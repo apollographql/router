@@ -41,10 +41,10 @@ pub(crate) mod test_utils {
     use opentelemetry::sdk::metrics::MeterProviderBuilder;
     use opentelemetry::sdk::metrics::Pipeline;
     use opentelemetry::sdk::AttributeSet;
-    use opentelemetry_api::Array;
+    use opentelemetry::Array;
+    use opentelemetry::KeyValue;
+    use opentelemetry::Value;
     use opentelemetry_api::Context;
-    use opentelemetry_api::KeyValue;
-    use opentelemetry_api::Value;
     use tokio::task_local;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
@@ -82,7 +82,7 @@ pub(crate) mod test_utils {
             self.reader.register_producer(producer)
         }
 
-        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry_api::metrics::Result<()> {
+        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
             self.reader.collect(rm)
         }
 

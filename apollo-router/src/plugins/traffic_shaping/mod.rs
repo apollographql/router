@@ -207,7 +207,7 @@ struct RouterShaping {
     timeout: Option<Duration>,
 }
 
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
@@ -286,23 +286,8 @@ impl Plugin for TrafficShaping {
             .transpose()?;
 
         {
-            let storage = if let Some(urls) = init
-                .config
-                .experimental_cache
-                .as_ref()
-                .map(|cache| cache.urls.clone())
-            {
-                Some(
-                    RedisCacheStorage::new(
-                        urls,
-                        None,
-                        init.config
-                            .experimental_cache
-                            .as_ref()
-                            .and_then(|c| c.timeout),
-                    )
-                    .await?,
-                )
+            let storage = if let Some(config) = init.config.experimental_cache.as_ref() {
+                Some(RedisCacheStorage::new(config.clone()).await?)
             } else {
                 None
             };
@@ -503,7 +488,7 @@ mod test {
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
-    use crate::services::router_service::RouterCreator;
+    use crate::services::router::service::RouterCreator;
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;

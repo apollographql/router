@@ -12,8 +12,6 @@ use std::time::Instant;
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use futures::channel::mpsc;
-use futures::stream::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
@@ -26,6 +24,7 @@ use reqwest::Client;
 use serde::ser::SerializeStruct;
 use serde_json::Value;
 use sys_info::hostname;
+use tokio::sync::mpsc;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
 use tower::BoxError;
@@ -36,6 +35,8 @@ use super::apollo::SingleReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
+const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
+const ROUTER_REPORT_TYPE_TRACES: &str = "traces";
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ApolloExportError {
@@ -72,7 +73,7 @@ impl Sender {
             Sender::Apollo(channel) => {
                 if let Err(err) = channel.to_owned().try_send(report) {
                     tracing::warn!(
-                        "could not send metrics to spaceport, metric will be dropped: {}",
+                        "could not send metrics to telemetry, metric will be dropped: {}",
                         err
                     );
                 }
@@ -142,14 +143,9 @@ impl ApolloExporter {
 
             loop {
                 tokio::select! {
-                    single_report = rx.next() => {
-                        if let Some(r) = single_report {
-                            report += r;
-                        } else {
-                            tracing::debug!("terminating apollo exporter");
-                            break;
-                        }
-                       },
+                    // If you run this example without `biased;`, the polling order is
+                    // pseudo-random and may never choose the timeout tick
+                    biased;
                     _ = timeout.tick() => {
                         match self.submit_report(std::mem::take(&mut report)).await {
                             Ok(_) => backoff_warn = true,
@@ -167,6 +163,14 @@ impl ApolloExporter {
                             }
                         }
                     }
+                    single_report = rx.recv() => {
+                        if let Some(r) = single_report {
+                            report += r;
+                        } else {
+                            tracing::debug!("terminating apollo exporter");
+                            break;
+                        }
+                    },
                 };
             }
 
@@ -250,7 +254,10 @@ impl ApolloExporter {
             }
         }
 
-        for i in 0..5 {
+        // We want to retry if we have traces...
+        let retries = if has_traces { 5 } else { 1 };
+
+        for i in 0..retries {
             // We know these requests can be cloned
             let task_req = req.try_clone().expect("requests must be clone-able");
             match self.client.execute(task_req).await {
@@ -291,6 +298,17 @@ impl ApolloExporter {
                         }
                     } else {
                         tracing::debug!("ingress response text: {:?}", data);
+                        let report_type = if has_traces {
+                            ROUTER_REPORT_TYPE_TRACES
+                        } else {
+                            ROUTER_REPORT_TYPE_METRICS
+                        };
+                        u64_counter!(
+                            "apollo.router.telemetry.studio.reports",
+                            "The number of reports submitted to Studio by the Router",
+                            1,
+                            report.type = report_type
+                        );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
                             if let Ok(response) = serde_json::Value::from_str(&data) {

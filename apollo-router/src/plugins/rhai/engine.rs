@@ -5,6 +5,9 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use base64::prelude::BASE64_STANDARD;
+use base64::prelude::BASE64_STANDARD_NO_PAD;
+use base64::prelude::BASE64_URL_SAFE;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use bytes::Bytes;
 use http::header::InvalidHeaderName;
@@ -82,10 +85,35 @@ impl<T> OptionDance<T> for SharedMut<T> {
     }
 }
 
+#[derive(Clone)]
+#[allow(unreachable_pub)]
+pub enum Base64Alphabet {
+    Standard,
+    StandardNoPad,
+    UrlSafe,
+    UrlSafeNoPad,
+}
+
+fn get_engine(alphabet: &Base64Alphabet) -> base64::engine::GeneralPurpose {
+    match alphabet {
+        Base64Alphabet::Standard => BASE64_STANDARD,
+        Base64Alphabet::StandardNoPad => BASE64_STANDARD_NO_PAD,
+        Base64Alphabet::UrlSafe => BASE64_URL_SAFE,
+        Base64Alphabet::UrlSafeNoPad => BASE64_URL_SAFE_NO_PAD,
+    }
+}
+
 // We have to keep the modules that we export using `export_module` inline because
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
+#[allow(unreachable_pub)]
 mod router_base64 {
+    pub type Alphabet = Base64Alphabet;
+    pub const STANDARD: Alphabet = Alphabet::Standard;
+    pub const STANDARD_NO_PAD: Alphabet = Alphabet::StandardNoPad;
+    pub const URL_SAFE: Alphabet = Alphabet::UrlSafe;
+    pub const URL_SAFE_NO_PAD: Alphabet = Alphabet::UrlSafeNoPad;
+
     #[rhai_fn(pure, return_raw)]
     pub(crate) fn decode(input: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
         String::from_utf8(
@@ -96,9 +124,25 @@ mod router_base64 {
         .map_err(|e| e.to_string().into())
     }
 
+    #[rhai_fn(pure, name = "decode", return_raw)]
+    pub(crate) fn decode_alphabet(
+        input: &mut ImmutableString,
+        alphabet: Alphabet,
+    ) -> Result<String, Box<EvalAltResult>> {
+        let engine = get_engine(&alphabet);
+        String::from_utf8(engine.decode(input.as_bytes()).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string().into())
+    }
+
     #[rhai_fn(pure)]
     pub(crate) fn encode(input: &mut ImmutableString) -> String {
         BASE64_STANDARD.encode(input.as_bytes())
+    }
+
+    #[rhai_fn(pure, name = "encode")]
+    pub(crate) fn encode_alphabet(input: &mut ImmutableString, alphabet: Alphabet) -> String {
+        let engine = get_engine(&alphabet);
+        engine.encode(input.as_bytes())
     }
 }
 

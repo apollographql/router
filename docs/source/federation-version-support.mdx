@@ -9,13 +9,21 @@ The Apollo Router supports supergraph schemas that are generated via Apollo Fede
 
 Apollo Federation is an evolving project, and its composition algorithm regularly receives new features and bug fixes.
 
-> **To help ensure that your router fully supports its supergraph schema, you should regularly update it to the latest stable version.**
+<Tip>
+
+Update your router regularly to the latest stable version to ensure that it fully supports its supergraph schema.
+
+</Tip>
 
 ## Support table
 
 The table below shows which version of federation each router release is compiled against. Make sure that your router's federation version is _at least_ as recent as the version used to compose your supergraph schema.
 
-> **Avoid router versions marked with ⚠️.** These versions include bugs described in the [changelog](https://github.com/apollographql/router/blob/main/CHANGELOG.md).
+<Caution>
+
+**Avoid router versions marked with ⚠️.** These versions include bugs described in the [changelog](https://github.com/apollographql/router/blob/main/CHANGELOG.md).
+
+</Caution>
 
 <table>
     <thead>
@@ -27,7 +35,31 @@ The table below shows which version of federation each router release is compile
     <tbody>
     <tr>
         <td>
-            v1.30.0 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
+            v1.35.0 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
+        </td>
+        <td>
+            2.6.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.34.1
+        </td>
+        <td>
+            2.5.7
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.33.0 - v1.34.0
+        </td>
+        <td>
+            2.5.5
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.30.0 - v1.32.0
         </td>
         <td>
             2.5.4
@@ -275,4 +307,4 @@ The table below shows which version of federation each router release is compile
 
 Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the Apollo Router with any valid Federation 1.x supergraph.
 
-> If your Federation 1.x supergraph _doesn't_ work with the Apollo Router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).
+If your Federation 1.x supergraph _doesn't_ work with the Apollo Router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).

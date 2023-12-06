@@ -3,7 +3,6 @@ use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
 
 use lru::LruCache;
 use serde::de::DeserializeOwned;
@@ -12,6 +11,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use super::redis::*;
+use crate::configuration::RedisCache;
 
 pub(crate) trait KeyType:
     Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
@@ -58,15 +58,14 @@ where
 {
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
-        redis_urls: Option<Vec<url::Url>>,
-        timeout: Option<Duration>,
+        config: Option<RedisCache>,
         caller: &str,
     ) -> Self {
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(urls) = redis_urls {
-                match RedisCacheStorage::new(urls, None, timeout).await {
+            redis: if let Some(config) = config {
+                match RedisCacheStorage::new(config).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",

@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/uplink/mod.rs
+expression: "results.into_iter().map(to_friendly).collect::<Vec<_>>()"
+---
+- Err: "fetch failed from uplink endpoint, and there are no fallback endpoints configured"
+

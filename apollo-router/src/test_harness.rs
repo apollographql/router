@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use tower::BoxError;
@@ -10,8 +11,10 @@ use tower::ServiceExt;
 use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
+use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
@@ -23,11 +26,12 @@ use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
+use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
 pub mod mocks;
@@ -143,6 +147,13 @@ impl<'a> TestHarness<'a> {
         configuration: serde_json::Value,
     ) -> Result<Self, serde_json::Error> {
         let configuration: Configuration = serde_json::from_value(configuration)?;
+        Ok(self.configuration(Arc::new(configuration)))
+    }
+
+    /// Specifies the (static) router configuration as a YAML string,
+    /// such as from the `serde_json::json!` macro.
+    pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
+        let configuration: Configuration = Configuration::from_str(configuration)?;
         Ok(self.configuration(Arc::new(configuration)))
     }
 
@@ -275,14 +286,18 @@ impl<'a> TestHarness<'a> {
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
-            config,
+            config.clone(),
         )
         .await
         .unwrap();
 
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
-            let span = PropagatingMakeSpan::default().make_span(&request.router_request);
+            let span = PropagatingMakeSpan {
+                license: LicenseState::default(),
+                span_mode: span_mode(&config),
+            }
+            .make_span(&request.router_request);
             async move { router.oneshot(request).await }.instrument(span)
         })
         .boxed_clone())
@@ -293,7 +308,6 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::tests::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::RouterFactory;
-        use crate::uplink::license_enforcement::LicenseState;
 
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(

@@ -21,7 +21,7 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::configuration::TlsSubgraph;
+use crate::configuration::TlsClient;
 use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
@@ -40,7 +40,7 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::transport;
 use crate::services::HasConfig;
@@ -344,7 +344,7 @@ impl YamlRouterFactory {
     }
 }
 
-impl TlsSubgraph {
+impl TlsClient {
     pub(crate) fn create_certificate_store(
         &self,
     ) -> Option<Result<RootCertStore, ConfigurationError>> {

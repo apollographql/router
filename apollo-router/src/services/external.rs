@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use hyper::Body;
@@ -239,6 +241,19 @@ where
             .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
     }
+}
+
+/// Convert a HeaderMap into a HashMap
+pub(crate) fn externalize_header_map(
+    input: &HeaderMap<HeaderValue>,
+) -> Result<HashMap<String, Vec<String>>, BoxError> {
+    let mut output = HashMap::new();
+    for (k, v) in input {
+        let k = k.as_str().to_owned();
+        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
+        output.entry(k).or_insert_with(Vec::new).push(v)
+    }
+    Ok(output)
 }
 
 #[cfg(test)]

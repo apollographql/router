@@ -7,8 +7,8 @@ use lazy_static::lazy_static;
 use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::Key;
 use opentelemetry::Value;
+use opentelemetry_api::Key;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -16,7 +16,8 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
@@ -59,10 +60,15 @@ impl TracingConfigurator for Config {
         self.enabled
     }
 
-    fn apply(&self, builder: Builder, trace: &Trace) -> Result<Builder, BoxError> {
+    fn apply(
+        &self,
+        builder: Builder,
+        trace: &TracingCommon,
+        _spans_config: &Spans,
+    ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
-        let trace_config: sdk::trace::Config = trace.into();
+        let common: sdk::trace::Config = trace.into();
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
@@ -82,7 +88,7 @@ impl TracingConfigurator for Config {
                     })
             })
             .with(
-                &trace_config.resource.get(SERVICE_NAME),
+                &common.resource.get(SERVICE_NAME),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -90,13 +96,13 @@ impl TracingConfigurator for Config {
                 },
             )
             .with_version(
-                trace_config
+                common
                     .resource
                     .get(SERVICE_VERSION)
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
-            .with_trace_config(trace_config)
+            .with_trace_config(common)
             .build_exporter()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)

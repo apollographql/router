@@ -21,12 +21,14 @@ use crate::services::SubgraphResponse;
 
 type MockResponses = HashMap<Request, Response>;
 
-#[derive(Clone, Default)]
+#[derive(Default, Clone)]
 pub struct MockSubgraph {
     // using an arc to improve efficiency when service is cloned
     mocks: Arc<MockResponses>,
     extensions: Option<Object>,
     subscription_stream: Option<Handle<String, graphql::Response>>,
+    map_request_fn:
+        Option<Arc<dyn (Fn(SubgraphRequest) -> SubgraphRequest) + Send + Sync + 'static>>,
 }
 
 impl MockSubgraph {
@@ -35,6 +37,7 @@ impl MockSubgraph {
             mocks: Arc::new(mocks),
             extensions: None,
             subscription_stream: None,
+            map_request_fn: None,
         }
     }
 
@@ -54,10 +57,19 @@ impl MockSubgraph {
         self.subscription_stream = Some(subscription_stream);
         self
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_map_request<F>(mut self, map_request_fn: F) -> Self
+    where
+        F: (Fn(SubgraphRequest) -> SubgraphRequest) + Send + Sync + 'static,
+    {
+        self.map_request_fn = Some(Arc::new(map_request_fn));
+        self
+    }
 }
 
 /// Builder for `MockSubgraph`
-#[derive(Clone, Default)]
+#[derive(Default, Clone)]
 pub struct MockSubgraphBuilder {
     mocks: MockResponses,
     extensions: Option<Object>,
@@ -94,6 +106,7 @@ impl MockSubgraphBuilder {
             mocks: Arc::new(self.mocks),
             extensions: self.extensions,
             subscription_stream: self.subscription_stream,
+            map_request_fn: None,
         }
     }
 }
@@ -110,6 +123,9 @@ impl Service<SubgraphRequest> for MockSubgraph {
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
+        if let Some(map_request_fn) = &self.map_request_fn {
+            req = map_request_fn.clone()(req);
+        }
         let body = req.subgraph_request.body_mut();
 
         if let Some(sub_stream) = &mut req.subscription_stream {

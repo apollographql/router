@@ -3,7 +3,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
-use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
@@ -13,7 +12,6 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
-use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -29,13 +27,12 @@ use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::Compiler;
+use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::query::QUERY_EXECUTABLE;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -175,22 +172,20 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let (compiler, file_id) = query_analysis.make_compiler(&query);
-                let err_res = Query::check_errors(&compiler, file_id);
+                let doc = query_analysis.parse_document(&query);
+                let err_res = Query::check_errors(&doc);
                 if let Err(error) = err_res {
                     let e = Arc::new(QueryPlannerError::SpecError(error));
                     entry.insert(Err(e)).await;
                     continue;
                 }
 
-                if let Ok(modified_query) = add_defer_labels(file_id, &compiler) {
-                    query = modified_query;
+                let schema = &self.schema.api_schema().definitions;
+                if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
+                    query = modified_query.to_string();
                 }
 
-                context
-                    .private_entries
-                    .lock()
-                    .insert(Compiler(Arc::new(Mutex::new(compiler))));
+                context.private_entries.lock().insert::<ParsedDocument>(doc);
 
                 context.private_entries.lock().insert(caching_key.metadata);
 
@@ -311,30 +306,21 @@ where
                 context,
             } = request;
 
-            let compiler = match context.private_entries.lock().get::<Compiler>() {
+            let doc = match context.private_entries.lock().get::<ParsedDocument>() {
                 None => {
                     return Err(CacheResolverError::RetrievalError(Arc::new(
                         QueryPlannerError::SpecError(SpecError::ParsingError(
-                            "missing compiler".to_string(),
+                            "missing parsed document".to_string(),
                         )),
                     )))
                 }
-                Some(c) => c.0.clone(),
+                Some(d) => d.clone(),
             };
 
-            let compiler_guard = compiler.lock().await;
-            let file_id = compiler_guard
-                .db
-                .source_file(QUERY_EXECUTABLE.into())
-                .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
-                    "missing input file for query".to_string(),
-                )))
-                .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e)))?;
-
-            if let Ok(modified_query) = add_defer_labels(file_id, &compiler_guard) {
-                query = modified_query;
+            let schema = &self.schema.api_schema().definitions;
+            if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
+                query = modified_query.to_string();
             }
-            drop(compiler_guard);
 
             let request = QueryPlannerRequest::builder()
                 .query(query)
@@ -348,12 +334,7 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    // we need to isolate the compiler guard here, otherwise rustc might believe we still hold it
-                    // when inserting the error in the entry
-                    let err_res = {
-                        let compiler_guard = compiler.lock().await;
-                        Query::check_errors(&compiler_guard, file_id)
-                    };
+                    let err_res = Query::check_errors(&doc);
 
                     if let Err(error) = err_res {
                         request
@@ -583,12 +564,13 @@ mod tests {
         let schema =
             Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
-        let compiler1 = Arc::new(Mutex::new(
-            Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
-        ));
+        let doc1 = Query::parse_document("query Me { me { username } }", &schema, &configuration);
 
         let context = Context::new();
-        context.private_entries.lock().insert(Compiler(compiler1));
+        context
+            .private_entries
+            .lock()
+            .insert::<ParsedDocument>(doc1);
 
         for _ in 0..5 {
             assert!(planner
@@ -600,17 +582,17 @@ mod tests {
                 .await
                 .is_err());
         }
-        let compiler2 = Arc::new(Mutex::new(
-            Query::make_compiler(
-                "query Me { me { name { first } } }",
-                &schema,
-                &configuration,
-            )
-            .0,
-        ));
+        let doc2 = Query::parse_document(
+            "query Me { me { name { first } } }",
+            &schema,
+            &configuration,
+        );
 
         let context = Context::new();
-        context.private_entries.lock().insert(Compiler(compiler2));
+        context
+            .private_entries
+            .lock()
+            .insert::<ParsedDocument>(doc2);
 
         assert!(planner
             .call(query_planner::CachingRequest::new(
@@ -660,16 +642,14 @@ mod tests {
         let schema =
             Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
-        let compiler = Arc::new(Mutex::new(
-            Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
-        ));
+        let doc = Query::parse_document("query Me { me { username } }", &schema, &configuration);
 
         let mut planner =
             CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
                 .await;
 
         let context = Context::new();
-        context.private_entries.lock().insert(Compiler(compiler));
+        context.private_entries.lock().insert::<ParsedDocument>(doc);
 
         for _ in 0..5 {
             assert!(planner

@@ -1,4 +1,6 @@
-use apollo_compiler::hir;
+use apollo_compiler::ast;
+use apollo_compiler::schema;
+use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -11,9 +13,9 @@ use crate::spec::Schema;
 pub(crate) struct InvalidValue;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct FieldType(pub(crate) hir::Type);
+pub(crate) struct FieldType(pub(crate) schema::Type);
 
-// hir::Type does not implement Serialize or Deserialize,
+// schema::Type does not implement Serialize or Deserialize,
 // and <https://serde.rs/remote-derive.html> seems not to work for recursive types.
 // Instead have explicit `impl`s that are based on derived impl of purpose-built types.
 
@@ -22,7 +24,7 @@ impl Serialize for FieldType {
     where
         S: serde::Serializer,
     {
-        struct BorrowedFieldType<'a>(&'a hir::Type);
+        struct BorrowedFieldType<'a>(&'a schema::Type);
 
         impl<'a> Serialize for BorrowedFieldType<'a> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -31,14 +33,18 @@ impl Serialize for FieldType {
             {
                 #[derive(Serialize)]
                 enum NestedBorrowed<'a> {
-                    NonNull(BorrowedFieldType<'a>),
-                    List(BorrowedFieldType<'a>),
                     Named(&'a str),
+                    NonNullNamed(&'a str),
+                    List(BorrowedFieldType<'a>),
+                    NonNullList(BorrowedFieldType<'a>),
                 }
                 match &self.0 {
-                    hir::Type::NonNull { ty, .. } => NestedBorrowed::NonNull(BorrowedFieldType(ty)),
-                    hir::Type::List { ty, .. } => NestedBorrowed::List(BorrowedFieldType(ty)),
-                    hir::Type::Named { name, .. } => NestedBorrowed::Named(name),
+                    schema::Type::Named(name) => NestedBorrowed::Named(name),
+                    schema::Type::NonNullNamed(name) => NestedBorrowed::NonNullNamed(name),
+                    schema::Type::List(ty) => NestedBorrowed::List(BorrowedFieldType(ty)),
+                    schema::Type::NonNullList(ty) => {
+                        NestedBorrowed::NonNullList(BorrowedFieldType(ty))
+                    }
                 }
                 .serialize(serializer)
             }
@@ -55,20 +61,20 @@ impl<'de> Deserialize<'de> for FieldType {
     {
         #[derive(Deserialize)]
         enum WithoutLocation {
-            NonNull(FieldType),
-            List(FieldType),
             Named(String),
+            NonNullNamed(String),
+            List(FieldType),
+            NonNullList(FieldType),
         }
-        WithoutLocation::deserialize(deserializer).map(|ty| match ty {
-            WithoutLocation::NonNull(ty) => FieldType(hir::Type::NonNull {
-                ty: Box::new(ty.0),
-                loc: None,
-            }),
-            WithoutLocation::List(ty) => FieldType(hir::Type::List {
-                ty: Box::new(ty.0),
-                loc: None,
-            }),
-            WithoutLocation::Named(name) => FieldType(hir::Type::Named { name, loc: None }),
+        Ok(match WithoutLocation::deserialize(deserializer)? {
+            WithoutLocation::Named(name) => FieldType(schema::Type::Named(
+                name.try_into().map_err(D::Error::custom)?,
+            )),
+            WithoutLocation::NonNullNamed(name) => FieldType(
+                schema::Type::Named(name.try_into().map_err(D::Error::custom)?).non_null(),
+            ),
+            WithoutLocation::List(ty) => FieldType(ty.0.list()),
+            WithoutLocation::NonNullList(ty) => FieldType(ty.0.list().non_null()),
         })
     }
 }
@@ -80,114 +86,83 @@ impl std::fmt::Display for FieldType {
 }
 
 fn validate_input_value(
-    ty: &hir::Type,
+    ty: &schema::Type,
     value: &Value,
     schema: &Schema,
 ) -> Result<(), InvalidValue> {
-    match (ty, value) {
-        (hir::Type::Named { name, .. }, Value::String(_)) if name == "String" => Ok(()),
+    if value.is_null() {
+        return match ty {
+            schema::Type::Named(_) | schema::Type::List(_) => Ok(()),
+            schema::Type::NonNullNamed(_) | schema::Type::NonNullList(_) => Err(InvalidValue),
+        };
+    }
+    let type_name = match ty {
+        schema::Type::Named(name) | schema::Type::NonNullNamed(name) => name,
+        schema::Type::List(inner_type) | schema::Type::NonNullList(inner_type) => {
+            return if let Value::Array(vec) = value {
+                vec.iter()
+                    .try_for_each(|x| validate_input_value(inner_type, x, schema))
+            } else {
+                // For coercion from single value to list
+                validate_input_value(inner_type, value, schema)
+            };
+        }
+    };
+    let from_bool = |condition| if condition { Ok(()) } else { Err(InvalidValue) };
+    match type_name.as_str() {
+        "String" => return from_bool(value.is_string()),
         // Spec: https://spec.graphql.org/June2018/#sec-Int
-        (hir::Type::Named { name, .. }, maybe_int) if name == "Int" => {
-            if maybe_int == &Value::Null || maybe_int.is_valid_int_input() {
-                Ok(())
-            } else {
-                Err(InvalidValue)
-            }
-        }
+        "Int" => return from_bool(value.is_valid_int_input()),
         // Spec: https://spec.graphql.org/draft/#sec-Float.Input-Coercion
-        (hir::Type::Named { name, .. }, maybe_float) if name == "Float" => {
-            if maybe_float == &Value::Null || maybe_float.is_valid_float_input() {
-                Ok(())
-            } else {
-                Err(InvalidValue)
-            }
-        }
+        "Float" => return from_bool(value.is_valid_float_input()),
         // "The ID scalar type represents a unique identifier, often used to refetch an object
         // or as the key for a cache. The ID type is serialized in the same way as a String;
         // however, it is not intended to be human-readable. While it is often numeric, it
         // should always serialize as a String."
         //
         // In practice it seems Int works too
-        (hir::Type::Named { name, .. }, Value::String(_)) if name == "ID" => Ok(()),
-        (hir::Type::Named { name, .. }, value) if name == "ID" => {
-            if value == &Value::Null || value.is_valid_id_input() {
-                Ok(())
-            } else {
-                Err(InvalidValue)
-            }
-        }
-        (hir::Type::Named { name, .. }, Value::Bool(_)) if name == "Boolean" => Ok(()),
-        (hir::Type::List { ty: inner_ty, .. }, Value::Array(vec)) => vec
-            .iter()
-            .try_for_each(|x| validate_input_value(inner_ty, x, schema)),
-        // For coercion from single value to list
-        (hir::Type::List { ty: inner_ty, .. }, val) if val != &Value::Null => {
-            validate_input_value(inner_ty, val, schema)
-        }
-        (hir::Type::NonNull { ty: inner_ty, .. }, value) => {
-            if value.is_null() {
-                Err(InvalidValue)
-            } else {
-                validate_input_value(inner_ty, value, schema)
-            }
-        }
-        (hir::Type::Named { name, .. }, _)
-            if schema
-                .type_system
-                .definitions
-                .scalars
-                .get(name)
-                .map(|def| !def.is_built_in())
-                .unwrap_or(false)
-                || schema.type_system.definitions.enums.contains_key(name) =>
-        {
-            Ok(())
-        }
-        // NOTE: graphql's types are all optional by default
-        (_, Value::Null) => Ok(()),
-        (hir::Type::Named { name, .. }, value) => {
-            if let Some(value) = value.as_object() {
-                if let Some(object_ty) = schema.type_system.definitions.input_objects.get(name) {
-                    object_ty.fields().try_for_each(|field| {
-                        let default: Value;
-                        let value = match value.get(field.name()) {
-                            Some(&Value::Null) | None => {
-                                default = field
-                                    .default_value()
-                                    .and_then(parse_hir_value)
-                                    .unwrap_or(Value::Null);
-                                &default
-                            }
-                            Some(value) => value,
-                        };
-                        validate_input_value(field.ty(), value, schema)
-                    })
-                } else {
-                    Err(InvalidValue)
-                }
-            } else {
-                Err(InvalidValue)
-            }
+        "ID" => return from_bool(value.is_valid_id_input()),
+        "Boolean" => return from_bool(value.is_boolean()),
+        _ => {}
+    }
+    let type_def = schema
+        .definitions
+        .types
+        .get(type_name)
+        .ok_or(InvalidValue)?;
+    match (type_def, value) {
+        // Custom scalar: accept any JSON value
+        (schema::ExtendedType::Scalar(_), _) => Ok(()),
+
+        // TODO: check enum value?
+        // (schema::ExtendedType::Enum(def), Value::String(s)) => {
+        //     from_bool(def.values.contains_key(s))
+        // },
+        (schema::ExtendedType::Enum(_), _) => Ok(()),
+
+        (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
+            // TODO: check keys in `obj` but not in `def.fields`?
+            def.fields
+                .values()
+                .try_for_each(|field| match obj.get(field.name.as_str()) {
+                    Some(&Value::Null) | None => {
+                        let default = field
+                            .default_value
+                            .as_ref()
+                            .and_then(|v| parse_hir_value(v))
+                            .unwrap_or(Value::Null);
+                        validate_input_value(&field.ty, &default, schema)
+                    }
+                    Some(value) => validate_input_value(&field.ty, value, schema),
+                })
         }
         _ => Err(InvalidValue),
     }
 }
 
-/// TODO: make `hir::Type::name` return &str instead of String
-fn hir_type_name(ty: &hir::Type) -> &str {
-    match ty {
-        hir::Type::NonNull { ty, .. } => hir_type_name(ty),
-        hir::Type::List { ty, .. } => hir_type_name(ty),
-        hir::Type::Named { name, .. } => name,
-    }
-}
-
 impl FieldType {
-    pub(crate) fn new_named(name: impl Into<String>) -> Self {
-        Self(hir::Type::Named {
-            name: name.into(),
-            loc: None,
-        })
+    pub(crate) fn new_named(name: ast::Name) -> Self {
+        Self(schema::Type::Named(name))
     }
 
     // This function validates input values according to the graphql specification.
@@ -200,37 +175,13 @@ impl FieldType {
         validate_input_value(&self.0, value, schema)
     }
 
-    /// return the name of the type on which selections happen
-    ///
-    /// Example if we get the field `list: [User!]!`, it will return "User"
-    pub(crate) fn inner_type_name(&self) -> Option<&str> {
-        let name = hir_type_name(&self.0);
-        if is_built_in(name) {
-            None // TODO: is this case important or could this method return unconditional `&str`?
-        } else {
-            Some(name)
-        }
-    }
-
-    pub(crate) fn is_builtin_scalar(&self) -> bool {
-        match &self.0 {
-            hir::Type::NonNull { .. } => false,
-            hir::Type::List { .. } => false,
-            hir::Type::Named { name, .. } => is_built_in(name),
-        }
-    }
-
     pub(crate) fn is_non_null(&self) -> bool {
         self.0.is_non_null()
     }
 }
 
-fn is_built_in(name: &str) -> bool {
-    matches!(name, "String" | "Int" | "Float" | "ID" | "Boolean")
-}
-
-impl From<&'_ hir::Type> for FieldType {
-    fn from(ty: &'_ hir::Type) -> Self {
+impl From<&'_ schema::Type> for FieldType {
+    fn from(ty: &'_ schema::Type) -> Self {
         Self(ty.clone())
     }
 }
@@ -238,16 +189,7 @@ impl From<&'_ hir::Type> for FieldType {
 /// Make sure custom Serialize and Deserialize impls are compatible with each other
 #[test]
 fn test_field_type_serialization() {
-    let ty = FieldType(hir::Type::NonNull {
-        ty: Box::new(hir::Type::List {
-            ty: Box::new(hir::Type::Named {
-                name: "ID".into(),
-                loc: None,
-            }),
-            loc: None,
-        }),
-        loc: None,
-    });
+    let ty = FieldType(apollo_compiler::ty!([ID]!));
     assert_eq!(
         serde_json::from_str::<FieldType>(&serde_json::to_string(&ty).unwrap()).unwrap(),
         ty

@@ -15,7 +15,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config::Trace;
+use super::config_new::spans::Spans;
+use crate::plugins::telemetry::config::TracingCommon;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
@@ -27,7 +28,12 @@ pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
     fn enabled(&self) -> bool;
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
+    fn apply(
+        &self,
+        builder: Builder,
+        common: &TracingCommon,
+        spans: &Spans,
+    ) -> Result<Builder, BoxError>;
 }
 
 #[derive(Debug)]

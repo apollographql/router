@@ -5,9 +5,7 @@ description: Customize your router's behavior in any language
 
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
->
-> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+<EnterpriseFeature />
 
 With **external coprocessing**, you can hook into the Apollo Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 
@@ -48,13 +46,13 @@ flowchart TB;
   class client,subgraphs,coprocessing secondary;
 ```
 
-> This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
+This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
 As shown in the diagram above, the `RouterService`, `SupergraphService` and `SubgraphService` steps of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
-- As excecution proceeds "down" from the client to individual subgraphs
+- As execution proceeds "down" from the client to individual subgraphs
     - Here, the coprocessor can inspect and modify details of requests before  GraphQL operations are processed.
     - The coprocessor can also instruct the router to [_terminate_ a client request](#terminating-a-client-request) immediately.
 - As execution proceeds back "up" from subgraphs to the client
@@ -68,7 +66,7 @@ If your coprocessor hooks into your router's `SubgraphService`, the router sends
 
 ## Setup
 
-> **First, make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).**
+First, make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).
 
 You configure external coprocessing in your router's [YAML config file](../configuration/overview/#yaml-config-file), under the `coprocessor` key.
 
@@ -96,7 +94,11 @@ In this case, the `RouterService` only sends a coprocessor request whenever it r
 
 The router communicates with your coprocessor via HTTP POST requests (called **coprocessor requests**). The body of each coprocessor request is a JSON object with properties that describe either the current client request or the current router response.
 
-> **Body properties vary by the router's current execution stage.** [See example request bodies for each stage.](#example-requests-by-stage)
+<Note>
+
+**Body properties vary by the router's current execution stage.** [See example request bodies for each stage.](#example-requests-by-stage)
+
+</Note>
 
 Properties of the JSON body are divided into two high-level categories:
 
@@ -228,18 +230,17 @@ Properties of the JSON body are divided into two high-level categories:
 
 </ExpansionPanel>
 
-
 #### `SupergraphRequest`
 
 <ExpansionPanel title="Click to expand">
 
-```json title="Example coprocessor request body"
+```json
+
 {
   // Control properties
   "version": 1,
-  "stage": "RouterRequest",
+  "stage": "SupergraphRequest",
   "control": "continue",
-  "id": "1b19c05fdafc521016df33148ad63c1b",
 
   // Data properties
   "headers": {
@@ -268,23 +269,22 @@ Properties of the JSON body are divided into two high-level categories:
       "46"
     ]
   },
-  body: {
-    "query": "query Long { me { name },
-    "operation_name": "MyQuery",
-    "variables": {},
-    "extensions": {}
+  "body": {
+    "query": "query Long {\n  me {\n  name\n}\n}",
+    "operationName": "MyQuery"
   },
   "context": {
     "entries": {
       "accepts-json": false,
       "accepts-wildcard": true,
-      "accepts-multipart": false
+      "accepts-multipart": false,
+      "this-is-a-test-context": 42
     }
   },
-  "sdl": "..." // String omitted due to length
-  "path": "/",
-  "method": "POST"
+  "serviceName": "service name shouldn't change",
+  "uri": "http://thisurihaschanged"
 }
+
 ```
 
 </ExpansionPanel>
@@ -294,60 +294,29 @@ Properties of the JSON body are divided into two high-level categories:
 <ExpansionPanel title="Click to expand">
 
 ```json
+
 {
   // Control properties
   "version": 1,
-  "stage": "RouterResponse",
-  "control": "continue",
-  "id": "1b19c05fdafc521016df33148ad63c1b",
-
-  "hasNext": false,
-  // Data properties
-  "headers": {
-    "vary": [
-      "origin"
-    ],
-    "content-type": [
-      "application/json"
-    ]
+  "stage": "SupergraphRequest",
+  "control": {
+    "break": 200
   },
+
+  // Data properties
   "body": {
-    "data": {
-      "me": {
-        "name": "Ada Lovelace"
-      }
-    }
+    "errors": [{ "message": "my error message" }]
   },
   "context": {
     "entries": {
-      "apollo_telemetry::subgraph_metrics_attributes": {},
-      "accepts-json": false,
-      "accepts-multipart": false,
-      "apollo_telemetry::client_name": "manual",
-      "apollo_telemetry::usage_reporting": {
-        "statsReportKey": "# Long\nquery Long{me{name}}",
-        "referencedFieldsByType": {
-          "User": {
-            "fieldNames": [
-              "name"
-            ],
-            "isInterface": false
-          },
-          "Query": {
-            "fieldNames": [
-              "me"
-            ],
-            "isInterface": false
-          }
-        }
-      },
-      "apollo_telemetry::client_version": "",
-      "accepts-wildcard": true
+      "testKey": true
     }
   },
-  "statusCode": 200,
-  "sdl": "..." // Omitted due to length
+  "headers": {
+    "aheader": ["a value"]
+  }
 }
+
 ```
 
 </ExpansionPanel>
@@ -631,8 +600,8 @@ This value is one of the following:
 
 - `RouterRequest`: The `RouterService` has just received a client request.
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
-- `SupergraphRequest`: The `SubgraphService` is about process a graphql request.
-- `SupergraphResponse`: The `SubgraphService` has just send a subgraph response.
+- `SupergraphRequest`: The `SupergraphService` is about to send a GraphQL request.
+- `SupergraphResponse`: The `SupergraphService` has just received a GraphQL response.
 - `SubgraphRequest`: The `SubgraphService` is about to send a request to a subgraph.
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
 
@@ -686,6 +655,7 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 This field's type depends on the coprocessor request's [`stage`](#stage):
 
 - For `SubgraphService` stages, `body` is a JSON _object_.
+- For `SupergraphService` stages, `body` is a JSON _object_.
 - For `RouterService` stages, `body` is a JSON _string_.
   - This is necessary to support handling [deferred queries](#handling-deferred-query-responses).
   - If you modify `body` during the `RouterRequest` stage, the new value must be a valid string serialization of a JSON object. If it isn't, the router detects that the body is malformed and returns an error to the client.
@@ -696,7 +666,7 @@ This field's structure depends on whether the coprocessor request corresponds to
 - **If a standard response,** `body` usually contains `data` and/or `errors` properties for the GraphQL operation result.
 - **If a response "chunk",** `body` contains `data` for _some_ of the operation fields.
 
-> By default, the `RouterResponse` stage returns _redacted_ errors within the `errors` field. To process subgraph errors manually in your coprocessor, enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
+By default, the `RouterResponse` stage returns _redacted_ errors within the `errors` field. To process subgraph errors manually in your coprocessor, enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
 
 </td>
 </tr>
@@ -862,15 +832,19 @@ In the response body, your coprocessor can return _modified values_ for certain 
 
 The router supports modifying the following properties from your coprocessor:
 
-> **Do not** modify other [control properties](#property-reference). Doing so can cause the client request to fail.
-
 - [`control`](#control)
     - Modify this property to immediately [terminate a client request](#terminating-a-client-request).
 - [`body`](#body)
 - [`headers`](#headers)
 - [`context`](#context)
 
-> If you omit a property from your response body entirely, the router uses its existing value for that property.
+<Caution>
+
+**Do not** modify other [control properties](#property-reference). Doing so can cause the client request to fail.
+
+</Caution>
+
+If you omit a property from your response body entirely, the router uses its existing value for that property.
 
 ### Terminating a client request
 
@@ -918,7 +892,41 @@ You can _also_ use this mechanism to immediately return a _successful_ response:
 }
 ```
 
-> ⚠️ If you return a successful response, make sure the structure of the `data` property matches the structure expected by the client query!
+<Note>
+
+If you return a successful response, make sure the structure of the `data` property matches the structure expected by the client query.
+
+</Note>
+
+<Tip>
+
+The `body` in the `RouterRequest` and `RouterResponse` stages is always a string, but you can still `break` with a GraphQL response if it's encoded as JSON.
+
+</Tip>
+
+<ExpansionPanel title="Examples of coprocessor responses for Router stages">
+
+```json
+{
+  "control": { "break": 500 },
+  "body": "{ \"errors\": [ { \"message\": \"Something went wrong\", \"extensions\": { \"code\": \"INTERNAL_SERVER_ERRROR\" } } ] }"
+}
+```
+
+```json
+{
+  "control": { "break": 200 },
+  "body": "{ \"data\": { \"currentUser\": { \"name\": \"Ada Lovelace\" } }"
+}
+```
+
+</ExpansionPanel>
+
+<Note>
+
+If you return a successful response, make sure the structure of the `data` property matches the structure expected by the client query.
+
+</Note>
 
 ### Failed responses
 
@@ -981,7 +989,7 @@ The first response chunk includes `headers` and `statusCode` fields:
   "body": "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":{\"id\":\"1\"}},\"hasNext\":true}\r\n--graphql\r\n",
   "context": {
     "entries": {
-      "apollo_telemetry::operation_kind": "query",
+      "operation_kind": "query",
       "apollo_telemetry::client_version": "",
       "apollo_telemetry::client_name": "manual"
     }
@@ -1003,7 +1011,7 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
   "body": "content-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"name\":\"Ada Lovelace\"},\"path\":[\"me\"]}]}\r\n--graphql--\r\n",
   "context": {
     "entries": {
-      "apollo_telemetry::operation_kind": "query",
+      "operation_kind": "query",
       "apollo_telemetry::client_version": "",
       "apollo_telemetry::client_name": "manual"
     }

@@ -3,9 +3,7 @@ title: Gateway migration guide
 description: Migrating to the Apollo Router from @apollo/gateway
 ---
 
-If you have a federated supergraph that currently uses the Node.js `@apollo/gateway` library, this article describes how to move that supergraph to the Rust-based Apollo Router. We recommend the Apollo Router over `@apollo/gateway` for all supergraphs, because it provides significant performance improvements.
-
-> **Tip**: Moving to the Apollo Router from `@apollo/gateway` requires zero changes to your subgraphs. 
+Learn how to migrate a federated supergraph using the `@apollo/gateway` library to the Apollo Router and gain significant performance improvements while making zero changes to your subgraphs.
 
 ## What's different?
 
@@ -13,7 +11,7 @@ Whereas `@apollo/gateway` is an npm package, the Apollo Router is packaged as a 
 
 The Apollo Router exposes the most common critical features via declarative configuration. You customize the router with a [YAML configuration file](./configuration/overview/#yaml-config-file) that takes effect at startup. Configurations can be modified and take effect without restart if you either start the router with the `--hot-reload` flag or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`.
 
-> You _can_ download the Apollo Router source and use it as a library in a larger project. However, our goal is to remove the need to write custom code in your graph router, which is always necessary with `@apollo/gateway`. 
+Although you _can_ download the Apollo Router source and use it as a library in a larger project, you may not need to because the features that were implemented by custom code with `@apollo/gateway` may be standard, supported features of the router.
 
 ## Take inventory of your gateway configuration
 
@@ -99,7 +97,7 @@ The `ApolloServer` constructor supports a large variety of options, but for the 
 - `context`
 - `plugins`
 
-> For the full list of options, see [`ApolloServer` options](/apollo-server/api/apollo-server#options). If you're using other options, additional steps might be necessary to replicate the same behavior. Please open a discussion on our [GitHub repository](https://github.com/apollographql/router) so we can understand your needs and help you with a solution.
+For the full list of options, see [`ApolloServer` options](/apollo-server/api/apollo-server#options). If you're using other options, additional steps might be necessary to replicate the same behavior. Please open a discussion on our [GitHub repository](https://github.com/apollographql/router) so we can understand your needs and help you with a solution.
 
 ### `context`
 
@@ -116,9 +114,9 @@ This constructor option is an array of built-in or custom `plugins` that extend 
 
 Before you attempt to replicate a plugin's functionality via an Apollo Router [customization](#supported-customizations), check whether any router [configuration options](./configuration/overview/) provide that same functionality. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
 
-> If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the Apollo Router _should_ provide out of the box, and we can help discuss the design.
->
-> For less common use cases, we also want to help build an ecosystem of shared customizations for the Apollo Router, enabling teams to more quickly add the functionality they need before native support is available.
+If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the Apollo Router _should_ provide out of the box, and we can help discuss the design.
+
+For less common use cases, we also want to help build an ecosystem of shared customizations for the Apollo Router, enabling teams to more quickly add the functionality they need before native support is available.
 
 #### Supported customizations
 

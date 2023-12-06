@@ -21,7 +21,7 @@ query:
 extracted_scopes: {"a", "b", "c", "d"}
 request scopes: []
 filtered:
-query {
+{
   test
   itf {
     ... on A {

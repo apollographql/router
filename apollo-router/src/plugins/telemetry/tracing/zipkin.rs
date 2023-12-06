@@ -8,7 +8,8 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
@@ -38,12 +39,16 @@ impl TracingConfigurator for Config {
         self.enabled
     }
 
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+    fn apply(
+        &self,
+        builder: Builder,
+        common: &TracingCommon,
+        _spans_config: &Spans,
+    ) -> Result<Builder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
 
         let exporter = opentelemetry_zipkin::new_pipeline()
-            .with_trace_config(trace_config.into())
-            .with_service_name(trace_config.service_name.clone())
+            .with_trace_config(common.into())
             .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |b, endpoint| {
                 b.with_collector_endpoint(endpoint.to_string())
             })

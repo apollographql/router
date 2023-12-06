@@ -7,12 +7,10 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::hir;
-use apollo_compiler::validation::ValidationDatabase;
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::AstDatabase;
-use apollo_compiler::FileId;
-use apollo_compiler::HirDatabase;
+use apollo_compiler::executable;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::WithErrors;
+use apollo_compiler::ExecutableDocument;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -23,6 +21,7 @@ use tracing::level_filters::LevelFilter;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
+use crate::configuration::GraphQLValidationMode;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
 use crate::graphql::Error;
@@ -32,7 +31,10 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
+use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
+use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
@@ -46,7 +48,6 @@ pub(crate) mod transform;
 pub(crate) mod traverse;
 
 pub(crate) const TYPENAME: &str = "__typename";
-pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
 /// A GraphQL query.
 #[derive(Derivative, Serialize, Deserialize)]
@@ -60,7 +61,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) unauthorized_paths: Vec<Path>,
+    pub(crate) unauthorized: UnauthorizedPaths,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -98,7 +99,7 @@ impl Query {
             },
             operations: Vec::new(),
             subselections: HashMap::new(),
-            unauthorized_paths: Vec::new(),
+            unauthorized: UnauthorizedPaths::default(),
             filtered_query: None,
             defer_stats: DeferStats {
                 has_defer: false,
@@ -261,20 +262,46 @@ impl Query {
         vec![]
     }
 
-    pub(crate) fn make_compiler(
+    pub(crate) fn parse_document(
         query: &str,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> (ApolloCompiler, FileId) {
-        let mut compiler = ApolloCompiler::new()
+    ) -> ParsedDocument {
+        let parser = &mut apollo_compiler::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
-        compiler.set_type_system_hir(schema.type_system.clone());
-        let id = compiler.add_executable(query, QUERY_EXECUTABLE);
-        (compiler, id)
+        let (ast, parse_errors) = match parser.parse_ast(query, "query.graphql") {
+            Ok(ast) => (ast, None),
+            Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+        };
+        let schema = &schema.api_schema().definitions;
+        let validate =
+            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
+        // Stretch the meaning of "assume valid" to "we’ll check later"
+        let (executable, validation_errors) = if validate {
+            match ast.to_executable_validate(schema) {
+                Ok(doc) => (doc.into_inner(), None),
+                Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+            }
+        } else {
+            match ast.to_executable(schema) {
+                Ok(doc) => (doc, None),
+                Err(WithErrors { partial, .. }) => (partial, None),
+            }
+        };
+
+        // Trace log recursion limit data
+        let recursion_limit = parser.recursion_reached();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        Arc::new(ParsedDocumentInner {
+            ast,
+            executable,
+            parse_errors,
+            validation_errors,
+        })
     }
 
-    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
@@ -282,17 +309,17 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let query = query.into();
 
-        let (compiler, id) = Self::make_compiler(&query, schema, configuration);
-        Self::check_errors(&compiler, id)?;
+        let doc = Self::parse_document(&query, schema, configuration);
+        Self::check_errors(&doc)?;
         let (fragments, operations, defer_stats) =
-            Self::extract_query_information(&compiler, schema)?;
+            Self::extract_query_information(schema, &doc.executable)?;
 
         Ok(Query {
             string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
-            unauthorized_paths: Vec::new(),
+            unauthorized: UnauthorizedPaths::default(),
             filtered_query: None,
             defer_stats,
             is_original: true,
@@ -301,59 +328,34 @@ impl Query {
     }
 
     /// Check for parse errors in a query in the compiler.
-    pub(crate) fn check_errors(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
-        let ast = compiler.db.ast(id);
-        // Trace log recursion limit data
-        let recursion_limit = ast.recursion_limit();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        let mut parse_errors = ast.errors().peekable();
-        if parse_errors.peek().is_some() {
-            let text = parse_errors
-                .map(|err| err.to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
-            failfast_debug!("parsing error(s): {}", text);
-            return Err(SpecError::ParsingError(text));
+    pub(crate) fn check_errors(document: &ParsedDocument) -> Result<(), SpecError> {
+        match document.parse_errors.clone() {
+            Some(errors) => Err(SpecError::ParsingError(errors.to_string_no_color())),
+            None => Ok(()),
         }
-
-        Ok(())
     }
 
     /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(
-        compiler: &ApolloCompiler,
-        id: FileId,
-    ) -> Result<(), ValidationErrors> {
-        // Bail out on validation errors, only if the input is expected to be valid
-        let diagnostics = compiler.db.validate_executable(id);
-        let errors = diagnostics
-            .into_iter()
-            .filter(|err| err.data.is_error())
-            .collect::<Vec<_>>();
-
-        if errors.is_empty() {
-            return Ok(());
+    pub(crate) fn validate_query(document: &ParsedDocument) -> Result<(), ValidationErrors> {
+        match document.validation_errors.clone() {
+            Some(errors) => Err(ValidationErrors { errors }),
+            None => Ok(()),
         }
-
-        Err(ValidationErrors { errors })
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.
     pub(crate) fn extract_query_information(
-        compiler: &ApolloCompiler,
         schema: &Schema,
+        document: &ExecutableDocument,
     ) -> Result<(Fragments, Vec<Operation>, DeferStats), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
             conditional_defer_variable_names: IndexSet::new(),
         };
-        let fragments = Fragments::from_hir(compiler, schema, &mut defer_stats)?;
-        let operations = compiler
-            .db
+        let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
+        let operations = document
             .all_operations()
-            .iter()
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
@@ -364,11 +366,11 @@ impl Query {
     fn format_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
-        field_type: &hir::Type,
+        field_type: &executable::Type,
         input: &mut Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &hir::Type,
+        parent_type: &executable::Type,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
@@ -377,10 +379,15 @@ impl Query {
             // for non null types, we validate with the inner type, then if we get an InvalidValue
             // we set it to null and immediately return an error instead of Ok(()), because we
             // want the error to go up until the next nullable parent
-            hir::Type::NonNull { ty: inner_type, .. } => {
+            executable::Type::NonNullNamed(_) | executable::Type::NonNullList(_) => {
+                let inner_type = match field_type {
+                    executable::Type::NonNullList(ty) => ty.clone().list(),
+                    executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
+                    _ => unreachable!(),
+                };
                 match self.format_value(
                     parameters,
-                    inner_type,
+                    &inner_type,
                     input,
                     output,
                     path,
@@ -417,7 +424,7 @@ impl Query {
             // and should replace the entire list with null
             // if the types are nullable, the inner call to filter_errors will take care
             // of setting the current entry to null
-            hir::Type::List { ty: inner_type, .. } => match input {
+            executable::Type::List(inner_type) => match input {
                 Value::Array(input_array) => {
                     if output.is_null() {
                         *output = Value::Array(
@@ -454,7 +461,7 @@ impl Query {
                 }
                 _ => Ok(()),
             },
-            hir::Type::Named { name, .. } if name == "Int" => {
+            executable::Type::Named(name) if name == "Int" => {
                 let opt = if input.is_i64() {
                     input.as_i64().and_then(|i| i32::try_from(i).ok())
                 } else if input.is_u64() {
@@ -472,7 +479,7 @@ impl Query {
                 }
                 Ok(())
             }
-            hir::Type::Named { name, .. } if name == "Float" => {
+            executable::Type::Named(name) if name == "Float" => {
                 if input.as_f64().is_some() {
                     *output = input.clone();
                 } else {
@@ -480,7 +487,7 @@ impl Query {
                 }
                 Ok(())
             }
-            hir::Type::Named { name, .. } if name == "Boolean" => {
+            executable::Type::Named(name) if name == "Boolean" => {
                 if input.as_bool().is_some() {
                     *output = input.clone();
                 } else {
@@ -488,7 +495,7 @@ impl Query {
                 }
                 Ok(())
             }
-            hir::Type::Named { name, .. } if name == "String" => {
+            executable::Type::Named(name) if name == "String" => {
                 if input.as_str().is_some() {
                     *output = input.clone();
                 } else {
@@ -496,7 +503,7 @@ impl Query {
                 }
                 Ok(())
             }
-            hir::Type::Named { name, .. } if name == "Id" => {
+            executable::Type::Named(name) if name == "Id" => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
                     *output = input.clone();
                 } else {
@@ -504,31 +511,32 @@ impl Query {
                 }
                 Ok(())
             }
-            hir::Type::Named {
-                name: type_name, ..
-            } => {
-                let definitions = &parameters.schema.type_system.definitions;
+            executable::Type::Named(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
-                if definitions.scalars.contains_key(type_name) {
-                    *output = input.clone();
-                    return Ok(());
-                } else if let Some(enum_type) = definitions.enums.get(type_name) {
-                    return match input.as_str() {
-                        Some(s) => {
-                            if enum_type.value(s).is_some() {
-                                *output = input.clone();
-                                Ok(())
-                            } else {
+                match parameters.schema.definitions.types.get(type_name) {
+                    Some(ExtendedType::Scalar(_)) => {
+                        *output = input.clone();
+                        return Ok(());
+                    }
+                    Some(ExtendedType::Enum(enum_type)) => {
+                        return match input.as_str() {
+                            Some(s) => {
+                                if enum_type.values.contains_key(s) {
+                                    *output = input.clone();
+                                    Ok(())
+                                } else {
+                                    *output = Value::Null;
+                                    Ok(())
+                                }
+                            }
+                            None => {
                                 *output = Value::Null;
                                 Ok(())
                             }
-                        }
-                        None => {
-                            *output = Value::Null;
-                            Ok(())
-                        }
-                    };
+                        };
+                    }
+                    _ => {}
                 }
 
                 match input {
@@ -536,18 +544,17 @@ impl Query {
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            let definitions = &parameters.schema.type_system.definitions;
                             // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
                             // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
                             // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
                             // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                            if !definitions.objects.contains_key(input_type)
-                                && !definitions.interfaces.contains_key(input_type)
-                            {
+                            let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                                parameters.schema.definitions.types.get(input_type)
+                            else {
                                 parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
                                 return Ok(());
-                            }
+                            };
                         }
 
                         if output.is_null() {
@@ -589,7 +596,7 @@ impl Query {
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &hir::Type,
+        parent_type: &executable::Type,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -608,6 +615,31 @@ impl Query {
                         continue;
                     }
 
+                    if name.as_str() == TYPENAME {
+                        let input_value = input
+                            .get(field_name.as_str())
+                            .cloned()
+                            .filter(|v| v.is_string())
+                            .unwrap_or_else(|| {
+                                Value::String(ByteString::from(
+                                    parent_type.inner_named_type().as_str().to_owned(),
+                                ))
+                            });
+
+                        if let Some(input_str) = input_value.as_str() {
+                            if parameters
+                                .schema
+                                .definitions
+                                .get_object(input_str)
+                                .is_some()
+                            {
+                                output.insert((*field_name).clone(), input_value);
+                            } else {
+                                return Err(InvalidValue);
+                            }
+                        }
+                        continue;
+                    }
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
@@ -622,34 +654,19 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if name.as_str() == TYPENAME {
-                            if let Some(input_str) = input_value.as_str() {
-                                if parameters
-                                    .schema
-                                    .type_system
-                                    .definitions
-                                    .objects
-                                    .contains_key(input_str)
-                                {
-                                    *output_value = input_value.clone();
-                                } else {
-                                    return Err(InvalidValue);
-                                }
-                            }
-                        } else {
-                            path.push(ResponsePathElement::Key(field_name.as_str()));
-                            let res = self.format_value(
-                                parameters,
-                                &field_type.0,
-                                input_value,
-                                output_value,
-                                path,
-                                parent_type,
-                                selection_set,
-                            );
-                            path.pop();
-                            res?
-                        }
+
+                        path.push(ResponsePathElement::Key(field_name.as_str()));
+                        let res = self.format_value(
+                            parameters,
+                            &field_type.0,
+                            input_value,
+                            output_value,
+                            path,
+                            parent_type,
+                            selection_set,
+                        );
+                        path.pop();
+                        res?
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
@@ -861,7 +878,9 @@ impl Query {
                         input,
                         output,
                         path,
-                        &FieldType::new_named(type_condition).0,
+                        // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                        #[allow(clippy::unwrap_used)]
+                        &FieldType::new_named(type_condition.try_into().unwrap()).0,
                     )?;
                 }
                 Selection::FragmentSpread {
@@ -895,7 +914,9 @@ impl Query {
                             input,
                             output,
                             path,
-                            &FieldType::new_named(root_type_name).0,
+                            // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                            #[allow(clippy::unwrap_used)]
+                            &FieldType::new_named(root_type_name.try_into().unwrap()).0,
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
@@ -1096,31 +1117,32 @@ pub(crate) struct Variable {
 
 impl Operation {
     pub(crate) fn from_hir(
-        operation: &hir::OperationDefinition,
+        operation: &executable::Operation,
         schema: &Schema,
         defer_stats: &mut DeferStats,
     ) -> Result<Self, SpecError> {
-        let name = operation.name().map(|s| s.to_owned());
-        let kind = operation.operation_ty().into();
+        let name = operation.name.as_ref().map(|s| s.as_str().to_owned());
+        let kind = operation.operation_type.into();
         let type_name = schema.root_operation_name(kind).to_owned();
-        let current_field_type = FieldType::new_named(&type_name);
         let selection_set = operation
-            .selection_set()
-            .selection()
+            .selection_set
+            .selections
             .iter()
             .filter_map(|selection| {
-                Selection::from_hir(selection, &current_field_type, schema, 0, defer_stats)
-                    .transpose()
+                Selection::from_hir(selection, &type_name, schema, 0, defer_stats).transpose()
             })
             .collect::<Result<_, _>>()?;
         let variables = operation
-            .variables()
+            .variables
             .iter()
             .map(|variable| {
-                let name = variable.name().into();
+                let name = variable.name.as_str().into();
                 let variable = Variable {
-                    field_type: variable.ty().into(),
-                    default_value: variable.default_value().and_then(parse_hir_value),
+                    field_type: variable.ty.as_ref().into(),
+                    default_value: variable
+                        .default_value
+                        .as_ref()
+                        .and_then(|v| parse_hir_value(v)),
                 };
                 Ok((name, variable))
             })
@@ -1176,29 +1198,19 @@ impl Operation {
     }
 }
 
-impl From<hir::OperationType> for OperationKind {
-    fn from(operation_type: hir::OperationType) -> Self {
-        match operation_type {
-            hir::OperationType::Query => Self::Query,
-            hir::OperationType::Mutation => Self::Mutation,
-            hir::OperationType::Subscription => Self::Subscription,
-        }
-    }
-}
-
-pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
+pub(crate) fn parse_hir_value(value: &executable::Value) -> Option<Value> {
     match value {
-        hir::Value::Variable(_) => None,
-        hir::Value::Int { value, .. } => Some((value.get() as i64).into()),
-        hir::Value::Float { value, .. } => Some(value.get().into()),
-        hir::Value::Null { .. } => Some(Value::Null),
-        hir::Value::String { value, .. } => Some(value.as_str().into()),
-        hir::Value::Boolean { value, .. } => Some((*value).into()),
-        hir::Value::Enum { value, .. } => Some(value.src().into()),
-        hir::Value::List { value, .. } => value.iter().map(parse_hir_value).collect(),
-        hir::Value::Object { value, .. } => value
+        executable::Value::Variable(_) => None,
+        executable::Value::Int(value) => Some(value.as_str().parse::<i64>().ok()?.into()),
+        executable::Value::Float(value) => Some(value.try_to_f64().ok()?.into()),
+        executable::Value::Null => Some(Value::Null),
+        executable::Value::String(value) => Some(value.as_str().into()),
+        executable::Value::Boolean(value) => Some((*value).into()),
+        executable::Value::Enum(value) => Some(value.as_str().into()),
+        executable::Value::List(value) => value.iter().map(|v| parse_hir_value(v)).collect(),
+        executable::Value::Object(value) => value
             .iter()
-            .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
+            .map(|(k, v)| Some((k.as_str(), parse_hir_value(v)?)))
             .collect(),
     }
 }

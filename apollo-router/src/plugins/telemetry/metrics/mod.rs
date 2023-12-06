@@ -11,9 +11,8 @@ use opentelemetry::sdk::metrics::reader::AggregationSelector;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry::sdk::resource::ResourceDetector;
-use opentelemetry::sdk::resource::SdkProvidedResourceDetector;
 use opentelemetry::sdk::Resource;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -29,6 +28,7 @@ use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::resource::ConfigResource;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
@@ -37,7 +37,6 @@ pub(crate) mod apollo;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 pub(crate) mod span_metrics_exporter;
-static UNKNOWN_SERVICE: &str = "unknown_service";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -464,7 +463,7 @@ impl ResourceDetector for ConfigResourceDetector {
         );
         resource = resource.merge(&mut Resource::new(
             self.0
-                .resources
+                .resource
                 .clone()
                 .into_iter()
                 .map(|(k, v)| KeyValue::new(k, v)),
@@ -475,36 +474,7 @@ impl ResourceDetector for ConfigResourceDetector {
 
 impl MetricsBuilder {
     pub(crate) fn new(config: &Conf) -> Self {
-        let metrics_common_config = &config.metrics.common;
-
-        let mut resource = Resource::from_detectors(
-            Duration::from_secs(0),
-            vec![
-                Box::new(ConfigResourceDetector(metrics_common_config.clone())),
-                Box::new(SdkProvidedResourceDetector),
-                Box::new(opentelemetry::sdk::resource::EnvResourceDetector::new()),
-            ],
-        );
-
-        // Otel resources can be initialized from env variables, there is an override mechanism, but it's broken for service name as it will always override service.name
-        // If the service name is set to unknown service then override it from the config
-        if resource.get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
-            == Some(UNKNOWN_SERVICE.into())
-        {
-            if let Some(service_name) = Resource::from_detectors(
-                Duration::from_secs(0),
-                vec![Box::new(ConfigResourceDetector(
-                    metrics_common_config.clone(),
-                ))],
-            )
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
-            {
-                resource = resource.merge(&mut Resource::new(vec![KeyValue::new(
-                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                    service_name,
-                )]));
-            }
-        }
+        let resource = config.exporters.metrics.common.to_resource();
 
         Self {
             resource: resource.clone(),

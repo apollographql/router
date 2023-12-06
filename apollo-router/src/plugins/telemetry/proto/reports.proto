@@ -456,14 +456,9 @@ message Report {
 
   ReportHeader header = 1;
 
-  // key is statsReportKey (# operationName\nsignature) Note that the nested
-  // traces will *not* have a signature or details.operationName (because the
-  // key is adequate).
-  //
-  // We also assume that traces don't have
-  // legacy_per_query_implicit_operation_name, and we don't require them to have
-  // details.raw_query (which would consume a lot of space and has privacy/data
-  // access issues, and isn't currently exposed by our app anyway).
+  // If QueryMetadata isn't provided, this key should be a statsReportKey (# operationName\nsignature). If the operation
+  // name, signature, and persisted query IDs are provided in the QueryMetadata, and this operation was requested via a
+  // persisted query, this key can be "pq# <persisted query id>" instead of the signature and operation.
   map<string, TracesAndStats> traces_per_query = 5;
 
   // This is the time that the requests in this trace are considered to have taken place
@@ -498,6 +493,15 @@ message ContextualizedStats {
 
 }
 
+message QueryMetadata {
+  // The operation name. For now this is a required field if QueryMetadata is present.
+  string name = 1;
+  // the operation signature. For now this is a required field if QueryMetadata is present.
+  string signature = 2;
+  // (Optional) Persisted query ID that was used to request this operation.
+  string pq_id = 3;
+}
+
 // A sequence of traces and stats. If Report.traces_pre_aggregated (at the top
 // level of the report) is false, an individual operation should either be
 // described as a trace or as part of stats, but not both. If that flag
@@ -517,4 +521,8 @@ message TracesAndStats {
   // matches similar algorithms in Apollo's servers. It is otherwise ignored and should not
   // be included in reports.
   repeated Trace internal_traces_contributing_to_stats = 3 [(js_preEncoded) = true];
+
+  // This is an optional field that is used to provide more context to the key of this object within the
+  // traces_per_query map. If it's omitted, we assume the key is a standard operation name and signature key.
+  QueryMetadata query_metadata = 5;
 }

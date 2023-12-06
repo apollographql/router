@@ -1,23 +1,24 @@
 supergraph:
   listen: 1.2.3.4:5
 telemetry:
-  tracing:
-    trace_config:
-      attributes:
-        foo: bar
-      max_attributes_per_event: 2
-      max_attributes_per_link: 3
-      max_attributes_per_span: 3
-      max_events_per_span: 3
-      max_links_per_span: 3
-      parent_based_sampler: false
-      sampler: 0.3
-      service_name: "foo"
-      service_namespace: "bar"
-    propagation:
-      datadog: false
-      jaeger: false
-      baggage: false
-      trace_context: false
-      zipkin: false
+  exporters:
+    tracing:
+      common:
+        resource:
+          foo: bar
+        max_attributes_per_event: 2
+        max_attributes_per_link: 3
+        max_attributes_per_span: 3
+        max_events_per_span: 3
+        max_links_per_span: 3
+        parent_based_sampler: false
+        sampler: 0.3
+        service_name: "foo"
+        service_namespace: "bar"
+      propagation:
+        datadog: false
+        jaeger: false
+        baggage: false
+        trace_context: false
+        zipkin: false
 
