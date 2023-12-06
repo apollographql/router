@@ -273,8 +273,8 @@ impl BridgeQueryPlanner {
             GraphQLValidationMode::Both => Query::validate_query(doc).err(),
         };
 
-        let (fragments, operations, defer_stats) =
-            Query::extract_query_information(&self.schema, executable)?;
+        let (fragments, operations, defer_stats, schema_aware_hash) =
+            Query::extract_query_information(&self.schema, executable, &doc.ast)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -295,6 +295,7 @@ impl BridgeQueryPlanner {
             defer_stats,
             is_original: true,
             validation_error,
+            schema_aware_hash,
         })
     }
 
@@ -379,9 +380,12 @@ impl BridgeQueryPlanner {
             .into_result()
         {
             Ok(mut plan) => {
-                if let Some(node) = plan.data.query_plan.node.as_mut() {
-                    node.extract_authorization_metadata(&self.schema.definitions, &key);
-                }
+                plan.data
+                    .query_plan
+                    .hash_subqueries(&self.schema.definitions);
+                plan.data
+                    .query_plan
+                    .extract_authorization_metadata(&self.schema.definitions, &key);
                 plan
             }
             Err(err) => {
@@ -692,6 +696,24 @@ pub(crate) struct QueryPlanResult {
 struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     node: Option<PlanNode>,
+}
+
+impl QueryPlan {
+    fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+        if let Some(node) = self.node.as_mut() {
+            node.hash_subqueries(schema);
+        }
+    }
+
+    fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        key: &CacheKeyMetadata,
+    ) {
+        if let Some(node) = self.node.as_mut() {
+            node.extract_authorization_metadata(schema, key);
+        }
+    }
 }
 
 #[cfg(test)]
