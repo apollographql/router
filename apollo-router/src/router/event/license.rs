@@ -6,9 +6,11 @@ use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
+use thiserror::Error;
 
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
+use crate::uplink::license_enforcement::Audience;
 use crate::uplink::license_enforcement::License;
 use crate::uplink::license_stream::LicenseQuery;
 use crate::uplink::license_stream::LicenseStreamExt;
@@ -16,6 +18,12 @@ use crate::uplink::stream_from_uplink;
 use crate::uplink::UplinkConfig;
 
 type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
+
+#[derive(Debug, Display, From, Error)]
+enum Error {
+    /// The license is invalid.
+    InvalidLicense,
+}
 
 /// License controls availability of certain features of the Router.
 /// This API experimental and is subject to change outside of semver.
@@ -58,12 +66,18 @@ impl Default for LicenseSource {
     }
 }
 
+const VALID_AUDIENCES_USER_SUPLIED_LICENSES: [Audience; 2] = [Audience::Offline, Audience::Cloud];
+
 impl LicenseSource {
     /// Convert this license into a stream regardless of if is static or not. Allows for unified handling later.
     pub(crate) fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            LicenseSource::Static { license } => stream::once(future::ready(license)).boxed(),
-            LicenseSource::Stream(stream) => stream.boxed(),
+            LicenseSource::Static { license } => stream::once(future::ready(license))
+                .validate_audience(VALID_AUDIENCES_USER_SUPLIED_LICENSES)
+                .boxed(),
+            LicenseSource::Stream(stream) => stream
+                .validate_audience(VALID_AUDIENCES_USER_SUPLIED_LICENSES)
+                .boxed(),
             LicenseSource::File { path, watch } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -98,9 +112,12 @@ impl LicenseSource {
                                         }
                                         result.ok()
                                     })
+                                    .validate_audience(VALID_AUDIENCES_USER_SUPLIED_LICENSES)
                                     .boxed()
                             } else {
-                                stream::once(future::ready(license)).boxed()
+                                stream::once(future::ready(license))
+                                    .validate_audience(VALID_AUDIENCES_USER_SUPLIED_LICENSES)
+                                    .boxed()
                             }
                         }
                         Ok(Err(err)) => {
@@ -136,7 +153,9 @@ impl LicenseSource {
                         tracing::error!("Failed to parse license: {}", err);
                         stream::empty().boxed()
                     }
-                    Err(_) => stream::once(future::ready(License::default())).boxed(),
+                    Err(_) => stream::once(future::ready(License::default()))
+                        .validate_audience(VALID_AUDIENCES_USER_SUPLIED_LICENSES)
+                        .boxed(),
                 }
             }
         }

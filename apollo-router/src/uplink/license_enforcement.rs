@@ -42,11 +42,12 @@ pub enum Error {
     InvalidLicense(jsonwebtoken::errors::Error),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum Audience {
     SelfHosted,
     Cloud,
+    Offline,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
