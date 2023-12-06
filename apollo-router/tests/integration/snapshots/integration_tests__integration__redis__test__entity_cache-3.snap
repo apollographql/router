@@ -1,5 +1,5 @@
 ---
-source: apollo-router/tests/redis_test.rs
+source: apollo-router/tests/integration/redis.rs
 expression: "v.as_object().unwrap().get(\"data\").unwrap()"
 ---
 {

@@ -1,5 +1,5 @@
 ---
-source: apollo-router/tests/redis_test.rs
+source: apollo-router/tests/integration/redis.rs
 expression: response
 ---
 {
@@ -14,10 +14,13 @@ expression: response
         ]
       },
       {
-        "name": "plate",
+        "name": "table",
         "reviews": [
           {
-            "body": "I can eat in it"
+            "body": "I can sit on it"
+          },
+          {
+            "body": "I can eat on it"
           }
         ]
       }

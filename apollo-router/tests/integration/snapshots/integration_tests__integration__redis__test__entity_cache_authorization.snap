@@ -1,22 +1,17 @@
 ---
-source: apollo-router/tests/redis_test.rs
+source: apollo-router/tests/integration/redis.rs
 expression: response
 ---
 {
   "data": {
-    "me": {
-      "id": "1",
-      "name": null
-    },
+    "me": null,
     "topProducts": [
       {
         "name": "chair",
         "reviews": [
           {
             "body": "I can sit on it",
-            "author": {
-              "username": "ada"
-            }
+            "author": null
           }
         ]
       },
@@ -25,15 +20,11 @@ expression: response
         "reviews": [
           {
             "body": "I can sit on it",
-            "author": {
-              "username": "ada"
-            }
+            "author": null
           },
           {
             "body": "I can eat on it",
-            "author": {
-              "username": "charles"
-            }
+            "author": null
           }
         ]
       }
@@ -43,8 +34,20 @@ expression: response
     {
       "message": "Unauthorized field or type",
       "path": [
-        "me",
-        "name"
+        "me"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    },
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "topProducts",
+        "@",
+        "reviews",
+        "@",
+        "author"
       ],
       "extensions": {
         "code": "UNAUTHORIZED_FIELD_OR_TYPE"
