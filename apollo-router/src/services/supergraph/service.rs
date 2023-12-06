@@ -600,8 +600,8 @@ async fn plan_query(
         let mut entries = context.private_entries.lock();
         if !entries.contains_key::<ParsedDocument>() {
             let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
-            Query::validate_query(&schema, &doc.executable)
-                .map_err(crate::error::QueryPlannerError::from)?;
+            Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
+            Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
             entries.insert::<ParsedDocument>(doc);
         }
         drop(entries);

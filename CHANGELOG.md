@@ -4,6 +4,210 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.35.0] - 2023-12-01
+
+## 🚀 Features
+
+### Federation v2.6.1
+
+This updates the Apollo Federation version to v2.6.1.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4296
+
+### Support configurable heartbeat for subscription callback protocol ([Issue #4115](https://github.com/apollographql/router/issues/4115))
+
+The heartbeat interval that the Apollo Router uses for the subscription callback protocol is now configurable.
+
+The heartbeat can even be disabled for certain platforms.
+
+An example configuration:
+
+```yaml
+subscription:
+  enabled: true
+  mode:
+    preview_callback:
+      public_url: http://127.0.0.1:4000
+      heartbeat_interval: 5s # Optional
+      listen: 127.0.0.1:4000
+      path: /callback
+      subgraphs:
+      - accounts
+ ```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4246
+
+### Enhanced telemetry ([Issue #3226](https://github.com/apollographql/router/issues/3226))
+
+Telemetry functionality has been enhanced. The enhancements include:
+* Allowing fine-grained configuration of attributes on router, supergraph and subgraph spans.
+* Allowing coarse-grained control over attributes using OpenTelemetry requirement levels.
+* Bringing attributes into alignment with OpenTelemetry semantic conventions, with many new attributes now being configurable.
+* Allowing custom attributes to be easily declared in YAML.
+
+The enhanced telemetry enables new benefits. They include:
+* Easily including trace IDs in your log statements for correlation.
+* Extracting domain-specific data from the router's execution pipeline for example custom trace IDs.
+* Diagnosing network related issues with standard [Open Telemetry HTTP attributes](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/).
+* Improving performance by avoiding the use of large attributes on spans such as `graphql.document`.
+
+See the updated [telemetry documentation](configuration/telemetry/overview) for details on the new enhancements. 
+
+By [@bnjjj](https://github.com/bnjjj), [@bryncooke](https://github.com/bryncooke) and [Edward Huang](https://github.com/shorgi) in https://github.com/apollographql/router/pull/4102 and https://github.com/apollographql/router/pull/4129
+
+## 🐛 Fixes
+
+### Improved query deduplication with extracted authorization information from subgraph queries ([PR #4208](https://github.com/apollographql/router/pull/4208))
+
+Query deduplication has been improved with authorization information extracted from subgraph queries.
+
+Previously, query deduplication was already taking authorization information into account in its key, but that was for the global authorization context (the intersection of what the query authorization requires and what the request token provides).
+This was very coarse grained, leading to some subgraph queries with different authorization requirements or even no authorization requirements.
+
+In this release, the authorization information from subgraph queries is used for deduplication. This now means that deduplicated queries can be shared more widely across different authorization contexts.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4208
+
+### Add missing schemas for Redis connections ([Issue #4173](https://github.com/apollographql/router/issues/4173))
+
+Previously, support for additional schemas for the Redis client used in the Apollo Router were [added](https://github.com/apollographql/router/issues/3534). However, the router's Redis connection logic wasn't updated to process the new schema options.
+
+The Redis connection logic has been updated in this release.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4174
+
+### Relax JWKS requirements ([PR #4234](https://github.com/apollographql/router/pull/4234))
+
+Previously in the Apollo Router's logic for validating JWT with a corresponding JWK, a bug occured when the `use` and `key_ops` JWK parameters were absent, resulting in the key not being selected for verification. This bug has been fixed in this release.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4234
+
+### Session count metrics no longer go negative ([Issue #3485](https://github.com/apollographql/router/issues/3485))
+
+Previously, the `apollo_router_session_count_total` and `apollo_router_session_count_active` metrics were using counters that could become negative unexpectedly.
+
+This issue has been fixed in this release, with **the metric type changed from counter to gauge**.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3787
+
+### Decrease default GraphQL parser recursion limit to 500 ([PR #4205](https://github.com/apollographql/router/pull/4205))
+
+The Apollo Router's GraphQL parser uses recursion for nested selection sets, list values, or object values. The nesting level is limited to protect against stack overflow.
+
+Previously the default limit was 4096. That limit has been decreased to 500 in this release.
+
+You can change the limit (or backport the new default to older router versions) in YAML configuration:
+
+```yaml
+limits:
+  parser_max_recursion: 700
+```
+
+> Note: deeply nested selection sets often cause deeply nested response data. When handling a response from a subgraph, the JSON parser has its own recursion limit of 128 nesting levels. That limit is not configurable.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/4205
+
+### Fix gRPC metadata configuration ([Issue #2831](https://github.com/apollographql/router/issues/2831))
+
+Previously, telemetry exporters that used gRPC as a protocol would not correctly parse metadata configuration. Consequently, a user was forced to use a workaround of specifying a list of values instead of a map. For example:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        grpc:
+          metadata:
+            "key1": "value1" # Failed to parse
+            "key2":  # Succeeded to parse
+              - "value2"
+```
+
+This issue has been fixed, and the following example with a map of values now parses correctly:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        grpc:
+          metadata:
+            "key1": "value1"
+```
+
+By [@bryncooke](https://github.com/AUTHOR) in https://github.com/apollographql/router/pull/4285
+
+### Input objects values can be empty
+
+This updates to `apollo-parser@0.7.4` which fixes a critical bug introduced in `apollo-parser@0.7.3` where empty input objects failed to parse.  The following is valid again:
+
+```graphql
+{ field(argument: {}) }
+```
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/4309
+
+### Rename `apollo.router.telemetry.studio.reports`' `type` attribute ([Issue #4300](https://github.com/apollographql/router/issues/4300))
+
+To better comply with OpenTelemetry naming conventions, for `apollo.router.telemetry.studio.reports` the `type` attribute has been renamed to `report.type`.
+
+**Please update your dashboards if you are monitoring this metric.**
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4302
+
+### Rhai scripts no longer preventing traces from appearing in Apollo Studio ([PR #4228](https://github.com/apollographql/router/pull/4228))
+
+Previously, the trace report for the Apollo Router when configured with a Rhai script may have been incomplete. That issue has been resolved in this release.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4228
+
+## 🛠 Maintenance
+
+### Improve the secure deployability of our Helm Chart and Docker Image ([Issue #3856](https://github.com/apollographql/router/issues/3856))
+
+This is a security improvement for the Apollo Router that is achieved by:
+ - Switching the router process owner from `root` to a user with less privileges
+ - Changing the default port from 80 to 4000
+ - Updating the base image from bullseye (Debian 11) to bookworm (Debian 12)
+
+The primary motivations for these changes is that many Kubernetes environments impose security restrictions on containers. For example:
+ - Don't run as root
+ - Can't bind to ports < 1024
+
+With these changes in place, the router is more secure by default and much simpler to deploy to secure environments.
+
+The base Debian image has also been updated at this time to keep track with bug fixes in the base image.
+
+Changing the default port in the Helm chart from 80 to 4000 is an innocuous change. This shouldn't impact most users. Changing the default user from `root` to `router` will have an impact. You will no longer be able to `exec` to the executing container (Kubernetes or Docker) and perform root privilege operations. The container is now "locked down", by default. Good for security, but less convenient for support or debugging.
+
+Although it's not recommended to revert to the previous behavior of the router executing as root and listening on port 80, it's possible to achieve that with the following configuration:
+
+```
+router:
+  configuration:
+    supergraph:
+      listen: 0.0.0.0:80
+securityContext:
+  runAsUser: 0
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3971
+
+### Improve Uplink error and warning messages ([Issue #3877](https://github.com/apollographql/router/issues/3877))
+
+A few log messages for Apollo Uplink have been improved:
+
+- Added a warning if the router is started with only a single Uplink URL.
+- Improved the error messages shown when a fetch from Uplink fails.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4250
+
+### Centralize telemetry resource cleanup ([Issue #4121](https://github.com/apollographql/router/issues/4121))
+
+The OpenTelemetry shutdown procedures within the Apollo Router have been improved by centralizing the cleanup logic.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4148
+
 # [1.34.1] - 2023-11-21
 
 ## 🐛 Fixes
@@ -158,11 +362,13 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 >
 > If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
 
-> The `@policy` directive requires using a federation version not yet available at the time of router release `1.34.0`.
+> The `@policy` directive requires using a [federation version `2.6`](https://www.apollographql.com/docs/federation/federation-versions).
 
-We introduce a new GraphOS authorization directive called `@policy` that is designed to offload authorization policy execution to a coprocessor or Rhai script. 
+We introduce a new GraphOS authorization directive called `@policy` that is designed to offload authorization policy execution to a coprocessor or Rhai script.
 
 When executing an operation, the relevant policy will be determined based on `@policy` directives in the schema. The coprocessor or Rhai script then indicates which of those policies requirements are not met.  Finally, the router filters out fields which are unauthorized in the same way it does when using `@authenticated` or `@requiresScopes` before executing the operation.
+
+For more information, see the [documentation](https://www.apollographql.com/docs/router/configuration/authorization#authorization-directives).
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3751
 

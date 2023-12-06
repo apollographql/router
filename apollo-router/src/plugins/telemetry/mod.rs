@@ -70,9 +70,6 @@ pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
-use super::traffic_shaping::cache::hash_request;
-use super::traffic_shaping::cache::hash_vary_headers;
-use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -83,6 +80,9 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::cache::entity::hash_query;
+use crate::plugins::cache::entity::hash_vary_headers;
+use crate::plugins::cache::entity::REPRESENTATIONS;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -1001,7 +1001,7 @@ impl Telemetry {
         sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
         let body = sub_request.subgraph_request.body_mut();
-        let hashed_query = hash_request(body);
+        let hashed_query = hash_query(&sub_request.query_hash, body);
         let representations = body
             .variables
             .get(REPRESENTATIONS)
