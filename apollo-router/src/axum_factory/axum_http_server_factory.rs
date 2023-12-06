@@ -387,13 +387,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
+// This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
 pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
     configuration
         .apollo_plugins
         .plugins
         .iter()
         .find(|(s, _)| s.as_str() == "telemetry")
-        .and_then(|(_, v)| v.get("spans").and_then(|v| v.as_object()))
+        .and_then(|(_, v)| v.get("instrumentation").and_then(|v| v.as_object()))
+        .and_then(|v| v.get("spans").and_then(|v| v.as_object()))
         .and_then(|v| {
             v.get("mode")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -603,5 +605,40 @@ async fn handle_graphql(
 
             http::Response::from_parts(parts, body).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_span_mode_default() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
+    }
+
+    #[test]
+    fn test_span_mode_spec_compliant() {
+        let config = Configuration::from_str(include_str!(
+            "testdata/span_mode_spec_compliant.router.yaml"
+        ))
+        .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::SpecCompliant);
+    }
+
+    #[test]
+    fn test_span_mode_deprecated() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_deprecated.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
     }
 }

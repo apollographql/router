@@ -126,7 +126,9 @@ pub(crate) fn collect_subselections(
             let type_name = operation.type_name.clone();
             let primary = collect_from_selection_set(
                 &mut shared,
-                &FieldType::new_named(&type_name),
+                // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                #[allow(clippy::unwrap_used)]
+                &FieldType::new_named((&type_name).try_into().unwrap()),
                 &operation.selection_set,
             )
             .map_err(|err| SpecError::ParsingError(err.to_owned()))?;
@@ -268,7 +270,11 @@ fn collect_from_selection_set<'a>(
                 let new;
                 let fragment_type = match known_type {
                     Some(name) => {
-                        new = FieldType::new_named(name);
+                        // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                        #[allow(clippy::unwrap_used)]
+                        {
+                            new = FieldType::new_named(name.try_into().unwrap());
+                        }
                         &new
                     }
                     None => parent_type,
@@ -315,7 +321,11 @@ fn collect_from_selection_set<'a>(
                     .ok_or("Missing fragment definition")?;
                 let nested = collect_from_selection_set(
                     shared,
-                    &FieldType::new_named(&fragment_definition.type_condition),
+                    // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                    #[allow(clippy::unwrap_used)]
+                    &FieldType::new_named(
+                        (&fragment_definition.type_condition).try_into().unwrap(),
+                    ),
                     &fragment_definition.selection_set,
                 )?;
                 if nested.is_empty() {
