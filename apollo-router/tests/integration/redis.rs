@@ -290,7 +290,7 @@ mod test {
                 }
             }))?
             .extra_plugin(subgraphs)
-            .schema(include_str!("fixtures/supergraph-auth.graphql"))
+            .schema(include_str!("../fixtures/supergraph-auth.graphql"))
             .build_supergraph()
             .await
             .unwrap();
@@ -394,7 +394,7 @@ mod test {
                 }
             }))?
             .extra_plugin(subgraphs)
-            .schema(include_str!("fixtures/supergraph-auth.graphql"))
+            .schema(include_str!("../fixtures/supergraph-auth.graphql"))
             .build_supergraph()
             .await
             .unwrap();
@@ -593,7 +593,7 @@ mod test {
                 }
             }))?
             .extra_plugin(subgraphs)
-            .schema(include_str!("fixtures/supergraph-auth.graphql"))
+            .schema(include_str!("../fixtures/supergraph-auth.graphql"))
             .build_supergraph()
             .await
             .unwrap();
