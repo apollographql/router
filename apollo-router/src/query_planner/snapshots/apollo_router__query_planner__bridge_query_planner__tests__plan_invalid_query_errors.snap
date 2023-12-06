@@ -16,18 +16,6 @@ PlanErrors {
             ),
             validation_error: true,
         },
-        PlanError {
-            message: Some(
-                "compiler error: fragment `UnusedTestFragment` must be used in an operation",
-            ),
-            extensions: Some(
-                PlanErrorExtensions {
-                    code: "GRAPHQL_VALIDATION_FAILED",
-                    exception: None,
-                },
-            ),
-            validation_error: true,
-        },
     ],
     usage_reporting: UsageReporting {
         stats_report_key: "## GraphQLValidationFailure\n",
