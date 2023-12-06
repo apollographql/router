@@ -255,7 +255,7 @@ impl BridgeQueryPlanner {
         operation_name: Option<&str>,
         doc: &ParsedDocument,
     ) -> Result<Query, QueryPlannerError> {
-        let ast = &doc.ast;
+        Query::check_errors(doc)?;
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
             &self.configuration,
@@ -263,14 +263,13 @@ impl BridgeQueryPlanner {
             executable,
             operation_name,
         )?;
-        Query::check_errors(ast)?;
         let validation_error = match self.configuration.experimental_graphql_validation_mode {
             GraphQLValidationMode::Legacy => None,
             GraphQLValidationMode::New => {
-                Query::validate_query(&self.schema, executable)?;
+                Query::validate_query(doc)?;
                 None
             }
-            GraphQLValidationMode::Both => Query::validate_query(&self.schema, executable).err(),
+            GraphQLValidationMode::Both => Query::validate_query(doc).err(),
         };
 
         let (fragments, operations, defer_stats) =
@@ -505,9 +504,18 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
+                    let executable = modified_query
+                        .to_executable(schema)
+                        // Assume transformation creates a valid document: ignore conversion errors
+                        .unwrap_or_else(|invalid| invalid.partial);
                     doc = Arc::new(ParsedDocumentInner {
-                        executable: modified_query.to_executable(schema),
+                        executable,
                         ast: modified_query,
+                        // Carry errors from previous ParsedDocument
+                        // and assume transformation doesn’t introduce new errors.
+                        // TODO: check the latter?
+                        parse_errors: doc.parse_errors.clone(),
+                        validation_errors: doc.validation_errors.clone(),
                     });
                     context
                         .private_entries
@@ -608,9 +616,18 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
+            let executable = new_doc
+                .to_executable(&self.schema.api_schema().definitions)
+                // Assume transformation creates a valid document: ignore conversion errors
+                .unwrap_or_else(|invalid| invalid.partial);
             doc = Arc::new(ParsedDocumentInner {
-                executable: new_doc.to_executable(&self.schema.api_schema().definitions),
+                executable,
                 ast: new_doc,
+                // Carry errors from previous ParsedDocument
+                // and assume transformation doesn’t introduce new errors.
+                // TODO: check the latter?
+                parse_errors: doc.parse_errors.clone(),
+                validation_errors: doc.validation_errors.clone(),
             });
             selections.unauthorized.paths = unauthorized_paths;
         }
