@@ -5641,7 +5641,7 @@ fn filtered_defer_fragment() {
         }
       }";
 
-    let doc = ExecutableDocument::parse(&schema.definitions, query, "query.graphql");
+    let doc = ExecutableDocument::parse(&schema.definitions, query, "query.graphql").unwrap();
     let (fragments, operations, defer_stats) =
         Query::extract_query_information(&schema, &doc).unwrap();
 
@@ -5668,7 +5668,8 @@ fn filtered_defer_fragment() {
         &schema.definitions,
         filtered_query,
         "filtered_query.graphql",
-    );
+    )
+    .unwrap();
     let (fragments, operations, defer_stats) =
         Query::extract_query_information(&schema, &doc).unwrap();
 

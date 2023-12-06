@@ -468,7 +468,9 @@ impl FetchNode {
         schema: &apollo_compiler::Schema,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
-        let doc = Document::parse(&self.operation, "query.graphql");
+        let doc = Document::parse(&self.operation, "query.graphql")
+            // Assume query planing creates a valid document: ignore parse errors
+            .unwrap_or_else(|invalid| invalid.partial);
         let subgraph_query_cache_key =
             AuthorizationPlugin::generate_cache_metadata(&doc, schema, !self.requires.is_empty());
 

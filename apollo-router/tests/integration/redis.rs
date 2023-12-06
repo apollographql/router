@@ -37,7 +37,7 @@ mod test {
                     }
                 }
             }))?
-            .schema(include_str!("fixtures/supergraph.graphql"))
+            .schema(include_str!("../fixtures/supergraph.graphql"))
             .build_supergraph()
             .await?;
 
@@ -103,7 +103,7 @@ mod test {
         let router = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(config.clone())?
-            .schema(include_str!("fixtures/supergraph.graphql"))
+            .schema(include_str!("../fixtures/supergraph.graphql"))
             .build_router()
             .await?;
 
@@ -172,7 +172,7 @@ mod test {
         let router = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(config.clone())?
-            .schema(include_str!("fixtures/supergraph.graphql"))
+            .schema(include_str!("../fixtures/supergraph.graphql"))
             .build_router()
             .await?;
 
