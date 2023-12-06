@@ -45,8 +45,7 @@
         "Authorization": [
           "/configuration/authorization",
           [
-            "enterprise",
-            "preview"
+            "enterprise"
           ]
         ],      
         "Subgraph Authentication": "/configuration/authn-subgraph",

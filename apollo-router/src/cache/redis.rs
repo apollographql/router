@@ -13,11 +13,15 @@ use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use fred::types::TlsConfig;
+use fred::types::TlsHostMapping;
+use tower::BoxError;
 use url::Url;
 
 use super::KeyType;
 use super::ValueType;
 use crate::configuration::RedisCache;
+use crate::services::generate_tls_client_config;
 
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
@@ -128,9 +132,21 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(config: RedisCache) -> Result<Self, RedisError> {
+    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
-        let client_config = RedisConfig::from_url(url.as_str())?;
+        let mut client_config = RedisConfig::from_url(url.as_str())?;
+
+        if let Some(tls) = config.tls.as_ref() {
+            let tls_cert_store = tls.create_certificate_store().transpose()?;
+            let client_cert_config = tls.client_authentication.as_ref();
+            let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
+            let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_client_config));
+
+            client_config.tls = Some(TlsConfig {
+                connector: fred::types::TlsConnector::Rustls(connector),
+                hostnames: TlsHostMapping::None,
+            });
+        }
 
         let client = RedisClient::new(
             client_config,

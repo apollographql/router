@@ -335,10 +335,16 @@ mod tests {
 
     #[track_caller]
     fn hash(schema: &str, query: &str) -> String {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = Document::parse(query, "query.graphql");
-        schema.validate().unwrap();
-        doc.to_executable(&schema).validate(&schema).unwrap();
+        let schema = Schema::parse(schema, "schema.graphql")
+            .unwrap()
+            .validate()
+            .unwrap();
+        let doc = Document::parse(query, "query.graphql").unwrap();
+
+        doc.to_executable(&schema)
+            .unwrap()
+            .validate(&schema)
+            .unwrap();
         let mut visitor = QueryHashVisitor::new(&schema, &doc);
         traverse::document(&mut visitor, &doc).unwrap();
 
@@ -347,8 +353,8 @@ mod tests {
 
     #[track_caller]
     fn hash_subgraph_query(schema: &str, query: &str) -> String {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = Document::parse(query, "query.graphql");
+        let schema = Schema::parse(schema, "schema.graphql").unwrap();
+        let doc = Document::parse(query, "query.graphql").unwrap();
         //doc.to_executable(&schema);
         let mut visitor = QueryHashVisitor::new(&schema, &doc);
         visitor.subgraph_query = true;
@@ -575,7 +581,7 @@ mod tests {
         }
         "#;
 
-        let query1 = r#"Query1($representations:[_Any!]!){
+        let query1 = r#"query Query1($representations:[_Any!]!){
             _entities(representations:$representations){
                 ...on User {
                     id
@@ -594,7 +600,7 @@ mod tests {
 
         assert_ne!(hash1, hash2);
 
-        let query2 = r#"Query1($representations:[_Any!]!){
+        let query2 = r#"query Query1($representations:[_Any!]!){
             _entities(representations:$representations){
                 ...on User {
                     name
