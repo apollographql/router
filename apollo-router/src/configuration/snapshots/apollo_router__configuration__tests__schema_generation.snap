@@ -1189,7 +1189,7 @@ expression: "&schema"
     },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
-      "default": "legacy",
+      "default": "both",
       "oneOf": [
         {
           "description": "Use the new Rust-based implementation.",
