@@ -1187,9 +1187,115 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_entity_cache": {
+      "description": "Configuration for entity caching",
+      "type": "object",
+      "required": [
+        "redis"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
+          "default": null,
+          "type": "boolean",
+          "nullable": true
+        },
+        "redis": {
+          "description": "Redis cache configuration",
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "timeout": {
+              "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "tls": {
+              "description": "TLS client configuration",
+              "default": null,
+              "type": "object",
+              "properties": {
+                "certificate_authorities": {
+                  "description": "list of certificate authorities in PEM format",
+                  "default": null,
+                  "type": "string",
+                  "nullable": true
+                },
+                "client_authentication": {
+                  "description": "client certificate authentication",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "certificate_chain",
+                    "key"
+                  ],
+                  "properties": {
+                    "certificate_chain": {
+                      "description": "list of certificates in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    },
+                    "key": {
+                      "description": "key in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "ttl": {
+              "description": "TTL for entries",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "subgraphs": {
+          "description": "Per subgraph configuration",
+          "type": "object",
+          "additionalProperties": {
+            "description": "Per subgraph configuration for entity caching",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "description": "activates caching for this subgraph, overrides the global configuration",
+                "default": null,
+                "type": "boolean",
+                "nullable": true
+              },
+              "ttl": {
+                "description": "expiration for all keys",
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
-      "default": "legacy",
+      "default": "both",
       "oneOf": [
         {
           "description": "Use the new Rust-based implementation.",
@@ -7745,21 +7851,6 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
-            "experimental_entity_caching": {
-              "description": "Enable entity caching",
-              "type": "object",
-              "required": [
-                "ttl"
-              ],
-              "properties": {
-                "ttl": {
-                  "description": "expiration for all keys",
-                  "type": "string"
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
             "experimental_http2": {
               "description": "Enable HTTP2 for subgraphs",
               "oneOf": [
@@ -7855,76 +7946,6 @@ expression: "&schema"
           "type": "boolean",
           "nullable": true
         },
-        "experimental_cache": {
-          "description": "Experimental URLs of Redis cache used for subgraph response caching",
-          "default": null,
-          "type": "object",
-          "required": [
-            "urls"
-          ],
-          "properties": {
-            "timeout": {
-              "description": "Redis request timeout (default: 2ms)",
-              "default": null,
-              "type": "string",
-              "nullable": true
-            },
-            "tls": {
-              "description": "TLS client configuration",
-              "default": null,
-              "type": "object",
-              "properties": {
-                "certificate_authorities": {
-                  "description": "list of certificate authorities in PEM format",
-                  "default": null,
-                  "type": "string",
-                  "nullable": true
-                },
-                "client_authentication": {
-                  "description": "client certificate authentication",
-                  "default": null,
-                  "type": "object",
-                  "required": [
-                    "certificate_chain",
-                    "key"
-                  ],
-                  "properties": {
-                    "certificate_chain": {
-                      "description": "list of certificates in PEM format",
-                      "writeOnly": true,
-                      "type": "string"
-                    },
-                    "key": {
-                      "description": "key in PEM format",
-                      "writeOnly": true,
-                      "type": "string"
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
-            "ttl": {
-              "description": "TTL for entries",
-              "default": null,
-              "type": "string",
-              "nullable": true
-            },
-            "urls": {
-              "description": "List of URLs to the Redis cluster",
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "uri"
-              }
-            }
-          },
-          "additionalProperties": false,
-          "nullable": true
-        },
         "router": {
           "description": "Applied at the router level",
           "type": "object",
@@ -7997,21 +8018,6 @@ expression: "&schema"
               "deduplicate_query": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
-                "nullable": true
-              },
-              "experimental_entity_caching": {
-                "description": "Enable entity caching",
-                "type": "object",
-                "required": [
-                  "ttl"
-                ],
-                "properties": {
-                  "ttl": {
-                    "description": "expiration for all keys",
-                    "type": "string"
-                  }
-                },
-                "additionalProperties": false,
                 "nullable": true
               },
               "experimental_http2": {
