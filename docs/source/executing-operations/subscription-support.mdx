@@ -196,7 +196,7 @@ subscription:
   enabled: true
   mode:
     callback:
-      public_url: https://example.com:4000/callback # The router's public URL, the one on which your subgraphs can have access to the Router, this must include the path configured on the Router
+      public_url: https://example.com:4000/callback # The router's public URL, which your subgraphs access, must include the path configured on the router
       listen: 127.0.0.1:4000 # The IP address and port the router will listen on for subscription callbacks, for security reasons it might be better to expose on another port that is only available from your internal network
       path: /callback # The path of the router's callback endpoint
       heartbeat_interval: 5s # Optional (default: 5secs)
