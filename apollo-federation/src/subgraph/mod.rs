@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use apollo_compiler::ast::Name;
 use apollo_compiler::schema::{ComponentName, ExtendedType, ObjectType};
 use apollo_compiler::{name, Node, Schema};
 use indexmap::map::Entry;
@@ -136,22 +135,22 @@ impl Subgraph {
         schema: &mut Schema,
         link_spec_definitions: LinkSpecDefinitions,
     ) -> Result<(), FederationError> {
-        let purpose_enum_name = Name::new(&link_spec_definitions.purpose_enum_name)?;
+        let purpose_enum_name = &link_spec_definitions.purpose_enum_name;
         schema
             .types
             .entry(purpose_enum_name.clone())
             .or_insert_with(|| {
                 link_spec_definitions
-                    .link_purpose_enum_definition(purpose_enum_name)
+                    .link_purpose_enum_definition(purpose_enum_name.clone())
                     .into()
             });
-        let import_scalar_name = Name::new(&link_spec_definitions.import_scalar_name)?;
+        let import_scalar_name = &link_spec_definitions.import_scalar_name;
         schema
             .types
             .entry(import_scalar_name.clone())
             .or_insert_with(|| {
                 link_spec_definitions
-                    .import_scalar_definition(import_scalar_name)
+                    .import_scalar_definition(import_scalar_name.clone())
                     .into()
             });
         if let Entry::Vacant(entry) = schema.directive_definitions.entry(DEFAULT_LINK_NAME) {
@@ -164,19 +163,19 @@ impl Subgraph {
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
     ) -> Result<(), FederationError> {
-        let fieldset_scalar_name = Name::new(&fed_definitions.fieldset_scalar_name)?;
+        let fieldset_scalar_name = &fed_definitions.fieldset_scalar_name;
         schema
             .types
             .entry(fieldset_scalar_name.clone())
             .or_insert_with(|| {
                 fed_definitions
-                    .fieldset_scalar_definition(fieldset_scalar_name)
+                    .fieldset_scalar_definition(fieldset_scalar_name.clone())
                     .into()
             });
 
         for directive_name in &FEDERATION_V2_DIRECTIVE_NAMES {
             let namespaced_directive_name =
-                Name::new(&fed_definitions.namespaced_type_name(directive_name, true))?;
+                fed_definitions.namespaced_type_name(directive_name, true);
             if let Entry::Vacant(entry) = schema
                 .directive_definitions
                 .entry(namespaced_directive_name.clone())
@@ -356,9 +355,9 @@ mod tests {
         "#;
 
         let subgraph = Subgraph::new("S1", "http://s1", schema).unwrap();
-        let keys = keys(&subgraph.schema, "T");
+        let keys = keys(&subgraph.schema, &name!("T"));
         assert_eq!(keys.len(), 1);
-        assert_eq!(keys.get(0).unwrap().type_name, "T");
+        assert_eq!(keys.get(0).unwrap().type_name, name!("T"));
 
         // TODO: no accessible selection yet.
     }

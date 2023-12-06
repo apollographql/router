@@ -392,13 +392,13 @@ impl Merger {
                         let requires_directive_option =
                             Option::and_then(field.directives.get_all("requires").next(), |p| {
                                 let requires_fields =
-                                    directive_string_arg_value(p, "fields").unwrap();
+                                    directive_string_arg_value(p, &name!("fields")).unwrap();
                                 Some(requires_fields.as_str())
                             });
                         let provides_directive_option =
                             Option::and_then(field.directives.get_all("provides").next(), |p| {
                                 let provides_fields =
-                                    directive_string_arg_value(p, "fields").unwrap();
+                                    directive_string_arg_value(p, &name!("fields")).unwrap();
                                 Some(provides_fields.as_str())
                             });
                         let external_field = field.directives.get_all("external").next().is_some();
@@ -629,7 +629,7 @@ fn join_type_applied_directive<'a>(
     let mut result = vec![];
     for key_directive in key_directives {
         let mut join_type_directive_with_key = join_type_directive.clone();
-        let field_set = directive_string_arg_value(key_directive, "fields").unwrap();
+        let field_set = directive_string_arg_value(key_directive, &name!("fields")).unwrap();
         join_type_directive_with_key
             .arguments
             .push(Node::new(Argument {
@@ -637,7 +637,8 @@ fn join_type_applied_directive<'a>(
                 value: Node::new(Value::String(NodeStr::new(field_set.as_str()))),
             }));
 
-        let resolvable = directive_bool_arg_value(key_directive, "resolvable").unwrap_or(&true);
+        let resolvable =
+            directive_bool_arg_value(key_directive, &name!("resolvable")).unwrap_or(&true);
         if !resolvable {
             join_type_directive_with_key
                 .arguments
@@ -657,7 +658,7 @@ fn join_type_applied_directive<'a>(
         .collect::<Vec<Component<Directive>>>()
 }
 
-fn join_type_implements(subgraph_name: Name, intf_name: &str) -> Component<Directive> {
+fn join_type_implements(subgraph_name: Name, intf_name: &Name) -> Component<Directive> {
     Component::new(Directive {
         name: name!("join__implements"),
         arguments: vec![
@@ -667,23 +668,23 @@ fn join_type_implements(subgraph_name: Name, intf_name: &str) -> Component<Direc
             }),
             Node::new(Argument {
                 name: name!("interface"),
-                value: Node::new(Value::String(NodeStr::new(intf_name))),
+                value: Node::new(Value::String(intf_name.to_string().into())),
             }),
         ],
     })
 }
 
-fn directive_arg_value<'a>(directive: &'a Directive, arg_name: &'static str) -> Option<&'a Value> {
+fn directive_arg_value<'a>(directive: &'a Directive, arg_name: &Name) -> Option<&'a Value> {
     directive
         .arguments
         .iter()
-        .find(|arg| arg.name == arg_name)
+        .find(|arg| arg.name == *arg_name)
         .map(|arg| arg.value.as_ref())
 }
 
 fn directive_string_arg_value<'a>(
     directive: &'a Directive,
-    arg_name: &'static str,
+    arg_name: &Name,
 ) -> Option<&'a NodeStr> {
     match directive_arg_value(directive, arg_name) {
         Some(Value::String(value)) => Some(value),
@@ -691,10 +692,7 @@ fn directive_string_arg_value<'a>(
     }
 }
 
-fn directive_bool_arg_value<'a>(
-    directive: &'a Directive,
-    arg_name: &'static str,
-) -> Option<&'a bool> {
+fn directive_bool_arg_value<'a>(directive: &'a Directive, arg_name: &Name) -> Option<&'a bool> {
     match directive_arg_value(directive, arg_name) {
         Some(Value::Boolean(value)) => Some(value),
         _ => None,
@@ -1207,7 +1205,7 @@ fn parse_keys<'a>(
     HashSet::from_iter(
         directives
             .flat_map(|k| {
-                let field_set = directive_string_arg_value(k, "fields").unwrap();
+                let field_set = directive_string_arg_value(k, &name!("fields")).unwrap();
                 field_set.split_whitespace()
             })
             .collect::<Vec<&str>>(),

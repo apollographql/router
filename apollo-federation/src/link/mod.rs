@@ -3,9 +3,9 @@ use crate::link::link_spec_definition::{LinkSpecDefinition, CORE_VERSIONS, LINK_
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::spec_definitions;
-use apollo_compiler::ast::{Directive, Value};
-use apollo_compiler::name;
+use apollo_compiler::ast::{Directive, InvalidNameError, Value};
 use apollo_compiler::schema::Name;
+use apollo_compiler::{name, Node, NodeStr};
 use std::fmt;
 use std::ops::Deref;
 use std::str;
@@ -28,6 +28,8 @@ pub const DEFAULT_PURPOSE_ENUM_NAME: Name = name!("Purpose");
 // error and whatnot.
 #[derive(Error, Debug, PartialEq)]
 pub enum LinkError {
+    #[error(transparent)]
+    InvalidName(#[from] InvalidNameError),
     #[error("Invalid use of @link in schema: {0}")]
     BootstrapError(String),
 }
@@ -77,11 +79,10 @@ impl str::FromStr for Purpose {
 
 impl fmt::Display for Purpose {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let str = match self {
-            Purpose::SECURITY => "SECURITY",
-            Purpose::EXECUTION => "EXECUTION",
-        };
-        write!(f, "{}", str)
+        match self {
+            Purpose::SECURITY => f.write_str("SECURITY"),
+            Purpose::EXECUTION => f.write_str("EXECUTION"),
+        }
     }
 }
 
@@ -100,13 +101,13 @@ pub struct Import {
     ///
     /// Note that this will never start with '@': whether or not this is the name of a directive is
     /// entirely reflected by the value of `is_directive`.
-    pub element: String,
+    pub element: Name,
 
     /// Whether the imported element is a directive (if it is not, then it is an imported type).
     pub is_directive: bool,
 
     /// The optional alias under which the element is imported.
-    pub alias: Option<String>,
+    pub alias: Option<Name>,
 }
 
 impl Import {
@@ -116,50 +117,54 @@ impl Import {
         // currently, so a bit annoying.
         match value {
             Value::String(str) => {
-                let is_directive = str.starts_with('@');
-                let element = if is_directive {
-                    str.strip_prefix('@').unwrap().to_string()
+                if let Some(directive_name) = str.strip_prefix('@') {
+                    Ok(Import { element: Name::new(directive_name)?, is_directive: true, alias: None })
                 } else {
-                    str.to_string()
-                };
-                Ok(Import { element, is_directive, alias: None })
+                    Ok(Import { element: Name::new(str.clone())?, is_directive: false, alias: None })
+                }
             },
             Value::Object(fields) => {
-                let mut name: Option<String> = None;
-                let mut alias: Option<String> = None;
+                let mut name: Option<NodeStr> = None;
+                let mut alias: Option<NodeStr> = None;
                 for (k, v) in fields {
                     match k.as_str() {
                         "name" => {
-                            name = Some(v.as_str().ok_or_else(|| {
+                            name = Some(v.as_node_str().ok_or_else(|| {
                                 LinkError::BootstrapError("invalid value for `name` field in @link(import:) argument: must be a string".to_string())
-                            })?.to_owned())
+                            })?.clone())
                         },
                         "as" => {
-                            alias = Some(v.as_str().ok_or_else(|| {
+                            alias = Some(v.as_node_str().ok_or_else(|| {
                                 LinkError::BootstrapError("invalid value for `as` field in @link(import:) argument: must be a string".to_string())
-                            })?.to_owned())
+                            })?.clone())
                         },
                         _ => Err(LinkError::BootstrapError(format!("unknown field `{k}` in @link(import:) argument")))?
                     }
                 }
                 if let Some(element) = name {
-                    let is_directive = element.starts_with('@');
-                    if is_directive {
-                        let element = element.strip_prefix('@').unwrap().to_string();
-                        if let Some(alias_str) = alias {
-                            if !alias_str.starts_with('@') {
-                                Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should start with '@' since the imported name does", alias_str, element)))?
-                            }
-                            alias = Some(alias_str.strip_prefix('@').unwrap().to_string());
+                    if let Some(directive_name) = element.strip_prefix('@') {
+                        if let Some(alias_str) = alias.as_ref() {
+                            let Some(alias_str) = alias_str.strip_prefix('@') else {
+                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should start with '@' since the imported name does", alias_str, element)));
+                            };
+                            alias = Some(alias_str.into());
                         }
-                        Ok(Import { element, is_directive, alias })
+                        Ok(Import {
+                            element: Name::new(directive_name)?,
+                            is_directive: true,
+                            alias: alias.map(Name::new).transpose()?,
+                        })
                     } else {
                         if let Some(alias) = &alias {
                             if alias.starts_with('@') {
-                                Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should not start with '@' (or, if {} is a directive, then the name should start with '@')", alias, element, element)))?
+                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should not start with '@' (or, if {} is a directive, then the name should start with '@')", alias, element, element)));
                             }
                         }
-                        Ok(Import { element, is_directive, alias })
+                        Ok(Import {
+                            element: Name::new(element)?,
+                            is_directive: false,
+                            alias: alias.map(Name::new).transpose()?,
+                        })
                     }
                 } else {
                     Err(LinkError::BootstrapError("invalid entry in @link(import:) argument, missing mandatory `name` field".to_string()))
@@ -169,24 +174,37 @@ impl Import {
         }
     }
 
-    pub fn element_display_name(&self) -> String {
-        if self.is_directive {
-            format!("@{}", self.element)
-        } else {
-            self.element.clone()
+    pub fn element_display_name(&self) -> impl fmt::Display + '_ {
+        DisplayName {
+            name: &self.element,
+            is_directive: self.is_directive,
         }
     }
 
-    pub fn imported_name(&self) -> &String {
+    pub fn imported_name(&self) -> &Name {
         return self.alias.as_ref().unwrap_or(&self.element);
     }
 
-    pub fn imported_display_name(&self) -> String {
-        if self.is_directive {
-            format!("@{}", self.imported_name())
-        } else {
-            self.imported_name().clone()
+    pub fn imported_display_name(&self) -> impl fmt::Display + '_ {
+        DisplayName {
+            name: self.imported_name(),
+            is_directive: self.is_directive,
         }
+    }
+}
+
+/// A [`fmt::Display`]able wrapper for name strings that adds an `@` in front for directive names.
+struct DisplayName<'s> {
+    name: &'s str,
+    is_directive: bool,
+}
+
+impl<'s> fmt::Display for DisplayName<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_directive {
+            f.write_str("@")?;
+        }
+        f.write_str(self.name)
     }
 }
 
@@ -196,11 +214,7 @@ impl fmt::Display for Import {
             write!(
                 f,
                 r#"{{ name: "{}", as: "{}" }}"#,
-                if self.is_directive {
-                    format!("@{}", self.element)
-                } else {
-                    self.element.clone()
-                },
+                self.element_display_name(),
                 self.imported_display_name()
             )
         } else {
@@ -212,41 +226,43 @@ impl fmt::Display for Import {
 #[derive(Debug, Eq, PartialEq)]
 pub struct Link {
     pub url: Url,
-    pub spec_alias: Option<String>,
+    pub spec_alias: Option<Name>,
     pub imports: Vec<Arc<Import>>,
     pub purpose: Option<Purpose>,
 }
 
 impl Link {
-    pub fn spec_name_in_schema(&self) -> &String {
+    pub fn spec_name_in_schema(&self) -> &Name {
         self.spec_alias.as_ref().unwrap_or(&self.url.identity.name)
     }
 
-    pub fn directive_name_in_schema(&self, name: &str) -> String {
+    pub fn directive_name_in_schema(&self, name: &Name) -> Name {
         // If the directive is imported, then it's name in schema is whatever name it is
         // imported under. Otherwise, it is usually fully qualified by the spec name (so,
         // something like 'federation__key'), but there is a special case for directives
         // whose name match the one of the spec: those don't get qualified.
-        if let Some(import) = self.imports.iter().find(|i| i.element == name) {
-            import.alias.clone().unwrap_or(name.to_string())
-        } else if name == self.url.identity.name {
+        if let Some(import) = self.imports.iter().find(|i| i.element == *name) {
+            import.alias.clone().unwrap_or_else(|| name.clone())
+        } else if name == self.url.identity.name.as_str() {
             self.spec_name_in_schema().clone()
         } else {
-            format!("{}__{}", self.spec_name_in_schema(), name)
+            // Both sides are `Name`s and we just add valid characters in between.
+            Name::new_unchecked(format!("{}__{}", self.spec_name_in_schema(), name).into())
         }
     }
 
-    pub fn type_name_in_schema(&self, name: &str) -> String {
+    pub fn type_name_in_schema(&self, name: &Name) -> Name {
         // Similar to directives, but the special case of a directive name matching the spec
         // name does not apply to types.
-        if let Some(import) = self.imports.iter().find(|i| i.element == name) {
-            import.alias.clone().unwrap_or(name.to_string())
+        if let Some(import) = self.imports.iter().find(|i| i.element == *name) {
+            import.alias.clone().unwrap_or_else(|| name.clone())
         } else {
-            format!("{}__{}", self.spec_name_in_schema(), name)
+            // Both sides are `Name`s and we just add valid characters in between.
+            Name::new_unchecked(format!("{}__{}", self.spec_name_in_schema(), name).into())
         }
     }
 
-    pub fn from_directive_application(directive: &Directive) -> Result<Link, LinkError> {
+    pub fn from_directive_application(directive: &Node<Directive>) -> Result<Link, LinkError> {
         let url = directive
             .argument_by_name("url")
             .and_then(|arg| arg.as_str())
@@ -258,8 +274,9 @@ impl Link {
         })?;
         let spec_alias = directive
             .argument_by_name("as")
-            .and_then(|arg| arg.as_str())
-            .map(|s| s.to_owned());
+            .and_then(|arg| arg.as_node_str())
+            .map(Name::new)
+            .transpose()?;
         let purpose = if let Some(value) = directive.argument_by_name("for") {
             Some(Purpose::from_ast_value(value)?)
         } else {
@@ -319,9 +336,9 @@ pub struct LinkedElement {
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
     pub(crate) by_identity: HashMap<Identity, Arc<Link>>,
-    pub(crate) by_name_in_schema: HashMap<String, Arc<Link>>,
-    pub(crate) types_by_imported_name: HashMap<String, (Arc<Link>, Arc<Import>)>,
-    pub(crate) directives_by_imported_name: HashMap<String, (Arc<Link>, Arc<Import>)>,
+    pub(crate) by_name_in_schema: HashMap<Name, Arc<Link>>,
+    pub(crate) types_by_imported_name: HashMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) directives_by_imported_name: HashMap<Name, (Arc<Link>, Arc<Import>)>,
 }
 
 impl LinksMetadata {
@@ -362,7 +379,7 @@ impl LinksMetadata {
         return self.by_identity.get(identity).cloned();
     }
 
-    pub fn source_link_of_type(&self, type_name: &str) -> Option<LinkedElement> {
+    pub fn source_link_of_type(&self, type_name: &Name) -> Option<LinkedElement> {
         // For types, it's either an imported name or it must be fully qualified
 
         if let Some((link, import)) = self.types_by_imported_name.get(type_name) {
@@ -382,7 +399,7 @@ impl LinksMetadata {
         }
     }
 
-    pub fn source_link_of_directive(&self, directive_name: &str) -> Option<LinkedElement> {
+    pub fn source_link_of_directive(&self, directive_name: &Name) -> Option<LinkedElement> {
         // For directives, it can be either:
         //   1. be an imported name,
         //   2. be the "imported" name of a linked spec (special case of a directive named like the

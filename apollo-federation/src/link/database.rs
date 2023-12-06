@@ -51,8 +51,8 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                 link.url.identity
             )));
         }
-        let name_in_schema = link.spec_name_in_schema().clone();
-        if let Some(other) = by_name_in_schema.insert(name_in_schema, Arc::clone(&link)) {
+        let name_in_schema = link.spec_name_in_schema();
+        if let Some(other) = by_name_in_schema.insert(name_in_schema.clone(), Arc::clone(&link)) {
             return Err(LinkError::BootstrapError(format!(
                 "name conflict: {} and {} are imported under the same name (consider using the `@link(as:)` argument to disambiguate)",
                 other.url, link.url,
@@ -149,6 +149,8 @@ fn parse_link_if_bootstrap_directive(schema: &Schema, directive: &Directive) -> 
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
+
     use crate::link::{
         spec::{Version, APOLLO_SPEC_DOMAIN},
         {Import, Purpose},
@@ -189,7 +191,7 @@ mod tests {
             .all_links()
             .iter()
             .map(|l| l.spec_name_in_schema())
-            .collect::<Vec<&String>>();
+            .collect::<Vec<_>>();
         assert_eq!(names_in_schema.len(), 4);
         assert_eq!(names_in_schema[0], "link");
         assert_eq!(names_in_schema[1], "federation");
@@ -200,7 +202,7 @@ mod tests {
         assert_eq!(
             link_spec.imports.get(0).unwrap().as_ref(),
             &Import {
-                element: "Import".to_string(),
+                element: name!("Import"),
                 is_directive: false,
                 alias: None
             }
@@ -209,7 +211,7 @@ mod tests {
         let fed_spec = meta
             .for_identity(&Identity {
                 domain: APOLLO_SPEC_DOMAIN.to_string(),
-                name: "federation".to_string(),
+                name: name!("federation"),
             })
             .unwrap();
         assert_eq!(fed_spec.url.version, Version { major: 2, minor: 3 });
@@ -220,7 +222,7 @@ mod tests {
         assert_eq!(
             imports.get(0).unwrap().as_ref(),
             &Import {
-                element: "key".to_string(),
+                element: name!("key"),
                 is_directive: true,
                 alias: None
             }
@@ -228,47 +230,47 @@ mod tests {
         assert_eq!(
             imports.get(1).unwrap().as_ref(),
             &Import {
-                element: "tag".to_string(),
+                element: name!("tag"),
                 is_directive: true,
-                alias: Some("myTag".to_string())
+                alias: Some(name!("myTag"))
             }
         );
 
         let auth_spec = meta
             .for_identity(&Identity {
                 domain: "https://megacorp.com".to_string(),
-                name: "auth".to_string(),
+                name: name!("auth"),
             })
             .unwrap();
         assert_eq!(auth_spec.purpose, Some(Purpose::SECURITY));
 
-        let import_source = meta.source_link_of_type("Import").unwrap();
+        let import_source = meta.source_link_of_type(&name!("Import")).unwrap();
         assert_eq!(import_source.link.url.identity.name, "link");
         assert!(!import_source.import.as_ref().unwrap().is_directive);
         assert_eq!(import_source.import.as_ref().unwrap().alias, None);
 
         // Purpose is not imported, so it should only be accessible in fql form
-        assert!(meta.source_link_of_type("Purpose").is_none());
+        assert!(meta.source_link_of_type(&name!("Purpose")).is_none());
 
-        let purpose_source = meta.source_link_of_type("link__Purpose").unwrap();
+        let purpose_source = meta.source_link_of_type(&name!("link__Purpose")).unwrap();
         assert_eq!(purpose_source.link.url.identity.name, "link");
         assert_eq!(purpose_source.import, None);
 
-        let key_source = meta.source_link_of_directive("key").unwrap();
+        let key_source = meta.source_link_of_directive(&name!("key")).unwrap();
         assert_eq!(key_source.link.url.identity.name, "federation");
         assert!(key_source.import.as_ref().unwrap().is_directive);
         assert_eq!(key_source.import.as_ref().unwrap().alias, None);
 
         // tag is imported under an alias, so "tag" itself should not match
-        assert!(meta.source_link_of_directive("tag").is_none());
+        assert!(meta.source_link_of_directive(&name!("tag")).is_none());
 
-        let tag_source = meta.source_link_of_directive("myTag").unwrap();
+        let tag_source = meta.source_link_of_directive(&name!("myTag")).unwrap();
         assert_eq!(tag_source.link.url.identity.name, "federation");
         assert_eq!(tag_source.import.as_ref().unwrap().element, "tag");
         assert!(tag_source.import.as_ref().unwrap().is_directive);
         assert_eq!(
             tag_source.import.as_ref().unwrap().alias,
-            Some("myTag".to_string())
+            Some(name!("myTag"))
         );
     }
 }

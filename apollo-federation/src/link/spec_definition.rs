@@ -23,7 +23,7 @@ pub(crate) trait SpecDefinition {
     fn is_spec_directive_name(
         &self,
         schema: &FederationSchema,
-        name_in_schema: &str,
+        name_in_schema: &Name,
     ) -> Result<bool, FederationError> {
         let Some(ref metadata) = schema.metadata() else {
             return Err(SingleFederationError::Internal {
@@ -40,7 +40,7 @@ pub(crate) trait SpecDefinition {
     fn is_spec_type_name(
         &self,
         schema: &FederationSchema,
-        name_in_schema: &str,
+        name_in_schema: &Name,
     ) -> Result<bool, FederationError> {
         let Some(ref metadata) = schema.metadata() else {
             return Err(SingleFederationError::Internal {
@@ -62,20 +62,18 @@ pub(crate) trait SpecDefinition {
         let Some(link) = self.link_in_schema(schema)? else {
             return Ok(None);
         };
-        Ok(Some(
-            link.directive_name_in_schema(name_in_spec).try_into()?,
-        ))
+        Ok(Some(link.directive_name_in_schema(name_in_spec)))
     }
 
     fn type_name_in_schema(
         &self,
         schema: &FederationSchema,
-        name_in_spec: &str,
+        name_in_spec: &Name,
     ) -> Result<Option<Name>, FederationError> {
         let Some(link) = self.link_in_schema(schema)? else {
             return Ok(None);
         };
-        Ok(Some(link.type_name_in_schema(name_in_spec).try_into()?))
+        Ok(Some(link.type_name_in_schema(name_in_spec)))
     }
 
     fn directive_definition<'schema>(

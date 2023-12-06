@@ -1,5 +1,7 @@
 //! Representation of Apollo `@link` specifications.
 use crate::error::{FederationError, SingleFederationError};
+use apollo_compiler::ast::Name;
+use apollo_compiler::name;
 use std::fmt;
 use std::str;
 use thiserror::Error;
@@ -32,15 +34,16 @@ pub struct Identity {
 
     /// The name of the specification this identifies.
     /// For instance, "federation".
-    pub name: String,
+    pub name: Name,
 }
 
 impl fmt::Display for Identity {
     /// Display a specification identity.
     ///
     ///     # use apollo_federation::link::spec::Identity;
+    ///     use apollo_compiler::name;
     ///     assert_eq!(
-    ///         Identity { domain: "https://specs.apollo.dev".to_string(), name: "federation".to_string() }.to_string(),
+    ///         Identity { domain: "https://specs.apollo.dev".to_string(), name: name!("federation") }.to_string(),
     ///         "https://specs.apollo.dev/federation"
     ///     )
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -52,28 +55,28 @@ impl Identity {
     pub fn core_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: "core".to_string(),
+            name: name!("core"),
         }
     }
 
     pub fn link_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: "link".to_string(),
+            name: name!("link"),
         }
     }
 
     pub fn federation_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: "federation".to_string(),
+            name: name!("federation"),
         }
     }
 
     pub fn join_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: "join".to_string(),
+            name: name!("join"),
         }
     }
 }
@@ -168,9 +171,10 @@ impl fmt::Display for Url {
     /// Display a specification url.
     ///
     ///     # use apollo_federation::link::spec::*;
+    ///     use apollo_compiler::name;
     ///     assert_eq!(
     ///         Url {
-    ///           identity: Identity { domain: "https://specs.apollo.dev".to_string(), name: "federation".to_string() },
+    ///           identity: Identity { domain: "https://specs.apollo.dev".to_string(), name: name!("federation") },
     ///           version: Version { major: 2, minor: 3 }
     ///         }.to_string(),
     ///         "https://specs.apollo.dev/federation/v2.3"
@@ -196,9 +200,18 @@ impl str::FromStr for Url {
                     return Err(SpecError::ParseError("invalid `@link` specification url: the last element of the path should be the version starting with a 'v'".to_string()));
                 }
                 let version = version.strip_prefix('v').unwrap().parse::<Version>()?;
-                let name = segments.next_back().ok_or(SpecError::ParseError(
-                    "invalid `@link` specification url: missing specification name".to_string(),
-                ))?;
+                let name = segments
+                    .next_back()
+                    .ok_or(SpecError::ParseError(
+                        "invalid `@link` specification url: missing specification name".to_string(),
+                    ))
+                    .and_then(|segment| {
+                        Name::new(segment).map_err(|err| {
+                            SpecError::ParseError(format!(
+                                "invalid `@link` specification url: {err}"
+                            ))
+                        })
+                    })?;
                 let scheme = url.scheme();
                 if !scheme.starts_with("http") {
                     return Err(SpecError::ParseError("invalid `@link` specification url: only http(s) urls are supported currently".to_string()));
@@ -213,10 +226,7 @@ impl str::FromStr for Url {
                     format!("{}://{}/{}", scheme, url_domain, path_remainder.join("/"))
                 };
                 Ok(Url {
-                    identity: Identity {
-                        domain,
-                        name: name.to_string(),
-                    },
+                    identity: Identity { domain, name },
                     version,
                 })
             }
@@ -230,6 +240,8 @@ impl str::FromStr for Url {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
+
     use super::*;
 
     #[test]
@@ -310,7 +322,7 @@ mod tests {
             Url {
                 identity: Identity {
                     domain: "https://specs.apollo.dev".to_string(),
-                    name: "federation".to_string()
+                    name: name!("federation")
                 },
                 version: Version { major: 2, minor: 3 }
             }
@@ -323,7 +335,7 @@ mod tests {
             Url {
                 identity: Identity {
                     domain: "http://something.com/more/path".to_string(),
-                    name: "my_spec_name".to_string()
+                    name: name!("my_spec_name")
                 },
                 version: Version { major: 0, minor: 1 }
             }

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::name;
 use apollo_compiler::Schema;
 
 use crate::error::FederationError;
@@ -14,7 +15,7 @@ use crate::Supergraph;
 pub fn join_link_identity() -> Identity {
     Identity {
         domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: "join".to_string(),
+        name: name!("join"),
     }
 }
 

@@ -83,7 +83,7 @@ pub(crate) fn directive_optional_fieldset_argument(
         Some(argument) => match argument.value.deref() {
             Value::String(name) => Ok(Some(name.clone())),
             Value::Null => Ok(None),
-            _ => Err(SingleFederationError::InvalidGraphQL {
+            _ => Err(SingleFederationError::Internal {
                 message: format!("Invalid value for argument \"{}\": must be a string.", name),
             }
             .into()),

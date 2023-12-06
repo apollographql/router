@@ -7,7 +7,7 @@ use apollo_compiler::ast::{
 use apollo_compiler::schema::{
     Component, ComponentName, EnumType, ExtendedType, ObjectType, ScalarType, UnionType,
 };
-use apollo_compiler::{name, ty, Node};
+use apollo_compiler::{name, ty, Node, NodeStr};
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -131,14 +131,14 @@ impl From<InvalidNameError> for FederationSpecError {
 #[derive(Debug)]
 pub struct FederationSpecDefinitions {
     link: Link,
-    pub fieldset_scalar_name: String,
+    pub fieldset_scalar_name: Name,
 }
 
 #[derive(Debug)]
 pub struct LinkSpecDefinitions {
     link: Link,
-    pub import_scalar_name: String,
-    pub purpose_enum_name: String,
+    pub import_scalar_name: Name,
+    pub purpose_enum_name: Name,
 }
 
 pub trait AppliedFederationLink {
@@ -158,10 +158,10 @@ macro_rules! applied_specification {
                         if i.alias.is_some() {
                             Value::Object(vec![
                                 (name!("name"), i.element.as_str().into()),
-                                (name!("as"), i.imported_display_name().into()),
+                                (name!("as"), i.imported_display_name().to_string().into()),
                             ])
                         } else {
-                            i.imported_display_name().into()
+                            i.imported_display_name().to_string().into()
                         }.into()
                     })
                     .collect::<Vec<Node<Value>>>();
@@ -181,7 +181,8 @@ macro_rules! applied_specification {
                 if let Some(spec_alias) = &self.link.spec_alias {
                     applied_link_directive.arguments.push(Argument {
                         name: name!("as"),
-                        value: spec_alias.into(),
+                        // TODO `spec_alias.into()` when https://github.com/apollographql/apollo-rs/pull/773 is released
+                        value: Value::String(<Name as AsRef::<NodeStr>>::as_ref(&spec_alias).clone()).into(),
                     }.into())
                 }
                 if let Some(purpose) = &self.link.purpose {
@@ -231,7 +232,7 @@ impl FederationSpecDefinitions {
                 .iter()
                 .map(|i| {
                     Arc::new(Import {
-                        element: i.to_string(),
+                        element: i.clone(),
                         alias: None,
                         is_directive: true,
                     })
@@ -242,7 +243,7 @@ impl FederationSpecDefinitions {
         })
     }
 
-    pub fn namespaced_type_name(&self, name: &str, is_directive: bool) -> String {
+    pub fn namespaced_type_name(&self, name: &Name, is_directive: bool) -> Name {
         if is_directive {
             self.link.directive_name_in_schema(name)
         } else {
@@ -292,11 +293,9 @@ impl FederationSpecDefinitions {
         Ok(InputValueDefinition {
             description: None,
             name: name!("fields"),
-            ty: Type::Named(Name::new(
-                self.namespaced_type_name(&FIELDSET_SCALAR_NAME, false),
-            )?)
-            .non_null()
-            .into(),
+            ty: Type::Named(self.namespaced_type_name(&FIELDSET_SCALAR_NAME, false))
+                .non_null()
+                .into(),
             default_value: None,
             directives: Default::default(),
         })
@@ -661,9 +660,7 @@ impl LinkSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("import"),
-                    ty: Type::Named(Name::new(&self.import_scalar_name)?)
-                        .list()
-                        .into(),
+                    ty: Type::Named(self.import_scalar_name.clone()).list().into(),
                     default_value: None,
                     directives: Default::default(),
                 }
@@ -671,7 +668,7 @@ impl LinkSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("for"),
-                    ty: Type::Named(Name::new(&self.purpose_enum_name)?).into(),
+                    ty: Type::Named(self.purpose_enum_name.clone()).into(),
                     default_value: None,
                     directives: Default::default(),
                 }
@@ -691,7 +688,7 @@ impl Default for LinkSpecDefinitions {
                 version: Version { major: 1, minor: 0 },
             },
             imports: vec![Arc::new(Import {
-                element: "Import".to_owned(),
+                element: name!("Import"),
                 is_directive: false,
                 alias: None,
             })],

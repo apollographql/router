@@ -14,7 +14,8 @@
 use std::sync::Arc;
 
 use apollo_compiler::executable::{Directive, SelectionSet};
-use apollo_compiler::Schema;
+use apollo_compiler::schema::Name;
+use apollo_compiler::{name, Schema};
 
 use crate::link::database::links_metadata;
 use crate::link::spec::{Identity, APOLLO_SPEC_DOMAIN};
@@ -25,13 +26,13 @@ use crate::link::Link;
 pub fn federation_link_identity() -> Identity {
     Identity {
         domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: "federation".to_string(),
+        name: name!("federation"),
     }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Key {
-    pub type_name: String,
+    pub type_name: Name,
     // TODO: this should _not_ be an Option below; but we don't know how to build the SelectionSet,
     // so until we have a solution, we use None to have code that compiles.
     selections: Option<Arc<SelectionSet>>,
@@ -46,7 +47,7 @@ impl Key {
     }
 
     pub(crate) fn from_directive_application(
-        type_name: &str,
+        type_name: &Name,
         directive: &Directive,
     ) -> Option<Key> {
         directive
@@ -55,7 +56,7 @@ impl Key {
             .find(|arg| arg.name == "fields")
             .and_then(|arg| arg.value.as_str())
             .map(|_value| Key {
-                type_name: type_name.to_string(),
+                type_name: type_name.clone(),
                 // TODO: obviously not what we want.
                 selections: None,
             })
@@ -74,13 +75,11 @@ pub fn federation_link(schema: &Schema) -> Arc<Link> {
 /// The name of the @key directive in this subgraph.
 /// This will either return 'federation__key' if the `@key` directive is not imported,
 /// or whatever never it is imported under otherwise. Commonly, this would just be `key`.
-pub fn key_directive_name(schema: &Schema) -> String {
-    federation_link(schema).directive_name_in_schema("key")
+pub fn key_directive_name(schema: &Schema) -> Name {
+    federation_link(schema).directive_name_in_schema(&name!("key"))
 }
 
-// TODO remove suppression OR use method in final version
-#[allow(dead_code)]
-pub fn keys(schema: &Schema, type_name: &str) -> Vec<Key> {
+pub fn keys(schema: &Schema, type_name: &Name) -> Vec<Key> {
     let key_name = key_directive_name(schema);
     if let Some(type_def) = schema.types.get(type_name) {
         type_def
