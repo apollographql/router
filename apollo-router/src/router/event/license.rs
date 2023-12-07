@@ -17,6 +17,8 @@ use crate::uplink::license_stream::LicenseStreamExt;
 use crate::uplink::stream_from_uplink;
 use crate::uplink::UplinkConfig;
 
+const APOLLO_ROUTER_LICENSE_INVALID: &'static str = "APOLLO_ROUTER_LICENSE_INVALID";
+
 type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
 
 #[derive(Debug, Display, From, Error)]
@@ -108,7 +110,11 @@ impl LicenseSource {
                                     .filter_map(|e| async move {
                                         let result = e.parse();
                                         if let Err(e) = &result {
-                                            tracing::error!("failed to parse license file, {}", e);
+                                            tracing::error!(
+                                                code = APOLLO_ROUTER_LICENSE_INVALID,
+                                                "failed to parse license file, {}",
+                                                e
+                                            );
                                         }
                                         result.ok()
                                     })
@@ -121,11 +127,19 @@ impl LicenseSource {
                             }
                         }
                         Ok(Err(err)) => {
-                            tracing::error!("Failed to parse license: {}", err);
+                            tracing::error!(
+                                code = APOLLO_ROUTER_LICENSE_INVALID,
+                                "Failed to parse license: {}",
+                                err
+                            );
                             stream::empty().boxed()
                         }
                         Err(err) => {
-                            tracing::error!("Failed to read license: {}", err);
+                            tracing::error!(
+                                code = APOLLO_ROUTER_LICENSE_INVALID,
+                                "Failed to read license: {}",
+                                err
+                            );
                             stream::empty().boxed()
                         }
                     }
@@ -138,7 +152,7 @@ impl LicenseSource {
                         future::ready(match res {
                             Ok(license) => Some(license),
                             Err(e) => {
-                                tracing::error!("{}", e);
+                                tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
                                 None
                             }
                         })

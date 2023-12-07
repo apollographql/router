@@ -3,6 +3,7 @@ source: apollo-router/src/uplink/license_stream.rs
 expression: yaml
 ---
 - fields:
-    message: license audience invalid
+    code: APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED
+    message: "the license file was valid, but was not enabled offline use"
   level: ERROR
 

@@ -34,6 +34,9 @@ use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
 
+const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &'static str =
+    "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
+
 #[derive(GraphQLQuery)]
 #[graphql(
     query_path = "src/uplink/license_query.graphql",
@@ -264,7 +267,10 @@ pub(crate) trait LicenseStreamExt: Stream<Item = License> {
                 };
 
                 if !matches {
-                    tracing::error!("license audience invalid");
+                    tracing::error!(
+                        code = APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED,
+                        "the license file was valid, but was not enabled offline use",
+                    );
                 }
                 futures::future::ready(if matches { Some(license) } else { None })
             })

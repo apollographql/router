@@ -34,6 +34,8 @@ pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
 pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
     "Apollo license expired https://go.apollo.dev/o/elp";
 
+pub(crate) const APOLLO_ROUTER_LICENSE_EXPIRED: &'static str = "APOLLO_ROUTER_LICENSE_EXPIRED";
+
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
 
 #[derive(Error, Display, Debug)]

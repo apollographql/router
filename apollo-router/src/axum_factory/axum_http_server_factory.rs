@@ -58,6 +58,7 @@ use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -481,7 +482,10 @@ async fn license_handler<B>(
                 )
                 .is_ok()
         {
-            ::tracing::error!("{}", LICENSE_EXPIRED_SHORT_MESSAGE);
+            ::tracing::error!(
+                code = APOLLO_ROUTER_LICENSE_EXPIRED,
+                LICENSE_EXPIRED_SHORT_MESSAGE
+            );
         }
     }
 
