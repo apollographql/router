@@ -34,8 +34,7 @@ use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
 
-const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &'static str =
-    "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
+const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
 
 #[derive(GraphQLQuery)]
 #[graphql(

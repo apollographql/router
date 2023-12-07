@@ -17,7 +17,7 @@ use crate::uplink::license_stream::LicenseStreamExt;
 use crate::uplink::stream_from_uplink;
 use crate::uplink::UplinkConfig;
 
-const APOLLO_ROUTER_LICENSE_INVALID: &'static str = "APOLLO_ROUTER_LICENSE_INVALID";
+const APOLLO_ROUTER_LICENSE_INVALID: &str = "APOLLO_ROUTER_LICENSE_INVALID";
 
 type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
 
