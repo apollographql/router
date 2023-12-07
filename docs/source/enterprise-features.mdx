@@ -20,6 +20,7 @@ Try out these Enterprise features for free with an [Enterprise trial](/graphos/o
 - **Custom request handling** in any language via [external coprocessing](./customizations/coprocessor/)
 - **Mitigation of potentially malicious requests** via [operation limits](./configuration/operation-limits) and [safelisting with persisted queries](./configuration/persisted-queries)
 - **Custom instrumentation and telemetry**, including custom [instruments](./configuration/instruments), [spans](./configuration/spans), and [events](./configuration/events).
+- An [**offline Enterprise license**](#offline-enterprise-license) enables running the router with Enterprise features when disconnected from the internet.
 
 <Tip>
 
@@ -81,7 +82,7 @@ With an offline license, a router can either be fully disconnected from GraphOS 
 
 <Note>
 
-A router using an offline license cannot use [safelisting with persisted queries](./configuration/persisted-queries), because the feature relies on Apollo Uplink to fetch persisted query manifests so it doesn't work as designed when the router is disconnected from Apollo Uplink.
+A router using an offline license cannot use [safelisting with persisted queries](./configuration/persisted-queries), because the feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Apollo Uplink.
 
 </Note>
 
@@ -103,10 +104,12 @@ Follow these steps to configure an Apollo Router to use an offline Enterprise li
 
     The router checks the CLI option and environment variables in the listed order, and it uses the value of the first set option or variable.
 
-1. Configure the router to use a local supergraph schema by setting either the [`--s/-supergraph` CLI option](./configuration/overview/#-s----supergraph) or the [`APOLLO_SUPERGRAPH_PATH` environment variable](). 
+1. Configure the router to use a local supergraph schema by setting one of the following:
+    * [`--s/-supergraph` CLI option](./configuration/overview/#-s----supergraph)
+    * [`APOLLO_SUPERGRAPH_PATH` environment variable]()
+    * [`APOLLO_SUPERGRAPH_URLS` environment variable]()
 
-1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting the 
-`APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables.
+1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables.
 
 ### Licenses with local development
 
