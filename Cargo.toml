@@ -41,3 +41,6 @@ incremental = false
 [profile.release-dhat]
 inherits = "release"
 debug = 1
+
+[patch.crates-io]
+rustls = { git = "https://github.com/Geal/rustls.git", rev = "42206a0c4cbe60f9608d1e802d42d5825feae79f" }

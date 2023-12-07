@@ -5944,8 +5944,7 @@ dependencies = [
 [[package]]
 name = "rustls"
 version = "0.21.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "629648aced5775d558af50b2b4c7b02983a04b312126d45eeead26e7caa498b9"
+source = "git+https://github.com/Geal/rustls.git?rev=42206a0c4cbe60f9608d1e802d42d5825feae79f#42206a0c4cbe60f9608d1e802d42d5825feae79f"
 dependencies = [
  "log",
  "ring 0.17.5",
