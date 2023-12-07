@@ -263,7 +263,8 @@ pub(crate) trait LicenseStreamExt: Stream<Item = License> {
                                 ..
                             }),
                     } => audiences.contains(aud),
-                    _ => false,
+                    // A license with no claims is always valid. We will check later if any commercial features are in use.
+                    License { claims: None } => true,
                 };
 
                 if !matches {
@@ -591,6 +592,18 @@ mod test {
             .with_subscriber(assert_snapshot_subscriber!())
             .await,
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_no_claim() {
+        assert_eq!(
+            futures::stream::once(ready(License::default()))
+                .validate_audience([Audience::Offline, Audience::Cloud])
+                .count()
+                .with_subscriber(assert_snapshot_subscriber!())
+                .await,
+            1
         );
     }
 }
