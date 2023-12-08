@@ -11,7 +11,7 @@ Arguments for this command are described below.
 
 If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
 
-```bash
+```bash showLineNumbers=false
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 ```
 
@@ -62,7 +62,7 @@ The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should us
 
 After [installing the Apollo Router](../quickstart/) in your current working directory, you can run the Apollo Router with the following example command:
 
-```bash
+```bash showLineNumbers=false
 ./router --config router.yaml --supergraph supergraph-schema.graphql
 ```
 
@@ -305,7 +305,7 @@ plugins:
 
 The Apollo Router provides a set of subcommands for interacting with its configuration. You run these subcommands with the following syntax:
 
-```
+```bash showLineNumbers=false
 ./router config schema
 ./router config upgrade <path-to-config-file.yaml>
 ```
@@ -330,7 +330,11 @@ The Apollo Router provides a set of subcommands for interacting with its configu
 
 Prints a JSON schema representation of the router's full supported configuration format.
 
+<Tip>
+
 Use this schema to enable [configuration awareness in your text editor](#configuration-awareness-in-your-text-editor).
+
+</Tip>
 
 </td>
 </tr>
@@ -357,7 +361,7 @@ For details, see [Upgrading your router configuration](#upgrading-your-router-co
 
 The Apollo Router takes an optional YAML configuration file as input via the [`--config`](#-c----config) option:
 
-```bash
+```bash showLineNumbers=false
 ./router --config router.yaml
 ```
 
@@ -645,7 +649,7 @@ You can only configure these certificates via the router's configuration since u
 
 If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled. You can generate it with the following command line command from a certificate signing request, in this example, `server.csr`:
 
-```
+```bash showLineNumbers=false
 openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
 ```
 
@@ -848,7 +852,7 @@ The Apollo Router can generate a JSON schema for config validation in your text 
 
 Generate the schema with the following command:
 
-```bash
+```bash showLineNumbers=false
 ./router config schema > configuration_schema.json
 ```
 
@@ -873,12 +877,12 @@ New releases of the Apollo Router might introduce breaking changes to the [YAML 
 
 If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
 
-```bash
+```bash showLineNumbers=false
 ./router config upgrade <path_to_config.yaml>
 ```
 
 You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
 
-```bash
+```bash showLineNumbers=false
 ./router config upgrade --diff <path_to_config.yaml>
 ```
