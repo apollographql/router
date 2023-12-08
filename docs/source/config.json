@@ -99,6 +99,7 @@
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",
       "GraphOS reporting": "/configuration/telemetry/apollo-telemetry",
+      "Client awareness": "/managed-federation/client-awareness",
       "Log exporters": {
         "Configuration": "/configuration/telemetry/exporters/logging/overview",
         "Stdout": "/configuration/telemetry/exporters/logging/stdout"
@@ -123,8 +124,7 @@
         "Selectors" : "/configuration/telemetry/instrumentation/selectors",
         "Standard attributes": "/configuration/telemetry/instrumentation/standard-attributes",
         "Standard instruments": "/configuration/telemetry/instrumentation/standard-instruments"
-      },
-      "Client awareness": "/managed-federation/client-awareness"
+      }
     },
     "Containerization": {
       "Overview": "/containerization/overview",

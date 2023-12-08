@@ -243,6 +243,18 @@ expression: get_spans()
                         "memory"
                       ],
                       [
+                        "monotonic_counter.apollo.router.validation",
+                        1
+                      ],
+                      [
+                        "validation.source",
+                        "operation"
+                      ],
+                      [
+                        "validation.result",
+                        "match"
+                      ],
+                      [
                         "histogram.apollo_router_query_planning_time",
                         "[REDACTED]"
                       ],

@@ -34,6 +34,8 @@ pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
 pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
     "Apollo license expired https://go.apollo.dev/o/elp";
 
+pub(crate) const APOLLO_ROUTER_LICENSE_EXPIRED: &str = "APOLLO_ROUTER_LICENSE_EXPIRED";
+
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
 
 #[derive(Error, Display, Debug)]
@@ -42,11 +44,12 @@ pub enum Error {
     InvalidLicense(jsonwebtoken::errors::Error),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum Audience {
     SelfHosted,
     Cloud,
+    Offline,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -181,12 +184,8 @@ impl LicenseEnforcementReport {
                 .name("APQ caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.traffic_shaping.experimental_cache")
+                .path("$.experimental_entity_cache")
                 .name("Subgraph caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.traffic_shaping..experimental_entity_caching")
-                .name("Subgraph entity caching")
                 .build(),
             ConfigurationRestriction::builder()
                 .path("$.subscription.enabled")

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::WithErrors;
@@ -18,6 +19,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
+use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
@@ -43,6 +45,7 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod change;
 pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
@@ -76,6 +79,15 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     #[serde(skip)]
     pub(crate) validation_error: Option<ValidationErrors>,
+
+    /// This is a hash that depends on:
+    /// - the query itself
+    /// - the relevant parts of the schema
+    ///
+    /// if a schema update does not affect a query, then this will be the same hash
+    /// with the old and new schema
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) schema_aware_hash: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,6 +120,7 @@ impl Query {
             },
             is_original: true,
             validation_error: None,
+            schema_aware_hash: vec![],
         }
     }
 
@@ -311,8 +324,8 @@ impl Query {
 
         let doc = Self::parse_document(&query, schema, configuration);
         Self::check_errors(&doc)?;
-        let (fragments, operations, defer_stats) =
-            Self::extract_query_information(schema, &doc.executable)?;
+        let (fragments, operations, defer_stats, schema_aware_hash) =
+            Self::extract_query_information(schema, &doc.executable, &doc.ast)?;
 
         Ok(Query {
             string: query,
@@ -324,6 +337,7 @@ impl Query {
             defer_stats,
             is_original: true,
             validation_error: None,
+            schema_aware_hash,
         })
     }
 
@@ -347,7 +361,8 @@ impl Query {
     pub(crate) fn extract_query_information(
         schema: &Schema,
         document: &ExecutableDocument,
-    ) -> Result<(Fragments, Vec<Operation>, DeferStats), SpecError> {
+        ast: &ast::Document,
+    ) -> Result<(Fragments, Vec<Operation>, DeferStats, Vec<u8>), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
@@ -359,7 +374,13 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Ok((fragments, operations, defer_stats))
+        let mut visitor = QueryHashVisitor::new(&schema.definitions, ast);
+        traverse::document(&mut visitor, ast).map_err(|e| {
+            SpecError::ParsingError(format!("could not calculate the query hash: {e}"))
+        })?;
+        let hash = visitor.finish();
+
+        Ok((fragments, operations, defer_stats, hash))
     }
 
     #[allow(clippy::too_many_arguments)]
