@@ -23,13 +23,16 @@ Part of the motivation for this decision, was the recognition that we already ha
 
 ### Introduce New APIs
 
-Introduce a new trait:
+Introduce 2 new traits:
 
+
+* pub (crate) PluginPrivate	
 * pub PluginUnstable
+
 
 [Demo](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=b4022dfeaeb920bc7ae94a94b7b9ea23)
 
-By default, new plugin services will start their life in the DynPlugin trait, but it is possible to start as Unstable if required.
+By default, new plugin services will start their life as Private, but it is possible to start as Unstable if required.
 
 ### Acceptance criteria
 
@@ -38,10 +41,10 @@ By default, new plugin services will start their life in the DynPlugin trait, bu
 * Plugins external to the router codebase can use the unstable API.
 * The new traits are documented appropriately.
 
-### Progression from DynPlugin to Public
+### Progression from Private to Public
 
 The order of introduction of new service would be:
-* DynPlugin - Does this work and make the router code cleaner?
+* Private - Does this work and make the router code cleaner?
 * Unstable - Available for use by plugins, but not guaranteed to be stable.
 * Public - Usable by all, and won't change.
 
