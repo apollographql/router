@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/plugins/telemetry/fmt_layer.rs
+expression: buff.to_string()
+---
+{"timestamp":"[timestamp]","level":"ERROR","message":"Hello from nested test","http.method":"GET","target":"apollo_router::plugins::telemetry::fmt_layer::tests"}
+{"timestamp":"[timestamp]","level":"INFO","message":"Hello from test","event_attr":"foo","target":"apollo_router::plugins::telemetry::fmt_layer::tests"}
+

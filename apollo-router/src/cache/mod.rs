@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
@@ -10,6 +9,7 @@ use tokio::sync::Mutex;
 use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
+use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
 pub(crate) mod storage;
@@ -34,13 +34,12 @@ where
 {
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
-        redis_urls: Option<Vec<url::Url>>,
-        timeout: Option<Duration>,
+        redis: Option<RedisCache>,
         caller: &str,
     ) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity, redis_urls, timeout, caller).await,
+            storage: CacheStorage::new(capacity, redis, caller).await,
         }
     }
 
@@ -48,13 +47,7 @@ where
         config: &crate::configuration::Cache,
         caller: &str,
     ) -> Self {
-        Self::with_capacity(
-            config.in_memory.limit,
-            config.redis.as_ref().map(|c| c.urls.clone()),
-            config.redis.as_ref().and_then(|r| r.timeout),
-            caller,
-        )
-        .await
+        Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
@@ -214,8 +207,7 @@ mod tests {
     async fn example_cache_usage() {
         let k = "key".to_string();
         let cache =
-            DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, None, "test")
-                .await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test").await;
 
         let entry = cache.get(&k).await;
 
@@ -232,8 +224,7 @@ mod tests {
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(NonZeroUsize::new(13).unwrap(), None, None, "test")
-                .await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(13).unwrap(), None, "test").await;
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -256,8 +247,7 @@ mod tests {
         mock.expect_retrieve().times(1).return_const(1usize);
 
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, None, "test")
-                .await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test").await;
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made

@@ -36,15 +36,6 @@ apq:
       in_memory:
         limit: 1000
 
-traffic_shaping:
-  subgraphs:
-    products:
-      experimental_entity_caching:
-        ttl: 2s
-  experimental_cache:
-    urls:
-      - https://example.com
-
 subscription:
   enabled: true
   mode:
@@ -60,3 +51,21 @@ subscription:
 plugins:
   experimental.restricted:
     enabled: true
+
+experimental_entity_cache:
+  redis:
+    urls:
+      - https://example.com
+
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          http.response.status_code: true
+      supergraph:
+        attributes:
+          graphql.document: true
+      subgraph:
+        attributes:
+          subgraph.graphql.document: true

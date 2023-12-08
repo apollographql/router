@@ -1,0 +1,52 @@
+---
+title: Datadog exporter (via OTLP)
+subtitle: Configure the Datadog exporter for metrics
+description: Configure the Datadog exporter for metrics via OpenTelemetry Protocol (OTLP) in the Apollo Router
+---
+
+Enable and configure the [OTLP exporter](./otlp) for metrics in the Apollo Router for use with [Datadog](https://www.datadoghq.com/).
+
+For general tracing configuration, refer to [Router Metrics Configuration](./overview).
+
+## Datadog configuration
+
+To export metrics to Datadog, you must both: 
+
+- Configure the Datadog agent to accept OpenTelemetry Protocol (OTLP) metrics, and
+- Configure the router to send traces to the Datadog agent.
+
+### Datadog agent configuration
+
+To configure the Datadog agent, add OTLP configuration (`otlp_config`) to your `datadog.yaml`. For example:
+
+```yaml title="datadog.yaml"
+otlp_config:
+  receiver:
+    protocols:
+      grpc:
+        endpoint: <dd-agent-ip>:4317
+```
+
+### Router configuration
+To configure the router, enable the [OTLP exporter](./otlp#configuration) and set both `temporality: delta` and `endpoint: <datadog-agent-endpoint>`. For example: 
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+        temporality: delta
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+        endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+```
+
+<Note>
+
+**You must set `temporality: delta`**, otherwise the router generates incorrect metrics.
+
+</Note>
+
+For more details about Datadog configuration, see [Datadog's docs on Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
+

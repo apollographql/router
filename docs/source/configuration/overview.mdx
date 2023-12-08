@@ -90,9 +90,11 @@ This reference lists and describes the options supported by the `router` binary.
 
 The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
 
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
+
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
 
-**Required** if you are _not_ using managed federation. If you _are_ using managed federation, do not provide this value.
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
 </td>
 </tr>
@@ -363,6 +365,12 @@ This file enables you to customize numerous aspects of your router's behavior, c
 
 If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
 
+<Tip>
+
+Enable your text editor to validate the format and content of your router YAML configuration file by [configuring it with the router's configuration schema](#configuration-awareness-in-your-text-editor).
+
+</Tip>
+
 ### Listen address
 
 By default, the Apollo Router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen`:
@@ -434,6 +442,12 @@ By default, the router does _not_ resolve introspection queries. You can enable 
 supergraph:
   introspection: true
 ```
+
+### Debugging
+
+- To configure logging, see [Logging in the Apollo Router](./logging).
+
+- To configure the inclusion of subgraph errors, see [Subgraph error inclusion](./subgraph-error-inclusion).
 
 ### Landing pages
 
@@ -517,6 +531,10 @@ See [Safelisting with persisted queries](./persisted-queries) for more informati
 
 See [Sending HTTP headers to subgraphs](./header-propagation/).
 
+### Traffic shaping
+
+To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the Apollo Router](./traffic-shaping).
+
 ### Cross-Origin Resource Sharing (CORS)
 
 See [Configuring CORS in the Apollo Router](./cors).
@@ -533,17 +551,33 @@ See [Apollo Router's _experimental_ support for query batching](../executing-ope
 
 See [GraphQL subscriptions in the Apollo Router](../executing-operations/subscription-support/#router-setup).
 
-### Authorization directives support
+### Authorization support
 
-See [Authorization in the Apollo Router](./authorization#authorization-directives).
+- To configure authorization directives, see [Authorization directives](./authorization/#authorization-directives).
+
+- To configure the authorization plugin, see [Configuration options](./authorization/#configuration-options).
+
+### JWT authentication
+
+To enable and configure JWT authentication, see [JWT authentication in the Apollo Router](./authn-jwt).
+
+### Cross-site request forgery (CSRF) prevention
+
+To configure CSRF prevention, see [CSRF prevention in the Apollo Router](./csrf).
+
+### Subgraph authentication
+
+To configure subgraph authentication with AWS SigV4, see a [configuration example](./authn-subgraph/#configuration-example).
 
 ### External coprocessing
 
 See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
 
-### OpenTelemetry tracing
+### Telemetry and monitoring
 
-See [Tracing in the Apollo Router](./tracing/).
+The Apollo Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
+
+See the [Apollo Router telemetry overview](./telemetry/overview).
 
 ### TLS
 
@@ -672,7 +706,7 @@ limits:
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
-  parser_max_recursion: 4096 # Default value
+  parser_max_recursion: 500 # Default value
 
   # Operation-based limits (Enterprise only)
   max_depth: 100
@@ -714,7 +748,7 @@ The default value is `15000`.
 
 Limits the deepest level of recursion allowed by the router's GraphQL parser to prevent stack overflows. This corresponds to the deepest nesting level of any single GraphQL operation or fragment defined in a query document.
 
-The default value is `4096`.
+The default value is `500`.
 
 In the example below, the `GetProducts` operation has a recursion of three, and the `ProductVariation` fragment has a recursion of two. Therefore, the _max_ recursion of the query document is three.
 

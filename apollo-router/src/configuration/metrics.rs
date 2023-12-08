@@ -185,7 +185,7 @@ impl Metrics {
             opt.require_authentication,
             "$[?(@.require_authentication == true)]",
             opt.directives,
-            "$.preview_directives[?(@.enabled == true)]"
+            "$.directives[?(@.enabled == true)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.coprocessor,
@@ -292,27 +292,50 @@ impl Metrics {
         );
 
         log_usage_metrics!(
-            value.apollo.router.config.entities,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]",
-            opt.cache,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]"
+            value.apollo.router.config.entity_cache,
+            "$.experimental_entity_cache",
+            opt.enabled,
+            "$[?(@.enabled)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraphs..enabled)]",
+            opt.subgraph.ttl,
+            "$[?(@.subgraphs..ttl)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,
-            "$.telemetry[?(@..endpoint || @.metrics.prometheus.enabled == true)]",
+            "$..telemetry[?(@..endpoint || @.metrics.prometheus.enabled == true)]",
             opt.metrics.otlp,
-            "$.metrics.otlp[?(@.endpoint)]",
+            "$..metrics.otlp[?(@.endpoint)]",
             opt.metrics.prometheus,
-            "$.metrics.prometheus[?(@.enabled==true)]",
+            "$..metrics.prometheus[?(@.enabled==true)]",
             opt.tracing.otlp,
-            "$.tracing.otlp[?(@.enabled==true)]",
+            "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
-            "$.tracing.datadog[?(@.enabled==true)]",
+            "$..tracing.datadog[?(@.enabled==true)]",
             opt.tracing.jaeger,
-            "$.tracing.jaeger[?(@.enabled==true)]",
+            "$..tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
-            "$.tracing.zipkin[?(@.enabled==true)]"
+            "$..tracing.zipkin[?(@.enabled==true)]",
+            opt.events,
+            "$..events",
+            opt.instruments,
+            "$..instruments",
+            opt.spans,
+            "$..spans",
+            opt.spans.mode,
+            "$..spans.mode",
+            opt.spans.default_attribute_requirement_level,
+            "$..spans.default_attribute_requirement_level",
+            opt.spans.router,
+            "$..spans.router",
+            opt.spans.subgraph,
+            "$..spans.subgraph",
+            opt.spans.supergraph,
+            "$..spans.supergraph",
+            opt.logging.experimental_when_header,
+            "$..logging.experimental_when_header"
         );
+
         log_usage_metrics!(
             value.apollo.router.config.batching,
             "$.experimental_batching[?(@.enabled == true)]",

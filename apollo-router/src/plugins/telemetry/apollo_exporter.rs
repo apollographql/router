@@ -307,7 +307,7 @@ impl ApolloExporter {
                             "apollo.router.telemetry.studio.reports",
                             "The number of reports submitted to Studio by the Router",
                             1,
-                            type = report_type
+                            report.type = report_type
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.

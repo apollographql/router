@@ -27,8 +27,11 @@ pub(crate) enum Error {
     #[error("http error")]
     Http(#[from] reqwest::Error),
 
-    #[error("fetch failed from all endpoints")]
-    FetchFailed,
+    #[error("fetch failed from uplink endpoint, and there are no fallback endpoints configured")]
+    FetchFailedSingle,
+
+    #[error("fetch failed from all {url_count} uplink endpoints")]
+    FetchFailedMultiple { url_count: usize },
 
     #[error("uplink error: code={code} message={message}")]
     UplinkError { code: String, message: String },
@@ -121,6 +124,13 @@ impl Endpoints {
                         .take(urls.len()),
                 )
             }
+        }
+    }
+
+    pub(crate) fn url_count(&self) -> usize {
+        match self {
+            Endpoints::Fallback { urls } => urls.len(),
+            Endpoints::RoundRobin { urls, current: _ } => urls.len(),
         }
     }
 }
@@ -228,7 +238,7 @@ where
             match fetch::<Query, Response, TransformedResponse>(
                 &client,
                 &query_body,
-                &mut endpoints.iter(),
+                &mut endpoints,
                 &transform_new_response,
             )
             .await
@@ -306,7 +316,7 @@ where
 pub(crate) async fn fetch<Query, Response, TransformedResponse>(
     client: &reqwest::Client,
     request_body: &QueryBody<Query::Variables>,
-    urls: &mut impl Iterator<Item = &Url>,
+    endpoints: &mut Endpoints,
     // See stream_from_uplink_transforming_new_response for an explanation of
     // this argument.
     transform_new_response: &(impl Fn(
@@ -324,7 +334,7 @@ where
     TransformedResponse: Send + Debug + 'static,
 {
     let query = query_name::<Query>();
-    for url in urls {
+    for url in endpoints.iter() {
         let now = Instant::now();
         match http_request::<Query>(client, url.as_str(), request_body).await {
             Ok(response) => match response.data.map(Into::into) {
@@ -417,7 +427,13 @@ where
             }
         };
     }
-    Err(Error::FetchFailed)
+
+    let url_count = endpoints.url_count();
+    if url_count == 1 {
+        Err(Error::FetchFailedSingle)
+    } else {
+        Err(Error::FetchFailedMultiple { url_count })
+    }
 }
 
 fn query_name<Query>() -> &'static str {
@@ -863,6 +879,24 @@ mod test {
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
             mock_uplink_config_with_round_robin_urls(vec![url1, url2]),
+        )
+        .take(1)
+        .collect::<Vec<_>>()
+        .await;
+        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_uplink_failed_from_single() {
+        let (mock_server, url1, _url2, _url3) = init_mock_server().await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url1)
+            .response(response_fetch_error_http())
+            .build()
+            .await;
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
+            mock_uplink_config_with_fallback_urls(vec![url1]),
         )
         .take(1)
         .collect::<Vec<_>>()

@@ -1,0 +1,19 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+supergraph:
+  listen: "1.2.3.4:5"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        service_name: test_tracing
+    logging:
+      common:
+        service_name: test_logging
+    metrics:
+      common:
+        service_name: test_metrics
+
