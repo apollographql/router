@@ -178,7 +178,7 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    /// Adds an extra, already instanciated unstable plugin.
+    /// Adds an extra, already instantiated unstable plugin.
     ///
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.
@@ -197,7 +197,7 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    /// Adds an extra, already instanciated private plugin.
+    /// Adds an extra, already instantiated private plugin.
     ///
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.
