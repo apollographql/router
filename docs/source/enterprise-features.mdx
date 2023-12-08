@@ -90,26 +90,29 @@ A router using an offline license cannot use [safelisting with persisted queries
 
 Follow these steps to configure an Apollo Router to use an offline Enterprise license:
 
-1. Fetch an offline license by running `rover fetch license` with the graph ref of the graph that you want to fetch a license for:
+1. Fetch an offline license by running [rover fetch license](/rover/commands/license/#fetch-license) with the ID of the graph from which you want to fetch a license:
 
     ```bash
-    rover fetch license <apollo-graph-ref>
+    rover license fetch --graph-id <apollo-graph-id>
     ```
 
-1. Provide the offline license to your router on startup. The router accepts an offline license in a few different ways:
+1. Provide the offline license to your router on startup. The router accepts an offline license in a few ways:
 
     1. `--license <license_path>` CLI option
     1. `APOLLO_ROUTER_LICENSE_PATH` environment variable
     1. `APOLLO_ROUTER_LICENSE` environment variable
 
-    The router checks the CLI option and environment variables in the listed order, and it uses the value of the first set option or variable.
+    The router checks the CLI option and environment variables in the listed order, and it uses the value of the first option or variable that is set.
 
 1. Configure the router to use a local supergraph schema by setting one of the following:
+
     * [`--s/-supergraph` CLI option](./configuration/overview/#-s----supergraph)
     * [`APOLLO_SUPERGRAPH_PATH` environment variable]()
     * [`APOLLO_SUPERGRAPH_URLS` environment variable]()
 
-1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables.
+1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables. 
+
+    These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 
 ### Licenses with local development
 
