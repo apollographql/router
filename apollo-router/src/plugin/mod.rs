@@ -543,15 +543,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
-
-    /// unstable
-    fn unstable_method(&self);
-
-    /// internal
-    fn internal_method(&self, i: InternalType);
 }
-
-pub(crate) struct InternalType;
 
 #[async_trait]
 impl<P> PluginPrivate for P
@@ -597,14 +589,6 @@ where
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         PluginUnstable::web_endpoints(self)
-    }
-
-    fn unstable_method(&self) {
-        PluginUnstable::unstable_method(self)
-    }
-
-    fn internal_method(&self, _i: InternalType) {
-        todo!();
     }
 }
 
@@ -654,12 +638,6 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// Support downcasting
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-
-    /// unstable
-    fn unstable_method(&self);
-
-    /// internal
-    fn internal_method(&self, i: InternalType);
 }
 
 #[async_trait]
@@ -699,16 +677,6 @@ where
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-
-    /// unstable
-    fn unstable_method(&self) {
-        self.unstable_method()
-    }
-
-    /// internal
-    fn internal_method(&self, i: InternalType) {
-        self.internal_method(i)
     }
 }
 
