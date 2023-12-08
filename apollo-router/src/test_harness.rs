@@ -20,6 +20,8 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
+use crate::plugin::PluginUnstable;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
@@ -162,6 +164,45 @@ impl<'a> TestHarness<'a> {
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.
     pub fn extra_plugin<P: Plugin>(mut self, plugin: P) -> Self {
+        let type_id = std::any::TypeId::of::<P>();
+        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
+            Some(factory) => factory.name.clone(),
+            None => format!(
+                "extra_plugins.{}.{}",
+                self.extra_plugins.len(),
+                std::any::type_name::<P>(),
+            ),
+        };
+
+        self.extra_plugins.push((name, Box::new(plugin)));
+        self
+    }
+
+    /// Adds an extra, already instantiated unstable plugin.
+    ///
+    /// May be called multiple times.
+    /// These extra plugins are added after plugins specified in configuration.
+    pub fn extra_unstable_plugin<P: PluginUnstable>(mut self, plugin: P) -> Self {
+        let type_id = std::any::TypeId::of::<P>();
+        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
+            Some(factory) => factory.name.clone(),
+            None => format!(
+                "extra_plugins.{}.{}",
+                self.extra_plugins.len(),
+                std::any::type_name::<P>(),
+            ),
+        };
+
+        self.extra_plugins.push((name, Box::new(plugin)));
+        self
+    }
+
+    /// Adds an extra, already instantiated private plugin.
+    ///
+    /// May be called multiple times.
+    /// These extra plugins are added after plugins specified in configuration.
+    #[allow(dead_code)]
+    pub(crate) fn extra_private_plugin<P: PluginPrivate>(mut self, plugin: P) -> Self {
         let type_id = std::any::TypeId::of::<P>();
         let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
             Some(factory) => factory.name.clone(),
