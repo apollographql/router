@@ -93,8 +93,8 @@ Usage:
 {{- end -}}
 
 {{- define "router.prometheusMetricsPath" -}}
-{{- if ((((.Values.router).configuration).telemetry).metrics).prometheus }}
-{{- .Values.router.configuration.telemetry.metrics.prometheus.path | quote }}
+{{- if (((((.Values.router).configuration).telemetry).exporters).metrics).prometheus }}
+{{- .Values.router.configuration.telemetry.exporters.metrics.prometheus.path | quote }}
 {{- else -}}
 "/metrics"
 {{- end }}

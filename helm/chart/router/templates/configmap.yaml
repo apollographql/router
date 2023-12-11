@@ -1,6 +1,6 @@
 {{- if .Values.router.configuration }}
 {{- $routerFullName := include "router.fullname" .  -}}
-{{- $configuration := dict "telemetry" (dict "metrics" (dict "common" (dict "resources" (dict "service.name" $routerFullName)))) -}}
+{{- $configuration := dict "telemetry" (dict "exporters" (dict "metrics" (dict "common" (dict "resource" (dict "service.name" $routerFullName))))) -}}
 {{- $_ := mustMergeOverwrite $configuration .Values.router.configuration  -}}
 
 apiVersion: v1

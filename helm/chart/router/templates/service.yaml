@@ -23,11 +23,10 @@ spec:
       protocol: TCP
       name: health
     {{- if .Values.serviceMonitor.enabled }}
-    - port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" }}
+    - port: {{ (splitList ":" .Values.router.configuration.telemetry.exporters.metrics.prometheus.listen | last) | default "9090" }}
       targetPort: metrics
       protocol: TCP
       name: metrics
     {{- end }}
   selector:
     {{- include "router.selectorLabels" . | nindent 4 }}
-
