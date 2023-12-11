@@ -855,7 +855,8 @@ mod test {
 
     #[test]
     fn test_gauge() {
-        meter_provider()
+        // Observables are cleaned up when they dropped, so keep this around.
+        let _gauge = meter_provider()
             .meter("test")
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
