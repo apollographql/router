@@ -30,7 +30,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test {
   t {
     v1
@@ -71,7 +71,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t @skip(if: $skipIf) {
     v1
@@ -116,7 +116,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t @customSkip(if: $skipIf, label: "foo") {
     v1
@@ -159,7 +159,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     v1
@@ -202,7 +202,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
   t @skip(if: $skip1) {
     v1
@@ -246,7 +246,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test {
   t @defer {
     v1
@@ -303,7 +303,7 @@ type V {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test {
   t {
     t1
@@ -356,7 +356,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test {
   t {
     v1
@@ -401,7 +401,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     ... on T @skip(if: $skipIf) {
@@ -450,7 +450,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     ... on T @customSkip(if: $skipIf, label: "foo") {
@@ -497,7 +497,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     v1
@@ -544,7 +544,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
   t {
     ... on T @skip(if: $skip1) {
@@ -593,7 +593,7 @@ type T {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test {
   t {
     ... on T @defer {
@@ -661,7 +661,7 @@ type V {
     let mut executable_document = executable_document.into_inner();
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments);
+        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
         let expected = r#"query Test {
   t {
     t1

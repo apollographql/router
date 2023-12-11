@@ -1,3 +1,5 @@
+use crate::error::FederationError;
+use crate::error::SingleFederationError::Internal;
 use apollo_compiler::ast::{Argument, DirectiveList, FieldDefinition, Name, NamedType};
 use apollo_compiler::executable::{
     Field, Fragment, InlineFragment, Operation, Selection, SelectionSet,
@@ -78,13 +80,13 @@ impl NormalizedSelectionSet {
     fn from_selection_set(
         selection_set: &SelectionSet,
         fragments: &IndexMap<Name, Node<Fragment>>,
-    ) -> Self {
+    ) -> Result<NormalizedSelectionSet, FederationError> {
         let normalized_selections =
-            normalize_selections(&selection_set.selections, &selection_set.ty, fragments);
-        NormalizedSelectionSet {
+            normalize_selections(&selection_set.selections, &selection_set.ty, fragments)?;
+        Ok(NormalizedSelectionSet {
             ty: selection_set.ty.clone(),
             selections: normalized_selections,
-        }
+        })
     }
 }
 
@@ -196,7 +198,7 @@ fn normalize_selections(
     selections: &Vec<Selection>,
     parent_type: &NamedType,
     fragments: &IndexMap<Name, Node<Fragment>>,
-) -> NormalizedSelectionMap {
+) -> Result<NormalizedSelectionMap, FederationError> {
     let mut normalized = NormalizedSelectionMap::new();
     for selection in selections {
         match selection {
@@ -233,11 +235,11 @@ fn normalize_selections(
                         &field.selection_set.selections,
                         field.ty().inner_named_type(),
                         fragments,
-                    );
+                    )?;
                     let merged_selections = merge_selections(
                         &field_entry.selection_set.selections,
                         &expanded_selection_set,
-                    );
+                    )?;
                     field_entry.make_mut().selection_set.selections = merged_selections;
                 }
             }
@@ -247,11 +249,11 @@ fn normalize_selections(
                         &fragment.selection_set.selections,
                         parent_type,
                         fragments,
-                    );
+                    )?;
 
                     // we can collapse named fragments if condition is on the parent type and we don't have any directives
                     if parent_type == fragment.type_condition() && fragment.directives.is_empty() {
-                        normalized = merge_selections(&normalized, &expanded_selection_set);
+                        normalized = merge_selections(&normalized, &expanded_selection_set)?;
                     } else {
                         // otherwise we convert to inline fragment
                         let mut fragment_key: NormalizedSelectionKey = fragment.into();
@@ -279,12 +281,17 @@ fn normalize_selections(
                             let merged_selections = merge_selections(
                                 &fragment_entry.selection_set.selections,
                                 &expanded_selection_set,
-                            );
+                            )?;
                             fragment_entry.make_mut().selection_set.selections = merged_selections;
                         }
                     }
                 } else {
-                    // no fragment found - should never happen as it would be invalid operation
+                    return Err(FederationError::SingleFederationError(Internal {
+                        message: format!(
+                            "Error during operation normalization, selection mismatch when processing {} named fragment",
+                            named_fragment.fragment_name
+                        ),
+                    }));
                 }
             }
             Selection::InlineFragment(inline_fragment) => {
@@ -292,12 +299,12 @@ fn normalize_selections(
                     &inline_fragment.selection_set.selections,
                     parent_type,
                     fragments,
-                );
+                )?;
                 // we can collapse selection set if inline fragment condition is on the parent type and we don't have any directives
                 if Some(parent_type) == inline_fragment.type_condition.as_ref()
                     && inline_fragment.directives.is_empty()
                 {
-                    normalized = merge_selections(&normalized, &expanded_selection_set);
+                    normalized = merge_selections(&normalized, &expanded_selection_set)?;
                 } else {
                     let mut fragment_key: NormalizedSelectionKey = inline_fragment.into();
                     // deferred fragments should not be merged
@@ -324,20 +331,20 @@ fn normalize_selections(
                         let merged_selections = merge_selections(
                             &fragment_entry.selection_set.selections,
                             &expanded_selection_set,
-                        );
+                        )?;
                         fragment_entry.make_mut().selection_set.selections = merged_selections;
                     }
                 }
             }
         }
     }
-    normalized
+    Ok(normalized)
 }
 
 fn merge_selections(
     source: &NormalizedSelectionMap,
     to_merge: &NormalizedSelectionMap,
-) -> NormalizedSelectionMap {
+) -> Result<NormalizedSelectionMap, FederationError> {
     let mut merged_selections = source.clone();
     for (key, selection) in to_merge {
         match merged_selections.entry(key.clone()) {
@@ -350,7 +357,14 @@ fn merge_selections(
                             if field_to_merge.name != source_field.name
                                 || field_to_merge.definition.ty != source_field.definition.ty
                             {
-                                panic!("TODO invalid operation");
+                                return Err(FederationError::SingleFederationError(Internal {
+                                    message: format!(
+                                        "Error during operation normalization, duplicate field {} selection that references different types, expected {} but was {}",
+                                        source_field.alias.clone().unwrap_or_else(|| source_field.name.clone()),
+                                        source_field.definition.ty.clone(),
+                                        field_to_merge.definition.ty.clone()
+                                    ),
+                                }));
                             }
                             if is_deferred {
                                 while merged_selections.contains_key(&field_key) {
@@ -365,7 +379,7 @@ fn merge_selections(
                                 let merged_field_selections = merge_selections(
                                     &source_field.selection_set.selections,
                                     &field_to_merge.selection_set.selections,
-                                );
+                                )?;
                                 let merged_selection_set = NormalizedSelectionSet {
                                     ty: source_field.selection_set.ty.clone(),
                                     selections: merged_field_selections,
@@ -397,7 +411,7 @@ fn merge_selections(
                                 let merged_fragment_selections = merge_selections(
                                     &source_fragment.selection_set.selections,
                                     &fragment_to_merge.selection_set.selections,
-                                );
+                                )?;
                                 let merged_selection_set = NormalizedSelectionSet {
                                     ty: source_fragment.selection_set.ty.clone(),
                                     selections: merged_fragment_selections,
@@ -413,7 +427,7 @@ fn merge_selections(
             }
         }
     }
-    merged_selections
+    Ok(merged_selections)
 }
 
 fn is_deferred_selection(directives: &DirectiveList) -> bool {
@@ -468,12 +482,13 @@ pub fn normalize_operation(
     operation: &mut Operation,
     _schema: &Schema,
     fragments: &IndexMap<Name, Node<Fragment>>,
-) {
+) -> Result<(), FederationError> {
     let normalized_selection_set =
-        NormalizedSelectionSet::from_selection_set(&operation.selection_set, fragments);
+        NormalizedSelectionSet::from_selection_set(&operation.selection_set, fragments)?;
 
     // flatten back to vec
     operation.selection_set = SelectionSet::from(normalized_selection_set);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -516,7 +531,7 @@ type Foo {
             .get_mut("NamedFragmentQuery")
         {
             let operation = operation.make_mut();
-            normalize_operation(operation, &schema, &executable_document.fragments);
+            normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
 
             let expected = r#"query NamedFragmentQuery {
   foo {
@@ -569,7 +584,7 @@ type Foo {
         let mut executable_document = executable_document.into_inner();
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let operation = operation.make_mut();
-            normalize_operation(operation, &schema, &executable_document.fragments);
+            normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
 
             let expected = r#"query NestedFragmentQuery {
   foo {
@@ -607,7 +622,7 @@ type Query {
             .get_mut("TestIntrospectionQuery")
         {
             let operation = operation.make_mut();
-            normalize_operation(operation, &schema, &executable_document.fragments);
+            normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
 
             assert!(operation.selection_set.selections.is_empty());
         }
