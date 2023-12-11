@@ -2108,7 +2108,7 @@ expression: "&schema"
                   "nullable": true
                 },
                 "public_url": {
-                  "description": "URL used to access this router instance, including the path configured on the router",
+                  "description": "URL used to access this router instance, including the path configured on the Router",
                   "type": "string"
                 },
                 "subgraphs": {
