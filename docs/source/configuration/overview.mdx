@@ -384,6 +384,12 @@ This file enables you to customize numerous aspects of your router's behavior, c
 
 If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
 
+<Tip>
+
+Enable your text editor to validate the format and content of your router YAML configuration file by [configuring it with the router's configuration schema](#configuration-awareness-in-your-text-editor).
+
+</Tip>
+
 ### Listen address
 
 By default, the Apollo Router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen`:
@@ -588,36 +594,9 @@ See [External coprocessing in the Apollo Router](../customizations/coprocessor/)
 
 ### Telemetry and monitoring
 
-The Apollo Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline.
+The Apollo Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
 
-#### Metrics
-
-To configure the metrics collected and exported by the Apollo Router, see [Router Metrics](./metrics).
-
-Supported metrics exporters:
-
-- [Prometheus](./exporters/prometheus)
-- [OpenTelemetry Protocol (OTLP)](./exporters/otlp)
-- [Datadog (OTLP)](./exporters/datadog-otlp)
-
-#### OpenTelemetry tracing
-
-See [Tracing in the Apollo Router](./tracing/).
-
-#### Logging
-
-To configure logging in the Apollo Router, see [Logging](./logging).
-
-#### Instrumentation
-
-To configure standard or custom instrumentation in the Apollo Router, see the following configuration guides:
-
-- [Instruments](./instruments)
-- [Events](./events)
-- [Conditions](./conditions)
-- [Spans](./spans)
-- [Selectors](./selectors)
-- [Standard attributes](./standard-attributes)
+See the [Apollo Router telemetry overview](./telemetry/overview).
 
 ### TLS
 

@@ -1,0 +1,4 @@
+telemetry:
+  instrumentation:
+    spans:
+      mode: deprecated

@@ -1,0 +1,4 @@
+telemetry:
+  instrumentation:
+    spans:
+      default_attribute_requirement_level: required
