@@ -6,12 +6,12 @@ description: Collect and export metrics from the Apollo Router for Prometheus, O
 
 The Apollo Router supports collection of metrics with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
-* [Prometheus](./exporters/prometheus)
+* [Prometheus](./prometheus)
 * [OpenTelemetry Protocol (OTLP)](./otlp)
 * [Datadog via OTLP](./datadog)
 * [New Relic via OTLP](./new-relic)
 
-In [`router.yaml`](./overview#yaml-config-file), you configure router metrics with the following settings:
+In [`router.yaml`](../../../overview/#yaml-config-file), you configure router metrics with the following settings:
 
 - `telemetry.exporters.metrics.common`. Configure values for the router which are common across metrics exporters.
 - `telemetry.exporters.metrics.prometheus`. Configure the Prometheus exporter.
@@ -21,7 +21,7 @@ In [`router.yaml`](./overview#yaml-config-file), you configure router metrics wi
 
 Common metrics configuration contains global settings for all exporters:
 
-* [Service name](#service-name)
+* [Service name](#service_name)
 * [Resource attributes](#resource-attribute)
 * [Custom historgram buckets](#custom-histogram-buckets)
 * [`apollo_router_http_requests` attributes](#attributes)
@@ -30,7 +30,7 @@ Common metrics configuration contains global settings for all exporters:
 
 Set a service name for your router metrics so you can easily locate them in external metrics dashboards. 
 
-The service name can be set by an environment variable or in [`router.yaml`](./overview#yaml-config-file), with the following order of precedence (first to last):
+The service name can be set by an environment variable or in [`router.yaml`](../../../overview/#yaml-config-file), with the following order of precedence (first to last):
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
@@ -76,7 +76,7 @@ If the service name isn't explicitly set, it defaults to `unknown_service:router
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
 
-In [`router.yaml`](./overview#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
+In [`router.yaml`](../../../overview/#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -93,7 +93,7 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### `buckets`
 
-You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](./overview#yaml-config-file). For example:
+You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](../../../overview/#yaml-config-file). For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -185,7 +185,7 @@ telemetry:
 
 <Note>
 
-OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](./instruments). 
+OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](../instrumentation/instruments). 
 
 </Note>
 
