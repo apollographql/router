@@ -4,9 +4,9 @@ version: 2.1
 # Rust Orb: https://github.com/CircleCI-Public/rust-orb
 # Github Orb: https://github.com/CircleCI-Public/github-cli-orb
 orbs:
-  rust: circleci/rust@1.6.0
+  rust: circleci/rust@1.6.1
   gh: circleci/github-cli@2.2.0
-  secops: apollo/circleci-secops-orb@2.0.3
+  secops: apollo/circleci-secops-orb@2.0.4
 
 # We run jobs on the following platforms: linux, macos and windows.
 # These are their specifications:
