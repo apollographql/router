@@ -414,7 +414,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
-        let metrics_handle = Metrics::new(&configuration);
+        let metrics_handle = Metrics::new(&configuration, &license);
 
         Ok(Running {
             configuration,

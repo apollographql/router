@@ -9,6 +9,7 @@ use paste::paste;
 use serde_json::Value;
 
 use crate::metrics::meter_provider;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 
 type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;
@@ -31,7 +32,7 @@ impl Default for InstrumentData {
 }
 
 impl Metrics {
-    pub(crate) fn new(configuration: &Configuration) -> Metrics {
+    pub(crate) fn new(configuration: &Configuration, license_state: &LicenseState) -> Metrics {
         let mut data = InstrumentData::default();
 
         // Env variables and unit tests don't mix.
@@ -42,6 +43,7 @@ impl Metrics {
                 .as_ref()
                 .unwrap_or(&serde_json::Value::Null),
         );
+        data.populate_license_instrument(license_state);
 
         data.into()
     }
@@ -368,6 +370,25 @@ impl InstrumentData {
         self.data
             .insert("apollo.router.config.env".to_string(), (1, attributes));
     }
+
+    pub(crate) fn populate_license_instrument(&mut self, license_state: &LicenseState) {
+        self.data.insert(
+            "apollo.router.license".to_string(),
+            (
+                1,
+                [(
+                    "license.state".to_string(),
+                    match license_state {
+                        LicenseState::Licensed => "licensed".into(),
+                        LicenseState::LicensedWarn => "warn".into(),
+                        LicenseState::LicensedHalt => "halt".into(),
+                        LicenseState::Unlicensed => "unlicensed".into(),
+                    },
+                )]
+                .into(),
+            ),
+        );
+    }
 }
 impl From<InstrumentData> for Metrics {
     fn from(data: InstrumentData) -> Self {
@@ -398,6 +419,7 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
+    use crate::uplink::license_enforcement::LicenseState;
 
     #[derive(RustEmbed)]
     #[folder = "src/configuration/testdata/metrics"]
@@ -424,6 +446,22 @@ mod test {
     fn test_env_metrics() {
         let mut data = InstrumentData::default();
         data.populate_env_instrument();
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_license_warn() {
+        let mut data = InstrumentData::default();
+        data.populate_license_instrument(&LicenseState::LicensedWarn);
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_license_halt() {
+        let mut data = InstrumentData::default();
+        data.populate_license_instrument(&LicenseState::LicensedHalt);
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
