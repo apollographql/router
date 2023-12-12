@@ -221,7 +221,7 @@ impl Metrics {
             opt.mode.passthrough,
             "$.mode.passthrough",
             opt.mode.callback,
-            "$.mode.preview_callback",
+            "$.mode.callback",
             opt.deduplication,
             "$[?(@.enable_deduplication == true)]",
             opt.max_opened,
