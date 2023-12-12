@@ -332,11 +332,14 @@ impl InstrumentData {
     fn populate_env_instrument(&mut self) {
         #[cfg(not(test))]
         fn env_var_exists(env_name: &str) -> opentelemetry::Value {
-            std::env::var(env_name).map(|_| 1).unwrap_or(0).into()
+            std::env::var(env_name)
+                .map(|_| true)
+                .unwrap_or(false)
+                .into()
         }
         #[cfg(test)]
         fn env_var_exists(_env_name: &str) -> opentelemetry::Value {
-            1.into()
+            true.into()
         }
 
         let mut attributes = HashMap::new();
