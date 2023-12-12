@@ -1,150 +1,134 @@
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
 
 use jsonpath_rust::JsonPathInst;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry_api::metrics::Meter;
+use opentelemetry_api::KeyValue;
 use paste::paste;
-use serde::Serialize;
 use serde_json::Value;
-use tokio::sync::OwnedSemaphorePermit;
 
+use crate::metrics::meter_provider;
 use crate::Configuration;
 
-pub(crate) struct MetricsHandle {
-    _guard: OwnedSemaphorePermit,
-}
-
+type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;
 pub(crate) struct Metrics {
-    yaml: Value,
-    metrics: HashMap<String, (u64, HashMap<String, AttributeValue>)>,
+    _instruments: Vec<opentelemetry::metrics::ObservableGauge<u64>>,
 }
 
-enum AttributeValue {
-    Bool(bool),
-    U64(u64),
-    I64(i64),
-    F64(f64),
-    String(String),
-}
-
-impl Serialize for AttributeValue {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            AttributeValue::Bool(value) => serializer.serialize_bool(*value),
-            AttributeValue::U64(value) => serializer.serialize_u64(*value),
-            AttributeValue::I64(value) => serializer.serialize_i64(*value),
-            AttributeValue::F64(value) => serializer.serialize_f64(*value),
-            AttributeValue::String(value) => serializer.serialize_str(value),
-        }
-    }
-}
-
-impl AttributeValue {
-    fn dyn_value(self: &AttributeValue) -> &dyn tracing::Value {
-        match self {
-            AttributeValue::Bool(value) => value as &dyn tracing::Value,
-            AttributeValue::U64(value) => value as &dyn tracing::Value,
-            AttributeValue::I64(value) => value as &dyn tracing::Value,
-            AttributeValue::F64(value) => value as &dyn tracing::Value,
-            AttributeValue::String(value) => value as &dyn tracing::Value,
-        }
-    }
+struct InstrumentData {
+    data: InstrumentMap,
+    meter: Meter,
 }
 
 impl Metrics {
-    /// Spawn a task that will log configuration usage metrics every second.
-    /// This task has to run more frequently than that of the apollo otlp exporter otherwise the gauges will flap.
-    /// Dropping the MetricsHandle stops the task.  
-    pub(crate) async fn spawn(configuration: &Configuration) -> MetricsHandle {
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        let guard = semaphore.clone().acquire_owned().await.unwrap();
-        let yaml = configuration
-            .validated_yaml
-            .as_ref()
-            .cloned()
-            .unwrap_or(Value::Object(Default::default()));
-        tokio::task::spawn(async move {
-            let mut metrics = Metrics {
-                yaml,
-                metrics: HashMap::new(),
-            };
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        metrics.log_usage_metrics();
-                    }
-                    _ = semaphore.acquire() => {
-                        // The semaphore was dropped so we can stop logging this config. The next config (if any) will take over.
-                        break;
-                    }
+    pub(crate) fn new(configuration: &Configuration) -> Metrics {
+        let mut data = InstrumentData {
+            meter: meter_provider().meter("apollo/router"),
+            data: Default::default(),
+        };
 
-                }
+        // Env variables and unit tests don't mix.
+        #[cfg(not(test))]
+        data.populate_env_instruments();
+        data.populate_config_instruments(
+            configuration
+                .validated_yaml
+                .as_ref()
+                .unwrap_or(&serde_json::Value::Null),
+        );
+
+        data.into()
+    }
+}
+
+impl InstrumentData {
+    fn get_value_from_path(
+        attributes: &mut HashMap<String, opentelemetry::Value>,
+        attr_name: &str,
+        path: &str,
+        value: &Value,
+    ) {
+        let attr_name = attr_name.to_string();
+        match JsonPathInst::from_str(path)
+            .expect("json path must be valid")
+            .find_slice(value)
+            .into_iter()
+            .next()
+            .as_deref()
+        {
+            // If the value is an object we can only state that it is set, but not what it is set to.
+            Some(Value::Object(_value)) => {
+                attributes.insert(attr_name, true.into());
             }
-        });
+            Some(Value::Array(value)) if !value.is_empty() => {
+                attributes.insert(attr_name, true.into());
+            }
+            // Scalars can be logged as is.
+            Some(Value::Number(value)) if value.is_f64() => {
+                attributes.insert(attr_name, value.as_f64().expect("checked, qed").into());
+            }
+            Some(Value::Number(value)) if value.is_i64() => {
+                attributes.insert(attr_name, value.as_i64().expect("checked, qed").into());
+            }
+            // Note that we convert u64 to i64 because opentelemetry does not support u64 as an attribute.
+            Some(Value::Number(value)) => {
+                attributes.insert(
+                    attr_name,
+                    (value.as_u64().expect("checked, qed") as i64).into(),
+                );
+            }
+            Some(Value::String(value)) => {
+                attributes.insert(attr_name, value.clone().into());
+            }
+            Some(Value::Bool(value)) => {
+                attributes.insert(attr_name, (*value).into());
+            }
 
-        MetricsHandle { _guard: guard }
+            // If the value is not set we don't specify the attribute.
+            None => {
+                attributes.insert(attr_name, false.into());
+            }
+
+            _ => {}
+        };
     }
-}
 
-impl Metrics {
-    pub(crate) fn log_usage_metrics(&mut self) {
-        // We have to have a macro here because tracing requires it. However, we also need to cache the metrics as json path is slow.
+    pub(crate) fn populate_config_instruments(&mut self, yaml: &serde_json::Value) {
         // This macro will query the config json for a primary metric and optionally metric attributes.
-        // The results will be cached for the next iteration.
 
         // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
         // We should consider converting the rest of the codebase to use jsonpath_rust.
 
         // Example usage:
-        // log_usage_metrics!(
+        // populate_usage_instrument!(
         //             value.apollo.router.config.authorization, // The metric name
         //             "$.authorization", // The path into the config
         //             opt.require_authentication, // The name of the attribute
         //             "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
         //         );
 
-        macro_rules! log_usage_metrics {
+        macro_rules! populate_config_instrument {
             ($($metric:ident).+, $path:literal) => {
-                let metric_name = stringify!($($metric).+).to_string();
-                let metric = self.metrics.entry(metric_name.clone()).or_insert_with(|| {
-                    if JsonPathInst::from_str($path).expect("json path must be valid").find_slice(&self.yaml).first().is_some() {
+                let instrument_name = stringify!($($metric).+).to_string();
+                self.data.entry(instrument_name.clone()).or_insert_with(|| {
+                    if JsonPathInst::from_str($path).expect("json path must be valid").find_slice(yaml).first().is_some() {
                         (1, HashMap::new())
                     }
                     else {
                         (0, HashMap::new())
                     }
                 });
-
-                // Now log the metric
-                tracing::info!($($metric).+ = metric.0);
-
             };
             ($($metric:ident).+, $path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
-                let metric_name = stringify!($($metric).+).to_string();
-                let metric = self.metrics.entry(metric_name.clone()).or_insert_with(|| {
-                    if let Some(value) = JsonPathInst::from_str($path).expect("json path must be valid").find_slice(&self.yaml).first() {
+                let instrument_name = stringify!($($metric).+).to_string();
+                self.data.entry(instrument_name.clone()).or_insert_with(|| {
+                    if let Some(value) = JsonPathInst::from_str($path).expect("json path must be valid").find_slice(yaml).first() {
                         paste!{
                             let mut attributes = HashMap::new();
                             $(
                             let attr_name = stringify!([<$($attr __ )+>]).to_string();
-                            match JsonPathInst::from_str($attr_path).expect("json path must be valid").find_slice(value).into_iter().next().as_deref() {
-                                // If the value is an object we can only state that it is set, but not what it is set to.
-                                Some(Value::Object(_value)) => {attributes.insert(attr_name, AttributeValue::Bool(true));},
-                                Some(Value::Array(value)) if !value.is_empty() => {attributes.insert(attr_name, AttributeValue::Bool(true));},
-                                // Scalars can be logged as is.
-                                Some(Value::Number(value)) if value.is_f64() => {attributes.insert(attr_name, AttributeValue::F64(value.as_f64().expect("checked, qed")));},
-                                Some(Value::Number(value)) if value.is_i64() => {attributes.insert(attr_name, AttributeValue::I64(value.as_i64().expect("checked, qed")));},
-                                Some(Value::Number(value)) => {attributes.insert(attr_name, AttributeValue::U64(value.as_u64().expect("checked, qed")));},
-                                Some(Value::String(value)) => {attributes.insert(attr_name, AttributeValue::String(value.clone()));},
-                                Some(Value::Bool(value)) => {attributes.insert(attr_name, AttributeValue::Bool(*value));},
-
-                                // If the value is not set we don't specify the attribute.
-                                None => {attributes.insert(attr_name, AttributeValue::Bool(false));},
-
-                                _ => {},
-                            };)+
+                            Self::get_value_from_path(&mut attributes, &attr_name, $attr_path, value);)+
                             (1, attributes)
                         }
                     }
@@ -153,42 +137,38 @@ impl Metrics {
                             let mut attributes = HashMap::new();
                             $(
                                 let attr_name = stringify!([<$($attr __ )+>]).to_string();
-                                attributes.insert(attr_name, AttributeValue::Bool(false));
+                                attributes.insert(attr_name, false.into());
                             )+
                             (0, attributes)
                         }
                     }
                 });
 
-                // Now log the metric
-                paste!{
-                    tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr __ )+>])).expect("attribute must be in map").dyn_value()),+);
-                }
             };
         }
 
-        log_usage_metrics!(
-            value.apollo.router.config.defer,
+        populate_config_instrument!(
+            apollo.router.config.defer,
             "$.supergraph[?(@.defer_support == true)]"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.authentication.jwt,
+        populate_config_instrument!(
+            apollo.router.config.authentication.jwt,
             "$.authentication[?(@..jwt)]"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.authentication.aws.sigv4,
+        populate_config_instrument!(
+            apollo.router.config.authentication.aws.sigv4,
             "$.authentication[?(@.subgraph..aws_sig_v4)]"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.authorization,
+        populate_config_instrument!(
+            apollo.router.config.authorization,
             "$.authorization",
             opt.require_authentication,
             "$[?(@.require_authentication == true)]",
             opt.directives,
             "$.directives[?(@.enabled == true)]"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.coprocessor,
+        populate_config_instrument!(
+            apollo.router.config.coprocessor,
             "$.coprocessor",
             opt.router.request,
             "$.router.request",
@@ -204,8 +184,8 @@ impl Metrics {
             opt.subgraph.response,
             "$.subgraph..response"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.persisted_queries,
+        populate_config_instrument!(
+            apollo.router.config.persisted_queries,
             "$.persisted_queries[?(@.enabled == true)]",
             opt.log_unknown,
             "$[?(@.log_unknown == true)]",
@@ -215,8 +195,8 @@ impl Metrics {
             "$[?(@.safelist.enabled == true)]"
         );
 
-        log_usage_metrics!(
-            value.apollo.router.config.subscriptions,
+        populate_config_instrument!(
+            apollo.router.config.subscriptions,
             "$.subscription[?(@.enabled == true)]",
             opt.mode.passthrough,
             "$.mode.passthrough",
@@ -230,8 +210,8 @@ impl Metrics {
             "$[?(@.queue_capacity)]"
         );
 
-        log_usage_metrics!(
-            value.apollo.router.config.limits,
+        populate_config_instrument!(
+            apollo.router.config.limits,
             "$.limits",
             opt.operation.max_depth,
             "$[?(@.max_depth)]",
@@ -250,8 +230,8 @@ impl Metrics {
             opt.request.max_size,
             "$[?(@.experimental_http_max_request_bytes)]"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.apq,
+        populate_config_instrument!(
+            apollo.router.config.apq,
             "$.apq[?(@.enabled==true)]",
             opt.router.cache.redis,
             "$.router.cache.redis",
@@ -260,8 +240,8 @@ impl Metrics {
             opt.subgraph,
             "$.subgraph..enabled[?(@ == true)]"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.tls,
+        populate_config_instrument!(
+            apollo.router.config.tls,
             "$.tls",
             opt.router.tls.server,
             "$.supergraph",
@@ -270,8 +250,8 @@ impl Metrics {
             opt.router.tls.subgraph.client_authentication,
             "$.subgraph..client_authentication"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.traffic_shaping,
+        populate_config_instrument!(
+            apollo.router.config.traffic_shaping,
             "$.traffic_shaping",
             opt.router.timeout,
             "$$[?(@.router.timeout)]",
@@ -291,8 +271,8 @@ impl Metrics {
             "$[?(@.all.experimental_retry || @.subgraphs..experimental_retry)]"
         );
 
-        log_usage_metrics!(
-            value.apollo.router.config.entity_cache,
+        populate_config_instrument!(
+            apollo.router.config.entity_cache,
             "$.experimental_entity_cache",
             opt.enabled,
             "$[?(@.enabled)]",
@@ -301,8 +281,8 @@ impl Metrics {
             opt.subgraph.ttl,
             "$[?(@.subgraphs..ttl)]"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.telemetry,
+        populate_config_instrument!(
+            apollo.router.config.telemetry,
             "$..telemetry[?(@..endpoint || @.metrics.prometheus.enabled == true)]",
             opt.metrics.otlp,
             "$..metrics.otlp[?(@.endpoint)]",
@@ -336,18 +316,63 @@ impl Metrics {
             "$..logging.experimental_when_header"
         );
 
-        log_usage_metrics!(
-            value.apollo.router.config.batching,
+        populate_config_instrument!(
+            apollo.router.config.batching,
             "$.experimental_batching[?(@.enabled == true)]",
             opt.mode,
             "$.mode"
         );
     }
+
+    #[cfg(not(test))]
+    fn populate_env_instruments(&mut self) -> InstrumentMap {
+        let instrument_map = Default::default();
+        self.populate_env_instrument("apollo.router.env.apollo.key", "APOLLO_KEY");
+        self.populate_env_instrument("apollo.router.env.apollo.graph_ref", "APOLLO_GRAPH_REF");
+        self.populate_env_instrument("apollo.router.env.apollo.license", "APOLLO_ROUTER_LICENSE");
+        self.populate_env_instrument(
+            "apollo.router.env.apollo.license.path",
+            "APOLLO_ROUTER_LICENSE_PATH",
+        );
+        instrument_map
+    }
+
+    #[cfg(not(test))]
+    fn populate_env_instrument(&mut self, metric_name: &str, env_name: &str) {
+        self.data.insert(
+            metric_name.to_string(),
+            (
+                std::env::var(env_name).map(|_| 1).unwrap_or(0),
+                HashMap::new(),
+            ),
+        );
+    }
+}
+impl From<InstrumentData> for Metrics {
+    fn from(data: InstrumentData) -> Self {
+        Metrics {
+            _instruments: data
+                .data
+                .into_iter()
+                .map(|(metric_name, (value, attributes))| {
+                    let attributes: Vec<_> = attributes
+                        .into_iter()
+                        .map(|(k, v)| KeyValue::new(k.replace("__", "."), v.clone()))
+                        .collect();
+                    data.meter
+                        .u64_observable_gauge(metric_name)
+                        .with_callback(move |observer| {
+                            observer.observe(value, &attributes);
+                        })
+                        .init()
+                })
+                .collect(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use insta::assert_yaml_snapshot;
     use rust_embed::RustEmbed;
 
     use crate::configuration::metrics::Metrics;
@@ -366,15 +391,11 @@ mod test {
             let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
                 .expect("config must be valid yaml");
 
-            let mut metrics = Metrics {
-                yaml: yaml.clone(),
-                metrics: Default::default(),
-            };
-            metrics.log_usage_metrics();
-            metrics.metrics.retain(|_, v| v.0 > 0);
-            insta::with_settings!({sort_maps => true, snapshot_suffix => file_name}, {
-                assert_yaml_snapshot!(&metrics.metrics);
+            let _metrics = Metrics::new(&crate::Configuration {
+                validated_yaml: Some(yaml.clone()),
+                ..Default::default()
             });
+            assert_non_zero_metrics_snapshot!(file_name);
         }
     }
 }
