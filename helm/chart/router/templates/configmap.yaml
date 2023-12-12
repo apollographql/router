@@ -1,6 +1,10 @@
 {{- if .Values.router.configuration }}
 {{- $routerFullName := include "router.fullname" .  -}}
-{{- $configuration := dict "telemetry" (dict "exporters" (dict "metrics" (dict "common" (dict "resource" (dict "service.name" $routerFullName))))) -}}
+{{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
+{{- $configuration := dict "telemetry" (dict "metrics" (dict "common" (dict "resources" (dict "service.name" $routerFullName)))) -}}
+{{- if .Values.router.configuration.telemetry.exporters }}
+{{- $configuration = dict "telemetry" (dict "exporters" (dict "metrics" (dict "common" (dict "resource" (dict "service.name" $routerFullName))))) -}}
+{{- end }}
 {{- $_ := mustMergeOverwrite $configuration .Values.router.configuration  -}}
 
 apiVersion: v1

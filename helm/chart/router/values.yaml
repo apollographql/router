@@ -11,13 +11,6 @@ router:
       listen: 0.0.0.0:4000
     health_check:
       listen: 0.0.0.0:8088
-    telemetry:
-      exporters:
-        metrics:
-          prometheus:
-            enabled: false
-            listen: 0.0.0.0:9090
-            path: "/metrics"
 
   args:
     - --hot-reload
