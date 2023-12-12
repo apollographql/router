@@ -64,9 +64,9 @@ dependencies = [
 
 [[package]]
 name = "aes-gcm"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "209b47e8954a928e1d72e86eca7000ebb6655fe1436d33eefc2201cad027e237"
+checksum = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
 dependencies = [
  "aead",
  "aes",
@@ -201,33 +201,17 @@ checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
 name = "apollo-compiler"
-version = "0.11.3"
+version = "1.0.0-beta.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb2436eb22464134efc641e508b33229361b27a3d5b6f03242b66b170ab8786c"
+checksum = "e2f12a04dc5164646affc9ef40f519741321b59d3503d0ca06719ce750741594"
 dependencies = [
- "apollo-parser 0.6.3",
- "ariadne",
- "indexmap 2.1.0",
- "ordered-float 4.1.0",
- "rowan",
- "salsa",
- "serde",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "apollo-compiler"
-version = "1.0.0-beta.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ae76a91725ab7ecd35d552db3fb3d3b3f534a4520330920a58a39892174b7ae"
-dependencies = [
- "apollo-parser 0.7.4",
+ "apollo-parser",
  "ariadne",
  "indexmap 2.1.0",
  "rowan",
  "salsa",
  "serde",
+ "sptr",
  "thiserror",
  "triomphe",
  "uuid",
@@ -235,40 +219,30 @@ dependencies = [
 
 [[package]]
 name = "apollo-encoder"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b323dfc43b95a8806a401aed913e84db297162c6295bca620c0f57956cdb52cf"
+checksum = "ee9f27b20841d14923dd5f0714a79f86360b23492d2f98ab5d1651471a56b7a4"
 dependencies = [
- "apollo-compiler 0.11.3",
- "apollo-parser 0.6.3",
+ "apollo-parser",
  "thiserror",
 ]
 
 [[package]]
 name = "apollo-federation"
-version = "0.0.3"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6deb778a0fbd1448bffb6ebf8d33d8719ffda3f785482ddd7c26d0c72fc243d2"
+checksum = "1e1f1a447ab0e78b150b076fa53fd0ac0a58563a493c9e588f447db842c18486"
 dependencies = [
- "apollo-compiler 1.0.0-beta.5",
+ "apollo-compiler",
+ "derive_more",
  "indexmap 2.1.0",
  "lazy_static",
+ "petgraph",
  "salsa",
  "strum",
  "strum_macros",
  "thiserror",
  "url",
-]
-
-[[package]]
-name = "apollo-parser"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b3cd0ce63c32c83e035757af12e3ae30566ce5d1ae183c02a2dd089a0df65aa"
-dependencies = [
- "memchr",
- "rowan",
- "thiserror",
 ]
 
 [[package]]
@@ -284,11 +258,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.34.1"
+version = "1.35.0"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler 1.0.0-beta.5",
+ "apollo-compiler",
  "apollo-federation",
  "arc-swap",
  "askama",
@@ -306,6 +280,7 @@ dependencies = [
  "bytes",
  "ci_info",
  "clap 4.4.8",
+ "console 0.15.7",
  "console-subscriber",
  "dashmap",
  "derivative",
@@ -392,6 +367,7 @@ dependencies = [
  "sha1",
  "sha2",
  "shellexpand",
+ "similar",
  "static_assertions",
  "strum_macros",
  "sys-info",
@@ -435,9 +411,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.34.1"
+version = "1.35.0"
 dependencies = [
- "apollo-parser 0.6.3",
+ "apollo-parser",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -451,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.34.1"
+version = "1.35.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -465,12 +441,12 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13ed94bb9de9f24da12ca2122b8eeaa7484d17b090dc84daaaba6b6ac2bee89b"
+checksum = "441a51f1055d2eebcda41b55066de925502e11c97097c6d1bab0da5bdeb5c70f"
 dependencies = [
  "apollo-encoder",
- "apollo-parser 0.6.3",
+ "apollo-parser",
  "arbitrary",
  "once_cell",
  "thiserror",
@@ -3361,6 +3337,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hkdf"
@@ -4713,15 +4692,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ordered-float"
-version = "4.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a540f3e3b3d7929c884e46d093d344e4e5bdeed54d08bf007df50c93cc85d5"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "outref"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5762,9 +5732,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.10+v2.6.1"
+version = "0.5.11+v2.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c1846644b2195e6ec12a089ec5f8af17dee8b78807c1cb450d61720b83d58e0"
+checksum = "46ea051e9f888ea68f9a977a5a49c145ec037277dd94dd89a18bbf7892eec2f6"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -5789,7 +5759,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.6.3",
+ "apollo-parser",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -6399,9 +6369,9 @@ dependencies = [
 
 [[package]]
 name = "similar"
-version = "2.2.1"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
+checksum = "2aeaf503862c419d66959f5d7ca015337d864e9c49485d771b732e2a20453597"
 
 [[package]]
 name = "simple_asn1"
@@ -6520,6 +6490,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sptr"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6610,7 +6586,7 @@ name = "supergraph_sdl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-compiler 1.0.0-beta.5",
+ "apollo-compiler",
  "apollo-router",
  "async-trait",
  "tower",

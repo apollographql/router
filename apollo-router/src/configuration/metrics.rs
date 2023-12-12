@@ -221,7 +221,7 @@ impl Metrics {
             opt.mode.passthrough,
             "$.mode.passthrough",
             opt.mode.callback,
-            "$.mode.preview_callback",
+            "$.mode.callback",
             opt.deduplication,
             "$[?(@.enable_deduplication == true)]",
             opt.max_opened,
@@ -292,10 +292,14 @@ impl Metrics {
         );
 
         log_usage_metrics!(
-            value.apollo.router.config.entities,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]",
-            opt.cache,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]"
+            value.apollo.router.config.entity_cache,
+            "$.experimental_entity_cache",
+            opt.enabled,
+            "$[?(@.enabled)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraphs..enabled)]",
+            opt.subgraph.ttl,
+            "$[?(@.subgraphs..ttl)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,

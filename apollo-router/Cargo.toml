@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.34.1"
+version = "1.35.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -15,6 +15,13 @@ build = "build/main.rs"
 [[bin]]
 name = "router"
 path = "src/main.rs"
+# Don’t recompile main.rs to run unit tests, there aren’t any there:
+test = false
+
+[lib]
+# Disabled as they are low value compared to the pathological amount of time and RAM
+# needed to link an executable for each individual doctest:
+doctest = false
 
 [features]
 default = ["global-allocator"]
@@ -57,8 +64,8 @@ features = ["docs_rs"]
 askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.75"
-apollo-compiler = "=1.0.0-beta.5"
-apollo-federation = "0.0.3"
+apollo-compiler = "=1.0.0-beta.10"
+apollo-federation = "0.0.5"
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.5", features = [
     "tokio",
@@ -94,7 +101,7 @@ flate2 = "1.0.28"
 fred = { version = "7.0.0", features = ["enable-rustls"] }
 futures = { version = "0.3.29", features = ["thread-pool"] }
 graphql_client = "0.13.0"
-hex = "0.4.3"
+hex = { version = "0.4.3", features = ["serde"] }
 http = "0.2.11"
 http-body = "0.4.5"
 heck = "0.4.1"
@@ -136,10 +143,7 @@ once_cell = "1.18.0"
 # groups `^tracing` and `^opentelemetry*` dependencies together as of
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
-opentelemetry = { version = "0.20.0", features = [
-    "trace",
-    "metrics",
-] }
+opentelemetry = { version = "0.20.0", features = ["trace", "metrics"] }
 opentelemetry_api = "0.20.0"
 opentelemetry-aws = "0.8.0"
 opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
@@ -180,7 +184,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.10+v2.6.1"
+router-bridge = "=0.5.11+v2.6.2"
 rust-embed = "8.0.0"
 rustls = "0.21.9"
 rustls-pemfile = "1.0.4"
@@ -254,6 +258,8 @@ aws-types = "0.56.1"
 sha1 = "0.10.6"
 tracing-serde = "0.1.3"
 time = { version = "0.3.30", features = ["serde"] }
+similar = { version = "2.3.0", features = ["inline"] }
+console = "0.15.7"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -280,9 +286,7 @@ mockall = "0.11.4"
 num-traits = "0.2.17"
 once_cell = "1.18.0"
 opentelemetry-stdout = { version = "0.1.0", features = ["trace"] }
-opentelemetry = { version = "0.20.0", features = [
-    "testing",
-] }
+opentelemetry = { version = "0.20.0", features = ["testing"] }
 p256 = "0.13.2"
 rand_core = "0.6.4"
 reqwest = { version = "0.11.22", default-features = false, features = [
