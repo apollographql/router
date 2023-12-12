@@ -863,7 +863,7 @@ pub(crate) struct QueryPlanning {
     /// but it may not be the optimal one.
     ///
     /// The default limit is set to 10000, but it may change in the future
-    pub(crate) experimental_plans_limits: Option<u32>,
+    pub(crate) experimental_plans_limit: Option<u32>,
 
     /// Before creating query plans, for each path of fields in the query we compute all the
     /// possible options to traverse that path via the subgraphs. Multiple options can arise because
@@ -877,7 +877,7 @@ pub(crate) struct QueryPlanning {
     /// path's options exceeds this limit, query planning will abort and the operation will fail.
     ///
     /// The default value is None, which specifies no limit.
-    pub(crate) experimental_paths_limits: Option<u32>,
+    pub(crate) experimental_paths_limit: Option<u32>,
 }
 
 /// Cache configuration

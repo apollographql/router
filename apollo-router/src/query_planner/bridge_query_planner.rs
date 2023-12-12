@@ -85,12 +85,12 @@ impl BridgeQueryPlanner {
                     max_evaluated_plans: configuration
                         .supergraph
                         .query_planning
-                        .experimental_plans_limits
+                        .experimental_plans_limit
                         .or(Some(10000)),
                     paths_limit: configuration
                         .supergraph
                         .query_planning
-                        .experimental_paths_limits,
+                        .experimental_paths_limit,
                 }),
             },
         )
@@ -234,12 +234,12 @@ impl BridgeQueryPlanner {
                             max_evaluated_plans: configuration
                                 .supergraph
                                 .query_planning
-                                .experimental_plans_limits
+                                .experimental_plans_limit
                                 .or(Some(10000)),
                             paths_limit: configuration
                                 .supergraph
                                 .query_planning
-                                .experimental_paths_limits,
+                                .experimental_paths_limit,
                         }),
                     },
                 )
