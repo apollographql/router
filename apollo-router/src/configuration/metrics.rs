@@ -21,16 +21,21 @@ struct InstrumentData {
     meter: Meter,
 }
 
-impl Metrics {
-    pub(crate) fn new(configuration: &Configuration) -> Metrics {
-        let mut data = InstrumentData {
+impl Default for InstrumentData {
+    fn default() -> Self {
+        InstrumentData {
             meter: meter_provider().meter("apollo/router"),
             data: Default::default(),
-        };
+        }
+    }
+}
+
+impl Metrics {
+    pub(crate) fn new(configuration: &Configuration) -> Metrics {
+        let mut data = InstrumentData::default();
 
         // Env variables and unit tests don't mix.
-        #[cfg(not(test))]
-        data.populate_env_instruments();
+        data.populate_env_instrument();
         data.populate_config_instruments(
             configuration
                 .validated_yaml
@@ -324,28 +329,33 @@ impl InstrumentData {
         );
     }
 
-    #[cfg(not(test))]
-    fn populate_env_instruments(&mut self) -> InstrumentMap {
-        let instrument_map = Default::default();
-        self.populate_env_instrument("apollo.router.env.apollo.key", "APOLLO_KEY");
-        self.populate_env_instrument("apollo.router.env.apollo.graph_ref", "APOLLO_GRAPH_REF");
-        self.populate_env_instrument("apollo.router.env.apollo.license", "APOLLO_ROUTER_LICENSE");
-        self.populate_env_instrument(
-            "apollo.router.env.apollo.license.path",
-            "APOLLO_ROUTER_LICENSE_PATH",
-        );
-        instrument_map
-    }
+    fn populate_env_instrument(&mut self) {
+        #[cfg(not(test))]
+        fn env_var_exists(env_name: &str) -> opentelemetry::Value {
+            std::env::var(env_name).map(|_| 1).unwrap_or(0).into()
+        }
+        #[cfg(test)]
+        fn env_var_exists(_env_name: &str) -> opentelemetry::Value {
+            1.into()
+        }
 
-    #[cfg(not(test))]
-    fn populate_env_instrument(&mut self, metric_name: &str, env_name: &str) {
-        self.data.insert(
-            metric_name.to_string(),
-            (
-                std::env::var(env_name).map(|_| 1).unwrap_or(0),
-                HashMap::new(),
-            ),
+        let mut attributes = HashMap::new();
+        attributes.insert("env.apollo.key".to_string(), env_var_exists("APOLLO_KEY"));
+        attributes.insert(
+            "env.apollo.graph_ref".to_string(),
+            env_var_exists("APOLLO_GRAPH_REF"),
         );
+        attributes.insert(
+            "env.apollo.license".to_string(),
+            env_var_exists("APOLLO_ROUTER_LICENSE"),
+        );
+        attributes.insert(
+            "env.apollo.license.path".to_string(),
+            env_var_exists("APOLLO_ROUTER_LICENSE_PATH"),
+        );
+
+        self.data
+            .insert("apollo.router.env".to_string(), (1, attributes));
     }
 }
 impl From<InstrumentData> for Metrics {
@@ -375,6 +385,7 @@ impl From<InstrumentData> for Metrics {
 mod test {
     use rust_embed::RustEmbed;
 
+    use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
 
     #[derive(RustEmbed)]
@@ -391,11 +402,18 @@ mod test {
             let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
                 .expect("config must be valid yaml");
 
-            let _metrics = Metrics::new(&crate::Configuration {
-                validated_yaml: Some(yaml.clone()),
-                ..Default::default()
-            });
+            let mut data = InstrumentData::default();
+            data.populate_config_instruments(yaml);
+            let _metrics: Metrics = data.into();
             assert_non_zero_metrics_snapshot!(file_name);
         }
+    }
+
+    #[test]
+    fn test_env_metrics() {
+        let mut data = InstrumentData::default();
+        data.populate_env_instrument();
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
     }
 }

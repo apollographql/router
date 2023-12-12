@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.non_zero()"
+---
+- name: apollo.router.env
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          env.apollo.graph_ref: 1
+          env.apollo.key: 1
+          env.apollo.license: 1
+          env.apollo.license.path: 1
+
