@@ -142,10 +142,10 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### Request/Response logging
 
-> This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we might change the configuration shape or adding/removing features.
-> If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/1961).
+<ExperimentalFeature appendText="If you want to give feedback or participate in the feature, feel free to join [the discussion on GitHub](https://github.com/apollographql/router/discussions/1961)." />
 
-By default, the router _doesn't_ log certain values that might contain sensitive data, even if a sufficient log level is set:
+
+By default, the router _doesn't_ log the following values that might contain sensitive data, even if a sufficient log level is set:
 
  - Request bodies
  - Response bodies
