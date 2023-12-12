@@ -2,7 +2,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError::Internal;
 use apollo_compiler::ast::{Argument, DirectiveList, FieldDefinition, Name, NamedType};
 use apollo_compiler::executable::{
-    Field, Fragment, InlineFragment, Operation, Selection, SelectionSet,
+    Field, Fragment, FragmentSpread, InlineFragment, Operation, Selection, SelectionSet,
 };
 use apollo_compiler::{Node, Schema};
 use indexmap::map::Entry;
@@ -33,7 +33,15 @@ pub enum NormalizedSelectionKey {
     Field {
         // field alias (if specified) or field name in the resulting selection set
         response_name: Name,
-        // directive applied on the field
+        // directives applied on the field
+        directives: DirectiveList,
+        // unique label/counter used to distinguish fields that cannot be merged
+        label: i32,
+    },
+    FragmentSpread {
+        // fragment name
+        name: Name,
+        // directives applied on the fragment spread
         directives: DirectiveList,
         // unique label/counter used to distinguish fields that cannot be merged
         label: i32,
@@ -48,16 +56,23 @@ pub enum NormalizedSelectionKey {
     },
 }
 
-// copy of apollo compiler types that store selections in a map so we can normalize it efficiently
-// we no longer have FragmentSpread variant as they get either auto expanded and merged into regular
-// field selection or converted to inline fragments if we cannot merge them
+// copy of apollo compiler type that store selections in a map so we can normalize it efficiently
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NormalizedSelection {
     NormalizedField(Node<NormalizedField>),
+    NormalizedFragmentSpread(Node<NormalizedFragmentSpread>),
     NormalizedInlineFragment(Node<NormalizedInlineFragment>),
 }
 
-// copy of apollo compiler types that store selections in a map so we can normalize it efficiently
+// copy of apollo compiler type that store selections in a map so we can normalize it efficiently
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedFragment {
+    pub name: Name,
+    pub directives: DirectiveList,
+    pub selection_set: NormalizedSelectionSet,
+}
+
+// copy of apollo compiler type that store selections in a map so we can normalize it efficiently
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedField {
     pub definition: Node<FieldDefinition>,
@@ -68,7 +83,14 @@ pub struct NormalizedField {
     pub selection_set: NormalizedSelectionSet,
 }
 
-// copy of apollo compiler types that store selections in a map so we can normalize it efficiently
+// copy of apollo compiler type
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedFragmentSpread {
+    pub fragment_name: Name,
+    pub directives: DirectiveList,
+}
+
+// copy of apollo compiler type that store selections in a map so we can normalize it efficiently
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedInlineFragment {
     pub type_condition: Option<NamedType>,
@@ -109,6 +131,15 @@ impl NormalizedSelectionKey {
                 label,
             } => Self::Field {
                 response_name: response_name.clone(),
+                directives: directives.clone(),
+                label: label + 1,
+            },
+            Self::FragmentSpread {
+                name,
+                directives,
+                label,
+            } => Self::FragmentSpread {
+                name: name.clone(),
                 directives: directives.clone(),
                 label: label + 1,
             },
@@ -420,6 +451,14 @@ fn merge_selections(
                             }
                         }
                     }
+                    NormalizedSelection::NormalizedFragmentSpread(_) => {
+                        // nothing to do fragment spread is already part of the selection set
+                        //
+                        // Fragment spreads are uniquely identified by fragment name and applied directives.
+                        // Since there is already an entry for the same fragment spread, there is no point
+                        // in attempting to merge its subselections as the underlying entry should be exactly the
+                        // same as the currently processed one.
+                    }
                 }
             }
             Entry::Vacant(entry) => {
@@ -453,6 +492,13 @@ fn flatten_selections(selections: &NormalizedSelectionMap) -> Vec<Selection> {
                     },
                 };
                 flattened.push(Selection::Field(Node::new(field)));
+            }
+            NormalizedSelection::NormalizedFragmentSpread(normalized_fragment_spread) => {
+                let fragment_spread = FragmentSpread {
+                    fragment_name: normalized_fragment_spread.fragment_name.to_owned(),
+                    directives: normalized_fragment_spread.directives.to_owned(),
+                };
+                flattened.push(Selection::FragmentSpread(Node::new(fragment_spread)));
             }
             NormalizedSelection::NormalizedInlineFragment(normalized_fragment) => {
                 let selections = flatten_selections(&normalized_fragment.selection_set.selections);
