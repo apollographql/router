@@ -7,8 +7,8 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          env.apollo.graph_ref: 1
-          env.apollo.key: 1
-          env.apollo.license: 1
-          env.apollo.license.path: 1
+          env.apollo.graph_ref: true
+          env.apollo.key: true
+          env.apollo.license: true
+          env.apollo.license.path: true
 
