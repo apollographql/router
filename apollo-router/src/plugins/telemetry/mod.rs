@@ -28,6 +28,8 @@ use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::sdk::propagation::TextMapCompositePropagator;
+use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
@@ -36,8 +38,6 @@ use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_sdk::propagation::TextMapCompositePropagator;
-use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use rand::Rng;
@@ -70,9 +70,6 @@ pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
-use super::traffic_shaping::cache::hash_request;
-use super::traffic_shaping::cache::hash_vary_headers;
-use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -83,6 +80,9 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::cache::entity::hash_query;
+use crate::plugins::cache::entity::hash_vary_headers;
+use crate::plugins::cache::entity::REPRESENTATIONS;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -167,7 +167,7 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
 
-    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
@@ -270,10 +270,12 @@ impl Plugin for Telemetry {
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
-            public_meter_provider: Some(metrics_builder.public_meter_provider_builder.build())
-                .map(FilterMeterProvider::public_metrics),
-            private_meter_provider: Some(metrics_builder.apollo_meter_provider_builder.build())
-                .map(FilterMeterProvider::private_metrics),
+            public_meter_provider: Some(FilterMeterProvider::public_metrics(
+                metrics_builder.public_meter_provider_builder.build(),
+            )),
+            private_meter_provider: Some(FilterMeterProvider::private_metrics(
+                metrics_builder.apollo_meter_provider_builder.build(),
+            )),
             public_prometheus_meter_provider: metrics_builder
                 .prometheus_meter_provider
                 .map(FilterMeterProvider::public_metrics),
@@ -707,11 +709,11 @@ impl Telemetry {
             propagators.push(Box::<opentelemetry_jaeger::Propagator>::default());
         }
         if propagation.baggage {
-            propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
+            propagators.push(Box::<opentelemetry::sdk::propagation::BaggagePropagator>::default());
         }
         if propagation.trace_context || tracing.otlp.enabled {
             propagators
-                .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
+                .push(Box::<opentelemetry::sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
@@ -733,7 +735,7 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<(SamplerOption, opentelemetry_sdk::trace::TracerProvider), BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
@@ -743,7 +745,7 @@ impl Telemetry {
         common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
         let mut builder =
-            opentelemetry_sdk::trace::TracerProvider::builder().with_config((&common).into());
+            opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
 
         builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
@@ -999,7 +1001,7 @@ impl Telemetry {
         sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
         let body = sub_request.subgraph_request.body_mut();
-        let hashed_query = hash_request(body);
+        let hashed_query = hash_query(&sub_request.query_hash, body);
         let representations = body
             .variables
             .get(REPRESENTATIONS)
@@ -1591,7 +1593,7 @@ impl Telemetry {
         }
     }
 
-    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::TracerProvider) {
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry::sdk::trace::TracerProvider) {
         Self::checked_spawn_task(Box::new(move || {
             drop(tracer_provider);
         }));
@@ -1755,10 +1757,13 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
                 )
             })
         })
-        .fold(BTreeMap::new(), |mut acc, (name, value)| {
-            acc.entry(name).or_insert_with(Vec::new).push(value);
-            acc
-        });
+        .fold(
+            BTreeMap::new(),
+            |mut acc: BTreeMap<String, Vec<String>>, (name, value)| {
+                acc.entry(name).or_default().push(value);
+                acc
+            },
+        );
 
     match serde_json::to_string(&headers_map) {
         Ok(result) => result,

@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
 
-use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -48,97 +48,156 @@ pub(crate) struct InlineFragment {
     pub(crate) selections: Vec<Selection>,
 }
 
-pub(crate) fn select_object(
-    content: &Object,
+pub(crate) fn execute_selection_set<'a>(
+    input_content: &'a Value,
     selections: &[Selection],
     schema: &Schema,
-) -> Result<Option<Value>, FetchError> {
+    mut current_type: Option<&'a str>,
+) -> Value {
+    let content = match input_content.as_object() {
+        Some(o) => o,
+        None => return Value::Null,
+    };
+
+    current_type = current_type.or_else(|| content.get("__typename").and_then(|v| v.as_str()));
+
     let mut output = Object::with_capacity(selections.len());
     for selection in selections {
         match selection {
-            Selection::Field(field) => {
-                if let Some((key, value)) = select_field(content, field, schema)? {
-                    if let Some(o) = output.get_mut(field.name.as_str()) {
-                        o.deep_merge(value);
-                    } else {
-                        output.insert(key.to_owned(), value);
+            Selection::Field(Field {
+                alias,
+                name,
+                selections,
+            }) => {
+                let selection_name = alias.as_deref().unwrap_or(name.as_str());
+                let field_type = current_type.and_then(|t| {
+                    schema.definitions.types.get(t).and_then(|ty| match ty {
+                        apollo_compiler::schema::ExtendedType::Object(o) => {
+                            o.fields.get(name.as_str()).map(|f| &f.ty)
+                        }
+                        apollo_compiler::schema::ExtendedType::Interface(i) => {
+                            i.fields.get(name.as_str()).map(|f| &f.ty)
+                        }
+                        _ => None,
+                    })
+                });
+
+                match content.get_key_value(selection_name) {
+                    None => {
+                        if name == "__typename" {
+                            // if the __typename field was missing but we can infer it, fill it
+                            if let Some(ty) = current_type {
+                                output.insert(
+                                    ByteString::from(selection_name.to_owned()),
+                                    Value::String(ByteString::from(ty.to_owned())),
+                                );
+                                continue;
+                            }
+                        }
+                        // the behaviour here does not align with the gateway: we should instead assume that
+                        // data is in the correct shape, and return a null (or even no value at all) on
+                        // missing fields. If a field was missing, it should have been nullified,
+                        // and if it was non nullable, the parent object would have been nullified.
+                        // Unfortunately, we don't validate subgraph responses yet
+                        if field_type
+                            .as_ref()
+                            .map(|ty| !ty.is_non_null())
+                            .unwrap_or(false)
+                        {
+                            output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
+                        } else {
+                            return Value::Null;
+                        }
+                    }
+                    Some((key, value)) => {
+                        if let Some(elements) = value.as_array() {
+                            let selected = elements
+                                .iter()
+                                .map(|element| match selections {
+                                    Some(sels) => execute_selection_set(
+                                        element,
+                                        sels,
+                                        schema,
+                                        field_type
+                                            .as_ref()
+                                            .map(|ty| ty.inner_named_type().as_str()),
+                                    ),
+                                    None => element.clone(),
+                                })
+                                .collect::<Vec<_>>();
+                            output.insert(key.clone(), Value::Array(selected));
+                        } else if let Some(sels) = selections {
+                            output.insert(
+                                key.clone(),
+                                execute_selection_set(
+                                    value,
+                                    sels,
+                                    schema,
+                                    field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
+                                ),
+                            );
+                        } else {
+                            output.insert(key.clone(), value.clone());
+                        }
                     }
                 }
             }
-            Selection::InlineFragment(fragment) => {
-                if let Some(Value::Object(value)) =
-                    select_inline_fragment(content, fragment, schema)?
-                {
-                    output.append(&mut value.to_owned())
+            Selection::InlineFragment(InlineFragment {
+                type_condition,
+                selections,
+            }) => match type_condition {
+                None => continue,
+                Some(condition) => {
+                    if is_object_of_type(current_type, condition, schema) {
+                        if let Value::Object(selected) =
+                            execute_selection_set(input_content, selections, schema, current_type)
+                        {
+                            for (key, value) in selected.into_iter() {
+                                match output.entry(key) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(value);
+                                    }
+                                    Entry::Occupied(e) => {
+                                        e.into_mut().deep_merge(value);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        };
-    }
-    if output.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(Value::Object(output)))
-}
-
-fn select_field<'a>(
-    content: &'a Object,
-    field: &Field,
-    schema: &Schema,
-) -> Result<Option<(&'a ByteString, Value)>, FetchError> {
-    let res = match (
-        content.get_key_value(field.name.as_str()),
-        &field.selections,
-    ) {
-        (Some((k, v)), _) => select_value(v, field, schema).map(|opt| opt.map(|v| (k, v))),
-        (None, _) => Err(FetchError::ExecutionFieldNotFound {
-            field: field.name.to_owned(),
-        }),
-    };
-    res
-}
-
-fn select_inline_fragment(
-    content: &Object,
-    fragment: &InlineFragment,
-    schema: &Schema,
-) -> Result<Option<Value>, FetchError> {
-    match (&fragment.type_condition, &content.get("__typename")) {
-        (Some(condition), Some(Value::String(typename))) => {
-            if condition == typename || schema.is_subtype(condition, typename.as_str()) {
-                select_object(content, &fragment.selections, schema)
-            } else {
-                Ok(None)
-            }
+            },
         }
-        (None, _) => select_object(content, &fragment.selections, schema),
-        (_, None) => Err(FetchError::ExecutionFieldNotFound {
-            field: "__typename".to_string(),
-        }),
-        (_, _) => Ok(None),
     }
+
+    Value::Object(output)
 }
 
-fn select_value(
-    content: &Value,
-    field: &Field,
-    schema: &Schema,
-) -> Result<Option<Value>, FetchError> {
-    match (content, &field.selections) {
-        (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
-        (Value::Array(elements), Some(_)) => elements
-            .iter()
-            .map(|element| {
-                select_value(element, field, schema)
-                    // if a value cannot be selected from the array element, return Some(Value::Null)
-                    // instead of None, because None will short circuit the iteration and return
-                    // an empty array
-                    .map(|opt| opt.unwrap_or(Value::Null))
-            })
-            .collect::<Result<Vec<Value>, FetchError>>()
-            .map(|v| Some(Value::Array(v))),
-        (value, None) => Ok(Some(value.to_owned())),
-        _ => Ok(None),
+fn is_object_of_type(typename: Option<&str>, condition: &str, schema: &Schema) -> bool {
+    let typename = match typename {
+        None => return false,
+        Some(t) => t,
+    };
+
+    if condition == typename {
+        return true;
     }
+
+    let object_type = match schema.definitions.types.get(typename) {
+        None => return false,
+        Some(t) => t,
+    };
+
+    let conditional_type = match schema.definitions.types.get(condition) {
+        None => return false,
+        Some(t) => t,
+    };
+
+    if conditional_type.is_interface() || conditional_type.is_union() {
+        return (object_type.is_object() || object_type.is_interface())
+            && schema.is_subtype(condition, typename);
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -148,6 +207,7 @@ mod tests {
 
     use super::Selection;
     use super::*;
+    use crate::error::FetchError;
     use crate::graphql::Response;
     use crate::json_ext::Path;
 
@@ -169,15 +229,8 @@ mod tests {
         Ok(Value::Array(
             values
                 .into_iter()
-                .flat_map(|value| match (value, selections) {
-                    (Value::Object(content), requires) => {
-                        select_object(content, requires, schema).transpose()
-                    }
-                    (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
-                        reason: "not an object".to_string(),
-                    })),
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+                .map(|value| execute_selection_set(value, selections, schema, None))
+                .collect::<Vec<_>>(),
         ))
     }
 
@@ -187,6 +240,7 @@ mod tests {
             let response = Response::builder()
                 .data($content)
                 .build();
+            // equivalent to "... on OtherStuffToIgnore {} ... on User { __typename id job { name } }"
             let stub = json!([
                 {
                     "kind": "InlineFragment",
@@ -264,14 +318,16 @@ mod tests {
 
     #[test]
     fn test_selection_missing_field() {
-        assert!(matches!(
+        // equivalent to "... on OtherStuffToIgnore {} ... on User { __typename id job { name } }"
+
+        assert_eq!(
             select!(
                 include_str!("testdata/schema.graphql"),
                 json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}),
             )
-                .unwrap_err(),
-            FetchError::ExecutionFieldNotFound { field } if field == "id"
-        ));
+            .unwrap(),
+            bjson!([{}])
+        );
     }
 
     #[test]
@@ -321,7 +377,7 @@ mod tests {
         ]);
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = select_object(response.as_object().unwrap(), &selection, &schema);
+        let value = execute_selection_set(&response, &selection, &schema, None);
         println!(
             "response\n{}\nand selection\n{:?}\n returns:\n{}",
             serde_json::to_string_pretty(&response).unwrap(),
@@ -330,7 +386,7 @@ mod tests {
         );
 
         assert_eq!(
-            value.unwrap().unwrap(),
+            value,
             bjson!({
                 "__typename": "MainObject",
                 "mainObjectList": [

@@ -167,11 +167,11 @@ sequenceDiagram
 
 As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
 
-Your Rhai scripts can hook into any combination of the above services _except_ the `RouterService` (which is reserved for built-in features). They can modify the request, response, and/or related metadata as they're passed along.
+Your Rhai scripts can hook into any combination of the above services (if you are using v1.30.0+). They can modify the request, response, and/or related metadata as they're passed along.
 
 ### Service descriptions
 
-Each Apollo Router service (except `RouterService`) has a corresponding function that a Rhai script can define to hook into that service:
+Each Apollo Router service has a corresponding function that a Rhai script can define to hook into that service:
 
 <table class="field-table">
   <thead>
@@ -190,7 +190,7 @@ Each Apollo Router service (except `RouterService`) has a corresponding function
 </td>
 <td>
 
-**Reserved for built-in functionality.** Runs at the very beginning and very end of the HTTP request lifecycle.
+Runs at the very beginning and very end of the HTTP request lifecycle.
 
 For example, [JWT authentication](../configuration/authn-jwt) is performed within the `RouterService`.
 

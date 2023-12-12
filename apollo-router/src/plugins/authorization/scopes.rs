@@ -291,11 +291,6 @@ impl<'a> ScopeFilteringVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        println!(
-            "implementors with different requirements for {:?}, node name={}",
-            field_def.name,
-            node.name.as_str()
-        );
         // we can request __typename outside of fragments even if the types have different
         // authorization requirements
         if node.name.as_str() == TYPENAME {
@@ -711,10 +706,9 @@ mod tests {
     "#;
 
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = Document::parse(query, "query.graphql");
-        schema.validate().unwrap();
-        doc.to_executable(&schema).validate(&schema).unwrap();
+        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+        let doc = Document::parse(query, "query.graphql").unwrap();
+        doc.to_executable_validate(&schema).unwrap();
         let mut visitor = ScopeExtractionVisitor::new(&schema, &doc, false).unwrap();
         traverse::document(&mut visitor, &doc).unwrap();
 
@@ -743,10 +737,9 @@ mod tests {
 
     #[track_caller]
     fn filter(schema: &str, query: &str, scopes: HashSet<String>) -> (Document, Vec<Path>) {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = Document::parse(query, "query.graphql");
-        schema.validate().unwrap();
-        doc.to_executable(&schema).validate(&schema).unwrap();
+        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+        let doc = Document::parse(query, "query.graphql").unwrap();
+        doc.to_executable_validate(&schema).unwrap();
 
         let map = schema.implementers_map();
         let mut visitor = ScopeFilteringVisitor::new(&schema, &doc, &map, scopes, false).unwrap();

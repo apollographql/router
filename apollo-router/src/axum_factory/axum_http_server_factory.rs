@@ -58,7 +58,10 @@ use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+
+static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -385,13 +388,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
+// This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
 pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
     configuration
         .apollo_plugins
         .plugins
         .iter()
         .find(|(s, _)| s.as_str() == "telemetry")
-        .and_then(|(_, v)| v.get("spans").and_then(|v| v.as_object()))
+        .and_then(|(_, v)| v.get("instrumentation").and_then(|v| v.as_object()))
+        .and_then(|v| v.get("spans").and_then(|v| v.as_object()))
         .and_then(|v| {
             v.get("mode")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -479,7 +484,10 @@ async fn license_handler<B>(
                 )
                 .is_ok()
         {
-            ::tracing::error!("{}", LICENSE_EXPIRED_SHORT_MESSAGE);
+            ::tracing::error!(
+                code = APOLLO_ROUTER_LICENSE_EXPIRED,
+                LICENSE_EXPIRED_SHORT_MESSAGE
+            );
         }
     }
 
@@ -534,7 +542,8 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1i64,);
+    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Release) + 1;
+    tracing::info!(value.apollo_router_session_count_active = session_count,);
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -552,7 +561,9 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            tracing::info!(value.apollo_router_session_count_active = session_count,);
+
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -575,7 +586,6 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
 
             let opt_compressor = accept_encoding
@@ -593,7 +603,46 @@ async fn handle_graphql(
                 }
             };
 
+            // FIXME: we should instead reduce it after the response has been entirely written
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            tracing::info!(value.apollo_router_session_count_active = session_count,);
+
             http::Response::from_parts(parts, body).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_span_mode_default() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
+    }
+
+    #[test]
+    fn test_span_mode_spec_compliant() {
+        let config = Configuration::from_str(include_str!(
+            "testdata/span_mode_spec_compliant.router.yaml"
+        ))
+        .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::SpecCompliant);
+    }
+
+    #[test]
+    fn test_span_mode_deprecated() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_deprecated.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
     }
 }

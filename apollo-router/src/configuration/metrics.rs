@@ -185,7 +185,7 @@ impl Metrics {
             opt.require_authentication,
             "$[?(@.require_authentication == true)]",
             opt.directives,
-            "$.preview_directives[?(@.enabled == true)]"
+            "$.directives[?(@.enabled == true)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.coprocessor,
@@ -292,10 +292,14 @@ impl Metrics {
         );
 
         log_usage_metrics!(
-            value.apollo.router.config.entities,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]",
-            opt.cache,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]"
+            value.apollo.router.config.entity_cache,
+            "$.experimental_entity_cache",
+            opt.enabled,
+            "$[?(@.enabled)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraphs..enabled)]",
+            opt.subgraph.ttl,
+            "$[?(@.subgraphs..ttl)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,

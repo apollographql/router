@@ -5,13 +5,7 @@ expression: stream.next().await.unwrap().unwrap()
 {
   "errors": [
     {
-      "message": "compiler error: cannot find directive `defer` in this document",
-      "locations": [
-        {
-          "line": 4,
-          "column": 20
-        }
-      ],
+      "message": "Unknown directive \"@defer\".",
       "extensions": {
         "code": "GRAPHQL_VALIDATION_FAILED"
       }
