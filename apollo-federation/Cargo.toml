@@ -13,7 +13,7 @@ autotests = false                                               # Integration te
 apollo-compiler = "=1.0.0-beta.10"
 derive_more = "0.99.17"
 salsa = "0.16.1"
-indexmap = "2.0.2"
+indexmap = "2.1.0"
 thiserror = "1.0"
 url = "2"
 lazy_static = "1.4.0"
