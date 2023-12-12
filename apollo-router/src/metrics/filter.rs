@@ -43,7 +43,7 @@ impl FilterMeterProvider {
         }
     }
 
-    pub(crate) fn private_metrics(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+    pub(crate) fn private(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
@@ -55,7 +55,7 @@ impl FilterMeterProvider {
             .build()
     }
 
-    pub(crate) fn public_metrics(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+    pub(crate) fn public(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
@@ -63,6 +63,11 @@ impl FilterMeterProvider {
                     .expect("regex should have been valid"),
             )
             .build()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn all(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+        FilterMeterProvider::builder().delegate(delegate).build()
     }
 
     pub(crate) fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
@@ -208,7 +213,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_metrics() {
         let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::private_metrics(
+        let meter_provider = FilterMeterProvider::private(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
@@ -258,7 +263,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_public_metrics() {
         let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::public_metrics(
+        let meter_provider = FilterMeterProvider::public(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
@@ -304,7 +309,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_description_and_unit() {
         let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::private_metrics(
+        let meter_provider = FilterMeterProvider::private(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),

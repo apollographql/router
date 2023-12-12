@@ -1,10 +1,13 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.apq:
-  - 1
-  - opt__router__cache__in_memory__: true
-    opt__router__cache__redis__: true
-    opt__subgraph__: true
+- name: apollo.router.config.apq
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.router.cache.in_memory.: true
+          opt.router.cache.redis.: true
+          opt.subgraph.: true
 
