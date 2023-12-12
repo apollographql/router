@@ -108,6 +108,8 @@ impl SpanMode {
                     "apollo_private.http.request_headers" = ::tracing::field::Empty,
                     "apollo_private.http.response_headers" = ::tracing::field::Empty,
                     "apollo_private.request" = true,
+                    "graphql.operation.name" = ::tracing::field::Empty,
+                    "graphql.operation.type" = ::tracing::field::Empty,
                 )
             }
         }
