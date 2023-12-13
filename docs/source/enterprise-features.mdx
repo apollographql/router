@@ -68,21 +68,21 @@ A router instance's license is valid for the duration of your organization's cur
 
 <Tip>
 
-Offline Enterprise license support for Apollo is available on an as-needed basis. It must be enabled on your Studio organization. For access, send a request to your Apollo contact.
+Offline Enterprise license support is available on an as-needed basis. Send a request to your Apollo contact to enable it for your GraphOS Studio organization.
 
 </Tip>
 
-Running your Apollo Router fleet while fully connected to GraphOS is the best choice for the majority of Apollo users. However, there are scenarios that can prevent your routers from connecting to GraphOS for an extended period of time, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
+Running your Apollo Router fleet while fully connected to GraphOS is the best choice for  most Apollo users. However, some scenarios can prevent your routers from connecting to GraphOS for an extended period, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet, but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
 
-To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the Apollo Router. An offline license enables your routers to start and serve traffic without a persistent connection to GraphOS. The functionality available with an offline license is much of the same as being fully connected to GraphOS, including managed federation for supergraph CI (operation checks, schema linting, contracts, etc.).
+To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the Apollo Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. The functionality available with an offline license is much like being fully connected to GraphOS, including managed federation for supergraph CI (operation checks, schema linting, contracts, etc.).
 
 An offline license can be retrieved from GraphOS with the [`rover license fetch`](/rover/commands/license) command.
 
-With an offline license, a router can either be fully disconnected from GraphOS or configured to connect to GraphOS on a best-effort basis so that it can send graph usage metrics. Apollo recommends configuring your router to report graph usage metrics to GraphOS whenever possible. Since your router sends metrics in a best-effort fashion, it incurs no performance or uptime penalties while enabling several powerful features of GraphOS such as operation checks, field insights, operation traces, and contracts.
+With an offline license, a router can either be fully disconnected from GraphOS or configured to connect to GraphOS on a best-effort basis so that it can send graph usage metrics. Apollo recommends configuring your router to report graph usage metrics to GraphOS whenever possible. Since your router sends metrics in a best-effort fashion, it incurs no performance or uptime penalties while enabling several powerful GraphOS features, such as operation checks, field insights, operation traces, and contracts.
 
 <Note>
 
-A router using an offline license cannot use [safelisting with persisted queries](./configuration/persisted-queries), because the feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Apollo Uplink.
+A router using an offline license cannot use [safelisting with persisted queries](./configuration/persisted-queries). The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
 
 </Note>
 
@@ -90,7 +90,7 @@ A router using an offline license cannot use [safelisting with persisted queries
 
 Follow these steps to configure an Apollo Router to use an offline Enterprise license:
 
-1. Fetch an offline license by running [rover fetch license](/rover/commands/license/#fetch-license) with the ID of the graph from which you want to fetch a license:
+1. Fetch an offline license by running [`rover license fetch`](/rover/commands/license/#fetch-license) with the ID of the graph from which you want to fetch a license:
 
     ```bash
     rover license fetch --graph-id <apollo-graph-id>
