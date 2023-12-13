@@ -343,22 +343,30 @@ impl InstrumentData {
         }
 
         let mut attributes = HashMap::new();
-        attributes.insert("env.apollo.key".to_string(), env_var_exists("APOLLO_KEY"));
+        attributes.insert("opt.apollo.key".to_string(), env_var_exists("APOLLO_KEY"));
         attributes.insert(
-            "env.apollo.graph_ref".to_string(),
+            "opt.apollo.graph_ref".to_string(),
             env_var_exists("APOLLO_GRAPH_REF"),
         );
         attributes.insert(
-            "env.apollo.license".to_string(),
+            "opt.apollo.license".to_string(),
             env_var_exists("APOLLO_ROUTER_LICENSE"),
         );
         attributes.insert(
-            "env.apollo.license.path".to_string(),
+            "opt.apollo.license.path".to_string(),
             env_var_exists("APOLLO_ROUTER_LICENSE_PATH"),
+        );
+        attributes.insert(
+            "opt.apollo.supergraph.urls".to_string(),
+            env_var_exists("APOLLO_ROUTER_SUPERGRAPH_URLS"),
+        );
+        attributes.insert(
+            "opt.apollo.supergraph.path".to_string(),
+            env_var_exists("APOLLO_ROUTER_SUPERGRAPH_PATH"),
         );
 
         self.data
-            .insert("apollo.router.env".to_string(), (1, attributes));
+            .insert("apollo.router.config.env".to_string(), (1, attributes));
     }
 }
 impl From<InstrumentData> for Metrics {
