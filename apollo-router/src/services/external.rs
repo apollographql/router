@@ -178,7 +178,7 @@ where
     }
 
     #[builder(visibility = "pub(crate)")]
-    /// This is the constructor (or builder) to use when constructing a Supergraph
+    /// This is the constructor (or builder) to use when constructing an Execution
     /// `Externalizable`.
     ///
     fn execution_new(
