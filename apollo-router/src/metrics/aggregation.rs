@@ -539,7 +539,7 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::Public,
-            Some(FilterMeterProvider::public_metrics(delegate)),
+            Some(FilterMeterProvider::public(delegate)),
         );
         let meter = meter_provider.meter("test");
 
@@ -590,7 +590,7 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::Public,
-            Some(FilterMeterProvider::public_metrics(delegate)),
+            Some(FilterMeterProvider::public(delegate)),
         );
         let meter = meter_provider.meter("test");
 
