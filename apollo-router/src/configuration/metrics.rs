@@ -127,7 +127,7 @@ impl InstrumentData {
             };
             ($($metric:ident).+, $path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
                 let instrument_name = stringify!($($metric).+).to_string();
-                self.data.entry(instrument_name.clone()).or_insert_with(|| {
+                self.data.entry(instrument_name).or_insert_with(|| {
                     if let Some(value) = JsonPathInst::from_str($path).expect("json path must be valid").find_slice(yaml).first() {
                         paste!{
                             let mut attributes = HashMap::new();
@@ -370,7 +370,7 @@ impl From<InstrumentData> for Metrics {
                 .map(|(metric_name, (value, attributes))| {
                     let attributes: Vec<_> = attributes
                         .into_iter()
-                        .map(|(k, v)| KeyValue::new(k.replace("__", "."), v.clone()))
+                        .map(|(k, v)| KeyValue::new(k.replace("__", "."), v))
                         .collect();
                     data.meter
                         .u64_observable_gauge(metric_name)
