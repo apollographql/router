@@ -414,11 +414,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
-        let metrics_handle = Metrics::new(&configuration, &license);
+        let metrics = Metrics::new(&configuration, &license);
 
         Ok(Running {
             configuration,
-            _metrics: metrics_handle,
+            _metrics: metrics,
             schema,
             license,
             server_handle: Some(server_handle),

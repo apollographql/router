@@ -2,7 +2,7 @@
 source: apollo-router/src/configuration/metrics.rs
 expression: "&metrics.non_zero()"
 ---
-- name: apollo.router.license
+- name: apollo.router.config.license
   data:
     datapoints:
       - value: 1
