@@ -253,7 +253,7 @@ zstd-safe = "7.0.0"
 # note: AWS dependencies should always use the same version
 aws-sigv4 = "0.56.1"
 aws-credential-types = "0.56.1"
-aws-config = "0.56.1"
+aws-config = "1.0.3"
 aws-types = "0.56.1"
 sha1 = "0.10.6"
 tracing-serde = "0.1.3"
