@@ -212,12 +212,11 @@ pub struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// Your Apollo Router license.
-    /// EXPERIMENTAL and not subject to semver.
     #[clap(skip = std::env::var("APOLLO_ROUTER_LICENSE").ok())]
     apollo_router_license: Option<String>,
 
     /// License location relative to the current directory.
-    #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH", hide(true))]
+    #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH")]
     apollo_router_license_path: Option<PathBuf>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
