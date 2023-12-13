@@ -167,7 +167,7 @@ sequenceDiagram
 
 As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
 
-Your Rhai scripts can hook into any combination of the above services (if you are using v1.30.0+). They can modify the request, response, and/or related metadata as they're passed along.
+Your Rhai scripts can hook into any combination of the above services (if you are using the Apollo Router v1.30.0 and later). The scripts can modify the request, response, and/or related metadata as they're passed along.
 
 ### Service descriptions
 
