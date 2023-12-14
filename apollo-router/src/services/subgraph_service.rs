@@ -429,7 +429,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             callback_url,
                             verifier,
                             heartbeat_interval_ms: match heartbeat_interval {
-                                HeartbeatInterval::Disabled => 0,
+                                HeartbeatInterval::Disabled(_) => 0,
                                 HeartbeatInterval::Duration(duration) => {
                                     duration.as_millis() as u64
                                 }
@@ -1252,6 +1252,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::plugins::subscription::Disabled;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -1882,7 +1883,7 @@ mod tests {
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
-                    heartbeat_interval: HeartbeatInterval::Disabled,
+                    heartbeat_interval: HeartbeatInterval::Disabled(Disabled::Disabled),
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
