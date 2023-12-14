@@ -488,9 +488,9 @@ impl FetchNode {
 
         let mut visitor = QueryHashVisitor::new(schema, &doc);
         visitor.subgraph_query = !self.requires.is_empty();
-        traverse::document(&mut visitor, &doc).unwrap();
-
-        self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
+        if traverse::document(&mut visitor, &doc).is_ok() {
+            self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
+        }
     }
 
     pub(crate) fn extract_authorization_metadata(
