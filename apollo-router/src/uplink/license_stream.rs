@@ -291,7 +291,6 @@ mod test {
     use tracing::instrument::WithSubscriber;
 
     use crate::assert_snapshot_subscriber;
-    use crate::logging::test::SnapshotSubscriber;
     use crate::router::Event;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
