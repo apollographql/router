@@ -86,7 +86,9 @@ This reference lists and describes the options supported by the `router` binary.
 </td>
 <td>
 
-The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
+The Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema). Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+
+> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages. 
 
 Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
 
