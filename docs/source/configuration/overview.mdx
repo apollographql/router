@@ -5,8 +5,6 @@ description: Command arguments and YAML config
 
 Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
 
-Arguments for this command are described below.
-
 ## Environment variables
 
 If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
@@ -34,7 +32,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
 The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
 
-If running the router with an [offline license](#--license), setting both `APOLLO_GRAPH_REF` and `APOLLO_KEY` configures the router to send usage metrics to GraphOS on a best-effort basis; not setting both disables sending usage metrics. Otherwise, setting this is **required** when using managed federation.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
 
 </td>
 </tr>
@@ -48,7 +46,7 @@ If running the router with an [offline license](#--license), setting both `APOLL
 
 The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
 
-If starting the router with an [offline license](#--license), setting both `APOLLO_GRAPH_REF` and `APOLLO_KEY` configures the router to send usage metrics to GraphOS on a best-effort basis; not setting both disables sending usage metrics. Otherwise, setting this is **required** when using managed federation.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
 
 </td>
 </tr>
@@ -173,7 +171,9 @@ The default value is `info`.
 </td>
 <td>
 
-An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS. 
+An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.
+
+An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
 
 When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](../enterprise-features/#the-enterprise-license).
 

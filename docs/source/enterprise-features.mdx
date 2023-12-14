@@ -86,7 +86,9 @@ A router using an offline license cannot use [safelisting with persisted queries
 
 </Note>
 
-#### Set up offline license
+An offline license is valid for the lesser of the duration of your contract with Apollo, or one year, with an added grace period of 28 days. You are responsible for keeping your offline license files up to date within your infrastructure by rerunning `rover license fetch` to fetch updated license files.
+
+#### Set up offline license for the Apollo Router
 
 Follow these steps to configure an Apollo Router to use an offline Enterprise license:
 
@@ -98,17 +100,17 @@ Follow these steps to configure an Apollo Router to use an offline Enterprise li
 
 1. Provide the offline license to your router on startup. The router accepts an offline license in a few ways:
 
-    1. [`--license <license_path>`](./configuration/overview/#--license) CLI option
-    1. [`APOLLO_ROUTER_LICENSE_PATH`](./configuration/overview/#--license) environment variable
-    1. [`APOLLO_ROUTER_LICENSE`](./configuration/overview/#--license) environment variable
+    1. [`--license <license_path>`](./configuration/overview/#--license) CLI option, with an argument containing an absolute or relative path to an offline license file
+    1. [`APOLLO_ROUTER_LICENSE_PATH`](./configuration/overview/#--license) environment variable, containing an absolute or relative path to an offline license file 
+    1. [`APOLLO_ROUTER_LICENSE`](./configuration/overview/#--license) environment variable, containing the stringified contents of an offline license file
 
-    The router checks the CLI option and environment variables in the listed order, and it uses the value of the first option or variable that is set.
+    The router checks the CLI option and environment variables in the listed order, then it uses the value of the first option or variable that is set.
 
 1. Configure the router to use a local supergraph schema by setting one of the following:
 
-    * [`--s/-supergraph`](./configuration/overview/#-s----supergraph) CLI option
-    * [`APOLLO_SUPERGRAPH_PATH`](./configuration/overview/#-s----supergraph) environment variable
-    * [`APOLLO_SUPERGRAPH_URLS`](./configuration/overview/#-s----supergraph) environment variable
+    * [`--s/-supergraph`](./configuration/overview/#-s----supergraph) CLI option, with an argument containing an absolute or relative path to supergraph schema file
+    * [`APOLLO_SUPERGRAPH_PATH`](./configuration/overview/#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
+    * [`APOLLO_SUPERGRAPH_URLS`](./configuration/overview/#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
 1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](../configuration/overview#apollo_graph_ref) environment variables. 
 
