@@ -365,7 +365,6 @@ async fn subscription_task(
     let mut receiver = sub_params.stream_rx;
     let sender = sub_params.client_sender;
 
-    let graphql_document = &query_plan.query.string;
     // Get the rest of the query_plan to execute for subscription events
     let query_plan = match &query_plan.root {
         crate::query_planner::PlanNode::Subscription { rest, .. } => rest.clone().map(|r| {
