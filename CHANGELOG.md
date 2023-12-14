@@ -10,7 +10,10 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Run new (non-load-bearing) Rust validation out-of-band to help identify deltas ([Issue#4159](https://github.com/apollographql/router/issues/4159))
 
-As part of the process to replace JavaScript validation with a more performant Rust validation in the router, we are enabling the router to run both validations as a default. This allows us to definitively assess reliability and stability of Rust validation before completely removing JavaScript validation. As before, it's possible to toggle between implementations using the `experimental_graphql_validation_mode` config key. Possible values are: `new` (runs only Rust-based validation), `legacy` (runs only JS-based validation), `both` (runs both in comparison, logging errors if a difference arises).
+As part of the process to replace JavaScript validation with a more performant Rust validation in the router, we are enabling the router to run both validations as a default. This allows us to definitively assess reliability and stability of Rust validation before completely removing JavaScript validation. As before, it's possible to toggle between implementations using the `experimental_graphql_validation_mode` config key. Possible values are: 
+* `new` - runs only Rust-based validation
+* `legacy` - runs only JS-based validation
+* `both` - runs both Rust-based and JS-based in comparison, logging errors if a difference arises
 
 
 By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/4161
@@ -20,8 +23,8 @@ By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router
 ### `span_mode: spec_compliant` not applied correctly ([Issue #4335](https://github.com/apollographql/router/issues/4335))
 
 Previously, `telemetry.instrumentation.spans.span_mode.spec_compliant` was not being correctly applied. This resulted in:
-* an extra `request` span at the root that should not have been present.
-* the root span not being correctly renamed to graphql operation name.
+* An extra `request` span at the root that should not have been present.
+* The root span not being correctly renamed to the GraphQL operation name.
 
 
 
