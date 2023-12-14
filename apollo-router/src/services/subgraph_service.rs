@@ -104,7 +104,7 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 #[allow(clippy::declare_interior_mutable_const)]
 static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
-    HeaderValue::from_static("application/json+graphql+callback/1.0");
+    HeaderValue::from_static("application/json;callbackSpec=1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
 static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
@@ -429,7 +429,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             callback_url,
                             verifier,
                             heartbeat_interval_ms: match heartbeat_interval {
-                                HeartbeatInterval::Disabled => 0,
+                                HeartbeatInterval::Disabled(_) => 0,
                                 HeartbeatInterval::Duration(duration) => {
                                     duration.as_millis() as u64
                                 }
@@ -1017,6 +1017,24 @@ async fn do_fetch(
         }
         Some(body)
     } else {
+        if display_body {
+            let body = hyper::body::to_bytes(body)
+                .instrument(tracing::debug_span!("aggregate_response_data"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = ?err);
+                    FetchError::SubrequestHttpError {
+                        status_code: Some(parts.status.as_u16()),
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    }
+                });
+            if let Ok(body) = &body {
+                tracing::info!(
+                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                );
+            }
+        }
         None
     };
     Ok((parts, content_type, body))
@@ -1234,6 +1252,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::plugins::subscription::Disabled;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -1864,7 +1883,7 @@ mod tests {
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
-                    heartbeat_interval: HeartbeatInterval::Disabled,
+                    heartbeat_interval: HeartbeatInterval::Disabled(Disabled::Disabled),
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,

@@ -288,11 +288,16 @@ pub struct License {
 }
 
 /// Licenses are converted into a stream of license states by the expander
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
 pub(crate) enum LicenseState {
+    /// licensed
     Licensed,
+    /// warn
     LicensedWarn,
+    /// halt
     LicensedHalt,
+
+    /// unlicensed
     #[default]
     Unlicensed,
 }

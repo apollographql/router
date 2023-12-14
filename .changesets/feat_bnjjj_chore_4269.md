@@ -59,7 +59,7 @@ The subscription specification has been updated with the following observable ch
 }
 ```
 
-* When the router is sending a subscription to a subgraph in callback mode, it now includes a specific `accept` header set to `application/json+graphql+callback/1.0` that let's you automatically detect if it's using callback mode or not.
+* When the router is sending a subscription to a subgraph in callback mode, it now includes a specific `accept` header set to `application/json;callbackSpec=1.0` that let's you automatically detect if it's using callback mode or not.
 
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4272

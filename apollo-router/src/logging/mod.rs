@@ -31,7 +31,22 @@ pub(crate) mod test {
             } else {
                 let parsed_log: Vec<Value> = log
                     .lines()
-                    .map(|line| serde_json::from_str(line).unwrap())
+                    .map(|line| {
+                        let mut line: serde_json::Value = serde_json::from_str(line).unwrap();
+                        // move the message field to the top level
+                        let fields = line
+                            .as_object_mut()
+                            .unwrap()
+                            .get_mut("fields")
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap();
+                        let message = fields.remove("message").unwrap();
+                        line.as_object_mut()
+                            .unwrap()
+                            .insert("message".to_string(), message);
+                        line
+                    })
                     .collect();
                 serde_json::json!(parsed_log)
             };
@@ -66,10 +81,19 @@ pub(crate) mod test {
 /// You can also use subscriber::with_default(assert_snapshot_subscriber!(), || { ... }) to assert the logs in non async code.
 macro_rules! assert_snapshot_subscriber {
     () => {
-        SnapshotSubscriber::create_subscriber(|yaml| {
+        $crate::logging::test::SnapshotSubscriber::create_subscriber(|yaml| {
             insta::with_settings!({sort_maps => true}, {
                 // the tests here will force maps to sort
                 insta::assert_yaml_snapshot!(yaml);
+            });
+        })
+    };
+
+    ($redactions:tt) => {
+        $crate::logging::test::SnapshotSubscriber::create_subscriber(|yaml| {
+            insta::with_settings!({sort_maps => true}, {
+                // the tests here will force maps to sort
+                insta::assert_yaml_snapshot!(yaml, $redactions);
             });
         })
     };

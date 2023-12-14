@@ -30,7 +30,7 @@ All actions described in these steps are performed by one of **Router**, **Subgr
 
 1. Before it executes a subscription operation, **Router** generates a unique ID to represent that operation.
 
-2. **Router** sends a GraphQL subscription operation to **Subgraph** via HTTP POST using the standard [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters) with `Accept` header containing `application/json+graphql+callback/1.0`:
+2. **Router** sends a GraphQL subscription operation to **Subgraph** via HTTP POST using the standard [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters) with `Accept` header containing `application/json;callbackSpec=1.0`:
 
     ```json
     {

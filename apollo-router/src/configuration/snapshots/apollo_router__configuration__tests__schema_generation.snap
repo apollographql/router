@@ -2079,7 +2079,10 @@ expression: "&schema"
                   "default": "5s",
                   "anyOf": [
                     {
-                      "type": "null"
+                      "type": "string",
+                      "enum": [
+                        "disabled"
+                      ]
                     },
                     {
                       "type": "string"

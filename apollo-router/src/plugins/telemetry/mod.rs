@@ -270,15 +270,15 @@ impl Plugin for Telemetry {
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
-            public_meter_provider: Some(FilterMeterProvider::public_metrics(
+            public_meter_provider: Some(FilterMeterProvider::public(
                 metrics_builder.public_meter_provider_builder.build(),
             )),
-            private_meter_provider: Some(FilterMeterProvider::private_metrics(
+            private_meter_provider: Some(FilterMeterProvider::private(
                 metrics_builder.apollo_meter_provider_builder.build(),
             )),
             public_prometheus_meter_provider: metrics_builder
                 .prometheus_meter_provider
-                .map(FilterMeterProvider::public_metrics),
+                .map(FilterMeterProvider::public),
             sampling_filter_ratio,
             config: Arc::new(config),
             counter,
