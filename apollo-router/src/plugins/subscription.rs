@@ -171,10 +171,16 @@ pub(crate) struct CallbackMode {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub(crate) enum HeartbeatInterval {
-    Disabled,
+    Disabled(Disabled),
     #[serde(with = "humantime_serde")]
     #[schemars(with = "String")]
     Duration(Duration),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Disabled {
+    Disabled,
 }
 
 impl Default for HeartbeatInterval {
@@ -233,7 +239,7 @@ impl Plugin for Subscription {
                 HeartbeatInterval::Duration(duration) => {
                     init.notify.set_ttl(Some(duration)).await?;
                 }
-                HeartbeatInterval::Disabled => {
+                HeartbeatInterval::Disabled(_) => {
                     init.notify.set_ttl(None).await?;
                 }
             }
