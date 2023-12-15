@@ -398,12 +398,6 @@ pub(crate) async fn create_plugins(
         .filter(|factory| {
             // the name starts with apollo
             factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
-                && (
-                    // the plugin is mandatory
-                    apollo_telemetry_plugin_mandatory ||
-                    // the name isn't apollo.telemetry
-                    factory.name != "apollo.telemetry"
-                )
         })
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
@@ -486,6 +480,8 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("headers");
     if apollo_telemetry_plugin_mandatory {
         add_mandatory_apollo_plugin!("telemetry");
+    } else {
+        add_optional_apollo_plugin!("telemetry");
     }
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
