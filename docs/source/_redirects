@@ -6,3 +6,4 @@
 /development-workflow/* /docs/router/executing-operations/:splat
 /configuration/spaceport* /docs/router/configuration/apollo-telemetry/
 /managed-federation/client%20awareness/ /docs/router/managed-federation/client-awareness/
+/configuration/logging /docs/router/configuration/telemetry/overview

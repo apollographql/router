@@ -30,4 +30,4 @@ filtered:
   }
 }
 
-paths: ["/itf/... on User"]
+paths: ["/itf"]

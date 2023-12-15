@@ -1,0 +1,40 @@
+---
+title: New Relic exporter (via OTLP)
+subtitle: Configure the New Relic exporter for metrics
+description: Configure the New Relic exporter for metrics via OpenTelemetry Protocol (OTLP) in the Apollo Router
+---
+
+Enable and configure the [OTLP exporter](./otlp) for metrics in the Apollo Router for use with [New Relic](https://newrelic.com/).
+
+For general tracing configuration, refer to [Router Metrics Configuration](./overview).
+
+## New Relic configuration
+
+To configure the router, enable the [OTLP exporter](./otlp#configuration) and set `temporality: delta`, `endpoint: <new-relic-endpoint>` and `api-key: <new-relic-api-key>`. For example: 
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+        temporality: delta
+        # Endpoint for your region.
+        endpoint: <new-relic-endpoint>
+        protocol: grpc
+        grpc:
+          metadata:
+            "api-key":
+              - <new-relic-api-key>
+
+```
+
+<Note>
+
+**You must set `temporality: delta`**, otherwise metrics will not be visible in New Relic.
+
+</Note>
+
+For more details about New Relic configuration, see [New Relic's docs on OpenTelemetry configuration](https://docs.newrelic.com/docs/more-integrations/open-source-telemetry-integrations/opentelemetry/get-started/opentelemetry-set-up-your-app/#review-settings).
+

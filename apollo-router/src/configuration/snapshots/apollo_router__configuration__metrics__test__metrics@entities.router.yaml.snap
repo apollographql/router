@@ -1,18 +1,13 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.entities:
-  - 1
-  - opt__cache__: true
-value.apollo.router.config.traffic_shaping:
-  - 1
-  - opt__router__rate_limit__: false
-    opt__router__timeout__: false
-    opt__subgraph__compression__: false
-    opt__subgraph__deduplicate_query__: false
-    opt__subgraph__http2__: false
-    opt__subgraph__rate_limit__: false
-    opt__subgraph__retry__: false
-    opt__subgraph__timeout__: false
+- name: apollo.router.config.entity_cache
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.enabled.: true
+          opt.subgraph.enabled.: true
+          opt.subgraph.ttl.: true
 

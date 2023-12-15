@@ -1,20 +1,21 @@
 limits:
   experimental_http_max_request_bytes: 60
 telemetry:
-  metrics:
-    prometheus:
-      listen: 127.0.0.1:4000
-      enabled: true
-      path: /metrics
-    common:
-      attributes:
-        subgraph:
-          all:
-            request:
-              header:
-                - named: "x-custom-header"
-                  rename: "custom_header"
-                  default: "unknown"
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        attributes:
+          subgraph:
+            all:
+              request:
+                header:
+                  - named: "x-custom-header"
+                    rename: "custom_header"
+                    default: "unknown"
 headers:
   all:
     request:

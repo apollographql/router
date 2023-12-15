@@ -111,20 +111,34 @@ impl IntegrationTest {
 
         let subscriber = Self::init_telemetry(telemetry);
 
-        let mut listener = None;
-        for _ in 0..100 {
-            if let Ok(new_listener) = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 4005))) {
-                listener = Some(new_listener);
-                break;
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let url = format!("http://{address}/");
+
+        let mut config: Value = serde_yaml::from_str(config).unwrap();
+        match config
+            .as_object_mut()
+            .and_then(|o| o.get_mut("override_subgraph_url"))
+            .and_then(|o| o.as_object_mut())
+        {
+            None => {
+                if let Some(o) = config.as_object_mut() {
+                    o.insert(
+                        "override_subgraph_url".to_string(),
+                        json! {{ "products": url}},
+                    );
+                }
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        if listener.is_none() {
-            panic!("could not listen")
+            Some(override_url) => {
+                let url = format!("http://{address}");
+                override_url.insert("products".to_string(), url.into());
+            }
         }
 
+        let config_str = serde_yaml::to_string(&config).unwrap();
+
         let subgraphs = wiremock::MockServer::builder()
-            .listener(listener.expect("just checked; qed"))
+            .listener(listener)
             .start()
             .await;
 
@@ -137,7 +151,7 @@ impl IntegrationTest {
         let mut test_config_location = std::env::temp_dir();
         test_config_location.push("test_config.yaml");
 
-        fs::write(&test_config_location, config).expect("could not write config");
+        fs::write(&test_config_location, &config_str).expect("could not write config");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
         let collect_stdio = collect_stdio.map(|sender| {
@@ -394,6 +408,7 @@ impl IntegrationTest {
                     .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
+                    .header("x-my-header", "test")
                     .json(&query)
                     .build()
                     .unwrap();

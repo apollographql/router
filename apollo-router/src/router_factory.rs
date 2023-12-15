@@ -3,17 +3,13 @@ use std::io;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
-use futures::future::BoxFuture;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
-use tower::retry::Retry;
 use tower::service_fn;
-use tower::util::Either;
-use tower::util::Oneshot;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -21,7 +17,7 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::configuration::TlsSubgraph;
+use crate::configuration::TlsClient;
 use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
@@ -29,9 +25,6 @@ use crate::plugin::PluginFactory;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
-use crate::plugins::traffic_shaping::rate;
-use crate::plugins::traffic_shaping::timeout;
-use crate::plugins::traffic_shaping::RetryPolicy;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -41,7 +34,7 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::transport;
 use crate::services::HasConfig;
@@ -238,32 +231,8 @@ pub(crate) async fn create_subgraph_services(
                 subgraph::Request,
                 Response = subgraph::Response,
                 Error = BoxError,
-                Future = Either<
-                    Either<
-                        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                        Either<
-                            BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                            timeout::future::ResponseFuture<
-                                Oneshot<
-                                    Either<
-                                        Retry<
-                                            RetryPolicy,
-                                            Either<
-                                                rate::service::RateLimit<SubgraphService>,
-                                                SubgraphService,
-                                            >,
-                                        >,
-                                        Either<
-                                            rate::service::RateLimit<SubgraphService>,
-                                            SubgraphService,
-                                        >,
-                                    >,
-                                    subgraph::Request,
-                                >,
-                            >,
-                        >,
-                    >,
-                    <SubgraphService as Service<subgraph::Request>>::Future,
+                Future = crate::plugins::traffic_shaping::TrafficShapingSubgraphFuture<
+                    SubgraphService,
                 >,
             > + Clone
             + Send
@@ -345,7 +314,7 @@ impl YamlRouterFactory {
     }
 }
 
-impl TlsSubgraph {
+impl TlsClient {
     pub(crate) fn create_certificate_store(
         &self,
     ) -> Option<Result<RootCertStore, ConfigurationError>> {
@@ -524,6 +493,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("override_subgraph_url");
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
+    add_optional_apollo_plugin!("experimental_entity_cache");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");

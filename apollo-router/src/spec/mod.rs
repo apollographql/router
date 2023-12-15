@@ -42,7 +42,7 @@ pub(crate) enum SpecError {
     /// parsing error: {0}
     ParsingError(String),
     /// validation error
-    ValidationError(Vec<apollo_compiler::GraphQLError>),
+    ValidationError(Vec<apollo_compiler::execution::GraphQLError>),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
     /// subscription operation is not supported
@@ -64,7 +64,7 @@ pub enum SpecError {
     /// parsing error: {0}
     ParsingError(String),
     /// validation error
-    ValidationError(Vec<apollo_compiler::GraphQLError>),
+    ValidationError(Vec<apollo_compiler::execution::GraphQLError>),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
     /// subscription operation is not supported

@@ -221,6 +221,55 @@ impl PlanNode {
         }
     }
 
+    pub(crate) fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+        match self {
+            PlanNode::Fetch(fetch_node) => {
+                fetch_node.hash_subquery(schema);
+            }
+
+            PlanNode::Sequence { nodes } => {
+                for node in nodes {
+                    node.hash_subqueries(schema);
+                }
+            }
+            PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    node.hash_subqueries(schema);
+                }
+            }
+            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(schema),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.hash_subqueries(schema);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.hash_subqueries(schema);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Subscription { primary: _, rest } => {
+                if let Some(node) = rest.as_mut() {
+                    node.hash_subqueries(schema);
+                }
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => {
+                if let Some(node) = if_clause.as_mut() {
+                    node.hash_subqueries(schema);
+                }
+                if let Some(node) = else_clause.as_mut() {
+                    node.hash_subqueries(schema);
+                }
+            }
+        }
+    }
+
     #[cfg(test)]
     /// Retrieves all the services used across all plan nodes.
     ///
@@ -267,6 +316,59 @@ impl PlanNode {
                     Box::new(if_node.service_usage().chain(else_node.service_usage()))
                 }
             },
+        }
+    }
+
+    pub(crate) fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        key: &CacheKeyMetadata,
+    ) {
+        match self {
+            PlanNode::Fetch(fetch_node) => {
+                fetch_node.extract_authorization_metadata(schema, key);
+            }
+
+            PlanNode::Sequence { nodes } => {
+                for node in nodes {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Flatten(flatten) => flatten.node.extract_authorization_metadata(schema, key),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.extract_authorization_metadata(schema, key);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Subscription { primary: _, rest } => {
+                if let Some(node) = rest.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => {
+                if let Some(node) = if_clause.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+                if let Some(node) = else_clause.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
         }
     }
 }

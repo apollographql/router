@@ -13,26 +13,29 @@ pub(crate) fn document(
         sources: document.sources.clone(),
         definitions: Vec::new(),
     };
+
+    // walk through the fragment first: if a fragment is entirely filtered, we want to
+    // remove the spread too
     for definition in &document.definitions {
-        match definition {
-            ast::Definition::OperationDefinition(def) => {
-                let root_type = visitor
-                    .schema()
-                    .root_operation(def.operation_type)
-                    .ok_or("missing root operation definition")?
-                    .clone();
-                if let Some(new_def) = visitor.operation(&root_type, def)? {
-                    new.definitions
-                        .push(ast::Definition::OperationDefinition(new_def.into()))
-                }
+        if let ast::Definition::FragmentDefinition(def) = definition {
+            if let Some(new_def) = visitor.fragment_definition(def)? {
+                new.definitions
+                    .push(ast::Definition::FragmentDefinition(new_def.into()))
             }
-            ast::Definition::FragmentDefinition(def) => {
-                if let Some(new_def) = visitor.fragment_definition(def)? {
-                    new.definitions
-                        .push(ast::Definition::FragmentDefinition(new_def.into()))
-                }
+        }
+    }
+
+    for definition in &document.definitions {
+        if let ast::Definition::OperationDefinition(def) = definition {
+            let root_type = visitor
+                .schema()
+                .root_operation(def.operation_type)
+                .ok_or("missing root operation definition")?
+                .clone();
+            if let Some(new_def) = visitor.operation(&root_type, def)? {
+                new.definitions
+                    .push(ast::Definition::OperationDefinition(new_def.into()))
             }
-            _ => {}
         }
     }
     Ok(new)
@@ -224,7 +227,11 @@ pub(crate) fn selection_set(
                 }
             }
             ast::Selection::InlineFragment(def) => {
-                let fragment_type = def.type_condition.as_deref().unwrap_or(parent_type);
+                let fragment_type = def
+                    .type_condition
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or(parent_type);
                 if let Some(sel) = visitor.inline_fragment(fragment_type, def)? {
                     selections.push(ast::Selection::InlineFragment(sel.into()))
                 }
@@ -263,7 +270,7 @@ fn test_add_directive_to_fields() {
             Ok(field(self, field_def, def)?.map(|mut new| {
                 new.directives.push(
                     ast::Directive {
-                        name: "added".into(),
+                        name: apollo_compiler::name!("added"),
                         arguments: Vec::new(),
                     }
                     .into(),
@@ -279,13 +286,14 @@ fn test_add_directive_to_fields() {
 
     let graphql = "
         type Query {
-            a: String
+            a(id: ID): String
             b: Int
             next: Query
         }
+        directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
         query($id: ID = null) {
-            a
+            a(id: $id)
             ... @defer {
                 b
             }
@@ -298,21 +306,22 @@ fn test_add_directive_to_fields() {
             }
         }
     ";
-    let ast = apollo_compiler::ast::Document::parse(graphql, "");
-    let (schema, _doc) = ast.to_mixed();
+    let ast = apollo_compiler::ast::Document::parse(graphql, "").unwrap();
+    let (schema, _doc) = ast.to_mixed_validate().unwrap();
+    let schema = schema.into_inner();
     let mut visitor = AddDirective { schema };
-    let expected = "query($id: ID = null) {
-  a @added
+    let expected = "fragment F on Query {
+  next @added {
+    a @added
+  }
+}
+
+query($id: ID = null) {
+  a(id: $id) @added
   ... @defer {
     b @added
   }
   ...F
-}
-
-fragment F on Query {
-  next @added {
-    a @added
-  }
 }
 ";
     assert_eq!(document(&mut visitor, &ast).unwrap().to_string(), expected)

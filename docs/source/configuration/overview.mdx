@@ -5,8 +5,6 @@ description: Command arguments and YAML config
 
 Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
 
-Arguments for this command are described below.
-
 ## Environment variables
 
 If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
@@ -34,7 +32,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
 The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
 
-**Required** if using managed federation.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
 
 </td>
 </tr>
@@ -48,7 +46,7 @@ The graph ref for the GraphOS graph and variant that the router fetches its supe
 
 The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
 
-**Required** if using managed federation.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
 
 </td>
 </tr>
@@ -83,16 +81,20 @@ This reference lists and describes the options supported by the `router` binary.
 
 ##### `-s` / `--supergraph`
 
-`APOLLO_ROUTER_SUPERGRAPH_PATH`
+`APOLLO_ROUTER_SUPERGRAPH_PATH`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
 
 </td>
 <td>
 
-The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
+The Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema). Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+
+> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages. 
+
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
 
-**Required** if you are _not_ using managed federation. If you _are_ using managed federation, do not provide this value.
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
 </td>
 </tr>
@@ -157,6 +159,27 @@ If set, the router watches for changes to its configuration file and any supergr
 The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
 The default value is `info`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--license`
+
+`APOLLO_ROUTER_LICENSE_PATH`, `APOLLO_ROUTER_LICENSE`
+
+</td>
+<td>
+
+An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.
+
+An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
+
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](../enterprise-features/#the-enterprise-license).
+
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](../enterprise-features/#offline-enterprise-license).
 
 </td>
 </tr>
@@ -363,6 +386,12 @@ This file enables you to customize numerous aspects of your router's behavior, c
 
 If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
 
+<Tip>
+
+Enable your text editor to validate the format and content of your router YAML configuration file by [configuring it with the router's configuration schema](#configuration-awareness-in-your-text-editor).
+
+</Tip>
+
 ### Listen address
 
 By default, the Apollo Router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen`:
@@ -565,9 +594,11 @@ To configure subgraph authentication with AWS SigV4, see a [configuration exampl
 
 See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
 
-### OpenTelemetry tracing
+### Telemetry and monitoring
 
-See [Tracing in the Apollo Router](./tracing/).
+The Apollo Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
+
+See the [Apollo Router telemetry overview](./telemetry/overview).
 
 ### TLS
 
@@ -696,7 +727,7 @@ limits:
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
-  parser_max_recursion: 4096 # Default value
+  parser_max_recursion: 500 # Default value
 
   # Operation-based limits (Enterprise only)
   max_depth: 100
@@ -738,7 +769,7 @@ The default value is `15000`.
 
 Limits the deepest level of recursion allowed by the router's GraphQL parser to prevent stack overflows. This corresponds to the deepest nesting level of any single GraphQL operation or fragment defined in a query document.
 
-The default value is `4096`.
+The default value is `500`.
 
 In the example below, the `GetProducts` operation has a recursion of three, and the `ProductVariation` fragment has a recursion of two. Therefore, the _max_ recursion of the query document is three.
 

@@ -195,6 +195,10 @@ pub struct Opt {
     )]
     supergraph_path: Option<PathBuf>,
 
+    /// Locations (comma separated) to fetch the supergraph from. These will be queried in order.
+    #[clap(env = "APOLLO_ROUTER_SUPERGRAPH_URLS", value_delimiter = ',')]
+    supergraph_urls: Option<Vec<Url>>,
+
     /// Prints the configuration schema.
     #[clap(long, action(ArgAction::SetTrue), hide(true))]
     schema: bool,
@@ -212,12 +216,11 @@ pub struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// Your Apollo Router license.
-    /// EXPERIMENTAL and not subject to semver.
     #[clap(skip = std::env::var("APOLLO_ROUTER_LICENSE").ok())]
     apollo_router_license: Option<String>,
 
     /// License location relative to the current directory.
-    #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH", hide(true))]
+    #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH")]
     apollo_router_license_path: Option<PathBuf>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
@@ -534,14 +537,19 @@ impl Executable {
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
 
-        let schema_source = match (schema, &opt.supergraph_path, &opt.apollo_key) {
-            (Some(_), Some(_), _) => {
+        // Schema source will be in order of precedence:
+        // 1. Cli --supergraph
+        // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
+        // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key) {
+            (Some(_), Some(_), _, _) | (Some(_), _, Some(_), _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
                 ))
             }
-            (Some(source), None, _) => source,
-            (_, Some(supergraph_path), _) => {
+            (Some(source), None, None,_) => source,
+            (_, Some(supergraph_path), _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
@@ -556,7 +564,17 @@ impl Executable {
                     delay: None,
                 }
             }
-            (_, None, Some(_apollo_key)) => {
+            (_, _, Some(supergraph_urls), _) => {
+                tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+
+                SchemaSource::URLs {
+                    urls: supergraph_urls.clone(),
+                    watch: opt.hot_reload,
+                    period: opt.apollo_uplink_poll_interval
+                }
+            }
+            (_, None, None, Some(_apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
                 SchemaSource::Registry(opt.uplink_config()?)
@@ -641,9 +659,21 @@ impl Executable {
             tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
         }
 
+        let uplink_config = opt.uplink_config().ok();
+        if uplink_config
+            .clone()
+            .unwrap_or_default()
+            .endpoints
+            .unwrap_or_default()
+            .url_count()
+            == 1
+        {
+            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+        }
+
         let router = RouterHttpServer::builder()
             .configuration(configuration)
-            .and_uplink(opt.uplink_config().ok())
+            .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
