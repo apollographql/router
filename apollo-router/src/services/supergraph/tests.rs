@@ -2639,10 +2639,20 @@ async fn fragment_reuse() {
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": null }}}}
+                serde_json::json!{{
+                  "query":"query Query__user__0($a:Boolean!=true$b:Boolean!=true){me{name ...on User@include(if:$a){__typename id}...on User@include(if:$b){__typename id}}}",
+                  "operationName": "Query__user__0"
+                }},
+                serde_json::json!{{"data": {"me": { "name": "Ada", "__typename": "User", "id": "1" }}}}
             ).build()),
-        ("orga", MockSubgraph::default())
+        ("orga", MockSubgraph::builder().with_json(
+          serde_json::json!{{
+            "query":"query Query__orga__1($representations:[_Any!]!$a:Boolean!=true$b:Boolean!=true){_entities(representations:$representations){...F@include(if:$a)...F@include(if:$b)}}fragment F on User{organizations{id name}}",
+            "operationName": "Query__orga__1",
+            "variables":{"representations":[{"__typename":"User","id":"1"}]}
+          }},
+          serde_json::json!{{"data": {"_entities": [{ "organizations": [{"id": "2", "name": "Apollo"}] }]}}}
+      ).build())
     ].into_iter().collect());
 
     let service = TestHarness::builder()
