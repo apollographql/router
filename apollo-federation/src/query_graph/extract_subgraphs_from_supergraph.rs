@@ -32,6 +32,7 @@ use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::ops::Deref;
+use std::sync::Arc;
 
 /// Assumes the given schema has been validated.
 ///
@@ -109,7 +110,7 @@ pub(super) fn extract_subgraphs_from_supergraph(
                 }
             }
         } else {
-            ValidFederationSchema(Valid::assume_valid(subgraph.schema))
+            ValidFederationSchema(Arc::new(Valid::assume_valid(subgraph.schema)))
         };
         valid_subgraphs.add(ValidFederationSubgraph {
             name: subgraph.name,

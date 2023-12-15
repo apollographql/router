@@ -10,11 +10,14 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use indexmap::IndexSet;
 use referencer::Referencers;
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
+use std::sync::Arc;
 
 pub(crate) mod position;
 pub(crate) mod referencer;
 
+#[derive(Debug)]
 pub struct FederationSchema {
     schema: Schema,
     metadata: Option<LinksMetadata>,
@@ -105,22 +108,23 @@ impl FederationSchema {
 
     pub(crate) fn validate(self) -> Result<ValidFederationSchema, FederationError> {
         let schema = self.schema.validate()?.into_inner();
-        Ok(ValidFederationSchema(Valid::assume_valid(
+        Ok(ValidFederationSchema(Arc::new(Valid::assume_valid(
             FederationSchema {
                 schema,
                 metadata: self.metadata,
                 referencers: self.referencers,
             },
-        )))
+        ))))
     }
 }
 
-pub struct ValidFederationSchema(pub(crate) Valid<FederationSchema>);
+#[derive(Debug, Clone)]
+pub struct ValidFederationSchema(pub(crate) Arc<Valid<FederationSchema>>);
 
 impl ValidFederationSchema {
     pub fn new(schema: Valid<Schema>) -> Result<ValidFederationSchema, FederationError> {
         let schema = FederationSchema::new(schema.into_inner())?;
-        Ok(ValidFederationSchema(Valid::assume_valid(schema)))
+        Ok(ValidFederationSchema(Arc::new(Valid::assume_valid(schema))))
     }
 
     pub(crate) fn schema(&self) -> &Valid<Schema> {
@@ -133,5 +137,19 @@ impl Deref for ValidFederationSchema {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl Eq for ValidFederationSchema {}
+
+impl PartialEq for ValidFederationSchema {
+    fn eq(&self, other: &ValidFederationSchema) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Hash for ValidFederationSchema {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
     }
 }

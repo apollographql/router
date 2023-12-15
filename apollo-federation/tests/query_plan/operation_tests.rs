@@ -1,4 +1,16 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::operation::normalize_operation;
+use apollo_federation::schema::ValidFederationSchema;
+
+fn parse_schema_and_operation(
+    schema_and_operation: &str,
+) -> (ValidFederationSchema, ExecutableDocument) {
+    let (schema, executable_document) =
+        apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql").unwrap();
+    let executable_document = executable_document.into_inner();
+    let schema = ValidFederationSchema::new(schema).unwrap();
+    (schema, executable_document)
+}
 
 //
 // fields
@@ -25,12 +37,10 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(operation_string, "document.graphql").unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) = parse_schema_and_operation(operation_string);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test {
   t {
     v1
@@ -65,13 +75,10 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(operation_with_directives, "document.graphql")
-            .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) = parse_schema_and_operation(operation_with_directives);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t @skip(if: $skipIf) {
     v1
@@ -108,15 +115,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) = apollo_compiler::parse_mixed_validate(
-        operation_with_directives_different_arg_order,
-        "document.graphql",
-    )
-    .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_with_directives_different_arg_order);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t @customSkip(if: $skipIf, label: "foo") {
     v1
@@ -151,15 +154,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) = apollo_compiler::parse_mixed_validate(
-        operation_one_field_with_directives,
-        "document.graphql",
-    )
-    .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_one_field_with_directives);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     v1
@@ -196,13 +195,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(operation_different_directives, "document.graphql")
-            .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_different_directives);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
   t @skip(if: $skip1) {
     v1
@@ -241,12 +238,10 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(operation_defer_fields, "document.graphql").unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) = parse_schema_and_operation(operation_defer_fields);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test {
   t @defer {
     v1
@@ -298,12 +293,10 @@ type V {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(nested_operation, "document.graphql").unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) = parse_schema_and_operation(nested_operation);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test {
   t {
     t1
@@ -350,13 +343,10 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(operation_with_fragments, "document.graphql")
-            .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) = parse_schema_and_operation(operation_with_fragments);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test {
   t {
     v1
@@ -393,15 +383,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) = apollo_compiler::parse_mixed_validate(
-        operation_fragments_with_directives,
-        "document.graphql",
-    )
-    .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_fragments_with_directives);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     ... on T @skip(if: $skipIf) {
@@ -442,15 +428,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) = apollo_compiler::parse_mixed_validate(
-        operation_fragments_with_directives_args_order,
-        "document.graphql",
-    )
-    .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_fragments_with_directives_args_order);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     ... on T @customSkip(if: $skipIf, label: "foo") {
@@ -489,15 +471,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) = apollo_compiler::parse_mixed_validate(
-        operation_one_fragment_with_directive,
-        "document.graphql",
-    )
-    .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_one_fragment_with_directive);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
   t {
     v1
@@ -536,15 +514,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) = apollo_compiler::parse_mixed_validate(
-        operation_fragments_with_different_directive,
-        "document.graphql",
-    )
-    .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_fragments_with_different_directive);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
   t {
     ... on T @skip(if: $skip1) {
@@ -587,13 +561,11 @@ type T {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(operation_fragments_with_defer, "document.graphql")
-            .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) =
+        parse_schema_and_operation(operation_fragments_with_defer);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test {
   t {
     ... on T @defer {
@@ -655,13 +627,10 @@ type V {
   v2: String
 }
 "#;
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(operation_nested_fragments, "document.graphql")
-            .unwrap();
-    let mut executable_document = executable_document.into_inner();
+    let (schema, mut executable_document) = parse_schema_and_operation(operation_nested_fragments);
     if let Some((_, operation)) = executable_document.named_operations.first_mut() {
         let operation = operation.make_mut();
-        normalize_operation(operation, &schema, &executable_document.fragments).unwrap();
+        normalize_operation(operation, &executable_document.fragments, &schema).unwrap();
         let expected = r#"query Test {
   t {
     t1

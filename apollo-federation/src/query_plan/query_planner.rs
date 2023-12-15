@@ -115,8 +115,8 @@ impl Default for QueryPlannerDebugConfig {
 pub struct QueryPlanner {
     config: Arc<QueryPlannerConfig>,
     federated_query_graph: Arc<QueryGraph>,
-    supergraph_schema: Arc<ValidFederationSchema>,
-    api_schema: Arc<ValidFederationSchema>,
+    supergraph_schema: ValidFederationSchema,
+    api_schema: ValidFederationSchema,
     subgraph_federation_spec_definitions: IndexMap<NodeStr, &'static FederationSpecDefinition>,
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.

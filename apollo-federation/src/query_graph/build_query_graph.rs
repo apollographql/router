@@ -23,7 +23,6 @@ use indexmap::{IndexMap, IndexSet};
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
-use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
@@ -33,8 +32,8 @@ use strum::IntoEnumIterator;
 ///
 /// Assumes the given schemas have been validated.
 pub fn build_federated_query_graph(
-    supergraph_schema: Arc<ValidFederationSchema>,
-    api_schema: Arc<ValidFederationSchema>,
+    supergraph_schema: ValidFederationSchema,
+    api_schema: ValidFederationSchema,
     validate_extracted_subgraphs: Option<bool>,
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
@@ -213,7 +212,7 @@ struct SchemaQueryGraphBuilder {
 
 struct SchemaQueryGraphBuilderSubgraphData {
     federation_spec_definition: &'static FederationSpecDefinition,
-    api_schema: Arc<ValidFederationSchema>,
+    api_schema: ValidFederationSchema,
 }
 
 impl SchemaQueryGraphBuilder {
@@ -223,7 +222,7 @@ impl SchemaQueryGraphBuilder {
         query_graph: QueryGraph,
         source: NodeStr,
         schema: ValidFederationSchema,
-        api_schema: Option<Arc<ValidFederationSchema>>,
+        api_schema: Option<ValidFederationSchema>,
         for_query_planning: bool,
     ) -> Result<Self, FederationError> {
         let subgraph = if let Some(api_schema) = api_schema {
@@ -940,14 +939,14 @@ struct AbstractTypeWithRuntimeTypes {
 
 struct FederatedQueryGraphBuilder {
     base: BaseQueryGraphBuilder,
-    supergraph_schema: Arc<ValidFederationSchema>,
+    supergraph_schema: ValidFederationSchema,
     subgraphs: FederatedQueryGraphBuilderSubgraphs,
 }
 
 impl FederatedQueryGraphBuilder {
     fn new(
         query_graph: QueryGraph,
-        supergraph_schema: Arc<ValidFederationSchema>,
+        supergraph_schema: ValidFederationSchema,
     ) -> Result<Self, FederationError> {
         let base = BaseQueryGraphBuilder::new(
             query_graph,
