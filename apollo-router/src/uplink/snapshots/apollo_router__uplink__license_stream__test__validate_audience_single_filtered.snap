@@ -4,6 +4,6 @@ expression: yaml
 ---
 - fields:
     code: APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED
-    message: "the license file was valid, but was not enabled offline use"
   level: ERROR
+  message: "the license file was valid, but was not enabled offline use"
 

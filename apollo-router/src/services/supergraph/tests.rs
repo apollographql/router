@@ -565,7 +565,7 @@ async fn subscription_with_callback() {
             ).build())
         ].into_iter().collect());
 
-    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
     configuration.notify = notify.clone();
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -640,7 +640,7 @@ async fn subscription_callback_schema_reload() {
             ("orga", orga_subgraph)
         ].into_iter().collect());
 
-    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "headers": {"all": {"request": [{"propagate": {"named": "x-test"}}]}}, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "headers": {"all": {"request": [{"propagate": {"named": "x-test"}}]}}, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
     configuration.notify = notify.clone();
     let configuration = Arc::new(configuration);
     let service = TestHarness::builder()
@@ -709,7 +709,7 @@ async fn subscription_with_callback_with_limit() {
             ).build())
         ].into_iter().collect());
 
-    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "max_opened_subscriptions": 1, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "max_opened_subscriptions": 1, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
     configuration.notify = notify.clone();
     let mut service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -776,7 +776,7 @@ async fn subscription_with_callback_with_limit() {
 #[tokio::test]
 async fn subscription_without_header() {
     let subgraphs = MockedSubgraphs(HashMap::new());
-    let configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+    let configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
         .schema(SCHEMA)

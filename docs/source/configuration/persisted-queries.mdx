@@ -107,3 +107,7 @@ apq:
 To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
 
 </Note>
+
+## Limitations
+
+* **Unsupported with offline license**. An Apollo Router using an [offline Enterprise license](../enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.

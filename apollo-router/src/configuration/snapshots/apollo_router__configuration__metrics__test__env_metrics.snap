@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.non_zero()"
+---
+- name: apollo.router.config.env
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.apollo.dev: true
+          opt.apollo.graph_ref: true
+          opt.apollo.key: true
+          opt.apollo.license: true
+          opt.apollo.license.path: true
+          opt.apollo.supergraph.path: true
+          opt.apollo.supergraph.urls: true
+

@@ -28,7 +28,6 @@ use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
 use crate::configuration::metrics::Metrics;
-use crate::configuration::metrics::MetricsHandle;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
@@ -60,7 +59,7 @@ enum State<FA: RouterSuperServiceFactory> {
     },
     Running {
         configuration: Arc<Configuration>,
-        _metrics_handle: MetricsHandle,
+        _metrics: Metrics,
         schema: Arc<String>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
@@ -415,11 +414,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
-        let metrics_handle = Metrics::spawn(&configuration).await;
+        let metrics = Metrics::new(&configuration, &license);
 
         Ok(Running {
             configuration,
-            _metrics_handle: metrics_handle,
+            _metrics: metrics,
             schema,
             license,
             server_handle: Some(server_handle),
