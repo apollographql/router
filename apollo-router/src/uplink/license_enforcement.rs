@@ -335,7 +335,7 @@ impl FromStr for License {
                 validation.validate_exp = false;
                 validation.set_required_spec_claims(&["iss", "sub", "aud", "warnAt", "haltAt"]);
                 validation.set_issuer(&["https://www.apollographql.com/"]);
-                validation.set_audience(&["CLOUD", "SELF_HOSTED"]);
+                validation.set_audience(&["CLOUD", "SELF_HOSTED", "OFFLINE"]);
 
                 decode::<Claims>(
                     jwt.trim(),
@@ -501,5 +501,13 @@ mod test {
             "haltAt": 123,
         }))
         .expect("json must deserialize");
+
+        serde_json::from_value::<Claims>(json!({
+            "iss": "Issuer",
+            "sub": "Subject",
+            "aud": "OFFLINE",
+            "warnAt": 122,
+            "haltAt": 123,
+        })).expect("json must deserialize");
     }
 }
