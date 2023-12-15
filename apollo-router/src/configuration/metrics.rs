@@ -367,6 +367,11 @@ impl InstrumentData {
             env_var_exists("APOLLO_ROUTER_SUPERGRAPH_PATH"),
         );
 
+        attributes.insert(
+            "opt.apollo.dev".to_string(),
+            env_var_exists("APOLLO_ROUTER_DEV_ENV"),
+        );
+
         self.data
             .insert("apollo.router.config.env".to_string(), (1, attributes));
     }
