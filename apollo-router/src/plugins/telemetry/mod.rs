@@ -1739,7 +1739,7 @@ impl CacheCounter {
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
     if let ForwardHeaders::None = forward_rules {
-        return String::new();
+        return String::from("{}");
     }
     let headers_map = headers
         .iter()
