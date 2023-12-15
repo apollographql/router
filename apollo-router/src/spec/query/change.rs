@@ -222,6 +222,7 @@ impl<'a> QueryHashVisitor<'a> {
                                 Some(condition) => self.inline_fragment(condition.as_str(), f)?,
                             };
                         }
+                        Selection::FragmentSpread(f) => self.fragment_spread(f)?,
                         _ => return Err("expected inline fragment".into()),
                     }
                 }
