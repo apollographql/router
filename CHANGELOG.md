@@ -30,7 +30,34 @@ Previously, `telemetry.instrumentation.spans.span_mode.spec_compliant` was not b
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/4341
 
+### TLS client configuration override for Redis ([Issue #3551](https://github.com/apollographql/router/issues/3551))
 
+It is now possible to set up a client certificate or override the root certificate authority list for Redis connections, through the `tls` section under Redis configuration. Options follow the same format as [subgraph TLS configuration](https://www.apollographql.com/docs/router/configuration/overview/#tls):
+
+```yaml
+apq:
+  router:
+    cache:
+      redis:
+        urls: [ "redis://localhost:6379" ]
+        tls:
+          certificate_authorities: "${file./path/to/ca.crt}"
+          client_authentication:
+            certificate_chain: ${file./path/to/certificate_chain.pem}
+            key: ${file./path/to/key.pem}
+```
+
+
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/4304
+
+### Fix fragment usage with `@interfaceObject` ([PR #4363](https://github.com/apollographql/router/issues/4363))
+
+When requesting `__typename` under a fragment under an interface, from a subgraph adding fields to that interface with the `@interfaceObject` directive, the router was returning the interface name instead of the concrete type name. This is now fixed at the query planner level.
+
+
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/4363
 
 # [1.35.0] - 2023-12-01
 
