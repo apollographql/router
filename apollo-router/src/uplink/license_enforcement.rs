@@ -508,6 +508,7 @@ mod test {
             "aud": "OFFLINE",
             "warnAt": 122,
             "haltAt": 123,
-        })).expect("json must deserialize");
+        }))
+        .expect("json must deserialize");
     }
 }
