@@ -114,7 +114,7 @@ impl DynAttribute for ::tracing::Span {
 
     fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
         let mut attributes = attributes.into_iter().peekable();
-        if attributes.peek().is_some() {
+        if attributes.peek().is_none() {
             return;
         }
         self.with_subscriber(move |(id, dispatch)| {
@@ -146,7 +146,7 @@ impl DynAttribute for ::tracing::Span {
                             let mut attributes = attributes
                                 .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
                                 .peekable();
-                            if attributes.peek().is_some() {
+                            if attributes.peek().is_none() {
                                 return;
                             }
                             let mut extensions = s.extensions_mut();
