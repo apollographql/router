@@ -20,7 +20,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
-use crate::configuration::Homepage;
+use crate::configuration::{Explorer, Homepage};
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
 use crate::Configuration;
@@ -35,6 +35,9 @@ impl StaticPageLayer {
     pub(crate) fn new(configuration: &Configuration) -> Self {
         let static_page = if configuration.sandbox.enabled {
             Some(sandbox_page_content())
+        } else if configuration.explorer.enabled {
+            let explorer_config = configuration.explorer.clone();
+            Some(explorer_page_content(explorer_config))
         } else if configuration.homepage.enabled {
             let homepage_config = configuration.homepage.clone();
             Some(home_page_content(homepage_config))
@@ -112,6 +115,21 @@ struct SandboxTemplate {
 pub(crate) fn sandbox_page_content() -> String {
     let template = SandboxTemplate {
         apollo_router_version: std::env!("CARGO_PKG_VERSION"),
+    };
+    template.render().expect("cannot fail")
+}
+
+#[derive(Template)]
+#[template(path = "explorer_index.html")]
+struct ExplorerTemplate {
+    apollo_router_version: &'static str,
+    graph_ref: String,
+}
+
+pub(crate) fn explorer_page_content(explorer_config: Explorer) -> String {
+    let template = ExplorerTemplate {
+        apollo_router_version: std::env!("CARGO_PKG_VERSION"),
+        graph_ref: explorer_config.graph_ref.unwrap_or_default(),
     };
     template.render().expect("cannot fail")
 }

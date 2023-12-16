@@ -1,0 +1,8 @@
+# Enable the embedded explorer
+explorer:
+  enabled: true
+# Sandbox and homepage must be disabled
+sandbox:
+  enabled: false
+homepage:
+  enabled: false
