@@ -646,7 +646,6 @@ impl Query {
                                     parent_type.inner_named_type().as_str().to_owned(),
                                 ))
                             });
-
                         if let Some(input_str) = input_value.as_str() {
                             if parameters
                                 .schema
@@ -764,6 +763,16 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
+                        if let Some(typename_alias) = &fragment.aliased_typename {
+                            input.insert(
+                                TYPENAME,
+                                input
+                                    .get(typename_alias.as_str())
+                                    .and_then(|val| val.as_str())
+                                    .into(),
+                            );
+                        }
+
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
