@@ -1,16 +1,36 @@
 use crate::error::FederationError;
 use crate::error::SingleFederationError::Internal;
-use crate::schema::position::{CompositeTypeDefinitionPosition, FieldDefinitionPosition};
+use crate::schema::position::{
+    CompositeTypeDefinitionPosition, FieldDefinitionPosition, SchemaRootDefinitionKind,
+};
 use crate::schema::ValidFederationSchema;
 use apollo_compiler::ast::{Argument, DirectiveList, Name};
 use apollo_compiler::executable::{
     Field, Fragment, FragmentSpread, InlineFragment, Operation, Selection, SelectionSet,
+    VariableDefinition,
 };
 use apollo_compiler::Node;
-use indexmap::map::Entry;
 use indexmap::IndexMap;
+use linked_hash_map::{Entry, LinkedHashMap};
 use std::ops::Deref;
 use std::sync::Arc;
+
+/// An analogue of the apollo-compiler type `Operation` with these changes:
+/// - Stores the schema that the operation is queried against.
+/// - Swaps `operation_type` with `root_kind` (using the analogous federation-next type).
+/// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
+/// - Stores the fragments used by this operation (the executable document the operation was taken
+///   from may contain other fragments that are not used by this operation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedOperation {
+    pub(crate) schema: ValidFederationSchema,
+    pub(crate) root_kind: SchemaRootDefinitionKind,
+    pub(crate) name: Option<Name>,
+    pub(crate) variables: Arc<Vec<Node<VariableDefinition>>>,
+    pub(crate) directives: Arc<DirectiveList>,
+    pub(crate) selection_set: NormalizedSelectionSet,
+    pub(crate) fragments: Arc<IndexMap<Name, Node<Fragment>>>,
+}
 
 /// An analogue of the apollo-compiler type `SelectionSet` with these changes:
 /// - For the type, stores the schema and the position in that schema instead of just the
@@ -27,7 +47,9 @@ pub(crate) struct NormalizedSelectionSet {
 /// contain selections with the same selection "key". Selections that do have the same key are
 /// merged during the normalization process. By storing a selection set as a map, we can efficiently
 /// merge/join multiple selection sets.
-pub(crate) type NormalizedSelectionMap = IndexMap<NormalizedSelectionKey, NormalizedSelection>;
+///
+/// Note that this must be a `LinkedHashMap` so that removals don't change the order.
+pub(crate) type NormalizedSelectionMap = LinkedHashMap<NormalizedSelectionKey, NormalizedSelection>;
 
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
 /// (field, inline fragment, or fragment spread) that is used to determine whether two selections
@@ -203,7 +225,7 @@ impl NormalizedSelectionSet {
         let mut merged = NormalizedSelectionSet {
             schema: schema.clone(),
             type_position,
-            selections: Arc::new(IndexMap::new()),
+            selections: Arc::new(LinkedHashMap::new()),
         };
         merged.merge_pairs_into(normalized_selections)?;
         Ok(merged)

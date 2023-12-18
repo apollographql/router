@@ -117,15 +117,15 @@ pub struct QueryPlanner {
     federated_query_graph: Arc<QueryGraph>,
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
-    subgraph_federation_spec_definitions: IndexMap<NodeStr, &'static FederationSpecDefinition>,
+    subgraph_federation_spec_definitions: Arc<IndexMap<NodeStr, &'static FederationSpecDefinition>>,
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
-    interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
+    interface_types_with_interface_objects: Arc<IndexSet<InterfaceTypeDefinitionPosition>>,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    abstract_types_with_inconsistent_runtime_types: IndexSet<AbstractTypeDefinitionPosition>,
+    abstract_types_with_inconsistent_runtime_types: Arc<IndexSet<AbstractTypeDefinitionPosition>>,
     // TODO: Port _lastGeneratedPlanStatistics from the JS codebase in a way that keeps QueryPlanner
     // immutable.
 }

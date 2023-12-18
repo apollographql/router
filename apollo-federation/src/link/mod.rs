@@ -15,6 +15,7 @@ use thiserror::Error;
 mod argument;
 pub mod database;
 pub(crate) mod federation_spec_definition;
+pub(crate) mod graphql_definition;
 pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
 pub mod spec;

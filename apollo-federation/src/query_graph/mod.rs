@@ -15,6 +15,8 @@ use std::hash::Hash;
 pub mod build_query_graph;
 pub(crate) mod extract_subgraphs_from_supergraph;
 mod field_set;
+pub(crate) mod graph_path;
+pub(crate) mod path_tree;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {
@@ -212,6 +214,7 @@ impl Display for QueryGraphEdgeTransition {
     }
 }
 
+#[derive(Debug)]
 pub struct QueryGraph {
     /// The "current" source of the query graph. For query graphs representing a single source
     /// graph, this will only ever be one value, but it will change for "federated" query graphs

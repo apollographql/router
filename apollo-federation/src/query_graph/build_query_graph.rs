@@ -1440,7 +1440,8 @@ impl FederatedQueryGraphBuilder {
     ) -> Result<(), FederationError> {
         let mut stack = vec![(head, provided)];
         while let Some((node, selection_set)) = stack.pop() {
-            // We iterate through the selections to cancel out the reversing that the stack does.
+            // We reverse-iterate through the selections to cancel out the reversing that the stack
+            // does.
             for selection in selection_set.selections.iter().rev() {
                 match selection {
                     Selection::Field(field) => {
