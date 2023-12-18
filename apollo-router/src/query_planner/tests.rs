@@ -1242,7 +1242,8 @@ async fn missing_typename_and_fragments_in_requires2() {
                         "__typename": "Stuff",
                         "id": "1",
                         "thing": {
-                        "__typename": "Thing1"
+                        "__typename": "Thing1",
+                        "text1": "aaa"
                         }
                     }
                 ]}}},
