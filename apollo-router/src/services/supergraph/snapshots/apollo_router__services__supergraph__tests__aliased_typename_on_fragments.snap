@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+expression: aliased_typename
+---
+{
+  "data": {
+    "dog": {
+      "__isCatOrDog": "Dog",
+      "name": "Spot",
+      "nickname": "Spo",
+      "barkVolume": 7
+    }
+  }
+}
