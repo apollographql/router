@@ -180,6 +180,10 @@ impl Schema {
         self.definitions.get_interface(abstract_type).is_some()
     }
 
+    pub(crate) fn is_union(&self, abstract_type: &str) -> bool {
+        self.definitions.get_union(abstract_type).is_some()
+    }
+
     // given two field, returns the one that implements the other, if applicable
     pub(crate) fn most_precise<'f>(&self, a: &'f str, b: &'f str) -> Option<&'f str> {
         let typename_a = a;

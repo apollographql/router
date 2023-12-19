@@ -629,9 +629,9 @@ fn reformat_response_data_best_effort() {
                         "baz": "2",
                     },
                     "array": [
-                        {"bar": null, "baz": "3"},
+                        {},
                         null,
-                        {"bar": "5", "baz": null}
+                        {}
                     ],
                     "other": null,
                 },

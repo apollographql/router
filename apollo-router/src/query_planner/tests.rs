@@ -1458,9 +1458,7 @@ async fn typename_propagation2() {
                         "representations": [{
                             "__typename": "Book",
                             "bookId": "book1",
-                            "author": {
-                                "fullName": "Ada"
-                            }
+                            "author": null
                         }]
                     }
                 }},

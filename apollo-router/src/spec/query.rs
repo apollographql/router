@@ -583,33 +583,29 @@ impl Query {
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
-                        let typename =
-                            input_object
-                                .get(TYPENAME)
-                                .and_then(|val| val.as_str())
-                                .map(|s| {
-                                    apollo_compiler::ast::Type::Named(
-                                        apollo_compiler::ast::NamedType::new(
-                                            apollo_compiler::NodeStr::new(s),
-                                        )
-                                        .unwrap(),
+                        let typename = input_object
+                            .get(TYPENAME)
+                            .and_then(|val| val.as_str())
+                            .and_then(|s| {
+                                Some(apollo_compiler::ast::Type::Named(
+                                    apollo_compiler::ast::NamedType::new(
+                                        apollo_compiler::NodeStr::new(s),
                                     )
-                                });
+                                    .ok()?,
+                                ))
+                            });
 
                         let current_type = if parameters
                             .schema
                             .is_interface(field_type.inner_named_type().as_str())
                             || parameters
                                 .schema
-                                .definitions
-                                .get_union(field_type.inner_named_type().as_str())
-                                .is_some()
+                                .is_union(field_type.inner_named_type().as_str())
                         {
                             typename.as_ref().unwrap_or(field_type)
                         } else {
                             field_type
                         };
-                        println!("field type: {field_type:?} => current_type: {current_type:?}");
 
                         if self
                             .apply_selection_set(
@@ -747,12 +743,6 @@ impl Query {
                         continue;
                     }
 
-                    println!(
-                        "inline fragment: current_type = {}, type_condition={}",
-                        current_type.inner_named_type().as_str(),
-                        type_condition.as_str()
-                    );
-
                     let is_apply = current_type.inner_named_type().as_str()
                         == type_condition.as_str()
                         || parameters
@@ -798,12 +788,6 @@ impl Query {
                                     .into(),
                             );
                         }
-
-                        println!(
-                            "fragment spread: current_type = {}, type_condition={}",
-                            current_type.inner_named_type().as_str(),
-                            fragment.type_condition.as_str()
-                        );
 
                         let is_apply = current_type.inner_named_type().as_str()
                             == fragment.type_condition.as_str()
