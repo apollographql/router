@@ -747,7 +747,7 @@ impl Query {
                         == type_condition.as_str()
                         || parameters
                             .schema
-                            .is_subtype(&type_condition, current_type.inner_named_type().as_str());
+                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
