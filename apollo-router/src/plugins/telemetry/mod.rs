@@ -781,6 +781,7 @@ impl Telemetry {
         variables: &Map<ByteString, Value>,
         forward_rules: &ForwardValues,
     ) -> String {
+        let nb_var = variables.len();
         #[allow(clippy::mutable_key_type)] // False positive lint
         let variables = variables
             .iter()
@@ -799,7 +800,7 @@ impl Telemetry {
                     (name, "".to_string())
                 }
             })
-            .fold(BTreeMap::new(), |mut acc, (name, value)| {
+            .fold(HashMap::with_capacity(nb_var), |mut acc, (name, value)| {
                 acc.insert(name, value);
                 acc
             });
@@ -1737,6 +1738,9 @@ impl CacheCounter {
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+    if let ForwardHeaders::None = forward_rules {
+        return String::from("{}");
+    }
     let headers_map = headers
         .iter()
         .filter(|(name, _value)| {
