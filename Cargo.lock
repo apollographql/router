@@ -3361,6 +3361,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "home"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5444c27eef6923071f7ebcc33e3444508466a76f7a2b93da00ed6e19f30c1ddb"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "hostname"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5733,9 +5742,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.11+v2.6.2"
+version = "0.5.13+v2.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46ea051e9f888ea68f9a977a5a49c145ec037277dd94dd89a18bbf7892eec2f6"
+checksum = "aa10abe3baa710fd7b151c0b886e74f9fc73c63d23c0c91f3ab5fe87ce2674ed"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -7909,13 +7918,14 @@ checksum = "14247bb57be4f377dfb94c72830b8ce8fc6beac03cf4bf7b9732eadd414123fc"
 
 [[package]]
 name = "which"
-version = "4.4.0"
+version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2441c784c52b289a054b7201fc93253e288f094e2f4be9058343127c4226a269"
+checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
 dependencies = [
  "either",
- "libc",
+ "home",
  "once_cell",
+ "rustix 0.38.21",
 ]
 
 [[package]]
