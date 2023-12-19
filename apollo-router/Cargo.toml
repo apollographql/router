@@ -76,7 +76,7 @@ async-compression = { version = "0.4.5", features = [
 async-trait = "0.1.74"
 axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.5"
-bloomfilter = "1.0.12"
+bloomfilter = "1.0.13"
 buildstructor = "0.5.4"
 bytes = "1.5.0"
 clap = { version = "4.4.11", default-features = false, features = [
@@ -203,7 +203,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.25.3"
 sys-info = "0.9.1"
-thiserror = "1.0.50"
+thiserror = "1.0.51"
 tokio = { version = "1.35.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
 tokio-util = { version = "0.7.10", features = ["net", "codec", "time"] }
