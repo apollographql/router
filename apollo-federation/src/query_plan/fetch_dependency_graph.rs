@@ -93,7 +93,6 @@ pub(crate) struct FetchDependencyGraphEdge {
 ///
 /// In the graph, two fetches are connected if one of them (the parent/head) must be performed
 /// strictly before the other one (the child/tail).
-// TODO: Port `DeferTracking` and add a field for it here.
 #[derive(Debug, Clone)]
 pub(crate) struct FetchDependencyGraph {
     /// The supergraph schema that generated the federated query graph.
@@ -107,6 +106,8 @@ pub(crate) struct FetchDependencyGraph {
     /// The root nodes by subgraph name, representing the fetches against root operation types of
     /// the subgraphs.
     root_nodes_by_subgraph: Arc<IndexMap<NodeStr, IndexSet<NodeIndex>>>,
+    /// Tracks metadata about deferred blocks and their dependencies on one another.
+    defer_tracking: Arc<DeferTracking>,
     /// The initial fetch ID generation (used when handling `@defer`).
     starting_id_generation: u64,
     /// The current fetch ID generation (used when handling `@defer`).
@@ -116,4 +117,30 @@ pub(crate) struct FetchDependencyGraph {
     /// Whether this fetch dependency graph has undergone optimization (e.g. transitive reduction,
     /// removing empty/useless fetches, merging fetches with the same subgraph/path).
     is_optimized: bool,
+}
+
+// TODO: Write docstrings
+#[derive(Debug, Clone)]
+pub(crate) struct DeferTracking {
+    top_level_deferred: IndexSet<NodeStr>,
+    deferred: IndexMap<NodeStr, Vec<DeferredInfo>>,
+    primary_selection: Option<Arc<NormalizedSelectionSet>>,
+}
+
+// TODO: Write docstrings
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredInfo {
+    label: NodeStr,
+    path: FetchDependencyGraphPath,
+    sub_selection: NormalizedSelectionSet,
+    deferred: IndexSet<NodeStr>,
+    dependencies: IndexSet<NodeStr>,
+}
+
+// TODO: Write docstrings
+#[derive(Debug, Clone)]
+pub(crate) struct FetchDependencyGraphPath {
+    full_path: OpPath,
+    path_in_node: OpPath,
+    response_path: Vec<FetchDataPathElement>,
 }
