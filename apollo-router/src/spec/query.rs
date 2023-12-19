@@ -541,21 +541,8 @@ impl Query {
                         return Ok(());
                     }
                     Some(ExtendedType::Enum(enum_type)) => {
-                        return match input.as_str() {
-                            Some(s) => {
-                                if enum_type.values.contains_key(s) {
-                                    *output = input.clone();
-                                    Ok(())
-                                } else {
-                                    *output = Value::Null;
-                                    Ok(())
-                                }
-                            }
-                            None => {
-                                *output = Value::Null;
-                                Ok(())
-                            }
-                        };
+                        *output = input.clone();
+                        return Ok(())
                     }
                     _ => {}
                 }
