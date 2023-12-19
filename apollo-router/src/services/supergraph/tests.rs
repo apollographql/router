@@ -2345,8 +2345,8 @@ async fn no_typename_on_interface() {
 async fn aliased_typename_on_fragments() {
     let subgraphs = MockedSubgraphs([
             ("animal", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"query test__animal__0{dog{__isCatOrDog:__typename name nickname barkVolume}}", "operationName": "test__animal__0"}},
-                serde_json::json!{{"data":{"dog":{"__isCatOrDog": "Dog", "name":"Spot", "nickname": "Spo", "barkVolume": 7}}}}
+                serde_json::json!{{"query":"query test__animal__0{dog{name nickname barkVolume}}", "operationName": "test__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"name":"Spot", "nickname": "Spo", "barkVolume": 7}}}}
             ).build()),
         ].into_iter().collect());
 
@@ -2426,7 +2426,7 @@ async fn aliased_typename_on_fragments() {
     let request = supergraph::Request::fake_builder()
         .context(defer_context())
         .query(
-            "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { __isCatOrDog: __typename ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }",
+            "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }",
         )
         .build()
         .unwrap();
