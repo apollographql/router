@@ -779,16 +779,6 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if let Some(typename_alias) = &fragment.aliased_typename {
-                            input.insert(
-                                TYPENAME,
-                                input
-                                    .get(typename_alias.as_str())
-                                    .and_then(|val| val.as_str())
-                                    .into(),
-                            );
-                        }
-
                         let is_apply = current_type.inner_named_type().as_str()
                             == fragment.type_condition.as_str()
                             || parameters.schema.is_subtype(

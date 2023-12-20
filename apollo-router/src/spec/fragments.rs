@@ -4,7 +4,6 @@ use apollo_compiler::ExecutableDocument;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::TYPENAME;
 use crate::spec::query::DeferStats;
 use crate::spec::Schema;
 use crate::spec::Selection;
@@ -26,7 +25,6 @@ impl Fragments {
             .iter()
             .map(|(name, fragment)| {
                 let type_condition = fragment.type_condition();
-                let mut aliased_typename = None;
                 let fragment = Fragment {
                     type_condition: type_condition.as_str().to_owned(),
                     selection_set: fragment
@@ -34,16 +32,10 @@ impl Fragments {
                         .selections
                         .iter()
                         .filter_map(|selection| {
-                            if let Some(field) = selection.as_field() {
-                                if field.name.as_str() == TYPENAME && field.alias.is_some() {
-                                    aliased_typename = field.alias.as_ref().map(|f| f.to_string());
-                                }
-                            }
                             Selection::from_hir(selection, type_condition, schema, 0, defer_stats)
                                 .transpose()
                         })
                         .collect::<Result<Vec<_>, _>>()?,
-                    aliased_typename,
                 };
                 Ok((name.as_str().to_owned(), fragment))
             })
@@ -62,5 +54,4 @@ impl Fragments {
 pub(crate) struct Fragment {
     pub(crate) type_condition: String,
     pub(crate) selection_set: Vec<Selection>,
-    pub(crate) aliased_typename: Option<String>,
 }
