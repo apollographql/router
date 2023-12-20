@@ -12,6 +12,7 @@ use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -79,6 +80,18 @@ impl BridgeQueryPlanner {
                     configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                 ),
+                debug: Some(QueryPlannerDebugConfig {
+                    bypass_planner_for_single_subgraph: None,
+                    max_evaluated_plans: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_plans_limit
+                        .or(Some(10000)),
+                    paths_limit: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_paths_limit,
+                }),
             },
         )
         .await;
@@ -216,6 +229,18 @@ impl BridgeQueryPlanner {
                             GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                         ),
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                        debug: Some(QueryPlannerDebugConfig {
+                            bypass_planner_for_single_subgraph: None,
+                            max_evaluated_plans: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_plans_limit
+                                .or(Some(10000)),
+                            paths_limit: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_paths_limit,
+                        }),
                     },
                 )
                 .await?,

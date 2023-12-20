@@ -113,6 +113,10 @@ impl DynAttribute for ::tracing::Span {
     }
 
     fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
+        let mut attributes = attributes.into_iter().peekable();
+        if attributes.peek().is_none() {
+            return;
+        }
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -123,8 +127,7 @@ impl DynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
-                                        otel_data.builder.attributes =
-                                            Some(attributes.into_iter().collect());
+                                        otel_data.builder.attributes = Some(attributes.collect());
                                     } else {
                                         otel_data
                                             .builder
@@ -140,12 +143,16 @@ impl DynAttribute for ::tracing::Span {
                                 }
                             }
                         } else {
+                            let mut attributes = attributes
+                                .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                                .peekable();
+                            if attributes.peek().is_none() {
+                                return;
+                            }
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(registered_attributes) => {
-                                    registered_attributes.extend(attributes.into_iter().filter(
-                                        |kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX),
-                                    ));
+                                    registered_attributes.extend(attributes);
                                 }
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
