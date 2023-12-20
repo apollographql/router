@@ -1426,10 +1426,7 @@ async fn typename_propagation() {
     insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
 }
 
-// this test cannot pass as it is right now because we cannot fill in __typename yet without
-// large manipulations using the compiler
 #[tokio::test]
-#[should_panic]
 async fn typename_propagation2() {
     let subgraphs = MockedSubgraphs(
         [
