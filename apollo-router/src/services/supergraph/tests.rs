@@ -2342,6 +2342,102 @@ async fn no_typename_on_interface() {
 }
 
 #[tokio::test]
+async fn aliased_typename_on_fragments() {
+    let subgraphs = MockedSubgraphs([
+            ("animal", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"query test__animal__0{dog{name nickname barkVolume}}", "operationName": "test__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"name":"Spot", "nickname": "Spo", "barkVolume": 7}}}}
+            ).build()),
+        ].into_iter().collect());
+
+    let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(
+                r#"schema
+                @core(feature: "https://specs.apollo.dev/core/v0.2"),
+                @core(feature: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
+              {
+                query: Query
+              }
+              directive @core(as: String, feature: String!, for: core__Purpose) repeatable on SCHEMA
+              directive @join__field(graph: join__Graph, provides: join__FieldSet, requires: join__FieldSet) on FIELD_DEFINITION
+              directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+              directive @join__owner(graph: join__Graph!) on INTERFACE | OBJECT
+              directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+              directive @join__unionMember(
+                graph: join__Graph!
+                member: String!
+              ) repeatable on UNION
+
+              interface Animal {
+                id: String!
+              }
+
+              type Dog implements Animal {
+                id: String!
+                name: String!
+                nickname: String!
+                barkVolume: Int
+              }
+
+              type Cat implements Animal {
+                id: String!
+                name: String!
+                nickname: String!
+                meowVolume: Int
+              }
+
+              type Query {
+                animal: Animal! @join__field(graph: ANIMAL)
+                dog: Dog! @join__field(graph: ANIMAL)
+              }
+
+              enum core__Purpose {
+                """
+                `EXECUTION` features provide metadata necessary to for operation execution.
+                """
+                EXECUTION
+
+                """
+                `SECURITY` features provide metadata necessary to securely resolve fields.
+                """
+                SECURITY
+              }
+
+              union CatOrDog
+                @join__type(graph: ANIMAL)
+                @join__unionMember(graph: ANIMAL, member: "Dog")
+                @join__unionMember(graph: ANIMAL, member: "Cat") =
+                  Cat | Dog
+
+              scalar join__FieldSet
+
+              enum join__Graph {
+                ANIMAL @join__graph(name: "animal" url: "http://localhost:8080/query")
+              }
+              "#,
+            )
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(defer_context())
+        .query(
+            "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }",
+        )
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+
+    let aliased_typename = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(aliased_typename);
+}
+
+#[tokio::test]
 async fn multiple_interface_types() {
     let schema = r#"
       schema

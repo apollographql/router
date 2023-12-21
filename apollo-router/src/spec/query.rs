@@ -583,6 +583,30 @@ impl Query {
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
+                        let typename = input_object
+                            .get(TYPENAME)
+                            .and_then(|val| val.as_str())
+                            .and_then(|s| {
+                                Some(apollo_compiler::ast::Type::Named(
+                                    apollo_compiler::ast::NamedType::new(
+                                        apollo_compiler::NodeStr::new(s),
+                                    )
+                                    .ok()?,
+                                ))
+                            });
+
+                        let current_type = if parameters
+                            .schema
+                            .is_interface(field_type.inner_named_type().as_str())
+                            || parameters
+                                .schema
+                                .is_union(field_type.inner_named_type().as_str())
+                        {
+                            typename.as_ref().unwrap_or(field_type)
+                        } else {
+                            field_type
+                        };
+
                         if self
                             .apply_selection_set(
                                 selection_set,
@@ -590,7 +614,7 @@ impl Query {
                                 input_object,
                                 output_object,
                                 path,
-                                field_type,
+                                current_type,
                             )
                             .is_err()
                         {
@@ -617,7 +641,8 @@ impl Query {
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &executable::Type,
+        // the type under which we apply selections
+        current_type: &executable::Type,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -643,10 +668,9 @@ impl Query {
                             .filter(|v| v.is_string())
                             .unwrap_or_else(|| {
                                 Value::String(ByteString::from(
-                                    parent_type.inner_named_type().as_str().to_owned(),
+                                    current_type.inner_named_type().as_str().to_owned(),
                                 ))
                             });
-
                         if let Some(input_str) = input_value.as_str() {
                             if parameters
                                 .schema
@@ -661,6 +685,7 @@ impl Query {
                         }
                         continue;
                     }
+
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
@@ -683,7 +708,7 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            parent_type,
+                            current_type,
                             selection_set,
                         );
                         path.pop();
@@ -695,7 +720,7 @@ impl Query {
                         if field_type.is_non_null() {
                             parameters.errors.push(Error {
                                 message: format!(
-                                    "Cannot return null for non-nullable field {parent_type}.{}",
+                                    "Cannot return null for non-nullable field {current_type}.{}",
                                     field_name.as_str()
                                 ),
                                 path: Some(Path::from_response_slice(path)),
@@ -712,27 +737,17 @@ impl Query {
                     include_skip,
                     defer: _,
                     defer_label: _,
-                    known_type,
+                    known_type: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
-                    let is_apply = if let Some(input_type) =
-                        input.get(TYPENAME).and_then(|val| val.as_str())
-                    {
-                        // Only check if the fragment matches the input type directly, and if not, check if the
-                        // input type is a subtype of the fragment's type condition (interface, union)
-                        input_type == type_condition.as_str()
-                            || parameters.schema.is_subtype(type_condition, input_type)
-                    } else {
-                        known_type
-                            .as_ref()
-                            // We have no typename, we apply the selection set if the known_type implements the type_condition
-                            .map(|k| parameters.schema.is_subtype(type_condition, k))
-                            .unwrap_or_default()
-                            || known_type.as_deref() == Some(type_condition.as_str())
-                    };
+                    let is_apply = current_type.inner_named_type().as_str()
+                        == type_condition.as_str()
+                        || parameters
+                            .schema
+                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -748,13 +763,13 @@ impl Query {
                             input,
                             output,
                             path,
-                            parent_type,
+                            current_type,
                         )?;
                     }
                 }
                 Selection::FragmentSpread {
                     name,
-                    known_type,
+                    known_type: _,
                     include_skip,
                     defer: _,
                     defer_label: _,
@@ -764,23 +779,12 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        let is_apply = if let Some(input_type) =
-                            input.get(TYPENAME).and_then(|val| val.as_str())
-                        {
-                            // check if the fragment matches the input type directly, and if not, check if the
-                            // input type is a subtype of the fragment's type condition (interface, union)
-                            input_type == fragment.type_condition.as_str()
-                                || parameters
-                                    .schema
-                                    .is_subtype(&fragment.type_condition, input_type)
-                        } else {
-                            // If the type condition is an interface and the current known type implements it
-                            known_type
-                                .as_ref()
-                                .map(|k| parameters.schema.is_subtype(&fragment.type_condition, k))
-                                .unwrap_or_default()
-                                || known_type.as_deref() == Some(fragment.type_condition.as_str())
-                        };
+                        let is_apply = current_type.inner_named_type().as_str()
+                            == fragment.type_condition.as_str()
+                            || parameters.schema.is_subtype(
+                                &fragment.type_condition,
+                                current_type.inner_named_type().as_str(),
+                            );
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -796,7 +800,7 @@ impl Query {
                                 input,
                                 output,
                                 path,
-                                parent_type,
+                                current_type,
                             )?;
                         }
                     } else {
