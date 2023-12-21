@@ -542,7 +542,7 @@ impl Query {
                     }
                     Some(ExtendedType::Enum(enum_type)) => {
                         *output = input.clone();
-                        return Ok(())
+                        return Ok(());
                     }
                     _ => {}
                 }
