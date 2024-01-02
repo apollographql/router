@@ -25,7 +25,7 @@ Part of the motivation for this decision, was the recognition that we already ha
 
 Introduce 2 new traits:
 
-* pub (crate) PluginPrivate
+* pub (crate) PluginPrivate	
 * pub PluginUnstable
 
 [Demo](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=b4022dfeaeb920bc7ae94a94b7b9ea23)

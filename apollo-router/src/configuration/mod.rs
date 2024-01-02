@@ -207,10 +207,10 @@ pub(crate) enum GraphQLValidationMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
+    #[default]
     Both,
 }
 
@@ -883,7 +883,7 @@ impl Default for InMemoryCache {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {
@@ -899,6 +899,10 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// TTL for entries
     pub(crate) ttl: Option<Duration>,
+
+    #[serde(default)]
+    /// TLS client configuration
+    pub(crate) tls: Option<TlsClient>,
 }
 
 /// TLS related configuration options.
@@ -910,7 +914,7 @@ pub(crate) struct Tls {
     ///
     /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
     pub(crate) supergraph: Option<TlsSupergraph>,
-    pub(crate) subgraph: SubgraphConfiguration<TlsSubgraph>,
+    pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
 }
 
 /// Configuration options pertaining to the supergraph server component.
@@ -1031,7 +1035,7 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
-pub(crate) struct TlsSubgraph {
+pub(crate) struct TlsClient {
     /// list of certificate authorities in PEM format
     pub(crate) certificate_authorities: Option<String>,
     /// client certificate authentication
@@ -1039,7 +1043,7 @@ pub(crate) struct TlsSubgraph {
 }
 
 #[buildstructor::buildstructor]
-impl TlsSubgraph {
+impl TlsClient {
     #[builder]
     pub(crate) fn new(
         certificate_authorities: Option<String>,
@@ -1052,7 +1056,7 @@ impl TlsSubgraph {
     }
 }
 
-impl Default for TlsSubgraph {
+impl Default for TlsClient {
     fn default() -> Self {
         Self::builder().build()
     }

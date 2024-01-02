@@ -4,17 +4,23 @@ expression: response.errors
 ---
 [
   {
-    "message": "compiler error: fragment `Unused` must be used in an operation",
-    "extensions": {
-      "code": "GRAPHQL_VALIDATION_FAILED"
-    }
-  },
-  {
     "message": "compiler error: the argument `notAnArg` is not supported",
     "locations": [
       {
         "line": 1,
         "column": 22
+      }
+    ],
+    "extensions": {
+      "code": "GRAPHQL_VALIDATION_FAILED"
+    }
+  },
+  {
+    "message": "compiler error: fragment `Unused` must be used in an operation",
+    "locations": [
+      {
+        "line": 1,
+        "column": 42
       }
     ],
     "extensions": {

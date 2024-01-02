@@ -1,0 +1,57 @@
+---
+source: apollo-router/tests/integration/redis.rs
+expression: response
+---
+{
+  "data": {
+    "me": null,
+    "topProducts": [
+      {
+        "name": "chair",
+        "reviews": [
+          {
+            "body": "I can sit on it",
+            "author": null
+          }
+        ]
+      },
+      {
+        "name": "table",
+        "reviews": [
+          {
+            "body": "I can sit on it",
+            "author": null
+          },
+          {
+            "body": "I can eat on it",
+            "author": null
+          }
+        ]
+      }
+    ]
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "me"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    },
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "topProducts",
+        "@",
+        "reviews",
+        "@",
+        "author"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
+}

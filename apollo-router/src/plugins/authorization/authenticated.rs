@@ -600,10 +600,8 @@ mod tests {
 
     #[track_caller]
     fn filter(schema: &str, query: &str) -> (ast::Document, Vec<Path>) {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = ast::Document::parse(query, "query.graphql");
-        schema.validate().unwrap();
-        doc.to_executable(&schema).validate(&schema).unwrap();
+        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
 
         let map = schema.implementers_map();
         let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map, false).unwrap();

@@ -227,7 +227,11 @@ pub(crate) fn selection_set(
                 }
             }
             ast::Selection::InlineFragment(def) => {
-                let fragment_type = def.type_condition.as_deref().unwrap_or(parent_type);
+                let fragment_type = def
+                    .type_condition
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or(parent_type);
                 if let Some(sel) = visitor.inline_fragment(fragment_type, def)? {
                     selections.push(ast::Selection::InlineFragment(sel.into()))
                 }
@@ -266,7 +270,7 @@ fn test_add_directive_to_fields() {
             Ok(field(self, field_def, def)?.map(|mut new| {
                 new.directives.push(
                     ast::Directive {
-                        name: "added".into(),
+                        name: apollo_compiler::name!("added"),
                         arguments: Vec::new(),
                     }
                     .into(),
@@ -282,13 +286,14 @@ fn test_add_directive_to_fields() {
 
     let graphql = "
         type Query {
-            a: String
+            a(id: ID): String
             b: Int
             next: Query
         }
+        directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
         query($id: ID = null) {
-            a
+            a(id: $id)
             ... @defer {
                 b
             }
@@ -301,8 +306,9 @@ fn test_add_directive_to_fields() {
             }
         }
     ";
-    let ast = apollo_compiler::ast::Document::parse(graphql, "");
-    let (schema, _doc) = ast.to_mixed();
+    let ast = apollo_compiler::ast::Document::parse(graphql, "").unwrap();
+    let (schema, _doc) = ast.to_mixed_validate().unwrap();
+    let schema = schema.into_inner();
     let mut visitor = AddDirective { schema };
     let expected = "fragment F on Query {
   next @added {
@@ -311,7 +317,7 @@ fn test_add_directive_to_fields() {
 }
 
 query($id: ID = null) {
-  a @added
+  a(id: $id) @added
   ... @defer {
     b @added
   }

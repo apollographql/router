@@ -1,0 +1,18 @@
+---
+source: apollo-router/tests/integration/redis.rs
+expression: "v.as_object().unwrap().get(\"data\").unwrap()"
+---
+{
+  "topProducts": [
+    {
+      "__typename": "Product",
+      "upc": "1",
+      "name": "chair"
+    },
+    {
+      "__typename": "Product",
+      "upc": "2",
+      "name": "table"
+    }
+  ]
+}
