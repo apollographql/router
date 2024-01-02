@@ -81,7 +81,7 @@ flowchart LR;
 2. When your router receives a subscription, it executes that _same_ subscription against whichever subgraph defines the requested field (`stockPricesChanged` in the example above).
 
    - This communication usually _does_ use [a WebSocket subprotocol](#websocket-setup), for compatibility with most subgraph libraries.
-   - An HTTP-callback-based protocol is also available in preview. See [HTTP callback setup](#http-callback-setup).
+   - An HTTP-callback-based protocol is also available. See [HTTP callback setup](#http-callback-setup).
 
 3. The subgraph periodically sends new data to your router. Whenever it does, the router returns that data to the client in an additional HTTP response "chunk".
    - A subscription can include federated entity fields that are defined in _other_ subgraphs. If it does, the router _first_ fetches those fields by querying the corresponding subgraphs (such as **Portfolios** in the diagram above). These queries use HTTP as usual.
@@ -119,7 +119,7 @@ flowchart LR;
     - You can _skip_ modifying subgraph schemas that don't define any `Subscription` fields.
 
 1. If you're using Apollo Server to implement subgraphs, [update your Apollo Server instances to version 4 or later](/apollo-server/migration).
-    - Follow the Apollo Server 4 [guide for enabling subscriptions](/apollo-server/data/subscriptions#enabling-subscriptions). 
+    - Follow the Apollo Server 4 [guide for enabling subscriptions](/apollo-server/data/subscriptions#enabling-subscriptions).
     - Update [`@apollo/subgraph`](/apollo-server/using-federation/apollo-subgraph-setup/#1-install-and-import-apollosubgraph).
 
 After you complete these prerequisites, you can safely [configure your router](#router-setup) for subscriptions.
@@ -128,7 +128,7 @@ After you complete these prerequisites, you can safely [configure your router](#
 
 After completing all [prerequisites](#prerequisites), in your router's [YAML config file](../configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
 
-The Apollo Router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides preview support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
+The Apollo Router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
 
 ### WebSocket setup
 
@@ -155,7 +155,7 @@ The router supports the following WebSocket subprotocols, specified via the `pro
   - Used by the [graphql-ws](https://github.com/enisdenjo/graphql-ws) library
   - This subprotocol is the **default value** and is recommended for GraphQL server libraries implementing WebSocket-based subscriptions.
 - `graphql_transport_ws`
-  - Legacy subprotocol used by the [`subscriptions-transport-ws` library](https://github.com/apollographql/subscriptions-transport-ws), which is **unmaintained** but provided for backward compatibility. 
+  - Legacy subprotocol used by the [`subscriptions-transport-ws` library](https://github.com/apollographql/subscriptions-transport-ws), which is **unmaintained** but provided for backward compatibility.
 
 By default, the router uses the `graphql_ws` protocol option for all subgraphs. You can change this global default and/or override it for individual subgraphs by setting the `protocol` key as shown above.
 
@@ -163,18 +163,20 @@ Your router creates a separate WebSocket connection for each client subscription
 
 ### HTTP callback setup
 
-<PreviewFeature />
-
 <Note>
-  
+
 * Your router must use whichever subprotocol is expected by each of your subgraphs.
 * To disambiguate between `graph-ws` and `graph_ws`:
-  * `graph-ws` (with a hyphen `-`) is the name of the [library](https://github.com/enisdenjo/graphql-ws) that uses the recommended `graphql_ws` (with un underscore `_`) WebSocket subprotocol. 
+  * `graph-ws` (with a hyphen `-`) is the name of the [library](https://github.com/enisdenjo/graphql-ws) that uses the recommended `graphql_ws` (with un underscore `_`) WebSocket subprotocol.
 * Each `path` must be set as an _absolute path_. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the absolute path as `path: "/foo/bar/graphql/ws"`.
+* The `public_url` must include the configured `path` on the router. For example, given a server URL of `http://localhost:8080` and the router's `path` = `/my_callback`, then your `public_url` must append the `path` to the server: `http://localhost:8080/my_callback`.
+* If you have a proxy in front of the router that redirects queries to the `path` configured in the router, you can specify another path for the `public_url`, for example `http://localhost:8080/external_path`.
+* Given a `public_url`, the router appends a subscription id to the `public_url` to get {`http://localhost:8080/external_access/{subscription_id}`} then passes it directly to your subgraphs.
+* If you don't specify the `path`, its default value is `/callback`, so you'll have to specify it in `public_url`.
 
 </Note>
 
-The Apollo Router provides preview support for receiving subgraph subscription events via HTTP callbacks, _instead of_ over a persistent WebSocket connection. This **callback mode** provides the following advantages over WebSocket-based subscriptions:
+The Apollo Router provides support for receiving subgraph subscription events via HTTP callbacks, _instead of_ over a persistent WebSocket connection. This **callback mode** provides the following advantages over WebSocket-based subscriptions:
 
 - The router doesn't need to maintain a persistent connection for each distinct subscription.
 - You can publish events directly to the router from a pubsub system, instead of routing those events through the subgraph.
@@ -193,8 +195,8 @@ Here's an example configuration that sets up subgraph subscriptions in callback 
 subscription:
   enabled: true
   mode:
-    preview_callback:
-      public_url: https://example.com:4000 # The router's public URL, the one on which your subgraphs can have access to the Router
+    callback:
+      public_url: https://example.com:4000/callback # The router's public URL, which your subgraphs access, must include the path configured on the router
       listen: 127.0.0.1:4000 # The IP address and port the router will listen on for subscription callbacks, for security reasons it might be better to expose on another port that is only available from your internal network
       path: /callback # The path of the router's callback endpoint
       heartbeat_interval: 5s # Optional (default: 5secs)
@@ -202,6 +204,17 @@ subscription:
         - accounts
 ```
 
+You can disable the heartbeat by setting `heartbeat_interval_ms: disabled`. This is useful for example if you're running in callback mode in an infrastructure based on lambda functions, where you prefer neither to send heartbeats nor to keep a lambda awake just to send heartbeats to subscriptions.
+
+<Caution>
+
+Once the heartbeat is disabled, you must manage how a subscription is closed from the server side.
+
+If something crashes on your side for a specific subscription on specific events, but you don't manage closing the subscription, you can end up with a subscription still opened on the client but without any events to notify you on the client side that the subscription has crashed.
+
+Also, when handling subscriptions with heartbeats disabled, make sure to store a subscription's request payload (including extensions data with callback URL and verifier) to be able to send the right events on the right callback URL when you start your lambda function triggered by an event.
+
+</Caution>
 ### Using a combination of modes
 
 If some of your subgraphs require [passthrough mode](#websocket-setup) and others require [callback mode](#http-callback-setup) for subscriptions, you can apply different modes to different subgraphs in your configuration:
@@ -215,8 +228,8 @@ subscription:
         reviews: #highlight-line
           path: /ws
           protocol: graphql_ws
-    preview_callback:
-      public_url: http://public_url_of_my_router_instance:4000
+    callback:
+      public_url: http://public_url_of_my_router_instance:4000/callback # This must include the path configured on the router
       listen: 127.0.0.1:4000
       path: /callback
       subgraphs:

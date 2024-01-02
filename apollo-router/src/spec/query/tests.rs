@@ -471,6 +471,112 @@ fn reformat_response_data_fragment_spread() {
 }
 
 #[test]
+fn reformat_response_data_abstract_fragment_spread() {
+    let schema = "type Query {
+  dog: Dog
+}
+
+type Dog {
+  name: String!
+  nickname: String!
+  barkVolume: Int
+}
+
+type Cat {
+  name: String!
+  nickname: String!
+  meowVolume: Int
+}
+
+union CatOrDog = Cat | Dog";
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { __isCatOrDog: __typename ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "dog": {"__isCatOrDog": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .expected(json! {
+            {"dog": {"__isCatOrDog": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .test();
+
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } __isCatOrDog: __typename }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "dog": {"name": "Fido", "nickname": "Fi", "barkVolume": 7, "__isCatOrDog": "Dog" }}
+        })
+        .expected(json! {
+            {"dog": {"name": "Fido", "nickname": "Fi", "barkVolume": 7, "__isCatOrDog": "Dog" }}
+        })
+        .test();
+
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { __typename ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"dog": { "__typename": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .expected(json! {
+            {"dog": { "__typename": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .test();
+}
+
+#[test]
+fn reformat_response_data_nested_abstract_fragment_spread() {
+    let schema = "type Query {
+  nestedDog: NestedDog
+}
+
+type NestedDog {
+  dog: Dog!
+}
+
+type Dog {
+  name: String!
+  nickname: String!
+  barkVolume: Int
+}
+
+type Cat {
+  name: String!
+  nickname: String!
+  meowVolume: Int
+}
+
+union CatOrDog = Cat | NestedDog";
+    let query = "query test { nestedDog { ...petFragment } } fragment petFragment on CatOrDog { __isCatOrDog: __typename ... on NestedDog { dog { name nickname barkVolume } } ... on Cat { name nickname meowVolume } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "nestedDog": {"__isCatOrDog": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .expected(json! {
+            {"nestedDog": {"__isCatOrDog": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .test();
+
+    let query = "query test { nestedDog { ...petFragment } } fragment petFragment on CatOrDog { __typename ... on NestedDog { dog { name nickname barkVolume } } ... on Cat { name nickname meowVolume } }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"nestedDog": { "__typename": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .expected(json! {
+            {"nestedDog": { "__typename": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .test();
+}
+
+#[test]
 fn reformat_response_data_best_effort() {
     FormatTest::builder()
         .schema(
@@ -523,9 +629,9 @@ fn reformat_response_data_best_effort() {
                         "baz": "2",
                     },
                     "array": [
-                        {"bar": null, "baz": "3"},
+                        {},
                         null,
-                        {"bar": "5", "baz": null}
+                        {}
                     ],
                     "other": null,
                 },
