@@ -44,13 +44,13 @@
     
         <h2>Overview of licenses:</h2>
         <ul class="licenses-overview">
-            <li><a href="#MIT">MIT License</a> (97)</li>
-            <li><a href="#Apache-2.0">Apache License 2.0</a> (67)</li>
-            <li><a href="#BSD-3-Clause">BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License</a> (10)</li>
-            <li><a href="#ISC">ISC License</a> (7)</li>
+            <li><a href="#Apache-2.0">Apache License 2.0</a> (513)</li>
+            <li><a href="#MIT">MIT License</a> (161)</li>
+            <li><a href="#BSD-3-Clause">BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License</a> (12)</li>
+            <li><a href="#ISC">ISC License</a> (11)</li>
+            <li><a href="#BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</a> (3)</li>
             <li><a href="#Elastic-2.0">Elastic License 2.0</a> (3)</li>
             <li><a href="#MPL-2.0">Mozilla Public License 2.0</a> (3)</li>
-            <li><a href="#BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</a> (2)</li>
             <li><a href="#CC0-1.0">Creative Commons Zero v1.0 Universal</a> (2)</li>
             <li><a href="#OpenSSL">OpenSSL License</a> (2)</li>
             <li><a href="#Unicode-DFS-2016">Unicode License Agreement - Data Files and Software (2016)</a> (1)</li>
@@ -7945,6 +7945,7 @@ limitations under the License.</pre>
                     <li><a href=" https://github.com/dtolnay/serde-yaml ">serde_yaml</a></li>
                     <li><a href=" https://gitlab.com/ijackson/rust-shellexpand ">shellexpand</a></li>
                     <li><a href=" https://github.com/vorner/signal-hook ">signal-hook-registry</a></li>
+                    <li><a href=" https://github.com/mitsuhiko/similar ">similar</a></li>
                     <li><a href=" https://github.com/servo/rust-smallvec ">smallvec</a></li>
                     <li><a href=" https://github.com/rust-lang/socket2 ">socket2</a></li>
                     <li><a href=" https://github.com/rust-lang/socket2 ">socket2</a></li>
@@ -11812,8 +11813,6 @@ limitations under the License.
                 <h3 id="Apache-2.0">Apache License 2.0</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
-                    <li><a href=" https://github.com/apollographql/apollo-rs ">apollo-compiler</a></li>
-                    <li><a href=" https://github.com/apollographql/apollo-rs ">apollo-parser</a></li>
                     <li><a href=" https://github.com/dalek-cryptography/curve25519-dalek ">curve25519-dalek-derive</a></li>
                     <li><a href=" https://github.com/bikeshedder/deadpool ">deadpool-runtime</a></li>
                     <li><a href=" https://github.com/nrc/proc-macro-rules ">deno-proc-macro-rules</a></li>
@@ -11831,6 +11830,7 @@ limitations under the License.
                     <li><a href=" https://github.com/lifthrasiir/num-cmp ">num-cmp</a></li>
                     <li><a href=" https://github.com/rhaiscript/rhai ">rhai_codegen</a></li>
                     <li><a href=" https://github.com/jedisct1/rust-siphash ">siphasher</a></li>
+                    <li><a href=" https://github.com/Gankra/sptr ">sptr</a></li>
                     <li><a href=" https://github.com/mullvad/system-configuration-rs ">system-configuration</a></li>
                     <li><a href=" https://github.com/mullvad/system-configuration-rs ">system-configuration-sys</a></li>
                     <li><a href=" https://github.com/apache/thrift/tree/master/lib/rs ">thrift</a></li>
@@ -12456,7 +12456,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/dropbox/rust-alloc-no-stdlib ">alloc-stdlib</a></li>
-                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) &lt;year&gt; &lt;owner&gt;. 
 
@@ -12788,11 +12787,12 @@ these terms.
                 <h3 id="Elastic-2.0">Elastic License 2.0</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/apollographql/federation-next ">apollo-federation</a></li>
                     <li><a href=" https://github.com/apollographql/federation/ ">router-bridge</a></li>
                 </ul>
-                <pre class="license-text">Copyright 2021 Apollo Graph, Inc.
+                <pre class="license-text">Elastic License 2.0
 
-Elastic License 2.0
+URL: https://www.elastic.co/licensing/elastic-license
 
 ## Acceptance
 
@@ -12883,120 +12883,13 @@ these terms.
 **use** means anything you do with the software requiring one of your licenses.
 
 **trademark** means trademarks, service marks, and similar rights.
-
---------------------------------------------------------------------------------
 </pre>
-            </li>
-            <li class="license">
-                <h3 id="Elastic-2.0">Elastic License 2.0</h3>
-                <h4>Used by:</h4>
-                <ul class="license-used-by">
-                    <li><a href=" https://github.com/apollographql/federation-next ">apollo-federation</a></li>
-                </ul>
-                <pre class="license-text">Copyright 2021 Apollo Graph, Inc.
-
-Source code in this repository is covered by (i) the Elastic License 2.0 or (ii) an MIT compatible license, in each case, as designated by a licensing file in a subdirectory or file header. The default throughout the repository is a license under the Elastic License 2.0, unless a file header or a licensing file in a subdirectory specifies another license.
-
---------------------------------------------------------------------------------
-
-Elastic License 2.0
-
-## Acceptance
-
-By using the software, you agree to all of the terms and conditions below.
-
-## Copyright License
-
-The licensor grants you a non-exclusive, royalty-free, worldwide,
-non-sublicensable, non-transferable license to use, copy, distribute, make
-available, and prepare derivative works of the software, in each case subject to
-the limitations and conditions below.
-
-## Limitations
-
-You may not provide the software to third parties as a hosted or managed
-service, where the service provides users with access to any substantial set of
-the features or functionality of the software.
-
-You may not move, change, disable, or circumvent the license key functionality
-in the software, and you may not remove or obscure any functionality in the
-software that is protected by the license key.
-
-You may not alter, remove, or obscure any licensing, copyright, or other notices
-of the licensor in the software. Any use of the licensor’s trademarks is subject
-to applicable law.
-
-## Patents
-
-The licensor grants you a license, under any patent claims the licensor can
-license, or becomes able to license, to make, have made, use, sell, offer for
-sale, import and have imported the software, in each case subject to the
-limitations and conditions in this license. This license does not cover any
-patent claims that you cause to be infringed by modifications or additions to
-the software. If you or your company make any written claim that the software
-infringes or contributes to infringement of any patent, your patent license for
-the software granted under these terms ends immediately. If your company makes
-such a claim, your patent license ends immediately for work on behalf of your
-company.
-
-## Notices
-
-You must ensure that anyone who gets a copy of any part of the software from you
-also gets a copy of these terms.
-
-If you modify the software, you must include in any modified copies of the
-software prominent notices stating that you have modified the software.
-
-## No Other Rights
-
-These terms do not imply any licenses other than those expressly granted in
-these terms.
-
-## Termination
-
-If you use the software in violation of these terms, such use is not licensed,
-and your licenses will automatically terminate. If the licensor provides you
-with a notice of your violation, and you cease all violation of this license no
-later than 30 days after you receive that notice, your licenses will be
-reinstated retroactively. However, if you violate these terms after such
-reinstatement, any additional violation of these terms will cause your licenses
-to terminate automatically and permanently.
-
-## No Liability
-
-*As far as the law allows, the software comes as is, without any warranty or
-condition, and the licensor will not be liable to you for any damages arising
-out of these terms or the use or nature of the software, under any kind of
-legal claim.*
-
-## Definitions
-
-The **licensor** is the entity offering these terms, and the **software** is the
-software the licensor makes available under these terms, including any portion
-of it.
-
-**you** refers to the individual or entity agreeing to these terms.
-
-**your company** is any legal entity, sole proprietorship, or other kind of
-organization that you work for, plus all organizations that have control over,
-are under the control of, or are under common control with that
-organization. **control** means ownership of substantially all the assets of an
-entity, or the power to direct its management and policies by vote, contract, or
-otherwise. Control can be direct or indirect.
-
-**your licenses** are all the licenses granted to you for the software under
-these terms.
-
-**use** means anything you do with the software requiring one of your licenses.
-
-**trademark** means trademarks, service marks, and similar rights.
-
---------------------------------------------------------------------------------</pre>
             </li>
             <li class="license">
                 <h3 id="ISC">ISC License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                     <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                 </ul>
                 <pre class="license-text">   Copyright 2015-2016 Brian Smith.
@@ -13017,6 +12910,7 @@ these terms.
                 <h3 id="ISC">ISC License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                     <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                 </ul>
                 <pre class="license-text">/* Copyright (c) 2015, Google Inc.
@@ -13123,7 +13017,6 @@ THIS SOFTWARE.
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/jedisct1/rust-bloom-filter ">bloomfilter</a></li>
-                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                     <li><a href=" https://github.com/rustls/webpki ">rustls-webpki</a></li>
                 </ul>
                 <pre class="license-text">ISC License:
@@ -13396,7 +13289,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/reem/rust-ordered-float ">ordered-float</a></li>
                     <li><a href=" https://github.com/reem/rust-ordered-float ">ordered-float</a></li>
-                    <li><a href=" https://github.com/reem/rust-ordered-float ">ordered-float</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2015 Jonathan Reem
 
@@ -13471,6 +13363,7 @@ THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRES
                 <h3 id="MIT">MIT License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                     <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2015-2016 the fiat-crypto authors (see
@@ -14945,7 +14838,6 @@ SOFTWARE.
                     <li><a href=" https://github.com/DimaKudosh/difflib ">difflib</a></li>
                     <li><a href=" https://github.com/Stranger6667/jsonschema-rs ">jsonschema</a></li>
                     <li><a href=" https://crates.io/crates/lazy-regex-proc_macros ">lazy-regex-proc_macros</a></li>
-                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                     <li><a href=" https://github.com/denoland/deno ">serde_v8</a></li>
                     <li><a href=" https://github.com/denoland/rusty_v8 ">v8</a></li>
                     <li><a href=" https://github.com/tokio-rs/valuable ">valuable</a></li>
@@ -16743,6 +16635,7 @@ one at http://mozilla.org/MPL/2.0/.
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
+                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
                 </ul>
                 <pre class="license-text">/* &#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;
  * Copyright (c) 1998-2011 The OpenSSL Project.  All rights reserved.
@@ -16797,62 +16690,6 @@ one at http://mozilla.org/MPL/2.0/.
  * Hudson (tjh@cryptsoft.com).
  *
  */</pre>
-            </li>
-            <li class="license">
-                <h3 id="OpenSSL">OpenSSL License</h3>
-                <h4>Used by:</h4>
-                <ul class="license-used-by">
-                    <li><a href=" https://github.com/briansmith/ring ">ring</a></li>
-                </ul>
-                <pre class="license-text">OpenSSL License
-
-Copyright (c) 1998-2008 The OpenSSL Project. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-
-3. All advertising materials mentioning features or use of this software must display the following acknowledgment: &quot;This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (http://www.openssl.org/)&quot;
-
-4. The names &quot;OpenSSL Toolkit&quot; and &quot;OpenSSL Project&quot; must not be used to endorse or promote products derived from this software without prior written permission. For written permission, please contact openssl-core@openssl.org.
-
-5. Products derived from this software may not be called &quot;OpenSSL&quot; nor may &quot;OpenSSL&quot; appear in their names without prior written permission of the OpenSSL Project.
-
-6. Redistributions of any form whatsoever must retain the following acknowledgment: &quot;This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit (http://www.openssl.org/)&quot;
-
-THIS SOFTWARE IS PROVIDED BY THE OpenSSL PROJECT &#x60;&#x60;AS IS&#x27;&#x27; AND ANY EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE OpenSSL PROJECT OR ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-This product includes cryptographic software written by Eric Young (eay@cryptsoft.com). This product includes software written by Tim Hudson (tjh@cryptsoft.com).
-
-
-Original SSLeay License
-
-Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com) All rights reserved.
-
-This package is an SSL implementation written by Eric Young (eay@cryptsoft.com). The implementation was written so as to conform with Netscapes SSL.
-
-This library is free for commercial and non-commercial use as long as the following conditions are aheared to. The following conditions apply to all code found in this distribution, be it the RC4, RSA, lhash, DES, etc., code; not just the SSL code. The SSL documentation included with this distribution is covered by the same copyright terms except that the holder is Tim Hudson (tjh@cryptsoft.com).
-
-Copyright remains Eric Young&#x27;s, and as such any Copyright notices in the code are not to be removed. If this package is used in a product, Eric Young should be given attribution as the author of the parts of the library used. This can be in the form of a textual message at program startup or in documentation (online or textual) provided with the package.
-
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the copyright notice, this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-
-3. All advertising materials mentioning features or use of this software must display the following acknowledgement:
-&quot;This product includes cryptographic software written by Eric Young (eay@cryptsoft.com)&quot;
-The word &#x27;cryptographic&#x27; can be left out if the rouines from the library being used are not cryptographic related :-).
-
-4. If you include any Windows specific code (or a derivative thereof) from the apps directory (application code) you must include an acknowledgement: &quot;This product includes software written by Tim Hudson (tjh@cryptsoft.com)&quot;
-
-THIS SOFTWARE IS PROVIDED BY ERIC YOUNG &#x60;&#x60;AS IS&#x27;&#x27; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-The licence and distribution terms for any publically available version or derivative of this code cannot be changed. i.e. this code cannot simply be copied and put under another distribution licence [including the GNU Public Licence.]
-</pre>
             </li>
             <li class="license">
                 <h3 id="Unicode-DFS-2016">Unicode License Agreement - Data Files and Software (2016)</h3>

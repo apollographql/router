@@ -7,6 +7,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
+use crate::spec::TYPENAME;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
@@ -59,7 +60,10 @@ pub(crate) fn execute_selection_set<'a>(
         None => return Value::Null,
     };
 
-    current_type = current_type.or_else(|| content.get("__typename").and_then(|v| v.as_str()));
+    current_type = content
+        .get(TYPENAME)
+        .and_then(|v| v.as_str())
+        .or(current_type);
 
     let mut output = Object::with_capacity(selections.len());
     for selection in selections {
@@ -84,7 +88,7 @@ pub(crate) fn execute_selection_set<'a>(
 
                 match content.get_key_value(selection_name) {
                     None => {
-                        if name == "__typename" {
+                        if name == TYPENAME {
                             // if the __typename field was missing but we can infer it, fill it
                             if let Some(ty) = current_type {
                                 output.insert(

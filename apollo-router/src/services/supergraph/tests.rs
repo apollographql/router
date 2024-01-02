@@ -2702,47 +2702,47 @@ async fn interface_object_typename() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   directive @owner(
     """Subgraph owner who owns this definition."""
     subgraph: String!
   ) on ARGUMENT_DEFINITION | ENUM | ENUM_VALUE | FIELD_DEFINITION | INPUT_OBJECT | INPUT_FIELD_DEFINITION | INTERFACE | OBJECT | SCALAR | UNION
 
   scalar join__FieldSet
-  
+
   enum join__Graph {
     A @join__graph(name: "A", url: "https://localhost:4001")
     B @join__graph(name: "B", url: "https://localhost:4002")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type ContactWrapper @join__type(graph: A) {
     inner: Contact!
   }
@@ -2752,7 +2752,7 @@ async fn interface_object_typename() {
     @join__type(graph: B, key: "id displayName", isInterfaceObject: true)
   {
     id: ID!
-    displayName: String! 
+    displayName: String!
     country: String @join__field(graph: B)
   }
 
@@ -2764,7 +2764,7 @@ async fn interface_object_typename() {
     displayName: String!
     country: String @join__field
   }
-  
+
   type Query
     @join__type(graph: A)
   {
@@ -2893,4 +2893,99 @@ async fn interface_object_typename() {
 
     let mut stream = service.oneshot(request).await.unwrap();
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+}
+
+#[tokio::test]
+async fn fragment_reuse() {
+    const SCHEMA: &str = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+         {
+        query: Query
+   }
+   directive @core(feature: String!) repeatable on SCHEMA
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   scalar join__FieldSet
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+   type Query {
+       me: User @join__field(graph: USER)
+   }
+
+   type User
+   @join__owner(graph: USER)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id"){
+       id: ID!
+       name: String
+       organizations: [Organization] @join__field(graph: ORGA)
+   }
+   type Organization
+   @join__owner(graph: ORGA)
+   @join__type(graph: ORGA, key: "id") {
+       id: ID
+       name: String
+   }"#;
+
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                  "query":"query Query__user__0($a:Boolean!=true$b:Boolean!=true){me{name ...on User@include(if:$a){__typename id}...on User@include(if:$b){__typename id}}}",
+                  "operationName": "Query__user__0"
+                }},
+                serde_json::json!{{"data": {"me": { "name": "Ada", "__typename": "User", "id": "1" }}}}
+            ).build()),
+        ("orga", MockSubgraph::builder().with_json(
+          serde_json::json!{{
+            "query":"query Query__orga__1($representations:[_Any!]!$a:Boolean!=true$b:Boolean!=true){_entities(representations:$representations){...F@include(if:$a)...F@include(if:$b)}}fragment F on User{organizations{id name}}",
+            "operationName": "Query__orga__1",
+            "variables":{"representations":[{"__typename":"User","id":"1"}]}
+          }},
+          serde_json::json!{{"data": {"_entities": [{ "organizations": [{"id": "2", "name": "Apollo"}] }]}}}
+      ).build())
+    ].into_iter().collect());
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query Query($a: Boolean! = true, $b: Boolean! = true) {
+            me {
+              name
+              ...F @include(if: $a)
+              ...F @include(if: $b)
+            }
+          }
+          fragment F on User {
+            organizations {
+              id
+              name
+            }
+          }"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
 }
