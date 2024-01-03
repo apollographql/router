@@ -764,6 +764,14 @@ jobs:
     steps:
       - when:
           condition:
+            not:
+              equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+          steps:
+             - run:
+                command: >
+                  echo "Not publishing any github release."
+      - when:
+          condition:
             equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
           steps:
             - checkout
