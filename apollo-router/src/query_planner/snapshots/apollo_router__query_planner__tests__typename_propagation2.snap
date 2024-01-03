@@ -4,24 +4,12 @@ expression: "serde_json::to_value(&response).unwrap()"
 ---
 {
   "data": {
-    "book": null
-  },
-  "errors": [
-    {
-      "message": "couldn't find mock for query {\"query\":\"query QueryBook__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id}}}\",\"operationName\":\"QueryBook__node_relay_subgraph__2\",\"variables\":{\"representations\":[{\"__typename\":\"Book\",\"bookId\":\"book1\",\"author\":null}]}}",
-      "extensions": {
-        "code": "FETCH_ERROR"
+    "book": {
+      "__typename": "Book",
+      "id": "1",
+      "author": {
+        "__typename": "Author"
       }
     }
-  ],
-  "extensions": {
-    "valueCompletion": [
-      {
-        "message": "Cannot return null for non-nullable field Book.id",
-        "path": [
-          "book"
-        ]
-      }
-    ]
   }
 }
