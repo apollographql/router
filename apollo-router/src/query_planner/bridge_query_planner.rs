@@ -150,8 +150,8 @@ impl BridgeQueryPlanner {
 
                 if api_schema.schema != new_api_schema {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = "failed",
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = false,
                         "API schema generation mismatch: apollo-federation and router-bridge write different schema"
                     );
 
@@ -184,8 +184,8 @@ impl BridgeQueryPlanner {
                     );
                 } else {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = VALIDATION_MATCH,
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = true,
                     );
                 }
                 api_schema.schema
@@ -1032,7 +1032,7 @@ mod tests {
         s!(r#"query Q($s1:Boolean!) { me {
             username
             name {
-                ... @defer(label: "A") { 
+                ... @defer(label: "A") {
                     first
                     last @skip(if: $s1)
                 }

@@ -378,7 +378,7 @@ impl InstrumentData {
 
     pub(crate) fn populate_license_instrument(&mut self, license_state: &LicenseState) {
         self.data.insert(
-            "apollo.router.config.license".to_string(),
+            "apollo.router.lifecycle.license".to_string(),
             (
                 1,
                 [(
