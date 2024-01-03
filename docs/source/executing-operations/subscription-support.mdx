@@ -76,7 +76,7 @@ flowchart LR;
 
    - **The client does _not_ use a WebSocket protocol.** Instead, it receives updates via [multipart HTTP responses](./subscription-multipart-protocol/).
    - By using HTTP for subscriptions, clients can execute _all_ GraphQL operation types over HTTP instead of using two different protocols.
-   - Apollo Client for [Web](/react/data/subscriptions#http), [Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [iOS](/ios/fetching/subscriptions#http) all support GraphQL subscriptions over HTTP with minimal configuration. See each library's documentation for details.
+   - [Apollo Client](/react/data/subscriptions#http), [Apollo Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [Apollo iOS](/ios/fetching/subscriptions#http) all support GraphQL subscriptions over HTTP with minimal configuration. See each library's documentation for details. Apollo Client also provides network adapters for the [Relay](/react/data/subscriptions#relay) and [urql](/react/data/subscriptions#urql) libraries.
 
 2. When your router receives a subscription, it executes that _same_ subscription against whichever subgraph defines the requested field (`stockPricesChanged` in the example above).
 
