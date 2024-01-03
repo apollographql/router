@@ -49,7 +49,6 @@ const VALIDATION_SOURCE_OPERATION: &str = "operation";
 const VALIDATION_FALSE_NEGATIVE: &str = "false_negative";
 const VALIDATION_FALSE_POSITIVE: &str = "false_positive";
 const VALIDATION_MATCH: &str = "match";
-const GENERATION_FAIL: &str = "failed";
 
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
@@ -151,8 +150,8 @@ impl BridgeQueryPlanner {
 
                 if api_schema.schema != new_api_schema {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.operations.api_schema = 1u64,
-                        generation.result = GENERATION_FAIL,
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = false,
                         "API schema generation mismatch: apollo-federation and router-bridge write different schema"
                     );
 
@@ -185,8 +184,8 @@ impl BridgeQueryPlanner {
                     );
                 } else {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.operations.api_schema = 1u64,
-                        generation.result = VALIDATION_MATCH,
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = true,
                     );
                 }
                 api_schema.schema
