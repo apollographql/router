@@ -22,6 +22,7 @@ pub(crate) struct Conf {
 }
 
 pub(crate) struct ProgressiveOverridePlugin {
+    enabled: bool,
     label_to_percentages_map: HashMap<String, f64>,
 }
 
@@ -58,6 +59,7 @@ impl Plugin for ProgressiveOverridePlugin {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ProgressiveOverridePlugin {
+            enabled: init.config.enabled,
             label_to_percentages_map: collect_static_percentages_from_schema(Schema::parse(
                 &*init.supergraph_sdl,
                 "schema.graphql",
@@ -65,31 +67,30 @@ impl Plugin for ProgressiveOverridePlugin {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        service
-    }
-
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        service
-    }
-
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
-        let label_to_percentages_map = self.label_to_percentages_map.clone();
-        ServiceBuilder::new()
-            .map_request(move |request: execution::Request| {
-                let mut overridden_labels = HashSet::new();
-                label_to_percentages_map.iter().for_each(|(label, percentage)| {
-                    if rand::random::<f64>() < *percentage {
-                        overridden_labels.insert(label.to_owned());
-                    }
-                });
-                // TODO: handle the Err case here
-                let _ = request.context.insert(OVERRIDE_KEY, overridden_labels);
-                request
-            })
-            .service(service)
-            .boxed()
+        if !self.enabled {
+            service
+        } else {
+            let label_to_percentages_map = self.label_to_percentages_map.clone();
+            ServiceBuilder::new()
+                .map_request(move |request: execution::Request| {
+                    let mut overridden_labels = HashSet::new();
+                    label_to_percentages_map.iter().for_each(|(label, percentage)| {
+                        if rand::random::<f64>() < *percentage {
+                            overridden_labels.insert(label.to_owned());
+                        }
+                    });
+                    // TODO: handle the Err case here
+                    let _ = request.context.insert(OVERRIDE_KEY, overridden_labels);
+                    request
+                })
+                .service(service)
+                .boxed()
+        }
     }
 }
 
 register_plugin!("apollo", "progressive_override", ProgressiveOverridePlugin);
+
+#[cfg(test)]
+mod tests;
