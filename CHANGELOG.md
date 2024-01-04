@@ -4,6 +4,59 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.36.0] - 2024-01-02
+
+## 🚀 Features
+
+### Run new (non-load-bearing) Rust validation out-of-band to help identify deltas ([Issue#4159](https://github.com/apollographql/router/issues/4159))
+
+As part of the process to replace JavaScript validation with a more performant Rust validation in the router, we are enabling the router to run both validations as a default. This allows us to definitively assess reliability and stability of Rust validation before completely removing JavaScript validation. As before, it's possible to toggle between implementations using the `experimental_graphql_validation_mode` config key. Possible values are: `new` (runs only Rust-based validation), `legacy` (runs only JS-based validation), `both` (runs both in comparison, logging errors if a difference arises).
+
+The `both` mode is now the default, which will result in **no client-facing impact** but will output errors to the Router's logs if a discrepancy is recorded.  If you discover discrepancies in your logs, please open an issue.
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/4161
+
+## 🐛 Fixes
+
+### Fix fragment usage with `@interfaceObject` ([Issue #3855](https://github.com/apollographql/router/issues/3855))
+
+When requesting `__typename` under a fragment under an interface, from a subgraph adding fields to that interface with the `@interfaceObject` directive, the router was returning the interface name instead of the concrete type name. This is now fixed at the query planner level.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/4363
+
+### TLS client configuration override for Redis ([Issue #3551](https://github.com/apollographql/router/issues/3551))
+
+It is now possible to set up a client certificate or override the root certificate authority list for Redis connections, through the `tls` section under Redis configuration. Options follow the same format as [subgraph TLS configuration](https://www.apollographql.com/docs/router/configuration/overview/#tls):
+
+```yaml
+apq:
+  router:
+    cache:
+      redis:
+        urls: [ "redis://localhost:6379" ]
+        tls:
+          certificate_authorities: ""
+          client_authentication:
+            certificate_chain: 
+            key: 
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4304
+
+### `span_mode: spec_compliant` not applied correctly ([Issue #4335](https://github.com/apollographql/router/issues/4335))
+
+Previously, `telemetry.instrumentation.spans.span_mode.spec_compliant` was not being correctly applied. This resulted in extra request spans that should not have been present in spec compliant mode, where `router.supergraph.subgraph` was incorrectly output as `request.router.supergraph.subgraph`. This has been fixed in this release.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4341
+
+## 🛠 Maintenance
+
+### chore: Update zerocopy dependency ([PR #4403](https://github.com/apollographql/router/pull/4403))
+
+This changeset updates zerocopy to 0.7.31, which has a fix for https://rustsec.org/advisories/RUSTSEC-2023-0074.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/4403
+
 # [1.35.0] - 2023-12-01
 
 ## 🚀 Features
