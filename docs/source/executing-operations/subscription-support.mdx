@@ -166,10 +166,13 @@ Your router creates a separate WebSocket connection for each client subscription
 <PreviewFeature />
 
 <Note>
-  
+
 * Your router must use whichever subprotocol is expected by each of your subgraphs.
-* To disambiguate between `graph-ws` and `graph_ws`:
+
+* To disambiguate between `graph-ws` and `graph_ws`: 
+
   * `graph-ws` (with a hyphen `-`) is the name of the [library](https://github.com/enisdenjo/graphql-ws) that uses the recommended `graphql_ws` (with un underscore `_`) WebSocket subprotocol. 
+  
 * Each `path` must be set as an _absolute path_. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the absolute path as `path: "/foo/bar/graphql/ws"`.
 
 </Note>
