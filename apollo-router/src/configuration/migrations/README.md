@@ -23,6 +23,10 @@ actions:
   - type: add
     path: some.destination
     value: someValue
+  - type: log
+    level: error
+    path: some.source
+    log: this field is not longer available because XXX
 ```
 
 Each action is applied in order. Use the following formats for from, to and path.

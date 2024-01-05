@@ -12,6 +12,7 @@ use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -79,6 +80,18 @@ impl BridgeQueryPlanner {
                     configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                 ),
+                debug: Some(QueryPlannerDebugConfig {
+                    bypass_planner_for_single_subgraph: None,
+                    max_evaluated_plans: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_plans_limit
+                        .or(Some(10000)),
+                    paths_limit: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_paths_limit,
+                }),
             },
         )
         .await;
@@ -137,8 +150,8 @@ impl BridgeQueryPlanner {
 
                 if api_schema.schema != new_api_schema {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = "failed",
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = false,
                         "API schema generation mismatch: apollo-federation and router-bridge write different schema"
                     );
 
@@ -171,8 +184,8 @@ impl BridgeQueryPlanner {
                     );
                 } else {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = VALIDATION_MATCH,
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = true,
                     );
                 }
                 api_schema.schema
@@ -216,6 +229,18 @@ impl BridgeQueryPlanner {
                             GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                         ),
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                        debug: Some(QueryPlannerDebugConfig {
+                            bypass_planner_for_single_subgraph: None,
+                            max_evaluated_plans: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_plans_limit
+                                .or(Some(10000)),
+                            paths_limit: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_paths_limit,
+                        }),
                     },
                 )
                 .await?,
@@ -1007,7 +1032,7 @@ mod tests {
         s!(r#"query Q($s1:Boolean!) { me {
             username
             name {
-                ... @defer(label: "A") { 
+                ... @defer(label: "A") {
                     first
                     last @skip(if: $s1)
                 }
