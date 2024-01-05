@@ -6,4 +6,6 @@ To support long-term disconnection scenarios, GraphOS supports **offline Enterpr
 
 Offline Enterprise license support for Apollo is available on an as-needed basis. It must be enabled on your Studio organization. For access, send a request to your Apollo contact.
 
+To learn more, see [Offline Enterprise license](https://www.apollographql.com/docs/router/enterprise-features/#offline-enterprise-license).
+
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/4372

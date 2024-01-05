@@ -1,4 +1,4 @@
-### Expose Context Id to Rhai scripts ([Issue #4370](https://github.com/apollographql/router/issues/4370))
+### Expose Context ID to Rhai scripts ([Issue #4370](https://github.com/apollographql/router/issues/4370))
 
 We recently added an ID to Context which uniquely identifies the context for the duration of a request/response lifecycle. This is now accessible on Request or Response objects from Rhai scripts.
 
