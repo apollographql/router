@@ -200,7 +200,7 @@ mod tests {
 
         let link_spec = meta.for_identity(&Identity::link_identity()).unwrap();
         assert_eq!(
-            link_spec.imports.get(0).unwrap().as_ref(),
+            link_spec.imports.first().unwrap().as_ref(),
             &Import {
                 element: name!("Import"),
                 is_directive: false,
@@ -220,7 +220,7 @@ mod tests {
         let imports = &fed_spec.imports;
         assert_eq!(imports.len(), 2);
         assert_eq!(
-            imports.get(0).unwrap().as_ref(),
+            imports.first().unwrap().as_ref(),
             &Import {
                 element: name!("key"),
                 is_directive: true,
