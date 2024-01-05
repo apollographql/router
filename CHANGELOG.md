@@ -89,7 +89,7 @@ fn supergraph_service(service) {
 
 // Generate a log for each Supergraph request with the request ID
 fn process_request(request) {
-    print(`request id : `);
+    print(`request id :  ${request.id}`);
 }
 ```
 
