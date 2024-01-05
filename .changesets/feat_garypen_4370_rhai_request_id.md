@@ -1,6 +1,6 @@
 ### Expose Context ID to Rhai scripts ([Issue #4370](https://github.com/apollographql/router/issues/4370))
 
-We recently added an ID to Context which uniquely identifies the context for the duration of a request/response lifecycle. This is now accessible on Request or Response objects from Rhai scripts.
+We recently added an ID to `Context` which uniquely identifies the context for the duration of a request/response lifecycle. This is now accessible on `Request` or `Response` objects inside Rhai scripts.
 
 For example:
 
@@ -17,6 +17,6 @@ fn process_request(request) {
 }
 ```
 
-Note: We have chosen to expose this Context data directly from Request/Response objects rather than on the Context object to avoid the possibility of name collisions (with "id") in the context data.
+> Note: We expose this `Context` data directly from `Request` and `Response` objects, rather than on the `Context` object, to avoid the possibility of name collisions (e.g., with "id") in the context data itself.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4374
