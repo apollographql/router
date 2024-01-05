@@ -4,6 +4,179 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.37.0] - 2024-01-05
+
+## 🚀 Features
+
+### General availability of subscription callback protocol  ([Issue #3884](https://github.com/apollographql/router/issues/3884))
+
+The subscription callback protocol feature is now generally available (GA).
+
+**The configuration of subscription callback protocol in GA is incompatible with its configuration from its preview.** Follow the next section to migrate from preview to GA.
+
+#### Migrate from preview to GA
+
+You must update your router configuration with the following steps:
+
+1. Change the name of the option from `subscription.mode.preview_callback` to `subscription.mode.callback`. 
+
+    Failure to use the updated option name when running the router will result in an error and the router won't start.
+
+
+    In the example of the GA configuration below, the option is renamed as `callback`.
+    
+
+2. Update the `public_url` field to include the full URL of your callback endpoint.
+
+    Previously in preview, the public URL used by the router was the automatic concatenation of the `public_url` and `path` fields. In GA, the behavior has changed, and the router uses exactly the value set in `public_url`. This enables you to configure your own public URL, for example if you have a proxy in front of the router and want to configure redirection with the public URL.
+    
+    In the example of the GA configuration below, the path `/custom_callback` is no longer automatically appended to `public_url`, so instead it has to be set explicitly as `public_url: http://127.0.0.1:4000/custom_callback`.
+
+3. Configure the new `heartbeat_interval` field to set the period that a heartbeat must be sent to the callback endpoint for the subscription operation. 
+
+    The default heartbeat interval is 5 seconds. Heartbeats can be disabled by setting `heartbeat_interval: disabled`.
+    
+```yaml
+subscription:
+  enabled: true
+  mode:
+    callback: #highlight-line
+      public_url: http://127.0.0.1:4000/custom_callback
+      listen: 0.0.0.0:4000
+      path: /custom_callback
+      heartbeat_interval: 5secs # can be "disabled", by default it's 5secs
+```
+
+#### Changes in callback protocol specifications
+
+The subscription specification has been updated with the following observable changes:
+
+* The router will always answer with the header `subscription-protocol: callback/1.0` on the callback endpoint.
+
+* Extensions data now includes the heartbeat interval (in milliseconds) that you can globally configure. We also switch from snake_case to camelCase notation. An example of a payload sent to the subgraph using callback mode:
+
+```json
+{
+    "query": "subscription { userWasCreated { name reviews { body } } }",
+    "extensions": {
+        "subscription": {
+            "callbackUrl": "http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+            "subscriptionId": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+            "verifier": "XXX",
+            "heartbeatIntervalMs": 5000
+        }
+    }
+}
+```
+
+* When the router is sending a subscription to a subgraph in callback mode, it now includes a specific `accept` header set to `application/json;callbackSpec=1.0` that let's you automatically detect if it's using callback mode or not.
+
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4272
+
+### Expose Context Id to Rhai scripts ([Issue #4370](https://github.com/apollographql/router/issues/4370))
+
+We recently added an ID to Context which uniquely identifies the context for the duration of a request/response lifecycle. This is now accessible on Request or Response objects from Rhai scripts.
+
+For example:
+
+```rhai
+// Map Request for the Supergraph Service
+fn supergraph_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+}
+
+// Generate a log for each Supergraph request with the request ID
+fn process_request(request) {
+    print(`request id : `);
+}
+```
+
+Note: We have chosen to expose this Context data directly from Request/Response objects rather than on the Context object to avoid the possibility of name collisions (with "id") in the context data.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4374
+
+### Add support for downloading supergraph schema from a list of URLs. ([Issue #4219](https://github.com/apollographql/router/issues/4219))
+
+`APOLLO_ROUTER_SUPERGRAPH_URLS` takes a comma separated list of URLs which will be polled in order to try and retrieve the supergraph schema.
+
+This is useful for users who require supergraph deployments to be synchronized via gitops workflow.
+Poll interval is controlled by `APOLLO_UPLINK_POLL_INTERVAL` and defaults to 10s.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4377
+
+### Offline license support ([Issue #4219](https://github.com/apollographql/router/issues/4219))
+
+Running your Apollo Router fleet while fully connected to GraphOS is the best choice for the majority of Apollo users. However, there are scenarios that can prevent your routers from connecting to GraphOS for an extended period of time, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
+
+To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the Apollo Router. An offline license enables your routers to start and serve traffic without a persistent connection to GraphOS. The functionality available with an offline license is much of the same as being fully connected to GraphOS, including managed federation for supergraph CI (operation checks, schema linting, contracts, etc.).
+
+Offline Enterprise license support for Apollo is available on an as-needed basis. It must be enabled on your Studio organization. For access, send a request to your Apollo contact.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/4372
+
+## 🐛 Fixes
+
+### Fix reporting of subscription traces to Apollo ([Issue #4339](https://github.com/apollographql/router/issues/4339))
+
+Fixes the reporting of subscription traces in Apollo usage reports to match what is reported in OTel.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4328
+
+### Fix fragment spread response formatting ([Issue #4348](https://github.com/apollographql/router/issues/4348))
+
+When you had an inline fragment on an union type in a fragment spread, the response formatting was wrong.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4401
+
+### Fix TLS session ticket retries ([Issue #4305](https://github.com/apollographql/router/issues/4305))
+
+In some cases, the router could retry TLS connections indefinitely with an invalid session ticket, making it impossible to contact a subgraph. rustls 0.21.10 contains a fix for that
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4362
+
+## 🛠 Maintenance
+
+### fix: update telemetry config in helm chart ([PR #4360](https://github.com/apollographql/router/pull/4360))
+
+Before this change, if using the new `telemetry` configuration (notably `telemetry.exporters`), the helm chart would result in both old and new configuration at the same time. This is invalid and would prevent the router from starting up. With this change, the helm chart will output the appropriate structure based on user-provided configuration.
+
+<!-- start metadata -->
+---
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/4360
+
+### chore: Update zerocopy dependency ([PR #4403](https://github.com/apollographql/router/pull/4403))
+
+This changeset updates zerocopy to 0.7.31, which has a fix for https://rustsec.org/advisories/RUSTSEC-2023-0074.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/4403
+
+## 📚 Documentation
+
+### [docs] Update subgraph-error-inclusion to link to other docs ([PR #4206](https://github.com/apollographql/router/pull/4206))
+
+Update docs sets to link to other info on on why you might not be seeing error message in logs or GraphOS and where you can go to configure those
+
+By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/4206
+
+### Document `experimental_when_header` logging configuration option ([Issue #4342](https://github.com/apollographql/router/issues/4342))
+
+In the router v1.35.0, the experimental logging configuration option `experimental_when_header` was supported but not documented. Its documentation has been added [here](https://apollographql.com/docs/router/configuration/telemetry/exporters/logging/overview#requestresponse-logging).
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4359
+
+## 🧪 Experimental
+
+### Expose query plan and paths limits ([PR #4367](https://github.com/apollographql/router/pull/4367))
+
+This introduces two new options, `experimental_plans_limit` and `experimental_paths_limit`, to reduce the impact of complex queries on the planner. `experimental_plans_limit` limits the number of generated plans. Already generated plans will be valid, but may not be optimal. `experimental_paths_limit` stops entirely the planning process if the number of possible paths for a selection in the schema gets too large
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4367
+
+
+
 # [1.36.0] - 2024-01-02
 
 ## 🚀 Features
