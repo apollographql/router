@@ -99,7 +99,11 @@ impl LicenseEnforcementReport {
                 configuration,
                 &Self::configuration_restrictions(),
             ),
-            restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions(), &Self::schema_restriction_visitors()),
+            restricted_schema_in_use: Self::validate_schema(
+                schema,
+                &Self::schema_restrictions(),
+                &Self::schema_restriction_visitors(),
+            ),
         }
     }
 
@@ -263,30 +267,25 @@ impl LicenseEnforcementReport {
     }
 
     fn schema_restriction_visitors() -> Vec<SchemaRestrictionVisitor> {
-        vec![
-            SchemaRestrictionVisitor::builder()
-                .name("progressive_override")
-                .visitor(|document| {
-                    for definition in &document.definitions {
-                        if let Some(object_definition) = definition.as_object_type_definition() {
-                            for field in &object_definition.fields {
-                                if let Some(join_field_usage) = field
-                                    .directives
-                                    .get("join__field")
-                                {
-                                    for argument in &join_field_usage.arguments {
-                                        if argument.name == "overrideLabel" {
-                                            return true;
-                                        }
+        vec![SchemaRestrictionVisitor::builder()
+            .name("progressive_override")
+            .visitor(|document| {
+                for definition in &document.definitions {
+                    if let Some(object_definition) = definition.as_object_type_definition() {
+                        for field in &object_definition.fields {
+                            if let Some(join_field_usage) = field.directives.get("join__field") {
+                                for argument in &join_field_usage.arguments {
+                                    if argument.name == "overrideLabel" {
+                                        return true;
                                     }
                                 }
                             }
                         }
                     }
-                    return false;
-                })
-                .build(),
-        ]
+                }
+                return false;
+            })
+            .build()]
     }
 }
 

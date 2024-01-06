@@ -85,7 +85,10 @@ impl Plugin for ProgressiveOverridePlugin {
                         }
                     }
                     // TODO: handle the Err case here
-                    tracing::info!("override_labels: {:?}", &override_labels);
+                    tracing::info!(
+                        "ProgressiveOverridePlugin: computed override_labels: {:?}",
+                        &override_labels
+                    );
                     let _ = request.context.insert(OVERRIDE_KEY, override_labels);
                     request
                 })

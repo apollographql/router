@@ -558,14 +558,18 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
             let plan_options = {
                 if let Ok(Some(override_labels)) = context.get::<&str, Vec<String>>(OVERRIDE_KEY) {
-                    Some(PlanOptions {
-                        override_labels: Some(override_labels.clone()),
-                    })
+                    if override_labels.len() == 0 {
+                        None
+                    } else {
+                        Some(PlanOptions {
+                            override_labels: Some(override_labels.clone()),
+                        })
+                    }
                 } else {
                     None
                 }
             };
-            tracing::info!("plan_options: {:?}", &plan_options);
+            tracing::info!("BridgeQueryPlanner: plan_options: {:?}", &plan_options);
 
             let res = this
                 .get(
