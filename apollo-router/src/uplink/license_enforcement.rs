@@ -157,12 +157,12 @@ impl LicenseEnforcementReport {
         }
 
         for visitor in schema_restriction_visitors {
-            if (visitor.visitor)(schema) {
-                schema_violations.push(SchemaRestriction {
-                    name: visitor.name.clone(),
-                    url: "huzzah".to_string(),
-                });
-            }
+            // if (visitor.visitor)(schema) {
+            //     schema_violations.push(SchemaRestriction {
+            //         name: visitor.name.clone(),
+            //         url: "huzzah".to_string(),
+            //     });
+            // }
         }
 
         schema_violations

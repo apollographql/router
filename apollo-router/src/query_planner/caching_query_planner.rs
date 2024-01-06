@@ -102,6 +102,7 @@ where
                 query: key.query,
                 operation: key.operation,
                 metadata: key.metadata,
+                options: key.options,
             })
             .collect()
     }
@@ -151,6 +152,8 @@ where
                     query,
                     operation: None,
                     metadata: CacheKeyMetadata::default(),
+                    // TODO: probably wrong
+                    options: None,
                 });
             }
         }
@@ -162,6 +165,7 @@ where
             mut query,
             operation,
             metadata,
+            options,
         } in all_cache_keys
         {
             let caching_key = CachingQueryKey {
@@ -169,6 +173,7 @@ where
                 query: query.clone(),
                 operation: operation.clone(),
                 metadata,
+                options,
             };
             let context = Context::new();
 
@@ -484,6 +489,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
     pub(crate) metadata: CacheKeyMetadata,
+    pub(crate) options: Option<PlanOptions>,
 }
 
 #[cfg(test)]

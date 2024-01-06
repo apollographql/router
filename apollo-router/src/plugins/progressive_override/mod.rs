@@ -54,6 +54,7 @@ fn collect_static_percentages_from_schema(schema: Schema) -> HashMap<String, f64
             }
         }
     }
+    tracing::info!("static_percentages: {:?}", &static_percentages);
     static_percentages
 }
 
@@ -69,14 +70,14 @@ impl Plugin for ProgressiveOverridePlugin {
         })
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         // bypass plugin if we didn't find any override labels in the supergraph
         if self.label_to_percentage_map.is_empty() {
             service
         } else {
             let label_to_percentage_map = self.label_to_percentage_map.clone();
             ServiceBuilder::new()
-                .map_request(move |request: execution::Request| {
+                .map_request(move |request: supergraph::Request| {
                     let mut override_labels = HashSet::new();
                     for (label, percentage) in &label_to_percentage_map {
                         if rand::random::<f64>() * 100.0 < *percentage {
@@ -84,6 +85,7 @@ impl Plugin for ProgressiveOverridePlugin {
                         }
                     }
                     // TODO: handle the Err case here
+                    tracing::info!("override_labels: {:?}", &override_labels);
                     let _ = request.context.insert(OVERRIDE_KEY, override_labels);
                     request
                 })

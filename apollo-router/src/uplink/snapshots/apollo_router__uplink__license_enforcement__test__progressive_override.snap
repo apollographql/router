@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+assertion_line: 558
+expression: report.to_string()
+---
+Schema features:
+* progressive_override
+  huzzah
