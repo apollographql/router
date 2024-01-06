@@ -13,17 +13,21 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-
-const OVERRIDE_KEY: &str = "apollo_override::overridden_labels";
+// TODO: telemetry & analytics??
+// entitlement?
+// tracing::info!(
+//                         monotonic_counter.apollo.router.operations.authorization = 1u64,
+//                         authorization.filtered = filtered,
+//                         authorization.needs_authenticated = needs_authenticated,
+//                         authorization.needs_requires_scopes = needs_requires_scopes,
+//                     );
+pub(crate) const OVERRIDE_KEY: &str = "apollo_override::override_labels";
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
-pub(crate) struct Conf {
-    enabled: bool,
-}
+pub(crate) struct Conf {}
 
 pub(crate) struct ProgressiveOverridePlugin {
-    enabled: bool,
-    label_to_percentages_map: HashMap<String, f64>,
+    label_to_percentage_map: HashMap<String, f64>,
 }
 
 fn collect_static_percentages_from_schema(schema: Schema) -> HashMap<String, f64> {
@@ -34,8 +38,8 @@ fn collect_static_percentages_from_schema(schema: Schema) -> HashMap<String, f64
                 if let Some(label_arg) = field
                     .directives
                     .iter()
-                    .find(|d| d.name == "override")
-                    .and_then(|d| d.arguments.iter().find(|a| a.name == "label"))
+                    .find(|d| d.name == "join__field")
+                    .and_then(|d| d.arguments.iter().find(|a| a.name == "overrideLabel"))
                     .and_then(|a| a.value.as_str())
                 {
                     if let Some(percent_as_str) = label_arg
@@ -59,29 +63,28 @@ impl Plugin for ProgressiveOverridePlugin {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ProgressiveOverridePlugin {
-            enabled: init.config.enabled,
-            label_to_percentages_map: collect_static_percentages_from_schema(Schema::parse(
-                &*init.supergraph_sdl,
-                "schema.graphql",
-            )),
+            label_to_percentage_map: collect_static_percentages_from_schema(
+                Schema::parse(&*init.supergraph_sdl, "schema.graphql").unwrap(),
+            ),
         })
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
-        if !self.enabled {
+        // bypass plugin if we didn't find any override labels in the supergraph
+        if self.label_to_percentage_map.is_empty() {
             service
         } else {
-            let label_to_percentages_map = self.label_to_percentages_map.clone();
+            let label_to_percentage_map = self.label_to_percentage_map.clone();
             ServiceBuilder::new()
                 .map_request(move |request: execution::Request| {
-                    let mut overridden_labels = HashSet::new();
-                    label_to_percentages_map.iter().for_each(|(label, percentage)| {
-                        if rand::random::<f64>() < *percentage {
-                            overridden_labels.insert(label.to_owned());
+                    let mut override_labels = HashSet::new();
+                    for (label, percentage) in &label_to_percentage_map {
+                        if rand::random::<f64>() * 100.0 < *percentage {
+                            override_labels.insert(label.to_owned());
                         }
-                    });
+                    }
                     // TODO: handle the Err case here
-                    let _ = request.context.insert(OVERRIDE_KEY, overridden_labels);
+                    let _ = request.context.insert(OVERRIDE_KEY, override_labels);
                     request
                 })
                 .service(service)

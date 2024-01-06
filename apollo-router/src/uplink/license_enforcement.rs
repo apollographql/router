@@ -99,7 +99,7 @@ impl LicenseEnforcementReport {
                 configuration,
                 &Self::configuration_restrictions(),
             ),
-            restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions()),
+            restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions(), &Self::schema_restriction_visitors()),
         }
     }
 
@@ -135,6 +135,7 @@ impl LicenseEnforcementReport {
     fn validate_schema(
         schema: &apollo_compiler::ast::Document,
         schema_restrictions: &Vec<SchemaRestriction>,
+        schema_restriction_visitors: &Vec<SchemaRestrictionVisitor>,
     ) -> Vec<SchemaRestriction> {
         let feature_urls = schema
             .definitions
@@ -152,6 +153,15 @@ impl LicenseEnforcementReport {
         for restriction in schema_restrictions {
             if feature_urls.contains(&restriction.url) {
                 schema_violations.push(restriction.clone());
+            }
+        }
+
+        for visitor in schema_restriction_visitors {
+            if (visitor.visitor)(schema) {
+                schema_violations.push(SchemaRestriction {
+                    name: visitor.name.clone(),
+                    url: "huzzah".to_string(),
+                });
             }
         }
 
@@ -251,6 +261,40 @@ impl LicenseEnforcementReport {
                 .build(),
         ]
     }
+
+    fn schema_restriction_visitors() -> Vec<SchemaRestrictionVisitor> {
+        vec![
+            SchemaRestrictionVisitor::builder()
+                .name("progressive_override")
+                .visitor(|document| {
+                    for definition in &document.definitions {
+                        if let Some(object_definition) = definition.as_object_type_definition() {
+                            for field in &object_definition.fields {
+                                if let Some(join_field_usage) = field
+                                    .directives
+                                    .get("join__field")
+                                {
+                                    for argument in &join_field_usage.arguments {
+                                        if argument.name == "overrideLabel" {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return false;
+                })
+                .build(),
+        ]
+    }
+}
+
+// TODO: rename?
+#[derive(Builder)]
+struct SchemaRestrictionVisitor {
+    name: String,
+    visitor: fn(document: &apollo_compiler::ast::Document) -> bool,
 }
 
 impl Display for LicenseEnforcementReport {
@@ -512,5 +556,19 @@ mod test {
             "haltAt": 123,
         }))
         .expect("json must deserialize");
+    }
+
+    #[test]
+    fn progressive_override() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/progressive_override.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
     }
 }
