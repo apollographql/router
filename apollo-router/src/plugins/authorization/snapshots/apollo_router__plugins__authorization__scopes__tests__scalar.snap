@@ -14,7 +14,7 @@ query:
 extracted_scopes: {"internal", "test"}
 request scopes: []
 filtered:
-query {
+{
   topProducts {
     type
   }

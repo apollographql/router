@@ -17,6 +17,7 @@ use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use apollo_router::Configuration;
 use apollo_router::Context;
+use apollo_router::_private::create_test_service_factory_from_yaml;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -33,6 +34,8 @@ use tower::BoxError;
 use tower::ServiceExt;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
+
+mod integration;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -110,26 +113,25 @@ async fn api_schema_hides_field() {
 
     let (actual, _) = query_rust(request).await;
 
-    assert!(actual.errors[0]
-        .message
-        .as_str()
-        .contains(r#"Cannot query field "inStock" on type "Product""#));
+    let message = &actual.errors[0].message;
+    assert!(
+        message.contains("no field `inStock` in type `Product`"),
+        "{message}"
+    );
     assert_eq!(
         actual.errors[0].extensions["code"].as_str(),
-        Some("GRAPHQL_VALIDATION_FAILED"),
+        Some("PARSING_ERROR"),
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn api_schema_hides_field_rust_validation() {
+async fn validation_errors_from_rust() {
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { name inStock } }"#)
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
+        .query(r#"{ topProducts { name(notAnArg: true) } } fragment Unused on Product { upc }"#)
         .build()
         .expect("expecting valid request");
 
-    let (actual, _) = query_rust_with_config(
+    let (response, _) = query_rust_with_config(
         request,
         serde_json::json!({
             "telemetry":{
@@ -142,14 +144,7 @@ async fn api_schema_hides_field_rust_validation() {
     )
     .await;
 
-    assert!(actual.errors[0]
-        .message
-        .as_str()
-        .contains("cannot query field `inStock` on type `Product`"));
-    assert_eq!(
-        actual.errors[0].extensions["code"].as_str(),
-        Some("GRAPHQL_VALIDATION_FAILED"),
-    );
+    insta::assert_json_snapshot!(response.errors);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -533,7 +528,7 @@ async fn persisted_queries() {
     .await;
 
     let config = serde_json::json!({
-        "preview_persisted_queries": {
+        "persisted_queries": {
             "enabled": true
         },
         "apq": {
@@ -737,7 +732,11 @@ async fn query_just_at_recursion_limit() {
     .unwrap();
 
     assert_eq!(1, actual.errors.len());
-    assert!(actual.errors[0].message.contains("parser limit(5) reached"));
+    let message = &actual.errors[0].message;
+    assert!(
+        message.contains("parser recursion limit reached"),
+        "{message}"
+    );
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
@@ -1482,7 +1481,7 @@ async fn all_stock_router_example_yamls_are_valid() {
                         let mut configuration: Configuration = serde_yaml::from_str(&raw_yaml)
                             .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
                         let (_mock_guard, configuration) =
-                            if configuration.preview_persisted_queries.enabled {
+                            if configuration.persisted_queries.enabled {
                                 let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
                                 configuration.uplink = Some(uplink_config);
                                 (Some(_mock_guard), configuration)
@@ -1516,4 +1515,23 @@ Make sure it is accessible, and the configuration is working with the router."#,
         );
 
     insta::assert_snapshot!(include_str!("../../examples/graphql/supergraph.graphql"));
+}
+
+// This test must use the multi_thread tokio executor or the opentelemetry hang bug will
+// be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
+#[tokio::test(flavor = "multi_thread")]
+#[tracing_test::traced_test]
+async fn test_telemetry_doesnt_hang_with_invalid_schema() {
+    create_test_service_factory_from_yaml(
+        include_str!("../src/testdata/invalid_supergraph.graphql"),
+        r#"
+    telemetry:
+      tracing:
+        common:
+          service_name: router
+        otlp:
+          endpoint: default
+"#,
+    )
+    .await;
 }

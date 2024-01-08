@@ -1,18 +1,24 @@
 ---
 source: apollo-router/src/query_planner/bridge_query_planner.rs
-expression: plan_errors.errors
+expression: errors
 ---
-[
-    PlanError {
-        message: Some(
-            "Fragment \"UnusedTestFragment\" is never used.",
-        ),
-        extensions: Some(
-            PlanErrorExtensions {
-                code: "GRAPHQL_VALIDATION_FAILED",
-                exception: None,
-            },
-        ),
-        validation_error: true,
+PlanErrors {
+    errors: [
+        PlanError {
+            message: Some(
+                "Fragment \"UnusedTestFragment\" is never used.",
+            ),
+            extensions: Some(
+                PlanErrorExtensions {
+                    code: "GRAPHQL_VALIDATION_FAILED",
+                    exception: None,
+                },
+            ),
+            validation_error: true,
+        },
+    ],
+    usage_reporting: UsageReporting {
+        stats_report_key: "## GraphQLValidationFailure\n",
+        referenced_fields_by_type: {},
     },
-]
+}

@@ -1,0 +1,16 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        endpoint: default
+        enabled: true
+    metrics:
+      otlp:
+        endpoint: default
+        enabled: true
+

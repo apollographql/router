@@ -121,7 +121,9 @@ impl Stream for Multipart {
                                     response.errors.drain(..).collect()
                                 },
                                 payload: match response.data {
-                                    None | Some(Value::Null) => None,
+                                    None | Some(Value::Null) if response.extensions.is_empty() => {
+                                        None
+                                    }
                                     _ => response.into(),
                                 },
                             };
@@ -175,8 +177,6 @@ mod tests {
 
     use super::*;
 
-    // TODO add test with empty stream
-
     #[tokio::test]
     async fn test_heartbeat_and_boundaries() {
         let responses = vec![
@@ -196,6 +196,14 @@ mod tests {
                 .data(serde_json_bytes::Value::String(ByteString::from(
                     String::from("foobar"),
                 )))
+                .subscribed(true)
+                .build(),
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::Null)
+                .extension(
+                    "test",
+                    serde_json_bytes::Value::String("test_extension".into()),
+                )
                 .build(),
         ];
         let gql_responses = stream::iter(responses);
@@ -223,11 +231,17 @@ mod tests {
                     2 => {
                         assert_eq!(
                             res,
-                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foobar\"}}\r\n--graphql--\r\n"
+                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foobar\"}}\r\n--graphql\r\n"
+                        );
+                    }
+                    3 => {
+                        assert_eq!(
+                            res,
+                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":null,\"extensions\":{\"test\":\"test_extension\"}}}\r\n--graphql--\r\n"
                         );
                     }
                     _ => {
-                        panic!("should not happened, test failed");
+                        panic!("should not happen, test failed");
                     }
                 }
                 curr_index += 1;
@@ -246,7 +260,7 @@ mod tests {
         );
         let mut curr_index = 0;
         while let Some(resp) = protocol.next().await {
-            let res = dbg!(String::from_utf8(resp.unwrap().to_vec()).unwrap());
+            let res = String::from_utf8(resp.unwrap().to_vec()).unwrap();
             if res == heartbeat {
                 continue;
             } else {

@@ -1,38 +1,30 @@
 ---
 title: Containerizing the Apollo Router
+description: Run Apollo Router images in containers
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-> More details about Apollo Router images are available [on GitHub](https://github.com/apollographql/router/pkgs/container/router).
-
-Each release of the Apollo Router includes both default and debug images. Each image for a release contains the same build. Debug images have helpful debugging utilities installed and run the router under the control of heaptrack (https://github.com/KDE/heaptrack).
+Apollo provides container images of the Apollo Router. By containerizing the router, you can run it in a cluster and leverage the portability, scalability, and high availability benefits of containerization. Containers can also simplify and speed up local development.
 
 <ElasticNotice />
 
-Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`):
+## About the Apollo Router container image
 
-```bash title="Docker"
-docker run -p 4000:4000 \
-  --env APOLLO_GRAPH_REF="<your graph>" \
-  --env APOLLO_KEY="<your key>" \
-  --rm \
-  ghcr.io/apollographql/router:<image version>
-```
+Apollo provides container images of the Apollo Router [on GitHub](https://github.com/apollographql/router/pkgs/container/router) in its container repository. The router images are based on [debian:bullseye-slim](https://hub.docker.com/_/debian/), which is designed to provide constrained, secure, and small images.
 
-This command downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
+Each release of the Apollo Router includes both default (production) and debug images. While each image for a release contains the same build, the debug images have helpful debugging utilities installed and run the router under the control of [heaptrack](https://github.com/KDE/heaptrack).
 
-For more complex configuration (such as overriding subgraph URLs or propagating headers), see [Configuring the Apollo Router](../configuration/overview/).
+A router image has the following layout:
 
-For examples of using router images in specific environments, see the guides for [Docker](./docker/) and [Kubernetes](./kubernetes/).
+* A `/dist` directory containing the router executable and licensing details
+* A `dist/config` directory containing a default configuration file, `router.yaml`
+* A `/dist/schema` directory for conveniently mounting a locally defined supergraph schema
 
-## Image file layout
+## Next steps
 
-* The router executable is located in the `/dist` directory.
-* A default configuration file, `router.yaml`, is located in the `dist/config` directory.
-* There is also a `/dist/schema` directory for convenient mounting of a locally defined supergraph schema.
-* Licensing details are also available in the `/dist` directory.
+The default behavior of a router image is suitable for a basic deployment or development scenario.
 
-## Image build
-
-Apollo Router images are based on [debian:bullseye-slim](https://hub.docker.com/_/debian/), which is designed to provide constrained, secure, and small images.
+For examples of customizing and deploying router images in specific environments, see the guides for: 
+* [Deploying in Kubernetes](./kubernetes/).
+* [Running in Docker](./docker/)

@@ -534,6 +534,32 @@ fn it_can_base64decode_string() {
 }
 
 #[test]
+fn it_can_base64encode_string_with_alphabet() {
+    let engine = new_rhai_test_engine();
+    let encoded: String = engine
+        .eval(r#"base64::encode("<<???>>", base64::STANDARD)"#)
+        .expect("can encode string");
+    assert_eq!(encoded, "PDw/Pz8+Pg==");
+    let encoded: String = engine
+        .eval(r#"base64::encode("<<???>>", base64::URL_SAFE)"#)
+        .expect("can encode string");
+    assert_eq!(encoded, "PDw_Pz8-Pg==");
+}
+
+#[test]
+fn it_can_base64decode_string_with_alphabet() {
+    let engine = new_rhai_test_engine();
+    let decoded: String = engine
+        .eval(r#"base64::decode("PDw/Pz8+Pg==", base64::STANDARD)"#)
+        .expect("can decode string");
+    assert_eq!(decoded, "<<???>>");
+    let decoded: String = engine
+        .eval(r#"base64::decode("PDw_Pz8-Pg==", base64::URL_SAFE)"#)
+        .expect("can decode string");
+    assert_eq!(decoded, "<<???>>");
+}
+
+#[test]
 fn it_can_create_unix_now() {
     let engine = new_rhai_test_engine();
     let st = SystemTime::now()
@@ -688,7 +714,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 155, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 161, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -714,7 +740,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 166, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 172, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");

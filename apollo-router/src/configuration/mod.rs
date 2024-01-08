@@ -151,11 +151,9 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) apq: Apq,
 
-    // NOTE: when renaming this to move out of preview, also update paths
-    // in `uplink/license.rs`.
     /// Configures managed persisted queries
     #[serde(default)]
-    pub preview_persisted_queries: PersistedQueries,
+    pub persisted_queries: PersistedQueries,
 
     /// Configuration for operation limits, parser limits, HTTP limits, etc.
     #[serde(default)]
@@ -169,6 +167,10 @@ pub struct Configuration {
     /// Set the GraphQL validation implementation to use.
     #[serde(default)]
     pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
+
+    /// Set the API schema generation implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
 
     /// Plugin configuration
     #[serde(default)]
@@ -185,6 +187,10 @@ pub struct Configuration {
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
+
+    /// Batching configuration.
+    #[serde(default)]
+    pub(crate) experimental_batching: Batching,
 }
 
 impl PartialEq for Configuration {
@@ -198,6 +204,21 @@ impl PartialEq for Configuration {
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum GraphQLValidationMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
+    #[default]
+    Both,
+}
+
+/// GraphQL validation modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ApiSchemaMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
@@ -228,12 +249,13 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ApolloPlugins,
             tls: Tls,
             apq: Apq,
-            preview_persisted_queries: PersistedQueries,
+            persisted_queries: PersistedQueries,
             #[serde(skip)]
             uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
+            experimental_batching: Batching,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -247,11 +269,12 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
             .apq(ad_hoc.apq)
-            .persisted_query(ad_hoc.preview_persisted_queries)
+            .persisted_query(ad_hoc.persisted_queries)
             .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
+            .experimental_batching(ad_hoc.experimental_batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -288,6 +311,8 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -310,10 +335,11 @@ impl Configuration {
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
-            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
+            experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -322,6 +348,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
+            experimental_batching: experimental_batching.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -360,6 +387,8 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        experimental_batching: Option<Batching>,
+        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -371,6 +400,8 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
+            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
+                .unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -380,8 +411,9 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
-            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            experimental_batching: experimental_batching.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -439,31 +471,31 @@ impl Configuration {
         }
 
         // PQs.
-        if self.preview_persisted_queries.enabled {
-            if self.preview_persisted_queries.safelist.enabled && self.apq.enabled {
+        if self.persisted_queries.enabled {
+            if self.persisted_queries.safelist.enabled && self.apq.enabled {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "apqs must be disabled to enable safelisting",
-                    error: "either set preview_persisted_queries.safelist.enabled: false or apq.enabled: false in your router yaml configuration".into()
+                    error: "either set persisted_queries.safelist.enabled: false or apq.enabled: false in your router yaml configuration".into()
                 });
-            } else if !self.preview_persisted_queries.safelist.enabled
-                && self.preview_persisted_queries.safelist.require_id
+            } else if !self.persisted_queries.safelist.enabled
+                && self.persisted_queries.safelist.require_id
             {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "safelist must be enabled to require IDs",
-                    error: "either set preview_persisted_queries.safelist.enabled: true or preview_persisted_queries.safelist.require_id: false in your router yaml configuration".into()
+                    error: "either set persisted_queries.safelist.enabled: true or persisted_queries.safelist.require_id: false in your router yaml configuration".into()
                 });
             }
         } else {
             // If the feature isn't enabled, sub-features shouldn't be.
-            if self.preview_persisted_queries.safelist.enabled {
+            if self.persisted_queries.safelist.enabled {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "persisted queries must be enabled to enable safelisting",
-                    error: "either set preview_persisted_queries.safelist.enabled: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                    error: "either set persisted_queries.safelist.enabled: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
-            } else if self.preview_persisted_queries.log_unknown {
+            } else if self.persisted_queries.log_unknown {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "persisted queries must be enabled to enable logging unknown operations",
-                    error: "either set preview_persisted_queries.log_unknown: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                    error: "either set persisted_queries.log_unknown: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
             }
         }
@@ -659,8 +691,7 @@ impl Supergraph {
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Limits {
     /// If set, requests with operations deeper than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
@@ -727,7 +758,7 @@ pub(crate) struct Limits {
     pub(crate) warn_only: bool,
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
-    /// default: 4096
+    /// default: 500
     pub(crate) parser_max_recursion: usize,
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
@@ -752,8 +783,8 @@ impl Default for Limits {
 
             // This is `apollo-parser`’s default, which protects against stack overflow
             // but is still very high for "reasonable" queries.
-            // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
-            parser_max_recursion: 4096,
+            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
+            parser_max_recursion: 500,
         }
     }
 }
@@ -768,16 +799,13 @@ pub(crate) struct Router {
 
 /// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Apq {
     /// Activates Automatic Persisted Queries (enabled by default)
-    #[serde(default = "default_apq")]
     pub(crate) enabled: bool,
 
-    #[serde(default)]
     pub(crate) router: Router,
 
-    #[serde(default)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphApq>,
 }
 
@@ -795,15 +823,10 @@ impl Apq {
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphApq {
     /// Enable
-    #[serde(default = "default_subgraph_apq")]
     pub(crate) enabled: bool,
-}
-
-fn default_subgraph_apq() -> bool {
-    false
 }
 
 fn default_apq() -> bool {
@@ -832,6 +855,29 @@ pub(crate) struct QueryPlanning {
     /// the in memory cache
     #[serde(default)]
     pub(crate) warmed_up_queries: Option<usize>,
+
+    /// Sets a limit to the number of generated query plans.
+    /// The planning process generates many different query plans as it
+    /// explores the graph, and the list can grow large. By using this
+    /// limit, we prevent that growth and still get a valid query plan,
+    /// but it may not be the optimal one.
+    ///
+    /// The default limit is set to 10000, but it may change in the future
+    pub(crate) experimental_plans_limit: Option<u32>,
+
+    /// Before creating query plans, for each path of fields in the query we compute all the
+    /// possible options to traverse that path via the subgraphs. Multiple options can arise because
+    /// fields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions
+    /// and interfaces) returned by fields sometimes require the query planner to traverse through
+    /// each constituent object type. The number of options generated in this computation can grow
+    /// large if the schema or query are sufficiently complex, and that will increase the time spent
+    /// planning.
+    ///
+    /// This config allows specifying a per-path limit to the number of options considered. If any
+    /// path's options exceeds this limit, query planning will abort and the operation will fail.
+    ///
+    /// The default value is None, which specifies no limit.
+    pub(crate) experimental_paths_limit: Option<u32>,
 }
 
 /// Cache configuration
@@ -860,7 +906,7 @@ impl Default for InMemoryCache {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {
@@ -871,6 +917,15 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
     pub(crate) timeout: Option<Duration>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// TTL for entries
+    pub(crate) ttl: Option<Duration>,
+
+    #[serde(default)]
+    /// TLS client configuration
+    pub(crate) tls: Option<TlsClient>,
 }
 
 /// TLS related configuration options.
@@ -882,7 +937,7 @@ pub(crate) struct Tls {
     ///
     /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
     pub(crate) supergraph: Option<TlsSupergraph>,
-    pub(crate) subgraph: SubgraphConfiguration<TlsSubgraph>,
+    pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
 }
 
 /// Configuration options pertaining to the supergraph server component.
@@ -1003,7 +1058,7 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
-pub(crate) struct TlsSubgraph {
+pub(crate) struct TlsClient {
     /// list of certificate authorities in PEM format
     pub(crate) certificate_authorities: Option<String>,
     /// client certificate authentication
@@ -1011,7 +1066,7 @@ pub(crate) struct TlsSubgraph {
 }
 
 #[buildstructor::buildstructor]
-impl TlsSubgraph {
+impl TlsClient {
     #[builder]
     pub(crate) fn new(
         certificate_authorities: Option<String>,
@@ -1024,7 +1079,7 @@ impl TlsSubgraph {
     }
 }
 
-impl Default for TlsSubgraph {
+impl Default for TlsClient {
     fn default() -> Self {
         Self::builder().build()
     }
@@ -1138,25 +1193,43 @@ pub(crate) struct HealthCheck {
     /// Defaults to 127.0.0.1:8088
     pub(crate) listen: ListenAddr,
 
-    /// Set to false to disable the health check endpoint
+    /// Set to false to disable the health check
     pub(crate) enabled: bool,
+
+    /// Optionally set a custom healthcheck path
+    /// Defaults to /health
+    pub(crate) path: String,
 }
 
 fn default_health_check_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:8088").unwrap().into()
 }
 
-fn default_health_check() -> bool {
+fn default_health_check_enabled() -> bool {
     true
+}
+
+fn default_health_check_path() -> String {
+    "/health".to_string()
 }
 
 #[buildstructor::buildstructor]
 impl HealthCheck {
     #[builder]
-    pub(crate) fn new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        enabled: Option<bool>,
+        path: Option<String>,
+    ) -> Self {
+        let mut path = path.unwrap_or_else(default_health_check_path);
+        if !path.starts_with('/') {
+            path = format!("/{path}").to_string();
+        }
+
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
-            enabled: enabled.unwrap_or_else(default_health_check),
+            enabled: enabled.unwrap_or_else(default_health_check_enabled),
+            path,
         }
     }
 }
@@ -1165,10 +1238,20 @@ impl HealthCheck {
 #[buildstructor::buildstructor]
 impl HealthCheck {
     #[builder]
-    pub(crate) fn fake_new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        enabled: Option<bool>,
+        path: Option<String>,
+    ) -> Self {
+        let mut path = path.unwrap_or_else(default_health_check_path);
+        if !path.starts_with('/') {
+            path = format!("/{path}");
+        }
+
         Self {
             listen: listen.unwrap_or_else(test_listen),
-            enabled: enabled.unwrap_or_else(default_health_check),
+            enabled: enabled.unwrap_or_else(default_health_check_enabled),
+            path,
         }
     }
 }
@@ -1272,4 +1355,24 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
+}
+
+#[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum BatchingMode {
+    /// batch_http_link
+    #[default]
+    BatchHttpLink,
+}
+
+/// Configuration for Batching
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Batching {
+    /// Activates Batching (disabled by default)
+    #[serde(default)]
+    pub(crate) enabled: bool,
+
+    /// Batching mode
+    pub(crate) mode: BatchingMode,
 }

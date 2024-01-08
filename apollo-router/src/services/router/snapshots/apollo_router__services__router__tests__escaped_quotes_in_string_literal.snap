@@ -1,0 +1,48 @@
+---
+source: apollo-router/src/services/router/tests.rs
+expression: "(graphql_response, &subgraph_query_log)"
+---
+(
+    Response {
+        label: None,
+        data: Some(
+            Object({
+                "topProducts": Array([
+                    Object({
+                        "name": String(
+                            "Table",
+                        ),
+                        "reviewsForAuthor": Null,
+                    }),
+                    Object({
+                        "name": String(
+                            "Couch",
+                        ),
+                        "reviewsForAuthor": Null,
+                    }),
+                ]),
+            }),
+        ),
+        path: None,
+        errors: [],
+        extensions: {},
+        has_next: None,
+        subscribed: None,
+        created_at: None,
+        incremental: [],
+    },
+    [
+        (
+            "products",
+            Some(
+                "query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}",
+            ),
+        ),
+        (
+            "reviews",
+            Some(
+                "query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviewsForAuthor(authorID:\"\\\"1\\\"\"){body}}}}",
+            ),
+        ),
+    ],
+)

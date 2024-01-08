@@ -23,6 +23,8 @@ pub(crate) mod extensions;
 
 /// The key of the resolved operation name. This is subject to change and should not be relied on.
 pub(crate) const OPERATION_NAME: &str = "operation_name";
+/// The key of the resolved operation kind. This is subject to change and should not be relied on.
+pub(crate) const OPERATION_KIND: &str = "operation_kind";
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -39,32 +41,40 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
 #[derive(Clone, Deserialize, Serialize, Derivative)]
+#[serde(default)]
 #[derivative(Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
-    #[serde(skip, default)]
+    #[serde(skip)]
     pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
 
     /// Creation time
     #[serde(skip)]
-    #[serde(default = "Instant::now")]
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
     #[derivative(Debug = "ignore")]
     busy_timer: Arc<Mutex<BusyTimer>>,
+
+    #[serde(skip)]
+    pub(crate) id: String,
 }
 
 impl Context {
     /// Create a new context.
     pub fn new() -> Self {
+        let id = uuid::Uuid::new_v4()
+            .as_hyphenated()
+            .encode_lower(&mut uuid::Uuid::encode_buffer())
+            .to_string();
         Context {
             entries: Default::default(),
             private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
+            id,
         }
     }
 }

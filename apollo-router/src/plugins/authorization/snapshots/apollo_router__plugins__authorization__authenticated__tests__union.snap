@@ -17,7 +17,7 @@ query:
         }
         
 filtered:
-query {
+{
   test
   uni {
     ... on A {

@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.non_zero()"
+---
+- name: apollo.router.lifecycle.license
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          license.state: halt
+

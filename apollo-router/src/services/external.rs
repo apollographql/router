@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use hyper::Body;
@@ -67,7 +69,6 @@ pub(crate) struct Externalizable<T> {
     pub(crate) stage: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) control: Option<Control>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
@@ -87,6 +88,8 @@ pub(crate) struct Externalizable<T> {
     pub(crate) service_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) has_next: Option<bool>,
 }
 
 #[buildstructor::buildstructor]
@@ -101,7 +104,7 @@ where
     fn router_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
@@ -118,7 +121,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -128,6 +131,7 @@ where
             path,
             method,
             service_name: None,
+            has_next: None,
         }
     }
 
@@ -138,13 +142,14 @@ where
     fn supergraph_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
         status_code: Option<u16>,
         method: Option<String>,
         sdl: Option<String>,
+        has_next: Option<bool>,
     ) -> Self {
         assert!(matches!(
             stage,
@@ -154,7 +159,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -164,6 +169,7 @@ where
             path: None,
             method,
             service_name: None,
+            has_next,
         }
     }
 
@@ -174,7 +180,7 @@ where
     fn subgraph_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
@@ -191,7 +197,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -201,6 +207,7 @@ where
             path: None,
             method,
             service_name,
+            has_next: None,
         }
     }
 
@@ -236,6 +243,19 @@ where
     }
 }
 
+/// Convert a HeaderMap into a HashMap
+pub(crate) fn externalize_header_map(
+    input: &HeaderMap<HeaderValue>,
+) -> Result<HashMap<String, Vec<String>>, BoxError> {
+    let mut output = HashMap::new();
+    for (k, v) in input {
+        let k = k.as_str().to_owned();
+        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
+        output.entry(k).or_insert_with(Vec::new).push(v)
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -244,9 +264,11 @@ mod test {
     fn it_will_build_router_externalizable_correctly() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::RouterRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::RouterResponse)
+            .id(String::default())
             .build();
     }
 
@@ -255,9 +277,24 @@ mod test {
     fn it_will_not_build_router_externalizable_incorrectly() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
+            .build();
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_will_not_build_router_externalizable_incorrectl_supergraph() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SupergraphRequest)
+            .id(String::default())
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SupergraphResponse)
+            .id(String::default())
             .build();
     }
 
@@ -265,9 +302,11 @@ mod test {
     fn it_will_build_subgraph_externalizable_correctly() {
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
             .build();
     }
 
@@ -276,9 +315,11 @@ mod test {
     fn it_will_not_build_subgraph_externalizable_incorrectly() {
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::RouterRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::RouterResponse)
+            .id(String::default())
             .build();
     }
 }

@@ -1,7 +1,9 @@
 supergraph:
   listen: 1.2.3.4:5
 telemetry:
-  tracing:
-    jaeger:
-      collector:
-        endpoint: http://example.com
+  exporters:
+    tracing:
+      jaeger:
+        enabled: true
+        collector:
+          endpoint: http://example.com
