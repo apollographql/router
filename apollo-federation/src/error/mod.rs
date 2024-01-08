@@ -420,7 +420,7 @@ impl From<DiagnosticList> for MultipleFederationErrors {
             errors: value
                 .iter()
                 .map(|e| SingleFederationError::InvalidGraphQL {
-                    message: e.message().to_string(),
+                    message: e.error.to_string(),
                 })
                 .collect(),
         }
