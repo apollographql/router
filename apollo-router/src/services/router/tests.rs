@@ -183,12 +183,12 @@ async fn it_fails_on_no_query() {
 }
 
 #[tokio::test]
-async fn test_experimental_http_max_request_bytes() {
+async fn test_http_max_request_bytes() {
     /// Size of the JSON serialization of the request created by `fn canned_new`
     /// in `apollo-router/src/services/supergraph.rs`
     const CANNED_REQUEST_LEN: usize = 391;
 
-    async fn with_config(experimental_http_max_request_bytes: usize) -> router::Response {
+    async fn with_config(http_max_request_bytes: usize) -> router::Response {
         let http_request = supergraph::Request::canned_builder()
             .build()
             .unwrap()
@@ -206,7 +206,7 @@ async fn test_experimental_http_max_request_bytes() {
             });
         let config = serde_json::json!({
             "limits": {
-                "experimental_http_max_request_bytes": experimental_http_max_request_bytes
+                "http_max_request_bytes": http_max_request_bytes
             }
         });
         crate::TestHarness::builder()
