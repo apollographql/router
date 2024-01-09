@@ -158,6 +158,7 @@ pub struct Opt {
         value_parser = add_log_filter,
         env = "APOLLO_ROUTER_LOG"
     )]
+    // FIXME: when upgrading to router 2.0 we should put this value in an Option
     log_level: String,
 
     /// Reload locally provided configuration and supergraph files automatically.  This only affects watching of local files and does not affect supergraphs and configuration provided by GraphOS through Uplink, which is always reloaded immediately.
@@ -262,8 +263,9 @@ fn add_log_filter(raw: &str) -> Result<String, String> {
             let rgx =
                 Regex::new(r"(^|,)(off|error|warn|info|debug|trace)").expect("regex must be valid");
             let res = rgx.replace_all(&lowered, |caps: &Captures| {
+                // The default level is info, then other ones can override the default one
                 // If the pattern matches, we must have caps 1 and 2
-                format!("{}apollo_router={}", &caps[1], &caps[2])
+                format!("info,{}apollo_router={}", &caps[1], &caps[2])
             });
             Ok(res.into_owned())
         }
