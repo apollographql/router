@@ -1044,7 +1044,7 @@ fn directives_with_sorted_arguments(directives: &DirectiveList) -> DirectiveList
 }
 
 fn is_deferred_selection(directives: &DirectiveList) -> bool {
-    directives.iter().any(|d| d.name == "defer")
+    directives.has("defer")
 }
 
 /// Normalizes the selection set of the specified operation.

@@ -3,7 +3,7 @@ use crate::link::argument::{
     directive_optional_boolean_argument, directive_required_fieldset_argument,
 };
 use crate::link::spec::{Identity, Url, Version};
-use crate::link::spec_definition::{spec_definitions, SpecDefinition, SpecDefinitions};
+use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
 use crate::schema::FederationSchema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::schema::{
@@ -11,7 +11,6 @@ use apollo_compiler::schema::{
 };
 use apollo_compiler::{name, Node, NodeStr};
 use lazy_static::lazy_static;
-use std::ops::Deref;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -354,33 +353,33 @@ impl SpecDefinition for FederationSpecDefinition {
 }
 
 lazy_static! {
-    pub(crate) static ref FEDERATION_VERSIONS: Result<SpecDefinitions<FederationSpecDefinition>, FederationError> = {
+    pub(crate) static ref FEDERATION_VERSIONS: SpecDefinitions<FederationSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::federation_identity());
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 0,
-        }))?;
+        }));
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 1,
-        }))?;
+        }));
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 2,
-        }))?;
+        }));
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 3,
-        }))?;
+        }));
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 4,
-        }))?;
+        }));
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 5,
-        }))?;
-        Ok(definitions)
+        }));
+        definitions
     };
 }
 
@@ -394,7 +393,7 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
         .ok_or_else(|| SingleFederationError::Internal {
             message: "Subgraph unexpectedly does not use federation spec".to_owned(),
         })?;
-    Ok(spec_definitions(FEDERATION_VERSIONS.deref())?
+    Ok(FEDERATION_VERSIONS
         .find(&federation_link.url.version)
         .ok_or_else(|| SingleFederationError::Internal {
             message: "Subgraph unexpectedly does not use a supported federation spec version"

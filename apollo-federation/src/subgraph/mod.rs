@@ -312,7 +312,7 @@ pub struct ValidSubgraph {
 
 impl std::fmt::Debug for ValidSubgraph {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, r#"name: {}, urL: {}"#, self.name, self.url)
+        write!(f, r#"name: {}, url: {}"#, self.name, self.url)
     }
 }
 

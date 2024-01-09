@@ -2,12 +2,10 @@ use crate::error::{FederationError, SingleFederationError};
 use crate::link::link_spec_definition::{LinkSpecDefinition, CORE_VERSIONS, LINK_VERSIONS};
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
-use crate::link::spec_definition::spec_definitions;
 use apollo_compiler::ast::{Directive, InvalidNameError, Value};
 use apollo_compiler::schema::Name;
 use apollo_compiler::{name, Node, NodeStr};
 use std::fmt;
-use std::ops::Deref;
 use std::str;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
@@ -347,23 +345,19 @@ impl LinksMetadata {
         &self,
     ) -> Result<&'static LinkSpecDefinition, FederationError> {
         if let Some(link_link) = self.for_identity(&Identity::link_identity()) {
-            spec_definitions(LINK_VERSIONS.deref())?
-                .find(&link_link.url.version)
-                .ok_or_else(|| {
-                    SingleFederationError::Internal {
-                        message: format!("Unexpected link spec version {}", link_link.url.version),
-                    }
-                    .into()
-                })
+            LINK_VERSIONS.find(&link_link.url.version).ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!("Unexpected link spec version {}", link_link.url.version),
+                }
+                .into()
+            })
         } else if let Some(core_link) = self.for_identity(&Identity::core_identity()) {
-            spec_definitions(CORE_VERSIONS.deref())?
-                .find(&core_link.url.version)
-                .ok_or_else(|| {
-                    SingleFederationError::Internal {
-                        message: format!("Unexpected core spec version {}", core_link.url.version),
-                    }
-                    .into()
-                })
+            CORE_VERSIONS.find(&core_link.url.version).ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!("Unexpected core spec version {}", core_link.url.version),
+                }
+                .into()
+            })
         } else {
             Err(SingleFederationError::Internal {
                 message: "Unexpectedly could not find core/link spec".to_owned(),

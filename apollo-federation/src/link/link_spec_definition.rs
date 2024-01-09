@@ -1,4 +1,3 @@
-use crate::error::FederationError;
 use crate::link::spec::{Identity, Url, Version};
 use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
 use lazy_static::lazy_static;
@@ -32,27 +31,27 @@ impl SpecDefinition for LinkSpecDefinition {
 }
 
 lazy_static! {
-    pub(crate) static ref CORE_VERSIONS: Result<SpecDefinitions<LinkSpecDefinition>, FederationError> = {
+    pub(crate) static ref CORE_VERSIONS: SpecDefinitions<LinkSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::core_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 1 },
             None,
             Identity::core_identity(),
-        ))?;
+        ));
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 2 },
             Some(Version { major: 2, minor: 0 }),
             Identity::core_identity(),
-        ))?;
-        Ok(definitions)
+        ));
+        definitions
     };
-    pub(crate) static ref LINK_VERSIONS: Result<SpecDefinitions<LinkSpecDefinition>, FederationError> = {
+    pub(crate) static ref LINK_VERSIONS: SpecDefinitions<LinkSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::link_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
             Some(Version { major: 2, minor: 0 }),
             Identity::link_identity(),
-        ))?;
-        Ok(definitions)
+        ));
+        definitions
     };
 }

@@ -7,7 +7,7 @@ use crate::link::join_spec_definition::{
 };
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::{Identity, Version};
-use crate::link::spec_definition::{spec_definitions, SpecDefinition};
+use crate::link::spec_definition::SpecDefinition;
 use crate::query_graph::field_set::parse_field_set;
 use crate::schema::position::{
     is_graphql_reserved_name, CompositeTypeDefinitionPosition, DirectiveDefinitionPosition,
@@ -140,13 +140,11 @@ fn validate_supergraph(
         }
         .into());
     };
-    let Some(join_spec_definition) =
-        spec_definitions(JOIN_VERSIONS.deref())?.find(&join_link.url.version)
-    else {
+    let Some(join_spec_definition) = JOIN_VERSIONS.find(&join_link.url.version) else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
             message: format!(
                 "Invalid supergraph: uses unsupported join spec version {} (supported versions: {})",
-                spec_definitions(JOIN_VERSIONS.deref())?.versions().map( | v| v.to_string()).collect:: < Vec<String> > ().join(", "),
+                JOIN_VERSIONS.versions().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
                 join_link.url.version,
             ),
         }.into());
@@ -193,7 +191,7 @@ fn collect_empty_subgraphs(
             .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
                 message: "Subgraph unexpectedly does not use federation spec".to_owned(),
             })?;
-        let federation_spec_definition = spec_definitions(FEDERATION_VERSIONS.deref())?
+        let federation_spec_definition = FEDERATION_VERSIONS
             .find(&federation_link.url.version)
             .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
                 message: "Subgraph unexpectedly does not use a supported federation spec version"
@@ -1790,6 +1788,9 @@ fn remove_inactive_requires_and_provides_from_subgraph(
         .name
         .clone();
 
+    let mut object_or_interface_field_definition_positions: Vec<
+        ObjectOrInterfaceFieldDefinitionPosition,
+    > = vec![];
     for type_pos in schema.get_types() {
         // Ignore introspection types.
         if is_graphql_reserved_name(type_pos.type_name()) {
@@ -1802,39 +1803,43 @@ fn remove_inactive_requires_and_provides_from_subgraph(
             continue;
         };
 
-        let object_or_interface_field_definition_positions: Vec<
-            ObjectOrInterfaceFieldDefinitionPosition,
-        > = match type_pos {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(type_pos) => type_pos
-                .get(schema.schema())?
-                .fields
-                .keys()
-                .map(|field_name| type_pos.field(field_name.clone()).into())
-                .collect(),
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_pos) => type_pos
-                .get(schema.schema())?
-                .fields
-                .keys()
-                .map(|field_name| type_pos.field(field_name.clone()).into())
-                .collect(),
+        match type_pos {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_pos) => {
+                object_or_interface_field_definition_positions.extend(
+                    type_pos
+                        .get(schema.schema())?
+                        .fields
+                        .keys()
+                        .map(|field_name| type_pos.field(field_name.clone()).into()),
+                )
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_pos) => {
+                object_or_interface_field_definition_positions.extend(
+                    type_pos
+                        .get(schema.schema())?
+                        .fields
+                        .keys()
+                        .map(|field_name| type_pos.field(field_name.clone()).into()),
+                )
+            }
         };
+    }
 
-        for pos in object_or_interface_field_definition_positions {
-            remove_inactive_applications(
-                schema,
-                federation_spec_definition,
-                FieldSetDirectiveKind::Requires,
-                &requires_directive_definition_name,
-                pos.clone(),
-            )?;
-            remove_inactive_applications(
-                schema,
-                federation_spec_definition,
-                FieldSetDirectiveKind::Provides,
-                &provides_directive_definition_name,
-                pos,
-            )?;
-        }
+    for pos in object_or_interface_field_definition_positions {
+        remove_inactive_applications(
+            schema,
+            federation_spec_definition,
+            FieldSetDirectiveKind::Requires,
+            &requires_directive_definition_name,
+            pos.clone(),
+        )?;
+        remove_inactive_applications(
+            schema,
+            federation_spec_definition,
+            FieldSetDirectiveKind::Provides,
+            &provides_directive_definition_name,
+            pos,
+        )?;
     }
 
     Ok(())

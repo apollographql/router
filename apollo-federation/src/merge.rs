@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::iter;
+use std::sync::Arc;
 
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::{
@@ -60,8 +61,7 @@ impl Merger {
             errors: Vec::new(),
         }
     }
-    fn merge(&mut self, subgraphs: Vec<&ValidSubgraph>) -> Result<MergeSuccess, MergeFailure> {
-        let mut subgraphs = subgraphs.clone();
+    fn merge(&mut self, mut subgraphs: Vec<&ValidSubgraph>) -> Result<MergeSuccess, MergeFailure> {
         subgraphs.sort_by(|s1, s2| s1.name.cmp(&s2.name));
         let mut subgraphs_and_enum_values: Vec<(&ValidSubgraph, Name)> = Vec::new();
         for subgraph in &subgraphs {
@@ -92,6 +92,11 @@ impl Merger {
 
         // create stubs
         for (subgraph, subgraph_name) in &subgraphs_and_enum_values {
+            let sources = Arc::make_mut(&mut supergraph.sources);
+            for (key, source) in subgraph.schema.sources.iter() {
+                sources.entry(*key).or_insert_with(|| source.clone());
+            }
+
             self.merge_schema(&mut supergraph, subgraph);
             // TODO merge directives
 

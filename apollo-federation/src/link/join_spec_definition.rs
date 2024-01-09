@@ -309,24 +309,24 @@ impl SpecDefinition for JoinSpecDefinition {
 }
 
 lazy_static! {
-    pub(crate) static ref JOIN_VERSIONS: Result<SpecDefinitions<JoinSpecDefinition>, FederationError> = {
+    pub(crate) static ref JOIN_VERSIONS: SpecDefinitions<JoinSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 1 },
             None,
-        ))?;
+        ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 2 },
             None,
-        ))?;
+        ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 3 },
             None,
-        ))?;
+        ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 1 },
             Some(Version { major: 2, minor: 0 }),
-        ))?;
-        Ok(definitions)
+        ));
+        definitions
     };
 }
