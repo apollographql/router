@@ -1799,11 +1799,11 @@ expression: "&schema"
         "warn_only": false,
         "parser_max_recursion": 500,
         "parser_max_tokens": 15000,
-        "experimental_http_max_request_bytes": 2000000
+        "http_max_request_bytes": 2000000
       },
       "type": "object",
       "properties": {
-        "experimental_http_max_request_bytes": {
+        "http_max_request_bytes": {
           "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
           "default": 2000000,
           "type": "integer",

@@ -1,5 +1,5 @@
 limits:
-  experimental_http_max_request_bytes: 60
+  http_max_request_bytes: 60
 telemetry:
   exporters:
     metrics:
