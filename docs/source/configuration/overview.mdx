@@ -530,6 +530,17 @@ Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use th
 
 If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](../customizations/overview/#request-path) in the `SubgraphService` layer.
 
+### Progressive override
+
+When migrating types and fields between subgraph schemas with the [`@override`](/federation/federated-types/federated-directives/#override) directive, you can configure the router to override fields or types in a progressive or gradual fashion by enabling the `progressive_override` option:
+
+```yaml title="router.yaml"
+progressive_override:
+  enabled: true
+```
+
+Learn more with the [Incremental migration with `@override`](/federation/entities-advanced/#incremental-migration-with-override) guide.
+
 ### Caching
 
 By default, the Apollo Router stores the following data in its in-memory cache to improve performance:
