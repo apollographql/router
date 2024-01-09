@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -2141,6 +2142,10 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
+    },
+    "progressive_override": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
     },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",

@@ -152,8 +152,7 @@ where
                     query,
                     operation: None,
                     metadata: CacheKeyMetadata::default(),
-                    // TODO: probably wrong
-                    plan_options: None,
+                    plan_options: PlanOptions::default(),
                 });
             }
         }
@@ -289,19 +288,14 @@ where
             AuthorizationPlugin::update_cache_key(&request.context);
         }
 
-        let plan_options = if let Ok(Some(override_labels)) =
-            request.context.get::<&str, Vec<String>>(OVERRIDE_KEY)
-        {
-            if override_labels.len() == 0 {
-                None
-            } else {
-                Some(PlanOptions {
-                    override_labels: Some(override_labels.clone()),
-                })
-            }
-        } else {
-            None
+        let plan_options = PlanOptions {
+            overridden_labels: request
+                .context
+                .get(OVERRIDE_KEY)
+                .unwrap_or_default()
+                .unwrap_or_default(),
         };
+
         tracing::info!(
             "CachingQueryPlanner.plan: plan_options: {:?}",
             &plan_options
@@ -468,7 +462,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
     pub(crate) metadata: CacheKeyMetadata,
-    pub(crate) plan_options: Option<PlanOptions>,
+    pub(crate) plan_options: PlanOptions,
 }
 
 impl std::fmt::Display for CachingQueryKey {
@@ -508,7 +502,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
     pub(crate) metadata: CacheKeyMetadata,
-    pub(crate) plan_options: Option<PlanOptions>,
+    pub(crate) plan_options: PlanOptions,
 }
 
 #[cfg(test)]
