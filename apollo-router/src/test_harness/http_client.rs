@@ -123,8 +123,7 @@ where
                 let defer_spec = mediatype::Name::new("deferSpec").unwrap();
                 assert_eq!(media_type.subty, "mixed");
                 assert_eq!(media_type.get_param(defer_spec).unwrap(), "20220824");
-                let boundary = media_type.get_param(mediatype::names::BOUNDARY).unwrap();
-                let boundary = format!("\r\n--{}", boundary.unquoted_str());
+                let boundary = "\r\n--graphql".to_string();
                 MaybeMultipart::Multipart(parse_multipart(boundary, body).await)
             } else {
                 let mut vec = Vec::new();

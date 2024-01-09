@@ -1162,7 +1162,7 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
     );
     assert_eq!(
         response.text().await.unwrap(),
-        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\", \"multipart/mixed;boundary=\\\"graphql\\\";subscriptionSpec=1.0\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
+        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\", \"multipart/mixed;subscriptionSpec=1.0\" or \"multipart/mixed;deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
     );
 
     server.shutdown().await
