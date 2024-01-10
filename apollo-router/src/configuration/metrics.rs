@@ -235,7 +235,7 @@ impl InstrumentData {
             opt.parser.max_tokens,
             "$[?(@.parser_max_tokens)]",
             opt.request.max_size,
-            "$[?(@.experimental_http_max_request_bytes)]"
+            "$[?(@.http_max_request_bytes)]"
         );
         populate_config_instrument!(
             apollo.router.config.apq,

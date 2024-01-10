@@ -160,7 +160,11 @@ impl Plugin for Record {
         ServiceBuilder::new()
             .map_request(move |req: supergraph::Request| {
                 if is_introspection(
-                    req.supergraph_request.body().query.clone().unwrap(),
+                    req.supergraph_request
+                        .body()
+                        .query
+                        .clone()
+                        .unwrap_or_default(),
                     schema.clone(),
                 ) {
                     return req;
@@ -303,13 +307,14 @@ impl Plugin for Record {
 
 async fn write_file(dir: Arc<Path>, path: &PathBuf, contents: &[u8]) -> Result<(), BoxError> {
     let path = dir.join(path);
-    let dir = path.parent().unwrap();
+    let dir = path.parent().ok_or("invalid record directory")?;
     fs::create_dir_all(dir).await?;
     fs::write(path, contents).await?;
     Ok(())
 }
 
 fn is_introspection(query: String, schema: Arc<Schema>) -> bool {
-    let query = Query::parse(query, &schema, &Configuration::default()).expect("query must valid");
-    query.contains_introspection()
+    Query::parse(query, &schema, &Configuration::default())
+        .map(|q| q.contains_introspection())
+        .unwrap_or_default()
 }
