@@ -3,6 +3,7 @@
 // Read more: https://github.com/hyperium/tonic/issues/1056
 #![allow(clippy::derive_partial_eq_without_eq)]
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -102,7 +103,6 @@ impl LicenseEnforcementReport {
             restricted_schema_in_use: Self::validate_schema(
                 schema,
                 &Self::schema_restrictions(),
-                &Self::schema_restriction_visitors(),
             ),
         }
     }
@@ -135,11 +135,9 @@ impl LicenseEnforcementReport {
         configuration_violations
     }
 
-    // TODO: trevor look here
     fn validate_schema(
         schema: &apollo_compiler::ast::Document,
         schema_restrictions: &Vec<SchemaRestriction>,
-        schema_restriction_visitors: &Vec<SchemaRestrictionVisitor>,
     ) -> Vec<SchemaRestriction> {
         let feature_urls = schema
             .definitions
@@ -152,21 +150,51 @@ impl LicenseEnforcementReport {
             })
             .collect::<HashSet<_>>();
 
+        // collect directive definitions and their argument names
+        let directive_to_arg_names_map = schema
+            .definitions
+            .iter()
+            .filter_map(|def| def.as_directive_definition())
+            .map(|directive_def| {
+                let arg_names = directive_def
+                    .arguments
+                    .iter()
+                    .map(|arg| arg.name.to_string())
+                    .collect::<Vec<String>>();
+                (directive_def.name.to_string(), arg_names)
+            })
+            .collect::<HashMap<String, Vec<String>>>();
+
         let mut schema_violations = Vec::new();
 
         for restriction in schema_restrictions {
-            if feature_urls.contains(&restriction.url) {
-                schema_violations.push(restriction.clone());
+            match restriction {
+                SchemaRestriction::Directive { url, name } => {
+                    if feature_urls.contains(url) {
+                        schema_violations.push(SchemaRestriction::Directive {
+                            url: url.to_string(),
+                            name: name.to_string(),
+                        });
+                    }
+                }
+                SchemaRestriction::DirectiveArgument {
+                    url,
+                    name,
+                    argument,
+                } => {
+                    if directive_to_arg_names_map
+                        .get(name.strip_prefix('@').unwrap_or_default())
+                        .map(|args| args.contains(argument))
+                        .unwrap_or_default()
+                    {
+                        schema_violations.push(SchemaRestriction::DirectiveArgument {
+                            url: url.to_string(),
+                            name: name.to_string(),
+                            argument: argument.to_string(),
+                        });
+                    }
+                }
             }
-        }
-
-        for visitor in schema_restriction_visitors {
-            // if (visitor.visitor)(schema) {
-            //     schema_violations.push(SchemaRestriction {
-            //         name: visitor.name.clone(),
-            //         url: "huzzah".to_string(),
-            //     });
-            // }
         }
 
         schema_violations
@@ -255,45 +283,21 @@ impl LicenseEnforcementReport {
 
     fn schema_restrictions() -> Vec<SchemaRestriction> {
         vec![
-            SchemaRestriction::builder()
-                .name("@authenticated")
-                .url("https://specs.apollo.dev/authenticated/v0.1")
-                .build(),
-            SchemaRestriction::builder()
-                .name("@requiresScopes")
-                .url("https://specs.apollo.dev/requiresScopes/v0.1")
-                .build(),
+            SchemaRestriction::Directive {
+                name: "@authenticated".to_string(),
+                url: "https://specs.apollo.dev/authenticated/v0.1".to_string(),
+            },
+            SchemaRestriction::Directive {
+                name: "@requiresScopes".to_string(),
+                url: "https://specs.apollo.dev/requiresScopes/v0.1".to_string(),
+            },
+            SchemaRestriction::DirectiveArgument {
+                name: "@join__field".to_string(),
+                argument: "overrideLabel".to_string(),
+                url: "".to_string(),
+            },
         ]
     }
-
-    fn schema_restriction_visitors() -> Vec<SchemaRestrictionVisitor> {
-        vec![SchemaRestrictionVisitor::builder()
-            .name("progressive_override")
-            .visitor(|document| {
-                for definition in &document.definitions {
-                    if let Some(object_definition) = definition.as_object_type_definition() {
-                        for field in &object_definition.fields {
-                            if let Some(join_field_usage) = field.directives.get("join__field") {
-                                for argument in &join_field_usage.arguments {
-                                    if argument.name == "overrideLabel" {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                return false;
-            })
-            .build()]
-    }
-}
-
-// TODO: rename?
-#[derive(Builder)]
-struct SchemaRestrictionVisitor {
-    name: String,
-    visitor: fn(document: &apollo_compiler::ast::Document) -> bool,
 }
 
 impl Display for LicenseEnforcementReport {
@@ -315,7 +319,7 @@ impl Display for LicenseEnforcementReport {
             let restricted_schema = self
                 .restricted_schema_in_use
                 .iter()
-                .map(|v| format!("* {}\n  {}", v.name, v.url))
+                .map(|v| format!("{}", v))
                 .join("\n\n");
 
             write!(f, "Schema features:\n{restricted_schema}")?
@@ -410,11 +414,38 @@ pub(crate) struct ConfigurationRestriction {
     value: Option<Value>,
 }
 
+// An individual check for the supergraph schema
+// #[derive(Builder, Clone, Debug, Serialize, Deserialize)]
+// pub(crate) struct SchemaRestriction {
+//     name: String,
+//     url: String,
+// }
+
 /// An individual check for the supergraph schema
-#[derive(Builder, Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct SchemaRestriction {
-    name: String,
-    url: String,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) enum SchemaRestriction {
+    Directive {
+        name: String,
+        url: String,
+    },
+    DirectiveArgument {
+        name: String,
+        url: String,
+        argument: String,
+    },
+}
+
+impl Display for SchemaRestriction {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            SchemaRestriction::Directive { name, url } => {
+                write!(f, "* {}\n  {}", name, url)
+            },
+            SchemaRestriction::DirectiveArgument { name, url, argument } => {
+                write!(f, "* {}.{}\n  {}", name, argument, url)
+            }
+        }
+    }
 }
 
 impl License {
