@@ -47,7 +47,7 @@ To execute a deferred query on the Apollo Router, a GraphQL client sends an HTTP
 The only difference is that the request should include the following `Accept` header:
 
 ```text title="Example header"
-Accept: multipart/mixed; deferSpec=20220824, application/json
+Accept: multipart/mixed;deferSpec=20220824, application/json
 ```
 
 > Note: because the parts are always JSON, it is never possible for `\r\n--graphql` to appear in the contents of a part. For convenience, servers MAY use `graphql` as a boundary.
