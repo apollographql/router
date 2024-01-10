@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
+use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
 pub(crate) mod storage;
@@ -33,12 +34,12 @@ where
 {
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
-        redis_urls: Option<Vec<url::Url>>,
+        redis: Option<RedisCache>,
         caller: &str,
     ) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity, redis_urls, caller).await,
+            storage: CacheStorage::new(capacity, redis, caller).await,
         }
     }
 
@@ -46,12 +47,7 @@ where
         config: &crate::configuration::Cache,
         caller: &str,
     ) -> Self {
-        Self::with_capacity(
-            config.in_memory.limit,
-            config.redis.as_ref().map(|c| c.urls.clone()),
-            caller,
-        )
-        .await
+        Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {

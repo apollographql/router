@@ -1,6 +1,12 @@
 {{- if .Values.router.configuration }}
 {{- $routerFullName := include "router.fullname" .  -}}
+{{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
+{{- $configuration := dict }}
+{{- if (.Values.router.configuration.telemetry).exporters }}
+{{- $configuration = dict "telemetry" (dict "exporters" (dict "metrics" (dict "common" (dict "resource" (dict "service.name" $routerFullName))))) -}}
+{{- else }}
 {{- $configuration := dict "telemetry" (dict "metrics" (dict "common" (dict "resources" (dict "service.name" $routerFullName)))) -}}
+{{- end }}
 {{- $_ := mustMergeOverwrite $configuration .Values.router.configuration  -}}
 
 apiVersion: v1
@@ -9,6 +15,9 @@ metadata:
   name: {{ $routerFullName }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
 data:
   configuration.yaml: |
     {{- toYaml $configuration | nindent 4 }}

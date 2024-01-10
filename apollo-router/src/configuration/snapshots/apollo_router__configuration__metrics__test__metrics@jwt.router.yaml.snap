@@ -1,8 +1,10 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.authentication.jwt:
-  - 1
-  - {}
+- name: apollo.router.config.authentication.jwt
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
 

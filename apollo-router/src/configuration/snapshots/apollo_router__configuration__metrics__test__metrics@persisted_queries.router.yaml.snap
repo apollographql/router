@@ -1,10 +1,13 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.persisted_queries:
-  - 1
-  - opt__log_unknown__: true
-    opt__safelist__enabled__: true
-    opt__safelist__require_id__: true
+- name: apollo.router.config.persisted_queries
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.log_unknown.: true
+          opt.safelist.enabled.: true
+          opt.safelist.require_id.: true
 

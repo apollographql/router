@@ -1,7 +1,9 @@
 telemetry:
-  tracing:
-    trace_config:
-      service_name: router
-    jaeger:
-      agent:
-        endpoint: default
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      jaeger:
+        enabled: true
+        agent:
+          endpoint: default

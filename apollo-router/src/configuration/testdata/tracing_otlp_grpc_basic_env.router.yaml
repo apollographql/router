@@ -1,7 +1,9 @@
 supergraph:
   listen: 1.2.3.4:5
 telemetry:
-  tracing:
-    otlp:
-      endpoint: ${env.TEST_CONFIG_ENDPOINT}
-      protocol: http
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: ${env.TEST_CONFIG_ENDPOINT}
+        protocol: http

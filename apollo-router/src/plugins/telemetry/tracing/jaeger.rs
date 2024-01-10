@@ -1,34 +1,36 @@
 //! Configuration for jaeger tracing.
 use std::fmt::Debug;
 
-use opentelemetry::sdk::export::trace::SpanData;
+use http::Uri;
+use lazy_static::lazy_static;
+use opentelemetry::runtime;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::sdk::trace::Span;
-use opentelemetry::sdk::trace::SpanProcessor;
-use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::trace::TraceResult;
-use opentelemetry::Context;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
-use url::Url;
 
-use super::agent_endpoint;
-use super::deser_endpoint;
-use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::endpoint::SocketEndpoint;
+use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+lazy_static! {
+    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:14268/api/traces");
+}
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum Config {
     Agent {
+        /// Enable Jaeger
+        enabled: bool,
+
         /// Agent configuration
+        #[serde(default)]
         agent: AgentConfig,
 
         /// Batch processor configuration
@@ -36,7 +38,11 @@ pub(crate) enum Config {
         batch_processor: BatchProcessorConfig,
     },
     Collector {
+        /// Enable Jaeger
+        enabled: bool,
+
         /// Collector configuration
+        #[serde(default)]
         collector: CollectorConfig,
 
         /// Batch processor configuration
@@ -45,20 +51,28 @@ pub(crate) enum Config {
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct AgentConfig {
-    /// The endpoint to send to
-    #[schemars(schema_with = "agent_endpoint")]
-    #[serde(deserialize_with = "deser_endpoint")]
-    endpoint: AgentEndpoint,
+impl Default for Config {
+    fn default() -> Self {
+        Config::Agent {
+            enabled: false,
+            agent: Default::default(),
+            batch_processor: Default::default(),
+        }
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct AgentConfig {
+    /// The endpoint to send to
+    endpoint: SocketEndpoint,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct CollectorConfig {
     /// The endpoint to send reports to
-    endpoint: Url,
+    endpoint: UriEndpoint,
     /// The optional username
     username: Option<String>,
     /// The optional password
@@ -66,27 +80,29 @@ pub(crate) struct CollectorConfig {
 }
 
 impl TracingConfigurator for Config {
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+    fn enabled(&self) -> bool {
+        matches!(
+            self,
+            Config::Agent { enabled: true, .. } | Config::Collector { enabled: true, .. }
+        )
+    }
+
+    fn apply(
+        &self,
+        builder: Builder,
+        common: &TracingCommon,
+        _spans_config: &Spans,
+    ) -> Result<Builder, BoxError> {
         match &self {
             Config::Agent {
+                enabled,
                 agent,
                 batch_processor,
-            } => {
-                tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
-                let socket = match &agent.endpoint {
-                    AgentEndpoint::Default(_) => None,
-                    AgentEndpoint::Url(u) => {
-                        let socket_addr = u
-                            .socket_addrs(|| None)?
-                            .pop()
-                            .ok_or_else(|| format!("cannot resolve url ({u}) for jaeger agent"))?;
-                        Some(socket_addr)
-                    }
-                };
+            } if *enabled => {
+                tracing::info!("Configuring Jaeger tracing: {} (agent)", batch_processor);
                 let exporter = opentelemetry_jaeger::new_agent_pipeline()
-                    .with_trace_config(trace_config.into())
-                    .with_service_name(trace_config.service_name.clone())
-                    .with(&socket, |b, s| b.with_endpoint(s))
+                    .with_trace_config(common.into())
+                    .with(&agent.endpoint.to_socket(), |b, s| b.with_endpoint(s))
                     .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
@@ -96,48 +112,37 @@ impl TracingConfigurator for Config {
                 ))
             }
             Config::Collector {
+                enabled,
                 collector,
                 batch_processor,
-            } => {
-                tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
-                // We are waiting for a release of https://github.com/open-telemetry/opentelemetry-rust/issues/894
-                // Until that time we need to wrap a tracer provider with Jeager in.
-                let tracer_provider = opentelemetry_jaeger::new_collector_pipeline()
-                    .with_trace_config(trace_config.into())
-                    .with_service_name(trace_config.service_name.clone())
+            } if *enabled => {
+                tracing::info!(
+                    "Configuring Jaeger tracing: {} (collector)",
+                    batch_processor
+                );
+
+                let exporter = opentelemetry_jaeger::new_collector_pipeline()
+                    .with_trace_config(common.into())
                     .with(&collector.username, |b, u| b.with_username(u))
                     .with(&collector.password, |b, p| b.with_password(p))
-                    .with_endpoint(&collector.endpoint.to_string())
+                    .with(
+                        &collector
+                            .endpoint
+                            .to_uri(&DEFAULT_ENDPOINT)
+                            // https://github.com/open-telemetry/opentelemetry-rust/issues/1280 Default jaeger endpoint for collector looks incorrect
+                            .or_else(|| Some(DEFAULT_ENDPOINT.clone())),
+                        |b, p| b.with_endpoint(p.to_string()),
+                    )
                     .with_reqwest()
                     .with_batch_processor_config(batch_processor.clone().into())
-                    .build_batch(opentelemetry::runtime::Tokio)?;
-                Ok(builder
-                    .with_span_processor(DelegateSpanProcessor { tracer_provider }.filtered()))
+                    .build_collector_exporter::<runtime::Tokio>()?;
+                Ok(builder.with_span_processor(
+                    BatchSpanProcessor::builder(exporter, runtime::Tokio)
+                        .with_batch_config(batch_processor.clone().into())
+                        .build(),
+                ))
             }
+            _ => Ok(builder),
         }
-    }
-}
-
-#[derive(Debug)]
-struct DelegateSpanProcessor {
-    tracer_provider: TracerProvider,
-}
-
-impl SpanProcessor for DelegateSpanProcessor {
-    fn on_start(&self, span: &mut Span, cx: &Context) {
-        self.tracer_provider.span_processors()[0].on_start(span, cx)
-    }
-
-    fn on_end(&self, span: SpanData) {
-        self.tracer_provider.span_processors()[0].on_end(span)
-    }
-
-    fn force_flush(&self) -> TraceResult<()> {
-        self.tracer_provider.span_processors()[0].force_flush()
-    }
-
-    fn shutdown(&mut self) -> TraceResult<()> {
-        // It's safe to not call shutdown as dropping tracer_provider will cause shutdown to happen separately.
-        Ok(())
     }
 }

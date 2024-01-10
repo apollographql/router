@@ -1,6 +1,9 @@
 ---
-title: Configuring CSRF (Cross-Site Request Forgery) prevention in the Apollo Router
+title: Cross-Site Request Forgery (CSRF) Prevention
 sidebar_title: CSRF prevention
+subtitle: Prevent CSRF attacks in the Apollo Router
+description: Prevent cross-site request forgery (CSRF) attacks in the Apollo Router.
+minVersion: 0.9.0
 ---
 
 Your router's [CORS policy](./cors/) enables you to control which websites can talk to your server. In most cases, the browser checks your server's CORS policy by sending a [preflight request](https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request) before sending the actual operation. This is a separate HTTP request. Unlike most HTTP requests (which use the `GET` or `POST` method), this request uses a method called `OPTIONS`. The browser sends an `Origin` header, along with some other headers that start with `Access-Control-`. These headers describe the kind of request that the potentially untrusted JavaScript wants to make. Your server returns a response with `Access-Control-*` headers describing its policies (as described above), and the browser uses that response to decide whether it's OK to send the real request.  Processing the `OPTIONS` preflight request never actually executes GraphQL operations.
@@ -23,9 +26,12 @@ Apollo Router 0.9 introduced a CSRF prevention feature, which is enabled by defa
 - There is a `X-Apollo-Operation-Name` header. This header is sent with all operations (`POST` or `GET`) by [Apollo iOS](/ios) (v0.13.0+) and [Apollo Kotlin](/kotlin) (all versions, including its former name "Apollo Android"), so any request from Apollo iOS or Apollo Kotlin will be executed.
 - There is a `Apollo-Require-Preflight` header.
 
-Note that all HTTP header names are case-insensitive.
+<Note>
 
-> Unlike requests that will execute GraphQL operations, CSRF prevention is not applied to the landing page or to health checks. It does however apply to new endpoints added by plugins.
+* All HTTP header names are case-insensitive.
+* Unlike requests that will execute GraphQL operations, CSRF prevention is not applied to the landing page or to health checks. It does however apply to new endpoints added by plugins.
+
+</Note> 
 
 HTTP requests that satisfy none of the conditions above will be rejected with a 400 status code and a message clearly explaining which headers need to be added in order to make the request succeed.
 

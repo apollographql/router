@@ -1,0 +1,8 @@
+⚠️ **Apollo doesn't recommend creating native plugins for the Apollo Router**, for the following reasons:
+
+- Native plugins require familiarity with programming in Rust.
+- Native plugins require compiling a custom router binary from source, which can introduce unexpected behavior in your router that's difficult to diagnose and support.
+
+Instead, for most router customizations, Apollo recommends creating either a [Rhai script](https://www.apollographql.com/docs/router/customizations/rhai/) or an [external coprocessor](https://www.apollographql.com/docs/router/customizations/coprocessor). Both of these customizations are supported by Apollo and provide strong separation of concerns and fault isolation.
+
+If you must create a native plugin, please [open a GitHub issue](https://github.com/apollographql/router/issues), and Apollo can investigate adding the custom capability to the stock router binary.

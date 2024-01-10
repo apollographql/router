@@ -1,0 +1,7 @@
+telemetry:
+  tracing:
+    otlp:
+      endpoint: default
+  metrics:
+    otlp:
+      endpoint: default

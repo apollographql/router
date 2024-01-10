@@ -1,12 +1,19 @@
 include_subgraph_errors:
   all: true
+rhai:
+  scripts: tests/fixtures
+  main: test_callbacks.rhai
 telemetry:
-  tracing:
-    experimental_response_trace_id:
-      enabled: true
-      header_name: "my_trace_id"
-    trace_config:
-      sampler: always_on
+  instrumentation:
+    spans:
+      mode: deprecated
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: "my_trace_id"
+      common:
+        sampler: always_on
 
   apollo:
     client_name_header: apollographql-client-name

@@ -20,7 +20,7 @@ query:
 extracted_scopes: {"read:user", "read:username"}
 request scopes: []
 filtered:
-query {
+{
   topProducts {
     type
   }

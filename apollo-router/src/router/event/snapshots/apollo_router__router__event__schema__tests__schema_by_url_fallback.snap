@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/router/event/schema.rs
+expression: yaml
+---
+- fields:
+    http.response.status_code: 400
+    url.full: "[url.full]"
+  level: WARN
+  message: failed to fetch supergraph schema
+- fields:
+    http.response.status_code: 400
+    url.full: "[url.full]"
+  level: WARN
+  message: failed to fetch supergraph schema
+

@@ -111,6 +111,7 @@ mod introspection_tests {
                     }),
                     graphql_validation: true,
                     reuse_query_fragments: Some(false),
+                    debug: None,
                 },
             )
             .await

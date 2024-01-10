@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
 use http::StatusCode;
@@ -23,6 +25,7 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -44,7 +47,7 @@ use crate::services::router;
 use crate::Context;
 
 mod jwks;
-mod subgraph;
+pub(crate) mod subgraph;
 
 #[cfg(test)]
 mod tests;
@@ -110,7 +113,7 @@ struct AuthenticationPlugin {
     subgraph: Option<SubgraphAuth>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
@@ -128,6 +131,13 @@ struct JWTConf {
 struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
+    /// Polling interval for each JWKS endpoint in human-readable format; defaults to 60s
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_poll_interval"
+    )]
+    #[schemars(with = "String", default = "default_poll_interval")]
+    poll_interval: Duration,
     /// Expected issuer for tokens verified by that JWKS
     issuer: Option<String>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
@@ -135,17 +145,6 @@ struct JwksConf {
     #[serde(default)]
     algorithms: Option<Vec<Algorithm>>,
 }
-
-impl Default for JWTConf {
-    fn default() -> Self {
-        Self {
-            jwks: Default::default(),
-            header_name: default_header_name(),
-            header_value_prefix: default_header_value_prefix(),
-        }
-    }
-}
-
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -172,6 +171,10 @@ fn default_header_name() -> String {
 
 fn default_header_value_prefix() -> String {
     "Bearer".to_string()
+}
+
+fn default_poll_interval() -> Duration {
+    DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
 }
 
 #[derive(Debug, Default)]
@@ -209,12 +212,18 @@ fn search_jwks(
         // criteria)
         for mut key in jwks.keys.into_iter().filter(|key| {
             // We are only interested in keys which are used for signature verification
-            if let Some(purpose) = &key.common.public_key_use {
-                purpose == &PublicKeyUse::Signature
-            } else if let Some(purpose) = &key.common.key_operations {
-                purpose.contains(&KeyOperations::Verify)
-            } else {
-                false
+            match (&key.common.public_key_use, &key.common.key_operations) {
+                // "use" https://datatracker.ietf.org/doc/html/rfc7517#section-4.2 and
+                // "key_ops" https://datatracker.ietf.org/doc/html/rfc7517#section-4.3 are both optional
+                (None, None) => true,
+                (None, Some(purpose)) => purpose.contains(&KeyOperations::Verify),
+                (Some(key_use), None) => key_use == &PublicKeyUse::Signature,
+                // The "use" and "key_ops" JWK members SHOULD NOT be used together;
+                // however, if both are used, the information they convey MUST be
+                // consistent
+                (Some(key_use), Some(purpose)) => {
+                    key_use == &PublicKeyUse::Signature && purpose.contains(&KeyOperations::Verify)
+                }
             }
         }) {
             let mut key_score = 0;
@@ -392,6 +401,7 @@ impl Plugin for AuthenticationPlugin {
                         .algorithms
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
+                    poll_interval: jwks_conf.poll_interval,
                 });
             }
 
@@ -706,6 +716,41 @@ fn decode_jwt(
                 ))
             }
         }
+    }
+}
+
+pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
+    let claims = context
+        .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .map_err(|err| tracing::error!("could not read JWT claims: {err}"))
+        .ok()
+        .flatten();
+    let ts_opt = claims.as_ref().and_then(|x: &Value| {
+        if !x.is_object() {
+            tracing::error!("JWT claims should be an object");
+            return None;
+        }
+        let claims = x.as_object().expect("claims should be an object");
+        let exp = claims.get("exp")?;
+        if !exp.is_number() {
+            tracing::error!("JWT 'exp' (expiry) claim should be a number");
+            return None;
+        }
+        exp.as_i64()
+    });
+    match ts_opt {
+        Some(ts) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("we should not run before EPOCH")
+                .as_secs() as i64;
+            if now < ts {
+                Duration::from_secs((ts - now) as u64)
+            } else {
+                Duration::ZERO
+            }
+        }
+        None => Duration::MAX,
     }
 }
 

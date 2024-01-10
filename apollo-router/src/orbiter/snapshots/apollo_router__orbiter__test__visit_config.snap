@@ -14,7 +14,8 @@ configuration.headers.subgraphs.<redacted>.request.remove.len: 1
 configuration.headers.subgraphs.<redacted>.request.remove.named.<redacted>: 1
 configuration.override_subgraph_url.len: 1
 configuration.telemetry.apollo.send_headers.len: 1
-configuration.telemetry.tracing.otlp.endpoint.<redacted>: 1
-configuration.telemetry.tracing.otlp.grpc.metadata.len: 2
-configuration.telemetry.tracing.otlp.protocol.<redacted>: 1
+configuration.telemetry.exporters.tracing.otlp.enabled.true: 1
+configuration.telemetry.exporters.tracing.otlp.endpoint.<redacted>: 1
+configuration.telemetry.exporters.tracing.otlp.grpc.metadata.len: 2
+configuration.telemetry.exporters.tracing.otlp.protocol.<redacted>: 1
 

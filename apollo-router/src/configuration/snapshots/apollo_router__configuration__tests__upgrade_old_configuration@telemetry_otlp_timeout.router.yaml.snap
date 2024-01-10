@@ -4,9 +4,11 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    otlp:
-      endpoint: default
-      batch_processor:
-        max_export_timeout: 5s
+  exporters:
+    tracing:
+      otlp:
+        endpoint: default
+        batch_processor:
+          max_export_timeout: 5s
+        enabled: true
 

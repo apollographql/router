@@ -19,7 +19,7 @@ query:
         }
         
 filtered:
-query {
+{
   topProducts {
     type
   }
@@ -28,4 +28,4 @@ query {
   }
 }
 
-paths: ["/itf/... on User"]
+paths: ["/itf"]

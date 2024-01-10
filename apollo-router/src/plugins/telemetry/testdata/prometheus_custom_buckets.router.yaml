@@ -1,0 +1,14 @@
+telemetry:
+  apollo:
+    client_name_header: name_header
+    client_version_header: version_header
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        buckets:
+          - 5
+          - 10
+          - 20
+      prometheus:
+        enabled: true

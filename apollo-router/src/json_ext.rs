@@ -103,6 +103,9 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn is_valid_int_input(&self) -> bool;
 
+    #[track_caller]
+    fn is_valid_id_input(&self) -> bool;
+
     /// Returns whether this value is an object that matches the provided type.
     ///
     /// More precisely, this checks that this value is an object, looks at
@@ -392,6 +395,17 @@ impl ValueExt for Value {
         F: FnMut(&Path, &'a mut Value),
     {
         iterate_path_mut(schema, &mut Path::default(), &path.0, self, &mut f)
+    }
+
+    #[track_caller]
+    fn is_valid_id_input(&self) -> bool {
+        // https://spec.graphql.org/October2021/#sec-ID.Input-Coercion
+        match self {
+            // Any string and integer values are accepted
+            Value::String(_) => true,
+            Value::Number(n) => n.is_i64() || n.is_u64(),
+            _ => false,
+        }
     }
 
     #[track_caller]

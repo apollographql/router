@@ -1,7 +1,9 @@
 supergraph:
   listen: 1.2.3.4:5
 telemetry:
-  tracing:
-    jaeger:
-      collector:
-        endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}
+  exporters:
+    tracing:
+      jaeger:
+        enabled: true
+        collector:
+          endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}

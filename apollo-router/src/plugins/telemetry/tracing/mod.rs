@@ -11,16 +11,12 @@ use opentelemetry::sdk::trace::SpanProcessor;
 use opentelemetry::trace::TraceResult;
 use opentelemetry::Context;
 use opentelemetry::KeyValue;
-use reqwest::Url;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Deserializer;
-use serde::Serialize;
-use serde_json::Value;
 use tower::BoxError;
-use url::ParseError;
 
-use crate::plugins::telemetry::config::Trace;
+use super::config_new::spans::Spans;
+use crate::plugins::telemetry::config::TracingCommon;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
@@ -31,69 +27,13 @@ pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
-}
-
-schemar_fn!(
-    agent_endpoint,
-    String,
-    Some(Value::String("default".to_string())),
-    "The agent endpoint to send reports to"
-);
-/// The endpoint to send reports to
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum AgentEndpoint {
-    /// The default agent endpoint
-    Default(AgentDefault),
-    /// A custom URL endpoint
-    Url(Url),
-}
-
-/// The default agent endpoint
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum AgentDefault {
-    /// The default agent endpoint
-    Default,
-}
-
-pub(crate) fn parse_url_for_endpoint(mut s: String) -> Result<Url, ParseError> {
-    match Url::parse(&s) {
-        Ok(url) => {
-            // support the case of 'collector:4317' where url parses 'collector'
-            // as the scheme instead of the host
-            if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-                s = format!("http://{s}");
-                Url::parse(&s)
-            } else {
-                Ok(url)
-            }
-        }
-        Err(err) => {
-            match err {
-                // support the case of '127.0.0.1:4317' where url is interpreted
-                // as a relative url without a base
-                ParseError::RelativeUrlWithoutBase => {
-                    s = format!("http://{s}");
-                    Url::parse(&s)
-                }
-                _ => Err(err),
-            }
-        }
-    }
-}
-
-pub(crate) fn deser_endpoint<'de, D>(deserializer: D) -> Result<AgentEndpoint, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    if s == "default" {
-        return Ok(AgentEndpoint::Default(AgentDefault::Default));
-    }
-    let url = parse_url_for_endpoint(s).map_err(serde::de::Error::custom)?;
-    Ok(AgentEndpoint::Url(url))
+    fn enabled(&self) -> bool;
+    fn apply(
+        &self,
+        builder: Builder,
+        common: &TracingCommon,
+        spans: &Spans,
+    ) -> Result<Builder, BoxError>;
 }
 
 #[derive(Debug)]
@@ -162,7 +102,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -181,10 +121,10 @@ pub(crate) struct BatchProcessorConfig {
     /// is 512.
     pub(crate) max_export_batch_size: usize,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
     pub(crate) max_export_timeout: Duration,
 
     /// Maximum number of concurrent exports
