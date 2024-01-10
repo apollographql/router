@@ -12,7 +12,7 @@ use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry::sdk::resource::ResourceDetector;
 use opentelemetry::sdk::Resource;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -474,7 +474,7 @@ impl ResourceDetector for ConfigResourceDetector {
 
 impl MetricsBuilder {
     pub(crate) fn new(config: &Conf) -> Self {
-        let resource = config.metrics.common.to_resource();
+        let resource = config.exporters.metrics.common.to_resource();
 
         Self {
             resource: resource.clone(),

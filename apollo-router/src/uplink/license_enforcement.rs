@@ -34,6 +34,8 @@ pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
 pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
     "Apollo license expired https://go.apollo.dev/o/elp";
 
+pub(crate) const APOLLO_ROUTER_LICENSE_EXPIRED: &str = "APOLLO_ROUTER_LICENSE_EXPIRED";
+
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
 
 #[derive(Error, Display, Debug)]
@@ -42,11 +44,12 @@ pub enum Error {
     InvalidLicense(jsonwebtoken::errors::Error),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum Audience {
     SelfHosted,
     Cloud,
+    Offline,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -88,7 +91,7 @@ impl LicenseEnforcementReport {
 
     pub(crate) fn build(
         configuration: &Configuration,
-        schema: &apollo_compiler::schema::Schema,
+        schema: &apollo_compiler::ast::Document,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
@@ -128,14 +131,14 @@ impl LicenseEnforcementReport {
     }
 
     fn validate_schema(
-        schema: &apollo_compiler::schema::Schema,
+        schema: &apollo_compiler::ast::Document,
         schema_restrictions: &Vec<SchemaRestriction>,
     ) -> Vec<SchemaRestriction> {
         let feature_urls = schema
-            .schema_definition
-            .directives
+            .definitions
             .iter()
-            .filter(|dir| dir.name.as_str() == LINK_DIRECTIVE_NAME)
+            .filter_map(|def| def.as_schema_definition())
+            .flat_map(|def| def.directives.get_all(LINK_DIRECTIVE_NAME))
             .filter_map(|link| {
                 link.argument_by_name(LINK_URL_ARGUMENT)
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
@@ -165,7 +168,7 @@ impl LicenseEnforcementReport {
                 .name("Authentication plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.authorization.preview_directives")
+                .path("$.authorization.directives")
                 .name("Authorization directives")
                 .build(),
             ConfigurationRestriction::builder()
@@ -181,12 +184,8 @@ impl LicenseEnforcementReport {
                 .name("APQ caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.traffic_shaping.experimental_cache")
+                .path("$.experimental_entity_cache")
                 .name("Subgraph caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.traffic_shaping..experimental_entity_caching")
-                .name("Subgraph entity caching")
                 .build(),
             ConfigurationRestriction::builder()
                 .path("$.subscription.enabled")
@@ -214,6 +213,26 @@ impl LicenseEnforcementReport {
             ConfigurationRestriction::builder()
                 .path("$.persisted_queries")
                 .name("Persisted queries")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..spans.router")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..spans.supergraph")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..spans.subgraph")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..events")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..instruments")
+                .name("Advanced telemetry")
                 .build(),
         ]
     }
@@ -269,11 +288,16 @@ pub struct License {
 }
 
 /// Licenses are converted into a stream of license states by the expander
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
 pub(crate) enum LicenseState {
+    /// licensed
     Licensed,
+    /// warn
     LicensedWarn,
+    /// halt
     LicensedHalt,
+
+    /// unlicensed
     #[default]
     Unlicensed,
 }
@@ -311,7 +335,7 @@ impl FromStr for License {
                 validation.validate_exp = false;
                 validation.set_required_spec_claims(&["iss", "sub", "aud", "warnAt", "haltAt"]);
                 validation.set_issuer(&["https://www.apollographql.com/"]);
-                validation.set_audience(&["CLOUD", "SELF_HOSTED"]);
+                validation.set_audience(&["CLOUD", "SELF_HOSTED", "OFFLINE"]);
 
                 decode::<Claims>(
                     jwt.trim(),
@@ -378,8 +402,7 @@ mod test {
 
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-        let schema =
-            Schema::make_compiler(supergraph_schema).expect("supergraph schema must be valid");
+        let schema = Schema::parse_ast(supergraph_schema).expect("supergraph schema must be valid");
         LicenseEnforcementReport::build(&config, &schema)
     }
 
@@ -426,7 +449,7 @@ mod test {
 
     #[test]
     fn test_license_parse() {
-        let license = License::from_str("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw").expect("must be able to decode JWT");
+        let license = License::from_str("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw").expect("must be able to decode JWT"); // gitleaks:allow
         assert_eq!(
             license.claims,
             Some(Claims {
@@ -441,7 +464,7 @@ mod test {
 
     #[test]
     fn test_license_parse_with_whitespace() {
-        let license = License::from_str("   eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw\n ").expect("must be able to decode JWT");
+        let license = License::from_str("   eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw\n ").expect("must be able to decode JWT"); // gitleaks:allow
         assert_eq!(
             license.claims,
             Some(Claims {
@@ -474,6 +497,15 @@ mod test {
             "iss": "Issuer",
             "sub": "Subject",
             "aud": ["CLOUD", "SELF_HOSTED"],
+            "warnAt": 122,
+            "haltAt": 123,
+        }))
+        .expect("json must deserialize");
+
+        serde_json::from_value::<Claims>(json!({
+            "iss": "Issuer",
+            "sub": "Subject",
+            "aud": "OFFLINE",
             "warnAt": 122,
             "haltAt": 123,
         }))

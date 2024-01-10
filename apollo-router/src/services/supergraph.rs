@@ -24,6 +24,10 @@ use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Path;
 use crate::Context;
 
+pub(crate) mod service;
+#[cfg(test)]
+mod tests;
+
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;

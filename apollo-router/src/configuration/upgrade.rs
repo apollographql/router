@@ -1,4 +1,5 @@
 use std::fmt::Write as _;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use proteus::Parser;
@@ -6,6 +7,7 @@ use proteus::TransformBuilder;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::Value;
+use tracing_core::Level;
 
 use crate::error::ConfigurationError;
 
@@ -42,6 +44,13 @@ enum Action {
         path: String,
         from: Value,
         to: Value,
+    },
+    /// Don't migrate anything, just log a better message before the parsing error.
+    /// It can be useful when you're moving a feature from experimental to GA and it is not backward compatible
+    Log {
+        path: String,
+        level: String,
+        log: String,
     },
 }
 
@@ -143,6 +152,22 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                         Parser::parse(&format!(r#"const({to})"#), path)
                             .expect("migration must be valid"),
                     );
+                }
+            }
+            Action::Log { path, level, log } => {
+                let level = Level::from_str(level).expect("unknown level for log migration");
+
+                if !jsonpath_lib::select(config, &format!("$.{path}"))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    match level {
+                        Level::INFO => tracing::info!("{log}"),
+                        Level::ERROR => tracing::error!("{log}"),
+                        Level::WARN => tracing::warn!("{log}"),
+                        Level::TRACE => tracing::trace!("{log}"),
+                        Level::DEBUG => tracing::debug!("{log}"),
+                    }
                 }
             }
         }

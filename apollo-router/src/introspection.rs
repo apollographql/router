@@ -25,7 +25,7 @@ impl Introspection {
         capacity: NonZeroUsize,
     ) -> Self {
         Self {
-            cache: CacheStorage::new(capacity, None, None, "introspection").await,
+            cache: CacheStorage::new(capacity, None, "introspection").await,
             planner,
         }
     }
@@ -111,6 +111,7 @@ mod introspection_tests {
                     }),
                     graphql_validation: true,
                     reuse_query_fragments: Some(false),
+                    debug: None,
                 },
             )
             .await

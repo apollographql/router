@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+expression: response
+---
+{
+  "data": {
+    "me": {
+      "name": "Ada",
+      "organizations": [
+        {
+          "id": "2",
+          "name": "Apollo"
+        }
+      ]
+    }
+  }
+}

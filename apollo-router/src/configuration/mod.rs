@@ -207,10 +207,10 @@ pub(crate) enum GraphQLValidationMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
+    #[default]
     Both,
 }
 
@@ -758,7 +758,7 @@ pub(crate) struct Limits {
     pub(crate) warn_only: bool,
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
-    /// default: 4096
+    /// default: 500
     pub(crate) parser_max_recursion: usize,
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
@@ -766,7 +766,7 @@ pub(crate) struct Limits {
 
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
-    pub(crate) experimental_http_max_request_bytes: usize,
+    pub(crate) http_max_request_bytes: usize,
 }
 
 impl Default for Limits {
@@ -778,13 +778,13 @@ impl Default for Limits {
             max_root_fields: None,
             max_aliases: None,
             warn_only: false,
-            experimental_http_max_request_bytes: 2_000_000,
+            http_max_request_bytes: 2_000_000,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
             // but is still very high for "reasonable" queries.
-            // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
-            parser_max_recursion: 4096,
+            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
+            parser_max_recursion: 500,
         }
     }
 }
@@ -855,6 +855,29 @@ pub(crate) struct QueryPlanning {
     /// the in memory cache
     #[serde(default)]
     pub(crate) warmed_up_queries: Option<usize>,
+
+    /// Sets a limit to the number of generated query plans.
+    /// The planning process generates many different query plans as it
+    /// explores the graph, and the list can grow large. By using this
+    /// limit, we prevent that growth and still get a valid query plan,
+    /// but it may not be the optimal one.
+    ///
+    /// The default limit is set to 10000, but it may change in the future
+    pub(crate) experimental_plans_limit: Option<u32>,
+
+    /// Before creating query plans, for each path of fields in the query we compute all the
+    /// possible options to traverse that path via the subgraphs. Multiple options can arise because
+    /// fields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions
+    /// and interfaces) returned by fields sometimes require the query planner to traverse through
+    /// each constituent object type. The number of options generated in this computation can grow
+    /// large if the schema or query are sufficiently complex, and that will increase the time spent
+    /// planning.
+    ///
+    /// This config allows specifying a per-path limit to the number of options considered. If any
+    /// path's options exceeds this limit, query planning will abort and the operation will fail.
+    ///
+    /// The default value is None, which specifies no limit.
+    pub(crate) experimental_paths_limit: Option<u32>,
 }
 
 /// Cache configuration
@@ -883,7 +906,7 @@ impl Default for InMemoryCache {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {
@@ -894,6 +917,15 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
     pub(crate) timeout: Option<Duration>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// TTL for entries
+    pub(crate) ttl: Option<Duration>,
+
+    #[serde(default)]
+    /// TLS client configuration
+    pub(crate) tls: Option<TlsClient>,
 }
 
 /// TLS related configuration options.
@@ -905,7 +937,7 @@ pub(crate) struct Tls {
     ///
     /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
     pub(crate) supergraph: Option<TlsSupergraph>,
-    pub(crate) subgraph: SubgraphConfiguration<TlsSubgraph>,
+    pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
 }
 
 /// Configuration options pertaining to the supergraph server component.
@@ -1026,7 +1058,7 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
-pub(crate) struct TlsSubgraph {
+pub(crate) struct TlsClient {
     /// list of certificate authorities in PEM format
     pub(crate) certificate_authorities: Option<String>,
     /// client certificate authentication
@@ -1034,7 +1066,7 @@ pub(crate) struct TlsSubgraph {
 }
 
 #[buildstructor::buildstructor]
-impl TlsSubgraph {
+impl TlsClient {
     #[builder]
     pub(crate) fn new(
         certificate_authorities: Option<String>,
@@ -1047,7 +1079,7 @@ impl TlsSubgraph {
     }
 }
 
-impl Default for TlsSubgraph {
+impl Default for TlsClient {
     fn default() -> Self {
         Self::builder().build()
     }
@@ -1161,25 +1193,43 @@ pub(crate) struct HealthCheck {
     /// Defaults to 127.0.0.1:8088
     pub(crate) listen: ListenAddr,
 
-    /// Set to false to disable the health check endpoint
+    /// Set to false to disable the health check
     pub(crate) enabled: bool,
+
+    /// Optionally set a custom healthcheck path
+    /// Defaults to /health
+    pub(crate) path: String,
 }
 
 fn default_health_check_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:8088").unwrap().into()
 }
 
-fn default_health_check() -> bool {
+fn default_health_check_enabled() -> bool {
     true
+}
+
+fn default_health_check_path() -> String {
+    "/health".to_string()
 }
 
 #[buildstructor::buildstructor]
 impl HealthCheck {
     #[builder]
-    pub(crate) fn new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        enabled: Option<bool>,
+        path: Option<String>,
+    ) -> Self {
+        let mut path = path.unwrap_or_else(default_health_check_path);
+        if !path.starts_with('/') {
+            path = format!("/{path}").to_string();
+        }
+
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
-            enabled: enabled.unwrap_or_else(default_health_check),
+            enabled: enabled.unwrap_or_else(default_health_check_enabled),
+            path,
         }
     }
 }
@@ -1188,10 +1238,20 @@ impl HealthCheck {
 #[buildstructor::buildstructor]
 impl HealthCheck {
     #[builder]
-    pub(crate) fn fake_new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        enabled: Option<bool>,
+        path: Option<String>,
+    ) -> Self {
+        let mut path = path.unwrap_or_else(default_health_check_path);
+        if !path.starts_with('/') {
+            path = format!("/{path}");
+        }
+
         Self {
             listen: listen.unwrap_or_else(test_listen),
-            enabled: enabled.unwrap_or_else(default_health_check),
+            enabled: enabled.unwrap_or_else(default_health_check_enabled),
+            path,
         }
     }
 }

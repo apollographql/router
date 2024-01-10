@@ -3,9 +3,9 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use futures::channel::mpsc;
 use http::StatusCode;
 use http::Version;
+use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -13,21 +13,27 @@ use sha2::Digest;
 use sha2::Sha256;
 use static_assertions::assert_impl_all;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
+use crate::http_ext::header_map;
+use crate::http_ext::TryIntoHeaderName;
+use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::fetch::QueryHash;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
-pub type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send>>;
+pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send + Sync>>;
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
@@ -41,10 +47,17 @@ pub struct Request {
 
     pub context: Context,
 
+    /// Name of the subgraph, it's an Option to not introduce breaking change
+    pub(crate) subgraph_name: Option<String>,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
     /// Channel triggered when the client connection has been dropped
     pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
+
+    pub(crate) query_hash: Arc<QueryHash>,
+
+    // authorization metadata for this request
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
 #[buildstructor::buildstructor]
@@ -59,6 +72,7 @@ impl Request {
         operation_kind: OperationKind,
         context: Context,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+        subgraph_name: Option<String>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Self {
@@ -66,8 +80,11 @@ impl Request {
             subgraph_request,
             operation_kind,
             context,
+            subgraph_name,
             subscription_stream,
             connection_closed_signal,
+            query_hash: Default::default(),
+            authorization: Default::default(),
         }
     }
 
@@ -83,6 +100,7 @@ impl Request {
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+        subgraph_name: Option<String>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Request::new(
@@ -91,6 +109,7 @@ impl Request {
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
             subscription_stream,
+            subgraph_name,
             connection_closed_signal,
         )
     }
@@ -121,11 +140,14 @@ impl Clone for Request {
             subgraph_request,
             operation_kind: self.operation_kind,
             context: self.context.clone(),
+            subgraph_name: self.subgraph_name.clone(),
             subscription_stream: self.subscription_stream.clone(),
             connection_closed_signal: self
                 .connection_closed_signal
                 .as_ref()
                 .map(|s| s.resubscribe()),
+            query_hash: self.query_hash.clone(),
+            authorization: self.authorization.clone(),
         }
     }
 }
@@ -190,8 +212,8 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a "fake" Response.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// Response. It's usually enough for testing, when a fully consructed Response is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// Response. It's usually enough for testing, when a fully constructed Response is
+    /// difficult to construct and not required for the purposes of the test.
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
@@ -214,6 +236,36 @@ impl Response {
             context.unwrap_or_default(),
             headers,
         )
+    }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" Response.
+    /// It differs from the existing fake_new because it allows easier passing of headers. However we can't change the original without breaking the public APIs.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// Response. It's usually enough for testing, when a fully constructed Response is
+    /// difficult to construct and not required for the purposes of the test.
+    #[builder(visibility = "pub")]
+    fn fake2_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<Error>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
+        status_code: Option<StatusCode>,
+        context: Option<Context>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    ) -> Result<Response, BoxError> {
+        Ok(Response::new(
+            label,
+            data,
+            path,
+            errors,
+            extensions,
+            status_code,
+            context.unwrap_or_default(),
+            Some(header_map(headers)?),
+        ))
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
