@@ -84,7 +84,7 @@ expression: "&schema"
                   ],
                   "properties": {
                     "password": {
-                      "description": "Redis password if not provided in the URLs, this field takes precedence over the password in the URL",
+                      "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
                       "nullable": true
                     },
@@ -147,7 +147,7 @@ expression: "&schema"
                       }
                     },
                     "username": {
-                      "description": "Redis username if not provided in the URLs, this field takes precedence over the username in the URL",
+                      "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
                       "type": "string",
                       "nullable": true
                     }
@@ -1218,7 +1218,7 @@ expression: "&schema"
           ],
           "properties": {
             "password": {
-              "description": "Redis password if not provided in the URLs, this field takes precedence over the password in the URL",
+              "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
               "type": "string",
               "nullable": true
             },
@@ -1281,7 +1281,7 @@ expression: "&schema"
               }
             },
             "username": {
-              "description": "Redis username if not provided in the URLs, this field takes precedence over the username in the URL",
+              "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
               "type": "string",
               "nullable": true
             }
@@ -2330,7 +2330,7 @@ expression: "&schema"
                   ],
                   "properties": {
                     "password": {
-                      "description": "Redis password if not provided in the URLs, this field takes precedence over the password in the URL",
+                      "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
                       "nullable": true
                     },
@@ -2393,7 +2393,7 @@ expression: "&schema"
                       }
                     },
                     "username": {
-                      "description": "Redis username if not provided in the URLs, this field takes precedence over the username in the URL",
+                      "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
                       "type": "string",
                       "nullable": true
                     }

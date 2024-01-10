@@ -913,9 +913,9 @@ pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
 
-    /// Redis username if not provided in the URLs, this field takes precedence over the username in the URL
+    /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
     pub(crate) username: Option<String>,
-    /// Redis password if not provided in the URLs, this field takes precedence over the password in the URL
+    /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
