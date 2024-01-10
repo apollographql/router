@@ -53,6 +53,7 @@ console = ["tokio/tracing", "console-subscriber"]
 # See https://github.com/apollographql/federation-rs/pull/185
 docs_rs = ["router-bridge/docs_rs"]
 
+apollo_unsupported = []
 # Enables the use of new telemetry features that are under development
 # and not yet ready for production use.
 telemetry_next = []
