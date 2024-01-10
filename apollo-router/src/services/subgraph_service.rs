@@ -57,6 +57,7 @@ use uuid::Uuid;
 
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
+use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -103,7 +104,7 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 #[allow(clippy::declare_interior_mutable_const)]
 static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
-    HeaderValue::from_static("application/json+graphql+callback/1.0");
+    HeaderValue::from_static("application/json;callbackSpec=1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
 static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
@@ -137,6 +138,7 @@ impl Display for Compression {
 
 #[cfg_attr(test, derive(Deserialize))]
 #[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 struct SubscriptionExtension {
     subscription_id: String,
     callback_url: url::Url,
@@ -204,25 +206,7 @@ impl SubgraphService {
                 .client_authentication
                 .as_ref());
 
-        let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
-        let tls_client_config = match (tls_cert_store, client_cert_config) {
-            (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
-            (Some(store), None) => tls_builder
-                .with_root_certificates(store)
-                .with_no_client_auth(),
-            (None, Some(client_auth_config)) => {
-                tls_builder.with_native_roots().with_client_auth_cert(
-                    client_auth_config.certificate_chain.clone(),
-                    client_auth_config.key.clone(),
-                )?
-            }
-            (Some(store), Some(client_auth_config)) => tls_builder
-                .with_root_certificates(store)
-                .with_client_auth_cert(
-                    client_auth_config.certificate_chain.clone(),
-                    client_auth_config.key.clone(),
-                )?,
-        };
+        let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
 
         SubgraphService::new(
             name,
@@ -272,6 +256,29 @@ impl SubgraphService {
             notify,
         })
     }
+}
+
+pub(crate) fn generate_tls_client_config(
+    tls_cert_store: Option<RootCertStore>,
+    client_cert_config: Option<&TlsClientAuth>,
+) -> Result<rustls::ClientConfig, BoxError> {
+    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    Ok(match (tls_cert_store, client_cert_config) {
+        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+        (Some(store), None) => tls_builder
+            .with_root_certificates(store)
+            .with_no_client_auth(),
+        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
+            client_auth_config.certificate_chain.clone(),
+            client_auth_config.key.clone(),
+        )?,
+        (Some(store), Some(client_auth_config)) => tls_builder
+            .with_root_certificates(store)
+            .with_client_auth_cert(
+                client_auth_config.certificate_chain.clone(),
+                client_auth_config.key.clone(),
+            )?,
+    })
 }
 
 impl tower::Service<SubgraphRequest> for SubgraphService {
@@ -355,7 +362,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     }
                     Some(SubscriptionMode::Callback(CallbackMode {
                         public_url,
-                        path,
                         heartbeat_interval,
                         ..
                     })) => {
@@ -395,10 +401,16 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
                         // If not then put the subscription_id in the extensions for callback mode and continue
                         // Do this if the topic doesn't already exist
-                        let callback_url = public_url.join(&format!(
-                            "{}/{subscription_id}",
-                            path.as_deref().unwrap_or("/callback")
-                        ))?;
+                        let mut callback_url = public_url.clone();
+                        if callback_url.path_segments_mut().is_err() {
+                            callback_url = callback_url.join(&subscription_id)?;
+                        } else {
+                            callback_url
+                                .path_segments_mut()
+                                .expect("can't happen because we checked before")
+                                .push(&subscription_id);
+                        }
+
                         // Generate verifier
                         let verifier = create_verifier(&subscription_id).map_err(|err| {
                             FetchError::SubrequestHttpError {
@@ -417,7 +429,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             callback_url,
                             verifier,
                             heartbeat_interval_ms: match heartbeat_interval {
-                                HeartbeatInterval::Disabled => 0,
+                                HeartbeatInterval::Disabled(_) => 0,
                                 HeartbeatInterval::Duration(duration) => {
                                     duration.as_millis() as u64
                                 }
@@ -1005,6 +1017,24 @@ async fn do_fetch(
         }
         Some(body)
     } else {
+        if display_body {
+            let body = hyper::body::to_bytes(body)
+                .instrument(tracing::debug_span!("aggregate_response_data"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = ?err);
+                    FetchError::SubrequestHttpError {
+                        status_code: Some(parts.status.as_u16()),
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    }
+                });
+            if let Ok(body) = &body {
+                tracing::info!(
+                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                );
+            }
+        }
         None
     };
     Ok((parts, content_type, body))
@@ -1217,11 +1247,12 @@ mod tests {
     use super::*;
     use crate::configuration::load_certs;
     use crate::configuration::load_key;
+    use crate::configuration::TlsClient;
     use crate::configuration::TlsClientAuth;
-    use crate::configuration::TlsSubgraph;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::plugins::subscription::Disabled;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -1848,11 +1879,11 @@ mod tests {
             enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
-                    public_url: Url::parse("http://localhost:4000").unwrap(),
+                    public_url: Url::parse("http://localhost:4000/testcallback").unwrap(),
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
-                    heartbeat_interval: HeartbeatInterval::Disabled,
+                    heartbeat_interval: HeartbeatInterval::Disabled(Disabled::Disabled),
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
@@ -2337,6 +2368,7 @@ mod tests {
                 subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
                 authorization: Default::default(),
             })
             .await
@@ -2698,7 +2730,7 @@ mod tests {
         let mut config = Configuration::default();
         config.tls.subgraph.subgraphs.insert(
             "test".to_string(),
-            TlsSubgraph {
+            TlsClient {
                 certificate_authorities: Some(certificate_pem.into()),
                 client_authentication: None,
             },
@@ -2744,7 +2776,7 @@ mod tests {
         let mut config = Configuration::default();
         config.tls.subgraph.subgraphs.insert(
             "test".to_string(),
-            TlsSubgraph {
+            TlsClient {
                 certificate_authorities: Some(ca_pem.into()),
                 client_authentication: None,
             },
@@ -2840,7 +2872,7 @@ mod tests {
         let mut config = Configuration::default();
         config.tls.subgraph.subgraphs.insert(
             "test".to_string(),
-            TlsSubgraph {
+            TlsClient {
                 certificate_authorities: Some(ca_pem.into()),
                 client_authentication: Some(TlsClientAuth {
                     certificate_chain: client_certificates,

@@ -55,6 +55,12 @@ Defaults to:
 * http://127.0.0.1:4317 for gRPC 
 * http://127.0.0.1:4318 for HTTP
 
+<Note>
+
+Specify only the base URL in the endpoint parameter. The router automatically adds the `/v1/traces` portion of the URL to match the [OpenTelemetry specification](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request).
+
+</Note>
+
 ### `grpc`
 Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.
 

@@ -59,8 +59,7 @@ pub(crate) enum FreeformGraphQLAction {
 impl FreeformGraphQLBehavior {
     fn action_for_freeform_graphql(
         &self,
-        body_from_request: &str,
-        ast: &ast::Document,
+        ast: Result<&ast::Document, &str>,
     ) -> FreeformGraphQLAction {
         match self {
             FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction::Allow,
@@ -78,7 +77,7 @@ impl FreeformGraphQLBehavior {
                 log_unknown,
                 ..
             } => {
-                if safelist.is_allowed(body_from_request, ast) {
+                if safelist.is_allowed(ast) {
                     FreeformGraphQLAction::Allow
                 } else if *log_unknown {
                     FreeformGraphQLAction::DenyAndLog
@@ -87,7 +86,7 @@ impl FreeformGraphQLBehavior {
                 }
             }
             FreeformGraphQLBehavior::LogUnlessInSafelist { safelist, .. } => {
-                if safelist.is_allowed(body_from_request, ast) {
+                if safelist.is_allowed(ast) {
                     FreeformGraphQLAction::Allow
                 } else {
                     FreeformGraphQLAction::AllowAndLog
@@ -134,53 +133,58 @@ impl FreeformGraphQLSafelist {
     }
 
     fn insert_from_manifest(&mut self, body_from_manifest: &str) {
-        self.normalized_bodies.insert(self.normalize_body(
-            body_from_manifest,
-            &ast::Document::parse(body_from_manifest, "from_manifest"),
-        ));
+        self.normalized_bodies.insert(
+            self.normalize_body(
+                ast::Document::parse(body_from_manifest, "from_manifest")
+                    .as_ref()
+                    .map_err(|_| body_from_manifest),
+            ),
+        );
     }
 
-    fn is_allowed(&self, body_from_request: &str, ast: &ast::Document) -> bool {
+    fn is_allowed(&self, ast: Result<&ast::Document, &str>) -> bool {
         // Note: consider adding an LRU cache that caches this function's return
         // value based solely on body_from_request without needing to normalize
         // the body.
-        self.normalized_bodies
-            .contains(&self.normalize_body(body_from_request, ast))
+        self.normalized_bodies.contains(&self.normalize_body(ast))
     }
 
-    fn normalize_body(&self, body_from_request: &str, ast: &ast::Document) -> String {
-        if ast.check_parse_errors().is_err() {
-            // If we can't parse the operation (whether from the PQ list or the
-            // incoming request), then we can't normalize it. We keep it around
-            // unnormalized, so that it at least works as a byte-for-byte
-            // safelist entry.
-            body_from_request.to_string()
-        } else {
-            let mut operations = vec![];
-            let mut fragments = vec![];
-
-            for definition in &ast.definitions {
-                match definition {
-                    ast::Definition::OperationDefinition(def) => operations.push(def.clone()),
-                    ast::Definition::FragmentDefinition(def) => fragments.push(def.clone()),
-                    _ => {}
-                }
+    fn normalize_body(&self, ast: Result<&ast::Document, &str>) -> String {
+        match ast {
+            Err(body_from_request) => {
+                // If we can't parse the operation (whether from the PQ list or the
+                // incoming request), then we can't normalize it. We keep it around
+                // unnormalized, so that it at least works as a byte-for-byte
+                // safelist entry.
+                body_from_request.to_string()
             }
+            Ok(ast) => {
+                let mut operations = vec![];
+                let mut fragments = vec![];
 
-            let mut new_document = ast::Document::new();
+                for definition in &ast.definitions {
+                    match definition {
+                        ast::Definition::OperationDefinition(def) => operations.push(def.clone()),
+                        ast::Definition::FragmentDefinition(def) => fragments.push(def.clone()),
+                        _ => {}
+                    }
+                }
 
-            // First include operation definitions, sorted by name.
-            operations.sort_by_key(|x| x.name.clone());
-            new_document
-                .definitions
-                .extend(operations.into_iter().map(Into::into));
+                let mut new_document = ast::Document::new();
 
-            // Next include fragment definitions, sorted by name.
-            fragments.sort_by_key(|x| x.name.clone());
-            new_document
-                .definitions
-                .extend(fragments.into_iter().map(Into::into));
-            new_document.to_string()
+                // First include operation definitions, sorted by name.
+                operations.sort_by_key(|x| x.name.clone());
+                new_document
+                    .definitions
+                    .extend(operations.into_iter().map(Into::into));
+
+                // Next include fragment definitions, sorted by name.
+                fragments.sort_by_key(|x| x.name.clone());
+                new_document
+                    .definitions
+                    .extend(fragments.into_iter().map(Into::into));
+                new_document.to_string()
+            }
         }
     }
 }
@@ -277,8 +281,7 @@ impl PersistedQueryManifestPoller {
 
     pub(crate) fn action_for_freeform_graphql(
         &self,
-        query: &str,
-        ast: &ast::Document,
+        ast: Result<&ast::Document, &str>,
     ) -> FreeformGraphQLAction {
         let state = self
             .state
@@ -286,7 +289,7 @@ impl PersistedQueryManifestPoller {
             .expect("could not acquire read lock on persisted query state");
         state
             .freeform_graphql_behavior
-            .action_for_freeform_graphql(query, ast)
+            .action_for_freeform_graphql(ast)
     }
 
     // Some(bool) means "never allows freeform GraphQL, bool is whether or not to log"
@@ -660,8 +663,9 @@ mod tests {
             "}}}".to_string()),
         ]));
 
-        let is_allowed =
-            |body: &str| -> bool { safelist.is_allowed(body, &ast::Document::parse(body, "")) };
+        let is_allowed = |body: &str| -> bool {
+            safelist.is_allowed(ast::Document::parse(body, "").as_ref().map_err(|_| body))
+        };
 
         // Precise string matches.
         assert!(is_allowed(

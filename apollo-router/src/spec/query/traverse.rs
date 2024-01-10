@@ -154,7 +154,11 @@ fn selection_set(
         }
         ast::Selection::FragmentSpread(def) => visitor.fragment_spread(def),
         ast::Selection::InlineFragment(def) => {
-            let fragment_type = def.type_condition.as_deref().unwrap_or(parent_type);
+            let fragment_type = def
+                .type_condition
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or(parent_type);
             visitor.inline_fragment(fragment_type, def)
         }
     })
@@ -185,13 +189,14 @@ fn test_count_fields() {
 
     let graphql = "
         type Query {
-            a: String
+            a(id: ID): String
             b: Int
             next: Query
         }
+        directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
         query($id: ID = null) {
-            a
+            a(id: $id)
             ... @defer {
                 b
             }
@@ -205,8 +210,9 @@ fn test_count_fields() {
             }
         }
     ";
-    let ast = apollo_compiler::ast::Document::parse(graphql, "");
-    let (schema, _doc) = ast.to_mixed();
+    let ast = apollo_compiler::ast::Document::parse(graphql, "").unwrap();
+    let (schema, _doc) = ast.to_mixed_validate().unwrap();
+    let schema = schema.into_inner();
     let mut visitor = CountFields { fields: 0, schema };
     document(&mut visitor, &ast).unwrap();
     assert_eq!(visitor.fields, 4)

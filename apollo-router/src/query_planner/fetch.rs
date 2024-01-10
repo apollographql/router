@@ -11,7 +11,7 @@ use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
-use super::selection::select_object;
+use super::selection::execute_selection_set;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
@@ -26,6 +26,8 @@ use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
+use crate::spec::query::change::QueryHashVisitor;
+use crate::spec::query::traverse;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
@@ -117,9 +119,25 @@ pub(crate) struct FetchNode {
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
 
+    // hash for the query and relevant parts of the schema. if two different schemas provide the exact same types, fields and directives
+    // affecting the query, then they will have the same hash
+    #[serde(default)]
+    pub(crate) schema_aware_hash: Arc<QueryHash>,
+
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+}
+
+#[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
+pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
+
+impl std::fmt::Debug for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueryHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
 }
 
 pub(crate) struct Variables {
@@ -153,18 +171,17 @@ impl Variables {
             let mut values: IndexSet<Value> = IndexSet::new();
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                if let Value::Object(content) = value {
-                    if let Ok(Some(mut value)) = select_object(content, requires, schema) {
-                        rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                        match values.get_index_of(&value) {
-                            Some(index) => {
-                                inverted_paths[index].push(path.clone());
-                            }
-                            None => {
-                                inverted_paths.push(vec![path.clone()]);
-                                values.insert(value);
-                                debug_assert!(inverted_paths.len() == values.len());
-                            }
+                let mut value = execute_selection_set(value, requires, schema, None);
+                if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                    match values.get_index_of(&value) {
+                        Some(index) => {
+                            inverted_paths[index].push(path.clone());
+                        }
+                        None => {
+                            inverted_paths.push(vec![path.clone()]);
+                            values.insert(value);
+                            debug_assert!(inverted_paths.len() == values.len());
                         }
                     }
                 }
@@ -277,6 +294,7 @@ impl FetchNode {
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
+        subgraph_request.query_hash = self.schema_aware_hash.clone();
         subgraph_request.authorization = self.authorization.clone();
 
         let service = parameters
@@ -464,12 +482,25 @@ impl FetchNode {
         &self.operation_kind
     }
 
+    pub(crate) fn hash_subquery(&mut self, schema: &apollo_compiler::Schema) {
+        let doc = Document::parse(&self.operation, "query.graphql")
+            .expect("subgraph queries should be valid");
+
+        let mut visitor = QueryHashVisitor::new(schema, &doc);
+        visitor.subgraph_query = !self.requires.is_empty();
+        if traverse::document(&mut visitor, &doc).is_ok() {
+            self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
+        }
+    }
+
     pub(crate) fn extract_authorization_metadata(
         &mut self,
         schema: &apollo_compiler::Schema,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
-        let doc = Document::parse(&self.operation, "query.graphql");
+        let doc = Document::parse(&self.operation, "query.graphql")
+            // Assume query planing creates a valid document: ignore parse errors
+            .unwrap_or_else(|invalid| invalid.partial);
         let subgraph_query_cache_key =
             AuthorizationPlugin::generate_cache_metadata(&doc, schema, !self.requires.is_empty());
 
