@@ -5,6 +5,7 @@ version: 2.1
 orbs:
   gh: circleci/github-cli@2.2.0
   slack: circleci/slack@4.12.5
+  secops: apollo/circleci-secops-orb@2.0.6
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -683,6 +684,19 @@ jobs:
                   # Build and push release image
                   docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
             - run:
+                name: Save containers for analysis
+                command: |
+                  BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
+                  ROUTER_TAG=ghcr.io/apollographql/nightly/router
+                  docker save -o built-containers/router:${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
+                  docker save -o built-containers/router:${VERSION}.tar ${ROUTER_TAG}:${VERSION}
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - "build-containers/*.tar"
+            - run:
                 name: Helm build
                 command: |
                   # Package up the helm chart
@@ -921,6 +935,22 @@ workflows:
             parameters:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+      - secops/wiz-docker:
+          context:
+            - platform-docker-ro
+            - wiz
+            - github-orb
+          requires:
+            - build_release
+          container-dir: /tmp/workspace/built-containers
+          # Disables all PR comments from this job
+          do-pr-comments: false
+          # Scan job will return 1 if findings violating the Wiz policy are found.
+          # Toggle off to prevent any CI failures OR 
+          # contact Apollo's Security team to adjust what violates the 
+          # Wiz policy used in this scan.
+          fail-on-findings: true
+
 
   release:
     when:
