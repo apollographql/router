@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::Diagnostics;
+use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
@@ -23,9 +25,9 @@ use crate::Configuration;
 #[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    pub(crate) definitions: apollo_compiler::Schema,
+    pub(crate) definitions: Valid<apollo_compiler::Schema>,
     /// Stored for comparison with the validation errors from query planning.
-    diagnostics: Option<Diagnostics>,
+    diagnostics: Option<DiagnosticList>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
     api_schema: Option<Box<Schema>>,
@@ -59,41 +61,37 @@ impl Schema {
         Ok(schema)
     }
 
-    pub(crate) fn make_compiler(sdl: &str) -> Result<apollo_compiler::schema::Schema, SchemaError> {
+    pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
         let mut parser = apollo_compiler::Parser::new();
-        let ast = parser.parse_ast(sdl, "schema.graphql");
+        let result = parser.parse_ast(sdl, "schema.graphql");
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        ast.check_parse_errors()
-            .map_err(|errors| SchemaError::Parse(ParseErrors { errors }))?;
-
-        let definitions = ast.to_schema();
-        Ok(definitions)
+        result.map_err(|invalid| {
+            SchemaError::Parse(ParseErrors {
+                errors: invalid.errors,
+            })
+        })
     }
 
     pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
-        let mut parser = apollo_compiler::Parser::new();
-        let ast = parser.parse_ast(sdl, "schema.graphql");
-
-        // Trace log recursion limit data
-        let recursion_limit = parser.recursion_reached();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        ast.check_parse_errors()
-            .map_err(|errors| SchemaError::Parse(ParseErrors { errors }))?;
-
-        let definitions = ast.to_schema();
-
-        let diagnostics = if configuration.experimental_graphql_validation_mode
-            == GraphQLValidationMode::Legacy
-        {
-            None
+        let ast = Self::parse_ast(sdl)?;
+        let validate =
+            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
+        // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
+        let (definitions, diagnostics) = if validate {
+            match ast.to_schema_validate() {
+                Ok(schema) => (schema, None),
+                Err(WithErrors { partial, errors }) => (Valid::assume_valid(partial), Some(errors)),
+            }
         } else {
-            definitions.validate().err()
+            match ast.to_schema() {
+                Ok(schema) => (Valid::assume_valid(schema), None),
+                Err(WithErrors { partial, .. }) => (Valid::assume_valid(partial), None),
+            }
         };
 
         // Only error out if new validation is used: with `Both`, we take the legacy
@@ -180,6 +178,10 @@ impl Schema {
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
         self.definitions.get_interface(abstract_type).is_some()
+    }
+
+    pub(crate) fn is_union(&self, abstract_type: &str) -> bool {
+        self.definitions.get_union(abstract_type).is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable

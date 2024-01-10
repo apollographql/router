@@ -325,6 +325,7 @@ All callback functions registered via `map_request` are passed a `request` objec
 
 ```
 request.context
+request.id
 request.headers
 request.method
 request.body.query
@@ -395,6 +396,14 @@ let resolver = |current| {
 
 // Upsert our context with our resolver
 response.context.upsert("surrogate-cache-key", resolver);
+```
+
+### `request.id`
+
+The id is a string which uniquely identifies a request/response context for its entire lifespan. If you have a request (or a response) you can access the ID as follows.
+
+```rhai
+print(`request id is: ${request.id}`);
 ```
 
 ### `request.headers`
@@ -512,6 +521,7 @@ The `response` object includes the following fields:
 
 ```
 response.context
+response.id
 response.headers
 response.body.label
 response.body.data
@@ -524,6 +534,7 @@ All of the above fields are read/write.
 The following fields are identical in behavior to their `request` counterparts:
 
 * [`context`](#requestcontext)
+* [`id`](#requestid)
 * [`headers`](#requestheaders)
 * [`body`](#requestbody)
 * [`body.extensions`](#requestbodyextensions)

@@ -12,6 +12,7 @@ use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -21,6 +22,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::configuration::GraphQLValidationMode;
+use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -78,6 +80,18 @@ impl BridgeQueryPlanner {
                     configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                 ),
+                debug: Some(QueryPlannerDebugConfig {
+                    bypass_planner_for_single_subgraph: None,
+                    max_evaluated_plans: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_plans_limit
+                        .or(Some(10000)),
+                    paths_limit: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_paths_limit,
+                }),
             },
         )
         .await;
@@ -91,7 +105,7 @@ impl BridgeQueryPlanner {
 
                     if has_validation_errors && !schema.has_errors() {
                         tracing::warn!(
-                            monotonic_counter.apollo.router.validation = 1u64,
+                            monotonic_counter.apollo.router.operations.validation = 1u64,
                             validation.source = VALIDATION_SOURCE_SCHEMA,
                             validation.result = VALIDATION_FALSE_NEGATIVE,
                             "validation mismatch: JS query planner reported a schema validation error, but apollo-rs did not"
@@ -106,7 +120,7 @@ impl BridgeQueryPlanner {
         if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::Both {
             if schema.has_errors() {
                 tracing::warn!(
-                    monotonic_counter.apollo.router.validation = 1u64,
+                    monotonic_counter.apollo.router.operations.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_SCHEMA,
                     validation.result = VALIDATION_FALSE_POSITIVE,
                     "validation mismatch: apollo-rs reported a schema validation error, but JS query planner did not"
@@ -114,7 +128,7 @@ impl BridgeQueryPlanner {
             } else {
                 // false_negative was an early return so we know it was correct here
                 tracing::info!(
-                    monotonic_counter.apollo.router.validation = 1u64,
+                    monotonic_counter.apollo.router.operations.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_SCHEMA,
                     validation.result = VALIDATION_MATCH
                 );
@@ -136,8 +150,8 @@ impl BridgeQueryPlanner {
 
                 if api_schema.schema != new_api_schema {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = "failed",
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = false,
                         "API schema generation mismatch: apollo-federation and router-bridge write different schema"
                     );
 
@@ -170,8 +184,8 @@ impl BridgeQueryPlanner {
                     );
                 } else {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = VALIDATION_MATCH,
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = true,
                     );
                 }
                 api_schema.schema
@@ -215,6 +229,18 @@ impl BridgeQueryPlanner {
                             GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                         ),
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                        debug: Some(QueryPlannerDebugConfig {
+                            bypass_planner_for_single_subgraph: None,
+                            max_evaluated_plans: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_plans_limit
+                                .or(Some(10000)),
+                            paths_limit: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_paths_limit,
+                        }),
                     },
                 )
                 .await?,
@@ -255,7 +281,7 @@ impl BridgeQueryPlanner {
         operation_name: Option<&str>,
         doc: &ParsedDocument,
     ) -> Result<Query, QueryPlannerError> {
-        let ast = &doc.ast;
+        Query::check_errors(doc)?;
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
             &self.configuration,
@@ -263,18 +289,17 @@ impl BridgeQueryPlanner {
             executable,
             operation_name,
         )?;
-        Query::check_errors(ast)?;
         let validation_error = match self.configuration.experimental_graphql_validation_mode {
             GraphQLValidationMode::Legacy => None,
             GraphQLValidationMode::New => {
-                Query::validate_query(&self.schema, executable)?;
+                Query::validate_query(doc)?;
                 None
             }
-            GraphQLValidationMode::Both => Query::validate_query(&self.schema, executable).err(),
+            GraphQLValidationMode::Both => Query::validate_query(doc).err(),
         };
 
-        let (fragments, operations, defer_stats) =
-            Query::extract_query_information(&self.schema, executable)?;
+        let (fragments, operations, defer_stats, schema_aware_hash) =
+            Query::extract_query_information(&self.schema, executable, &doc.ast)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -295,6 +320,7 @@ impl BridgeQueryPlanner {
             defer_stats,
             is_original: true,
             validation_error,
+            schema_aware_hash,
         })
     }
 
@@ -322,7 +348,7 @@ impl BridgeQueryPlanner {
         key: CacheKeyMetadata,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        fn is_validation_error(errors: &router_bridge::planner::PlanErrors) -> bool {
+        fn is_validation_error(errors: &PlanErrors) -> bool {
             errors.errors.iter().all(|err| err.validation_error)
         }
 
@@ -331,7 +357,7 @@ impl BridgeQueryPlanner {
         ///
         /// The result isn't inspected deeply: it only checks validation success/failure.
         fn compare_validation_errors(
-            js_validation_error: Option<&router_bridge::planner::PlanErrors>,
+            js_validation_error: Option<&PlanErrors>,
             rs_validation_error: Option<&crate::error::ValidationErrors>,
         ) {
             match (
@@ -340,7 +366,7 @@ impl BridgeQueryPlanner {
             ) {
                 (false, Some(validation_error)) => {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.validation = 1u64,
+                        monotonic_counter.apollo.router.operations.validation = 1u64,
                         validation.source = VALIDATION_SOURCE_OPERATION,
                         validation.result = VALIDATION_FALSE_POSITIVE,
                         "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
@@ -351,7 +377,7 @@ impl BridgeQueryPlanner {
                 }
                 (true, None) => {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.validation = 1u64,
+                        monotonic_counter.apollo.router.operations.validation = 1u64,
                         validation.source = VALIDATION_SOURCE_OPERATION,
                         validation.result = VALIDATION_FALSE_NEGATIVE,
                         "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
@@ -364,7 +390,7 @@ impl BridgeQueryPlanner {
                 }
                 // if JS and Rust implementations agree, we return the JS result for now.
                 _ => tracing::info!(
-                    monotonic_counter.apollo.router.validation = 1u64,
+                    monotonic_counter.apollo.router.operations.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_OPERATION,
                     validation.result = VALIDATION_MATCH,
                 ),
@@ -379,24 +405,26 @@ impl BridgeQueryPlanner {
             .into_result()
         {
             Ok(mut plan) => {
-                if let Some(node) = plan.data.query_plan.node.as_mut() {
-                    node.extract_authorization_metadata(&self.schema.definitions, &key);
-                }
+                plan.data
+                    .query_plan
+                    .hash_subqueries(&self.schema.definitions);
+                plan.data
+                    .query_plan
+                    .extract_authorization_metadata(&self.schema.definitions, &key);
                 plan
             }
             Err(err) => {
+                let plan_errors: PlanErrors = err.into();
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Both
                 ) {
-                    compare_validation_errors(Some(&err), selections.validation_error.as_ref());
-
-                    // If we had a validation error from apollo-rs, return it now.
-                    if let Some(errors) = selections.validation_error {
-                        return Err(QueryPlannerError::from(errors));
-                    }
+                    compare_validation_errors(
+                        Some(&plan_errors),
+                        selections.validation_error.as_ref(),
+                    );
                 }
-                return Err(QueryPlannerError::from(err));
+                return Err(QueryPlannerError::from(plan_errors));
             }
         };
 
@@ -505,9 +533,18 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
+                    let executable = modified_query
+                        .to_executable(schema)
+                        // Assume transformation creates a valid document: ignore conversion errors
+                        .unwrap_or_else(|invalid| invalid.partial);
                     doc = Arc::new(ParsedDocumentInner {
-                        executable: modified_query.to_executable(schema),
+                        executable,
                         ast: modified_query,
+                        // Carry errors from previous ParsedDocument
+                        // and assume transformation doesn’t introduce new errors.
+                        // TODO: check the latter?
+                        parse_errors: doc.parse_errors.clone(),
+                        validation_errors: doc.validation_errors.clone(),
                     });
                     context
                         .private_entries
@@ -608,9 +645,18 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
+            let executable = new_doc
+                .to_executable(&self.schema.api_schema().definitions)
+                // Assume transformation creates a valid document: ignore conversion errors
+                .unwrap_or_else(|invalid| invalid.partial);
             doc = Arc::new(ParsedDocumentInner {
-                executable: new_doc.to_executable(&self.schema.api_schema().definitions),
+                executable,
                 ast: new_doc,
+                // Carry errors from previous ParsedDocument
+                // and assume transformation doesn’t introduce new errors.
+                // TODO: check the latter?
+                parse_errors: doc.parse_errors.clone(),
+                validation_errors: doc.validation_errors.clone(),
             });
             selections.unauthorized.paths = unauthorized_paths;
         }
@@ -677,6 +723,24 @@ struct QueryPlan {
     node: Option<PlanNode>,
 }
 
+impl QueryPlan {
+    fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+        if let Some(node) = self.node.as_mut() {
+            node.hash_subqueries(schema);
+        }
+    }
+
+    fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        key: &CacheKeyMetadata,
+    ) {
+        if let Some(node) = self.node.as_mut() {
+            node.extract_authorization_metadata(schema, key);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -725,11 +789,11 @@ mod tests {
         .unwrap_err();
 
         match err {
-            QueryPlannerError::OperationValidationErrors(errors) => {
+            QueryPlannerError::PlanningErrors(errors) => {
                 insta::assert_debug_snapshot!("plan_invalid_query_errors", errors);
             }
-            _ => {
-                panic!("invalid query planning should have failed");
+            e => {
+                panic!("invalid query planning should have failed: {e:?}");
             }
         }
     }
@@ -968,7 +1032,7 @@ mod tests {
         s!(r#"query Q($s1:Boolean!) { me {
             username
             name {
-                ... @defer(label: "A") { 
+                ... @defer(label: "A") {
                     first
                     last @skip(if: $s1)
                 }

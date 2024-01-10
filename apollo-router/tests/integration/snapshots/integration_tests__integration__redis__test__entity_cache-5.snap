@@ -1,0 +1,11 @@
+---
+source: apollo-router/tests/integration/redis.rs
+expression: "v.as_object().unwrap().get(\"data\").unwrap()"
+---
+{
+  "reviews": [
+    {
+      "body": "I can eat in it"
+    }
+  ]
+}

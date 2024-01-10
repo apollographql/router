@@ -285,7 +285,7 @@ pub(crate) enum Condition {
 
 /// Returns the `if` condition and the `label`
 fn parse_defer(
-    directives: &executable::Directives,
+    directives: &executable::DirectiveList,
     defer_stats: &mut DeferStats,
 ) -> (Condition, Option<String>) {
     if let Some(directive) = directives.get(DEFER_DIRECTIVE_NAME) {
@@ -318,7 +318,7 @@ fn parse_defer(
 }
 
 impl IncludeSkip {
-    pub(crate) fn parse(directives: &executable::Directives) -> Self {
+    pub(crate) fn parse(directives: &executable::DirectiveList) -> Self {
         let mut include = None;
         let mut skip = None;
         for directive in &directives.0 {

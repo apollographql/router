@@ -17,6 +17,8 @@ pub(crate) mod layer;
 
 #[cfg(test)]
 pub(crate) mod test_utils {
+    use std::cmp::Ordering;
+    use std::collections::BTreeMap;
     use std::fmt::Debug;
     use std::fmt::Display;
     use std::sync::Arc;
@@ -26,8 +28,11 @@ pub(crate) mod test_utils {
     use itertools::Itertools;
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
+    use opentelemetry::sdk::metrics::data::DataPoint;
     use opentelemetry::sdk::metrics::data::Gauge;
     use opentelemetry::sdk::metrics::data::Histogram;
+    use opentelemetry::sdk::metrics::data::HistogramDataPoint;
+    use opentelemetry::sdk::metrics::data::Metric;
     use opentelemetry::sdk::metrics::data::ResourceMetrics;
     use opentelemetry::sdk::metrics::data::Sum;
     use opentelemetry::sdk::metrics::data::Temporality;
@@ -45,6 +50,7 @@ pub(crate) mod test_utils {
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
     use opentelemetry_api::Context;
+    use serde::Serialize;
     use tokio::task_local;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
@@ -102,7 +108,7 @@ pub(crate) mod test_utils {
 
             meter_provider.set(
                 MeterProviderType::Public,
-                Some(FilterMeterProvider::public_metrics(
+                Some(FilterMeterProvider::all(
                     MeterProviderBuilder::default()
                         .with_reader(reader.clone())
                         .build(),
@@ -176,132 +182,27 @@ pub(crate) mod test_utils {
             ty: MetricType,
             value: T,
             attributes: &[KeyValue],
-        ) {
+        ) -> bool {
             let attributes = AttributeSet::from(attributes);
             if let Some(value) = value.to_u64() {
                 if self.metric_exists(name, &ty, value, &attributes) {
-                    return;
+                    return true;
                 }
             }
 
             if let Some(value) = value.to_i64() {
                 if self.metric_exists(name, &ty, value, &attributes) {
-                    return;
+                    return true;
                 }
             }
 
             if let Some(value) = value.to_f64() {
                 if self.metric_exists(name, &ty, value, &attributes) {
-                    return;
+                    return true;
                 }
             }
 
-            self.panic_metric_not_found(name, value, &attributes);
-        }
-
-        fn panic_metric_not_found<T: Display + 'static>(
-            &self,
-            name: &str,
-            value: T,
-            attributes: &AttributeSet,
-        ) {
-            panic!(
-                "metric: {}, {}, {} not found.\nMetrics that were found:\n{}",
-                name,
-                value,
-                Self::pretty_attributes(attributes),
-                self.resource_metrics
-                    .scope_metrics
-                    .iter()
-                    .flat_map(|scope_metrics| { scope_metrics.metrics.iter() })
-                    .flat_map(|metric| { Self::pretty_metric(metric) })
-                    .map(|metric| { format!("  {}", metric) })
-                    .join("\n")
-            )
-        }
-
-        fn pretty_metric(metric: &opentelemetry::sdk::metrics::data::Metric) -> Vec<String> {
-            let mut results = Vec::new();
-            results.append(&mut Self::pretty_data_point::<u64>(metric));
-            results.append(&mut Self::pretty_data_point::<i64>(metric));
-            results.append(&mut Self::pretty_data_point::<f64>(metric));
-            results
-        }
-
-        fn pretty_data_point<T: Display + 'static>(
-            metric: &opentelemetry::sdk::metrics::data::Metric,
-        ) -> Vec<String> {
-            let mut results = Vec::new();
-            if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
-                for datapoint in gauge.data_points.iter() {
-                    results.push(format!(
-                        "\"{}\", {}, {}",
-                        metric.name,
-                        datapoint.value,
-                        Self::pretty_attributes(&datapoint.attributes)
-                    ));
-                }
-            }
-            if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
-                for datapoint in sum.data_points.iter() {
-                    results.push(format!(
-                        "\"{}\", {}, {}",
-                        metric.name,
-                        datapoint.value,
-                        Self::pretty_attributes(&datapoint.attributes)
-                    ));
-                }
-            }
-            if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>() {
-                for datapoint in histogram.data_points.iter() {
-                    results.push(format!(
-                        "\"{}\", {}, {}",
-                        metric.name,
-                        datapoint.sum,
-                        Self::pretty_attributes(&datapoint.attributes)
-                    ));
-                }
-            }
-
-            results
-        }
-
-        fn pretty_attributes(attributes: &AttributeSet) -> String {
-            attributes
-                .iter()
-                .map(|(key, value)| {
-                    format!(
-                        "\"{}\" => {}",
-                        key.as_str(),
-                        match value {
-                            Value::Bool(v) => {
-                                v.to_string()
-                            }
-                            Value::I64(v) => {
-                                v.to_string()
-                            }
-                            Value::F64(v) => {
-                                format!("{}f64", v)
-                            }
-                            Value::String(v) => {
-                                format!("\"{}\"", v)
-                            }
-                            Value::Array(Array::Bool(v)) => {
-                                format!("[{}]", v.iter().map(|v| v.to_string()).join(", "))
-                            }
-                            Value::Array(Array::F64(v)) => {
-                                format!("[{}]", v.iter().map(|v| format!("{}f64", v)).join(", "))
-                            }
-                            Value::Array(Array::I64(v)) => {
-                                format!("[{}]", v.iter().map(|v| v.to_string()).join(", "))
-                            }
-                            Value::Array(Array::String(v)) => {
-                                format!("[{}]", v.iter().map(|v| format!("\"{}\"", v)).join(", "))
-                            }
-                        }
-                    )
-                })
-                .join(", ")
+            false
         }
 
         fn metric_exists<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
@@ -339,6 +240,171 @@ pub(crate) mod test_utils {
                 }
             }
             false
+        }
+
+        #[allow(dead_code)]
+        pub(crate) fn all(self) -> Vec<SerdeMetric> {
+            self.resource_metrics
+                .scope_metrics
+                .into_iter()
+                .flat_map(|scope_metrics| {
+                    scope_metrics.metrics.into_iter().map(|metric| {
+                        let serde_metric: SerdeMetric = metric.into();
+                        serde_metric
+                    })
+                })
+                .sorted()
+                .collect()
+        }
+
+        #[allow(dead_code)]
+        pub(crate) fn non_zero(self) -> Vec<SerdeMetric> {
+            self.all()
+                .into_iter()
+                .filter(|m| {
+                    m.data.datapoints.iter().any(|d| {
+                        d.value
+                            .as_ref()
+                            .map(|v| v.as_f64().unwrap_or_default() > 0.0)
+                            .unwrap_or_default()
+                            || d.sum
+                                .as_ref()
+                                .map(|v| v.as_f64().unwrap_or_default() > 0.0)
+                                .unwrap_or_default()
+                    })
+                })
+                .collect()
+        }
+    }
+
+    #[derive(Serialize, Eq, PartialEq)]
+    pub(crate) struct SerdeMetric {
+        pub(crate) name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        pub(crate) description: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        pub(crate) unit: String,
+        pub(crate) data: SerdeMetricData,
+    }
+
+    impl Ord for SerdeMetric {
+        fn cmp(&self, other: &Self) -> Ordering {
+            self.name.cmp(&other.name)
+        }
+    }
+
+    impl PartialOrd for SerdeMetric {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    #[derive(Serialize, Eq, PartialEq, Default)]
+    pub(crate) struct SerdeMetricData {
+        pub(crate) datapoints: Vec<SerdeMetricDataPoint>,
+    }
+
+    #[derive(Serialize, Eq, PartialEq)]
+    pub(crate) struct SerdeMetricDataPoint {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub(crate) value: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub(crate) sum: Option<serde_json::Value>,
+        pub(crate) attributes: BTreeMap<String, serde_json::Value>,
+    }
+
+    impl SerdeMetricData {
+        fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
+            metric_data: &mut SerdeMetricData,
+            value: &dyn opentelemetry::sdk::metrics::data::Aggregation,
+        ) {
+            if let Some(gauge) = value.as_any().downcast_ref::<Gauge<T>>() {
+                gauge.data_points.iter().for_each(|datapoint| {
+                    metric_data.datapoints.push(datapoint.into());
+                });
+            }
+            if let Some(sum) = value.as_any().downcast_ref::<Sum<T>>() {
+                sum.data_points.iter().for_each(|datapoint| {
+                    metric_data.datapoints.push(datapoint.into());
+                });
+            }
+            if let Some(histogram) = value.as_any().downcast_ref::<Histogram<T>>() {
+                histogram.data_points.iter().for_each(|datapoint| {
+                    metric_data.datapoints.push(datapoint.into());
+                });
+            }
+        }
+    }
+
+    impl From<Metric> for SerdeMetric {
+        fn from(value: Metric) -> Self {
+            SerdeMetric {
+                name: value.name.into_owned(),
+                description: value.description.into_owned(),
+                unit: value.unit.as_str().to_string(),
+                data: value.data.into(),
+            }
+        }
+    }
+
+    impl<T> From<&DataPoint<T>> for SerdeMetricDataPoint
+    where
+        T: Into<serde_json::Value> + Clone,
+    {
+        fn from(value: &DataPoint<T>) -> Self {
+            SerdeMetricDataPoint {
+                value: Some(value.value.clone().into()),
+                sum: None,
+                attributes: value
+                    .attributes
+                    .iter()
+                    .map(|(k, v)| (k.as_str().to_string(), Self::to_value(v)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl SerdeMetricDataPoint {
+        pub(crate) fn to_value(v: &Value) -> serde_json::Value {
+            match v.clone() {
+                Value::Bool(v) => v.into(),
+                Value::I64(v) => v.into(),
+                Value::F64(v) => v.into(),
+                Value::String(v) => v.to_string().into(),
+                Value::Array(v) => match v {
+                    Array::Bool(v) => v.into(),
+                    Array::I64(v) => v.into(),
+                    Array::F64(v) => v.into(),
+                    Array::String(v) => v.iter().map(|v| v.to_string()).collect::<Vec<_>>().into(),
+                },
+            }
+        }
+    }
+
+    impl<T> From<&HistogramDataPoint<T>> for SerdeMetricDataPoint
+    where
+        T: Into<serde_json::Value> + Clone,
+    {
+        fn from(value: &HistogramDataPoint<T>) -> Self {
+            SerdeMetricDataPoint {
+                sum: Some(value.sum.clone().into()),
+                value: None,
+                attributes: value
+                    .attributes
+                    .iter()
+                    .map(|(k, v)| (k.as_str().to_string(), Self::to_value(v)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl From<Box<dyn opentelemetry::sdk::metrics::data::Aggregation>> for SerdeMetricData {
+        fn from(value: Box<dyn opentelemetry::sdk::metrics::data::Aggregation>) -> Self {
+            let mut metric_data = SerdeMetricData::default();
+            Self::extract_datapoints::<u64>(&mut metric_data, value.as_ref());
+            Self::extract_datapoints::<f64>(&mut metric_data, value.as_ref());
+            Self::extract_datapoints::<i64>(&mut metric_data, value.as_ref());
+            metric_data
         }
     }
 
@@ -704,110 +770,206 @@ macro_rules! metric {
 }
 
 #[cfg(test)]
+macro_rules! assert_metric {
+    ($result:expr, $name:expr, $value:expr, $sum:expr, $attrs:expr) => {
+        if !$result {
+            let metric = crate::metrics::test_utils::SerdeMetric {
+                name: $name.to_string(),
+                description: "".to_string(),
+                unit: "".to_string(),
+                data: crate::metrics::test_utils::SerdeMetricData {
+                    datapoints: vec![crate::metrics::test_utils::SerdeMetricDataPoint {
+                        value: $value,
+                        sum: $sum,
+                        attributes: $attrs
+                            .iter()
+                            .map(|kv: &opentelemetry::KeyValue| {
+                                (
+                                    kv.key.to_string(),
+                                    crate::metrics::test_utils::SerdeMetricDataPoint::to_value(
+                                        &kv.value,
+                                    ),
+                                )
+                            })
+                            .collect(),
+                    }],
+                },
+            };
+            panic!(
+                "metric not found:\n{}\nmetrics present:\n{}",
+                serde_yaml::to_string(&metric).unwrap(),
+                serde_yaml::to_string(&crate::metrics::collect_metrics().all()).unwrap()
+            )
+        }
+    };
+}
+
+#[cfg(test)]
 macro_rules! assert_counter {
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let name = stringify!($($name).+);
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        assert_metric!(result, name, Some($value.into()), None, &attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let name = stringify!($($name).+);
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        assert_metric!(result, name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr) => {
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &[]);
+        assert_metric!(result, $name, Some($value.into()), None, &[]);
     };
 }
 
 #[cfg(test)]
 macro_rules! assert_up_down_counter {
-    ($($name:ident).+, $ty: expr, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+
+    ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr) => {
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &[]);
+        assert_metric!(result, $name, Some($value.into()), None, &[]);
     };
 }
 
 #[cfg(test)]
 macro_rules! assert_gauge {
-    ($($name:ident).+, $ty: expr, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+
+    ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr) => {
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &[]);
+        assert_metric!(result, $name, Some($value.into()), None, &[]);
     };
 }
 
 #[cfg(test)]
 macro_rules! assert_histogram {
-    ($($name:ident).+, $ty: expr, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+
+    ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        assert_metric!(result, $name, None, Some($value.into()), &attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        assert_metric!(result, $name, None, Some($value.into()), &attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        assert_metric!(result, $name, None, Some($value.into()), &attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+        assert_metric!(result, $name, None, Some($value.into()), &attributes);
     };
 
     ($name:literal, $value: expr) => {
-        crate::metrics::collect_metrics().assert($name, $value, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, $value, &[]);
+        assert_metric!(result, $name, None, Some($value.into()), &[]);
+    };
+}
+
+#[cfg(test)]
+#[allow(unused_macros)]
+macro_rules! assert_metrics_snapshot {
+    ($file_name: expr) => {
+        insta::with_settings!({sort_maps => true, snapshot_suffix => $file_name}, {
+            let metrics = crate::metrics::collect_metrics();
+            insta::assert_yaml_snapshot!(&metrics.all());
+        });
+
+    };
+    () => {
+        insta::with_settings!({sort_maps => true}, {
+            let metrics = crate::metrics::collect_metrics();
+            insta::assert_yaml_snapshot!(&metrics.all());
+        });
+    };
+}
+
+#[cfg(test)]
+#[allow(unused_macros)]
+macro_rules! assert_non_zero_metrics_snapshot {
+    ($file_name: expr) => {
+        insta::with_settings!({sort_maps => true, snapshot_suffix => $file_name}, {
+            let metrics = crate::metrics::collect_metrics();
+            insta::assert_yaml_snapshot!(&metrics.non_zero());
+        });
+
+    };
+    () => {
+        insta::with_settings!({sort_maps => true}, {
+            let metrics = crate::metrics::collect_metrics();
+            insta::assert_yaml_snapshot!(&metrics.non_zero());
+        });
     };
 }
 
@@ -855,7 +1017,8 @@ mod test {
 
     #[test]
     fn test_gauge() {
-        meter_provider()
+        // Observables are cleaned up when they dropped, so keep this around.
+        let _gauge = meter_provider()
             .meter("test")
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
@@ -1043,7 +1206,7 @@ mod test {
     #[should_panic]
     async fn test_type_gauge() {
         async {
-            meter_provider()
+            let _gauge = meter_provider()
                 .meter("test")
                 .u64_observable_gauge("test")
                 .with_callback(|m| m.observe(5, &[]))
