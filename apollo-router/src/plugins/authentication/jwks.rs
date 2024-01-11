@@ -200,7 +200,7 @@ pub(crate) fn parse_jwks(data: &str) -> Option<JwkSet> {
     // jsonwebtoken and exclude them
     tracing::debug!(data, "parsing JWKS");
 
-    let mut raw_json: Value = serde_json::from_str(&data)
+    let mut raw_json: Value = serde_json::from_str(data)
         .map_err(|e| {
             tracing::error!(%e, "could not create JSON Value from url content, enable debug logs to see content");
             e
@@ -212,11 +212,11 @@ pub(crate) fn parse_jwks(data: &str) -> Option<JwkSet> {
         keys.as_array_mut().map(|array| {
             *array = mem::take(array).into_iter().enumerate().filter(|(index, key)| {
                 if let Err(err) = serde_json::from_value::<Jwk>(key.clone()) {
-                    let alg = key.get("alg").and_then(|alg|alg.as_str()).unwrap_or_else(|| "<unknown>");
+                    let alg = key.get("alg").and_then(|alg|alg.as_str()).unwrap_or("<unknown>");
                     tracing::warn!(%err, alg, index, "ignoring a key since it is not valid, enable debug logs to full content");
                     return false;
                 }
-                return true;
+                true
             }).map(|(_, key)| key).collect();
         })
     });
