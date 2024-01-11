@@ -1021,14 +1021,14 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
 
 ## Adding authorization claims via coprocessor
 
-To use the [authorization directives](../configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` coprocessor](#how-it-works) since it hooks into the request lifecycle directly after the router has received a client request.
+To use the [authorization directives](../configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` or `SupergraphService` coprocessor](#how-it-works) since they hook into the request lifecycle before the router applies authorization logic.
 
-The router configuration needs to include at least these settings:
+An example configuration of the router calling a coprocessor for authorization claims:
 
 ```yaml title="router.yaml"
 coprocessor:
   url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
-  router: # By including this key, a coprocessor can hook into the `RouterService`
+  router: # By including this key, a coprocessor can hook into the `RouterService`. You can also use `SupergraphService` for authorization.
     request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
       headers: false # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
       context: true # The authorization directives works with claims stored in the request's context
