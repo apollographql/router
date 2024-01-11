@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
+use std::time::Instant;
 
 use http::header;
+use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -18,6 +21,9 @@ use tower_service::Service;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
+use super::metrics::extract_cache_attributes;
+use super::metrics::CacheAttributes;
+use super::metrics::CacheCounter;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
@@ -31,6 +37,7 @@ use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::telemetry::metrics::AttributesForwardConf;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -142,6 +149,9 @@ impl Plugin for EntityCache {
                 name: name.to_string(),
                 storage,
                 subgraph_ttl,
+                counter: Some(Arc::new(Mutex::new(CacheCounter::new(
+                    Duration::from_secs(60),
+                )))),
             })))
         } else {
             service
@@ -155,6 +165,7 @@ struct InnerCacheService {
     name: String,
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
+    counter: Option<Arc<Mutex<CacheCounter>>>,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -183,7 +194,7 @@ impl Service<subgraph::Request> for CacheService {
 impl InnerCacheService {
     async fn call_inner(
         mut self,
-        request: subgraph::Request,
+        mut request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
         if !request
             .subgraph_request
@@ -192,10 +203,31 @@ impl InnerCacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
+                let cache_attributes = Self::get_cache_attributes(
+                    /*FIXME*/ Arc::new(self.name.clone()),
+                    &mut request,
+                );
+
                 match cache_lookup_root(self.name, self.storage.clone(), request).await? {
                     ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, root_cache_key)) => {
                         let response = self.service.call(request).await?;
+
+                        /*if let Ok(cache_control) = response
+                            .response
+                            .headers()
+                            .get(header::CACHE_CONTROL)
+                            .ok_or(())
+                            .and_then(|val| val.to_str().map(|v| v.to_string()).map_err(|_| ()))
+                        {
+                            metric_attrs.push(KeyValue::new("cache_control", cache_control));
+                        }*/
+
+                        if let Some(cache_attributes) = cache_attributes {
+                            if let Some(counter) = &self.counter {
+                                Self::update_cache_metrics(counter, &response, cache_attributes)
+                            }
+                        }
 
                         let cache_control =
                             CacheControl::new(response.response.headers(), self.storage.ttl)?;
@@ -238,6 +270,63 @@ impl InnerCacheService {
                 }
             }
         }
+    }
+
+    fn get_cache_attributes(
+        subgraph_name: Arc<String>,
+        sub_request: &mut subgraph::Request,
+    ) -> Option<CacheAttributes> {
+        let body = sub_request.subgraph_request.body_mut();
+        let hashed_query = hash_query(&sub_request.query_hash, body);
+        let representations = body
+            .variables
+            .get(REPRESENTATIONS)
+            .and_then(|value| value.as_array())?;
+
+        let keys = extract_cache_attributes(representations).ok()?;
+
+        Some(CacheAttributes {
+            subgraph_name,
+            headers: sub_request.subgraph_request.headers().clone(),
+            hashed_query: Arc::new(hashed_query),
+            representations: keys,
+        })
+    }
+
+    fn update_cache_metrics(
+        counter: &Mutex<CacheCounter>,
+        sub_response: &subgraph::Response,
+        cache_attributes: CacheAttributes,
+    ) {
+        let mut vary_headers = sub_response
+            .response
+            .headers()
+            .get_all(header::VARY)
+            .into_iter()
+            .filter_map(|val| {
+                val.to_str().ok().map(|v| {
+                    v.to_string()
+                        .split(", ")
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>()
+                })
+            })
+            .flatten()
+            .collect::<Vec<String>>();
+        vary_headers.sort();
+        let vary_headers = vary_headers.join(", ");
+
+        let hashed_headers = if vary_headers.is_empty() {
+            Arc::default()
+        } else {
+            Arc::new(hash_vary_headers(&cache_attributes.headers))
+        };
+        counter.lock().unwrap().record(
+            cache_attributes.hashed_query.clone(),
+            cache_attributes.subgraph_name.clone(),
+            hashed_headers,
+            cache_attributes.representations,
+        );
     }
 }
 

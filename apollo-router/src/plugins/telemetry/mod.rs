@@ -238,7 +238,6 @@ impl Plugin for Telemetry {
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
-        // TODO move cache metrics to cache plugin.
         let metrics_builder = Self::create_metrics_builder(&config)?;
 
         let counter = if config
