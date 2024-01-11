@@ -26,6 +26,8 @@ use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
+use crate::spec::query::change::QueryHashVisitor;
+use crate::spec::query::traverse;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
@@ -117,9 +119,25 @@ pub(crate) struct FetchNode {
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
 
+    // hash for the query and relevant parts of the schema. if two different schemas provide the exact same types, fields and directives
+    // affecting the query, then they will have the same hash
+    #[serde(default)]
+    pub(crate) schema_aware_hash: Arc<QueryHash>,
+
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+}
+
+#[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
+pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
+
+impl std::fmt::Debug for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueryHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
 }
 
 pub(crate) struct Variables {
@@ -276,6 +294,7 @@ impl FetchNode {
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
+        subgraph_request.query_hash = self.schema_aware_hash.clone();
         subgraph_request.authorization = self.authorization.clone();
 
         let service = parameters
@@ -461,6 +480,17 @@ impl FetchNode {
 
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
+    }
+
+    pub(crate) fn hash_subquery(&mut self, schema: &apollo_compiler::Schema) {
+        let doc = Document::parse(&self.operation, "query.graphql")
+            .expect("subgraph queries should be valid");
+
+        let mut visitor = QueryHashVisitor::new(schema, &doc);
+        visitor.subgraph_query = !self.requires.is_empty();
+        if traverse::document(&mut visitor, &doc).is_ok() {
+            self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
+        }
     }
 
     pub(crate) fn extract_authorization_metadata(

@@ -1,10 +1,13 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.tls:
-  - 1
-  - opt__router__tls__server__: true
-    opt__router__tls__subgraph__ca_override__: true
-    opt__router__tls__subgraph__client_authentication__: true
+- name: apollo.router.config.tls
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.router.tls.server.: true
+          opt.router.tls.subgraph.ca_override.: true
+          opt.router.tls.subgraph.client_authentication.: true
 

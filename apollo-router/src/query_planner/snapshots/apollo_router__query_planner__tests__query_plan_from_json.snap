@@ -17,6 +17,9 @@ Sequence {
                 id: None,
                 input_rewrites: None,
                 output_rewrites: None,
+                schema_aware_hash: QueryHash(
+                    "",
+                ),
                 authorization: CacheKeyMetadata {
                     is_authenticated: false,
                     scopes: [],
@@ -75,6 +78,9 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        schema_aware_hash: QueryHash(
+                                            "",
+                                        ),
                                         authorization: CacheKeyMetadata {
                                             is_authenticated: false,
                                             scopes: [],
@@ -143,6 +149,9 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        schema_aware_hash: QueryHash(
+                                            "",
+                                        ),
                                         authorization: CacheKeyMetadata {
                                             is_authenticated: false,
                                             scopes: [],
@@ -200,6 +209,9 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        schema_aware_hash: QueryHash(
+                                            "",
+                                        ),
                                         authorization: CacheKeyMetadata {
                                             is_authenticated: false,
                                             scopes: [],
@@ -267,6 +279,9 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        schema_aware_hash: QueryHash(
+                                            "",
+                                        ),
                                         authorization: CacheKeyMetadata {
                                             is_authenticated: false,
                                             scopes: [],

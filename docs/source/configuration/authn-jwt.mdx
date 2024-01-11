@@ -680,9 +680,9 @@ If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo 
 
 ## Observability
 
-If your router enables [tracing](./tracing/), the JWT authentication plugin has its own tracing span: `authentication_plugin`
+If your router enables [tracing](./telemetry/exporters/tracing/overview), the JWT authentication plugin has its own tracing span: `authentication_plugin`
 
-If your router enables [metrics collection via Prometheus](./metrics/#using-prometheus), the JWT authentication plugin provides and exports the following metrics:
+If your router enables [metrics collection via Prometheus](./telemetry/exporters/metrics/prometheus), the JWT authentication plugin provides and exports the following metrics:
 
 - `apollo_authentication_failure_count`
 - `apollo_authentication_success_count`

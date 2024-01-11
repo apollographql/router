@@ -1,12 +1,15 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.subscriptions:
-  - 1
-  - opt__deduplication__: false
-    opt__max_opened__: true
-    opt__mode__callback__: true
-    opt__mode__passthrough__: true
-    opt__queue_capacity__: true
+- name: apollo.router.config.subscriptions
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.deduplication.: false
+          opt.max_opened.: true
+          opt.mode.callback.: true
+          opt.mode.passthrough.: true
+          opt.queue_capacity.: true
 

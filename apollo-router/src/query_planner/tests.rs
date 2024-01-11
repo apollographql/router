@@ -261,6 +261,7 @@ async fn defer() {
                         id: Some("fetch1".to_string()),
                         input_rewrites: None,
                         output_rewrites: None,
+                        schema_aware_hash: Default::default(),
                         authorization: Default::default(),
                     }))),
                 },
@@ -304,6 +305,7 @@ async fn defer() {
                             id: Some("fetch2".to_string()),
                             input_rewrites: None,
                             output_rewrites: None,
+                            schema_aware_hash: Default::default(),
                             authorization: Default::default(),
                         })),
                     }))),
@@ -1132,6 +1134,154 @@ async fn missing_typename_and_fragments_in_requires() {
 }
 
 #[tokio::test]
+async fn missing_typename_and_fragments_in_requires2() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+  
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+  
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+  
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+  
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+  
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+  
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+  
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+  
+  scalar join__FieldSet
+  
+  enum join__Graph {
+    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+  }
+  
+  scalar link__Import
+  
+  enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+  
+  type Query
+    @join__type(graph: SUB1)
+    @join__type(graph: SUB2)
+  {
+    stuff: Stuff @join__field(graph: SUB1)
+  }
+  
+  type Stuff
+    @join__type(graph: SUB1, key: "id")
+    @join__type(graph: SUB2, key: "id", extension: true)
+  {
+    id: ID
+    thing: PossibleThing @join__field(graph: SUB1) @join__field(graph: SUB2, external: true) 
+    isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { ... on Thing1 { __typename text1 } ... on Thing2 { __typename text2 } }")
+  }
+  
+  union PossibleThing @join__type(graph: SUB1) @join__type(graph: SUB2)
+  @join__unionMember(graph: SUB1, member: "Thing1") @join__unionMember(graph: SUB1, member: "Thing2")
+  @join__unionMember(graph: SUB2, member: "Thing1") @join__unionMember(graph: SUB2, member: "Thing2")
+    = Thing1 | Thing2
+
+  type Thing1
+  @join__type(graph: SUB1, key: "id")
+  @join__type(graph: SUB2, key: "id") {
+    id: ID
+    text1: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+  }
+
+  type Thing2
+  @join__type(graph: SUB1, key: "id")
+  @join__type(graph: SUB2, key: "id") {
+    id: ID
+    text2: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+  }
+  "#;
+
+    let query = "query {
+        stuff {
+          id
+          isEnabled
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs([
+        ("sub1", MockSubgraph::builder().with_json(
+            serde_json::json!{{"query": "{stuff{__typename id thing{__typename ...on Thing1{__typename text1}...on Thing2{__typename text2}}}}",}},
+            serde_json::json!{{"data": {
+                "stuff": {
+                  "__typename": "Stuff",
+                  "id": "1",
+                  "thing": {
+                    "__typename": "Thing1",
+                    "text1": "aaa"
+                  }
+                }
+            } }}
+        ).build()),
+        ("sub2", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Stuff{isEnabled}}}",
+                "variables":{"representations": [
+                    {
+                        "__typename": "Stuff",
+                        "id": "1",
+                        "thing": {
+                        "__typename": "Thing1",
+                        "text1": "aaa"
+                        }
+                    }
+                ]}}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "isEnabled": true
+                }]
+            } }}
+        ).build()),
+        ].into_iter().collect());
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .variables(
+            serde_json_bytes::json! {{ "tId": "1"}}
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
+}
+
+#[tokio::test]
 async fn null_in_requires() {
     let schema = r#"schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -1424,10 +1574,7 @@ async fn typename_propagation() {
     insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
 }
 
-// this test cannot pass as it is right now because we cannot fill in __typename yet without
-// large manipulations using the compiler
 #[tokio::test]
-#[should_panic]
 async fn typename_propagation2() {
     let subgraphs = MockedSubgraphs(
         [
@@ -1456,9 +1603,7 @@ async fn typename_propagation2() {
                         "representations": [{
                             "__typename": "Book",
                             "bookId": "book1",
-                            "author": {
-                                "fullName": "Ada"
-                            }
+                            "author": null
                         }]
                     }
                 }},

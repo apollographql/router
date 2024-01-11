@@ -70,9 +70,6 @@ pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
-use super::traffic_shaping::cache::hash_request;
-use super::traffic_shaping::cache::hash_vary_headers;
-use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -83,6 +80,9 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::cache::entity::hash_query;
+use crate::plugins::cache::entity::hash_vary_headers;
+use crate::plugins::cache::entity::REPRESENTATIONS;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -270,15 +270,15 @@ impl Plugin for Telemetry {
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
-            public_meter_provider: Some(FilterMeterProvider::public_metrics(
+            public_meter_provider: Some(FilterMeterProvider::public(
                 metrics_builder.public_meter_provider_builder.build(),
             )),
-            private_meter_provider: Some(FilterMeterProvider::private_metrics(
+            private_meter_provider: Some(FilterMeterProvider::private(
                 metrics_builder.apollo_meter_provider_builder.build(),
             )),
             public_prometheus_meter_provider: metrics_builder
                 .prometheus_meter_provider
-                .map(FilterMeterProvider::public_metrics),
+                .map(FilterMeterProvider::public),
             sampling_filter_ratio,
             config: Arc::new(config),
             counter,
@@ -781,6 +781,7 @@ impl Telemetry {
         variables: &Map<ByteString, Value>,
         forward_rules: &ForwardValues,
     ) -> String {
+        let nb_var = variables.len();
         #[allow(clippy::mutable_key_type)] // False positive lint
         let variables = variables
             .iter()
@@ -799,7 +800,7 @@ impl Telemetry {
                     (name, "".to_string())
                 }
             })
-            .fold(BTreeMap::new(), |mut acc, (name, value)| {
+            .fold(HashMap::with_capacity(nb_var), |mut acc, (name, value)| {
                 acc.insert(name, value);
                 acc
             });
@@ -1001,7 +1002,7 @@ impl Telemetry {
         sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
         let body = sub_request.subgraph_request.body_mut();
-        let hashed_query = hash_request(body);
+        let hashed_query = hash_query(&sub_request.query_hash, body);
         let representations = body
             .variables
             .get(REPRESENTATIONS)
@@ -1737,6 +1738,9 @@ impl CacheCounter {
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+    if let ForwardHeaders::None = forward_rules {
+        return String::from("{}");
+    }
     let headers_map = headers
         .iter()
         .filter(|(name, _value)| {

@@ -1,8 +1,11 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.batching:
-  - 1
-  - opt__mode__: batch_http_link
+- name: apollo.router.config.batching
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.mode.: batch_http_link
 
