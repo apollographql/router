@@ -42,9 +42,9 @@ pub(crate) enum PipelineStep {
     SubgraphResponse,
 }
 
-impl Into<opentelemetry::Value> for PipelineStep {
-    fn into(self) -> opentelemetry::Value {
-        self.to_string().into()
+impl From<PipelineStep> for opentelemetry::Value {
+    fn from(val: PipelineStep) -> Self {
+        val.to_string().into()
     }
 }
 
