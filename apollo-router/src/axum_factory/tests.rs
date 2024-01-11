@@ -81,6 +81,7 @@ use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
+use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
@@ -1666,10 +1667,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(
-            ACCEPT,
-            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-        )
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
@@ -1727,10 +1725,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(
-            ACCEPT,
-            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-        )
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
