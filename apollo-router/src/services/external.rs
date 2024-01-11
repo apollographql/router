@@ -42,6 +42,12 @@ pub(crate) enum PipelineStep {
     SubgraphResponse,
 }
 
+impl Into<opentelemetry::Value> for PipelineStep {
+    fn into(self) -> opentelemetry::Value {
+        self.to_string().into()
+    }
+}
+
 #[derive(Clone, Debug, Default, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum Control {
