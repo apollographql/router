@@ -83,6 +83,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "namespace": {
+                      "description": "namespace used to prefix Redis keys",
+                      "type": "string",
+                      "nullable": true
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -1207,6 +1212,11 @@ expression: "&schema"
             "urls"
           ],
           "properties": {
+            "namespace": {
+              "description": "namespace used to prefix Redis keys",
+              "type": "string",
+              "nullable": true
+            },
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
               "default": null,
@@ -2309,6 +2319,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "namespace": {
+                      "description": "namespace used to prefix Redis keys",
+                      "type": "string",
+                      "nullable": true
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,

@@ -45,6 +45,7 @@ where
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
+    namespace: Option<String>,
     pub(crate) ttl: Option<Duration>,
 }
 
@@ -184,6 +185,7 @@ impl RedisCacheStorage {
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(client),
+            namespace: config.namespace,
             ttl: config.ttl,
         })
     }
@@ -285,12 +287,19 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
+    fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
+        match &self.namespace {
+            Some(namespace) => format!("{namespace}:{}", key.to_string()),
+            None => key.to_string(),
+        }
+    }
+
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
         self.inner
-            .get::<RedisValue<V>, _>(key.to_string())
+            .get::<RedisValue<V>, _>(self.make_key(key))
             .await
             .map_err(|e| {
                 if !e.is_not_found() {
@@ -303,14 +312,14 @@ impl RedisCacheStorage {
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
-        keys: Vec<RedisKey<K>>,
+        mut keys: Vec<RedisKey<K>>,
     ) -> Option<Vec<Option<RedisValue<V>>>> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
         let res = if keys.len() == 1 {
             let res = self
                 .inner
-                .get::<RedisValue<V>, _>(keys.first().unwrap().to_string())
+                .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
                 .await
                 .map_err(|e| {
                     if !e.is_not_found() {
@@ -324,9 +333,8 @@ impl RedisCacheStorage {
         } else {
             self.inner
                 .mget(
-                    keys.clone()
-                        .into_iter()
-                        .map(|k| k.to_string())
+                    keys.into_iter()
+                        .map(|k| self.make_key(k))
                         .collect::<Vec<_>>(),
                 )
                 .await
@@ -338,7 +346,6 @@ impl RedisCacheStorage {
                 })
                 .ok()
         };
-        tracing::trace!("result for '{:?}': {:?}", keys, res);
 
         res
     }
@@ -349,6 +356,7 @@ impl RedisCacheStorage {
         value: RedisValue<V>,
         ttl: Option<Duration>,
     ) {
+        let key = self.make_key(key);
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
         let expiration = ttl
             .as_ref()
@@ -378,7 +386,7 @@ impl RedisCacheStorage {
                 for (key, value) in data {
                     let _ = pipeline
                         .set::<(), _, _>(
-                            key.clone(),
+                            self.make_key(key.clone()),
                             value.clone(),
                             expiration.clone(),
                             None,

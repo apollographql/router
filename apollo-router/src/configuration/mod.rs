@@ -923,6 +923,9 @@ pub(crate) struct RedisCache {
     /// TTL for entries
     pub(crate) ttl: Option<Duration>,
 
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
+
     #[serde(default)]
     /// TLS client configuration
     pub(crate) tls: Option<TlsClient>,
