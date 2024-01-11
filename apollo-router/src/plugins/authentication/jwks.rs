@@ -20,6 +20,7 @@ use serde_json::Value;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use tower::BoxError;
+use tracing_futures::Instrument;
 use url::Url;
 
 use super::CLIENT;
@@ -55,7 +56,10 @@ impl JwksManager {
             .iter()
             .cloned()
             .map(|JwksConfig { url, .. }| {
-                get_jwks(url.clone()).map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+                let span = tracing::info_span!("fetch jwks", url = %url);
+                get_jwks(url.clone())
+                    .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+                    .instrument(span)
             })
             .collect::<Vec<_>>();
 
@@ -140,7 +144,7 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
         let path = url
             .to_file_path()
             .map_err(|e| {
-                tracing::error!("could not process url: {:?}", url);
+                tracing::error!("url cannot be converted to filesystem path");
                 e
             })
             .ok()?;
@@ -187,10 +191,11 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
     //
     // Try to identify any entries which contain algorithms which are not supported by
     // jsonwebtoken.
+    tracing::debug!(data, "parsing JWKS");
 
     let mut raw_json: Value = serde_json::from_str(&data)
         .map_err(|e| {
-            tracing::error!(%e, "could not create JSON Value from url content");
+            tracing::error!(%e, "could not create JSON Value from url content, enable debug logs to see content");
             e
         })
         .ok()?;

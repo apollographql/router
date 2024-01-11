@@ -153,7 +153,7 @@ async fn test_bad_queries() {
     router.execute_huge_query().await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_http_requests_total{error="payload too large for the `experimental_http_max_request_bytes` configuration",status="413",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_http_requests_total{error="payload too large for the `http_max_request_bytes` configuration",status="413",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
