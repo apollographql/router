@@ -42,11 +42,32 @@ pub(crate) enum MeterProviderType {
     PublicPrometheus,
     Apollo,
     Public,
+    OtelDefault,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct AggregateMeterProvider {
     inner: Arc<Mutex<Inner>>,
+}
+
+impl Default for AggregateMeterProvider {
+    fn default() -> Self {
+        let meter_provider = AggregateMeterProvider {
+            inner: Arc::new(Mutex::new(Inner::default())),
+        };
+
+        // If the regular global meter provider has been set then the aggregate meter provider will use it. Otherwise it'll default to a no-op.
+        // For this to work the global meter provider must be set before the aggregate meter provider is created.
+        // This functionality is not guaranteed to stay like this, so use at your own risk.
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(
+                opentelemetry_api::global::meter_provider(),
+            )),
+        );
+
+        meter_provider
+    }
 }
 
 #[derive(Default)]
@@ -484,6 +505,7 @@ mod test {
     use opentelemetry::sdk::metrics::ManualReader;
     use opentelemetry::sdk::metrics::MeterProviderBuilder;
     use opentelemetry::sdk::metrics::Pipeline;
+    use opentelemetry_api::global::GlobalMeterProvider;
     use opentelemetry_api::metrics::MeterProvider;
     use opentelemetry_api::metrics::Result;
     use opentelemetry_api::Context;
@@ -672,5 +694,37 @@ mod test {
             .get(0)
             .unwrap()
             .value
+    }
+
+    #[test]
+    fn test_global_meter_provider() {
+        // The global meter provider is populated in AggregateMeterProvider::Default, but we can't test that without interacting with statics.
+        // Setting it explicitly is the next best thing.
+
+        let reader = SharedReader(Arc::new(ManualReader::builder().build()));
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(reader.clone())
+            .build();
+
+        let meter_provider = AggregateMeterProvider::default();
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
+                delegate,
+            ))),
+        );
+
+        let counter = meter_provider
+            .versioned_meter("test", None::<String>, None::<String>, None)
+            .u64_counter("test.counter")
+            .init();
+        counter.add(1, &[]);
+        let mut resource_metrics = ResourceMetrics {
+            resource: Default::default(),
+            scope_metrics: vec![],
+        };
+        reader.collect(&mut resource_metrics).unwrap();
+        assert_eq!(1, resource_metrics.scope_metrics.len());
     }
 }
