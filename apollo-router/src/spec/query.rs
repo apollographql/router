@@ -260,16 +260,7 @@ impl Query {
                         output.insert(TYPENAME, operation_kind.as_str().into());
                         Some(output.into())
                     }
-                    None => {
-                        // From the spec https://spec.graphql.org/October2021/#sec-Data
-                        // If an error was raised during the execution that prevented a valid response, the data entry in the response should be null.
-                        if original_operation.is_none() && response.errors.is_empty() {
-                            // This is useful for example if we statically skipped selection set with a query like this {get @skip(if: true) {id name}}
-                            Some(Value::Object(Default::default()))
-                        } else {
-                            Some(Value::default())
-                        }
-                    }
+                    None => Some(Value::default()),
                 };
 
                 return vec![];
@@ -1158,6 +1149,7 @@ impl Operation {
         let name = operation.name.as_ref().map(|s| s.as_str().to_owned());
         let kind = operation.operation_type.into();
         let type_name = schema.root_operation_name(kind).to_owned();
+
         let selection_set = operation
             .selection_set
             .selections

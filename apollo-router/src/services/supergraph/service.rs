@@ -207,7 +207,7 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Introspection { response }) => Ok(
+        Some(QueryPlannerContent::Response { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
