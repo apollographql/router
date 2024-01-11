@@ -662,6 +662,21 @@ impl BridgeQueryPlanner {
         }
 
         if selections.contains_introspection() {
+            // It can happen if you have a statically skipped query like { get @skip(if: true) { id name }} because it will be statically filtered with {}
+            if selections
+                .operations
+                .get(0)
+                .map(|op| op.selection_set.is_empty())
+                .unwrap_or_default()
+            {
+                return Ok(QueryPlannerContent::Introspection {
+                    response: Box::new(
+                        graphql::Response::builder()
+                            .data(Value::Object(Default::default()))
+                            .build(),
+                    ),
+                });
+            }
             // If we have only one operation containing only the root field `__typename`
             // (possibly aliased or repeated). (This does mean we fail to properly support
             // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
