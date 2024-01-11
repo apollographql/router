@@ -36,15 +36,6 @@ apq:
       in_memory:
         limit: 1000
 
-traffic_shaping:
-  subgraphs:
-    products:
-      experimental_entity_caching:
-        ttl: 2s
-  experimental_cache:
-    urls:
-      - https://example.com
-
 subscription:
   enabled: true
   mode:
@@ -52,14 +43,19 @@ subscription:
       subgraphs:
         reviews:
           path: /graphql
-    preview_callback:
-      public_url: "http://localhost:4040/"
+    callback:
+      public_url: "http://localhost:4040/callback"
       listen: 0.0.0.0:4040
       subgraphs:
         - atestsubgraph
 plugins:
   experimental.restricted:
     enabled: true
+
+experimental_entity_cache:
+  redis:
+    urls:
+      - https://example.com
 
 telemetry:
   instrumentation:

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use derivative::Derivative;
 use indexmap::IndexSet;
@@ -18,9 +19,11 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
+use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
+use crate::configuration::GraphQLValidationMode;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
 use crate::graphql::Error;
@@ -42,6 +45,7 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod change;
 pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
@@ -75,6 +79,15 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     #[serde(skip)]
     pub(crate) validation_error: Option<ValidationErrors>,
+
+    /// This is a hash that depends on:
+    /// - the query itself
+    /// - the relevant parts of the schema
+    ///
+    /// if a schema update does not affect a query, then this will be the same hash
+    /// with the old and new schema
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) schema_aware_hash: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -107,6 +120,7 @@ impl Query {
             },
             is_original: true,
             validation_error: None,
+            schema_aware_hash: vec![],
         }
     }
 
@@ -269,17 +283,38 @@ impl Query {
         let parser = &mut apollo_compiler::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
-        let ast = parser.parse_ast(query, "query.graphql");
-        let executable = ast.to_executable(&schema.api_schema().definitions);
+        let (ast, parse_errors) = match parser.parse_ast(query, "query.graphql") {
+            Ok(ast) => (ast, None),
+            Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+        };
+        let schema = &schema.api_schema().definitions;
+        let validate =
+            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
+        // Stretch the meaning of "assume valid" to "we’ll check later"
+        let (executable, validation_errors) = if validate {
+            match ast.to_executable_validate(schema) {
+                Ok(doc) => (doc.into_inner(), None),
+                Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+            }
+        } else {
+            match ast.to_executable(schema) {
+                Ok(doc) => (doc, None),
+                Err(WithErrors { partial, .. }) => (partial, None),
+            }
+        };
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        Arc::new(ParsedDocumentInner { ast, executable })
+        Arc::new(ParsedDocumentInner {
+            ast,
+            executable,
+            parse_errors,
+            validation_errors,
+        })
     }
 
-    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
@@ -288,9 +323,9 @@ impl Query {
         let query = query.into();
 
         let doc = Self::parse_document(&query, schema, configuration);
-        Self::check_errors(&doc.ast)?;
-        let (fragments, operations, defer_stats) =
-            Self::extract_query_information(schema, &doc.executable)?;
+        Self::check_errors(&doc)?;
+        let (fragments, operations, defer_stats, schema_aware_hash) =
+            Self::extract_query_information(schema, &doc.executable, &doc.ast)?;
 
         Ok(Query {
             string: query,
@@ -302,31 +337,32 @@ impl Query {
             defer_stats,
             is_original: true,
             validation_error: None,
+            schema_aware_hash,
         })
     }
 
     /// Check for parse errors in a query in the compiler.
-    pub(crate) fn check_errors(document: &ast::Document) -> Result<(), SpecError> {
-        document
-            .check_parse_errors()
-            .map_err(|errors| SpecError::ParsingError(errors.to_string_no_color()))
+    pub(crate) fn check_errors(document: &ParsedDocument) -> Result<(), SpecError> {
+        match document.parse_errors.clone() {
+            Some(errors) => Err(SpecError::ParsingError(errors.to_string_no_color())),
+            None => Ok(()),
+        }
     }
 
     /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(
-        schema: &Schema,
-        document: &ExecutableDocument,
-    ) -> Result<(), ValidationErrors> {
-        document
-            .validate(&schema.api_schema().definitions)
-            .map_err(|errors| ValidationErrors { errors })
+    pub(crate) fn validate_query(document: &ParsedDocument) -> Result<(), ValidationErrors> {
+        match document.validation_errors.clone() {
+            Some(errors) => Err(ValidationErrors { errors }),
+            None => Ok(()),
+        }
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.
     pub(crate) fn extract_query_information(
         schema: &Schema,
         document: &ExecutableDocument,
-    ) -> Result<(Fragments, Vec<Operation>, DeferStats), SpecError> {
+        ast: &ast::Document,
+    ) -> Result<(Fragments, Vec<Operation>, DeferStats, Vec<u8>), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
@@ -338,7 +374,13 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Ok((fragments, operations, defer_stats))
+        let mut visitor = QueryHashVisitor::new(&schema.definitions, ast);
+        traverse::document(&mut visitor, ast).map_err(|e| {
+            SpecError::ParsingError(format!("could not calculate the query hash: {e}"))
+        })?;
+        let hash = visitor.finish();
+
+        Ok((fragments, operations, defer_stats, hash))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -541,6 +583,30 @@ impl Query {
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
+                        let typename = input_object
+                            .get(TYPENAME)
+                            .and_then(|val| val.as_str())
+                            .and_then(|s| {
+                                Some(apollo_compiler::ast::Type::Named(
+                                    apollo_compiler::ast::NamedType::new(
+                                        apollo_compiler::NodeStr::new(s),
+                                    )
+                                    .ok()?,
+                                ))
+                            });
+
+                        let current_type = if parameters
+                            .schema
+                            .is_interface(field_type.inner_named_type().as_str())
+                            || parameters
+                                .schema
+                                .is_union(field_type.inner_named_type().as_str())
+                        {
+                            typename.as_ref().unwrap_or(field_type)
+                        } else {
+                            field_type
+                        };
+
                         if self
                             .apply_selection_set(
                                 selection_set,
@@ -548,7 +614,7 @@ impl Query {
                                 input_object,
                                 output_object,
                                 path,
-                                field_type,
+                                current_type,
                             )
                             .is_err()
                         {
@@ -575,7 +641,8 @@ impl Query {
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &executable::Type,
+        // the type under which we apply selections
+        current_type: &executable::Type,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -594,6 +661,31 @@ impl Query {
                         continue;
                     }
 
+                    if name.as_str() == TYPENAME {
+                        let input_value = input
+                            .get(field_name.as_str())
+                            .cloned()
+                            .filter(|v| v.is_string())
+                            .unwrap_or_else(|| {
+                                Value::String(ByteString::from(
+                                    current_type.inner_named_type().as_str().to_owned(),
+                                ))
+                            });
+                        if let Some(input_str) = input_value.as_str() {
+                            if parameters
+                                .schema
+                                .definitions
+                                .get_object(input_str)
+                                .is_some()
+                            {
+                                output.insert((*field_name).clone(), input_value);
+                            } else {
+                                return Err(InvalidValue);
+                            }
+                        }
+                        continue;
+                    }
+
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
@@ -608,33 +700,19 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if name.as_str() == TYPENAME {
-                            if let Some(input_str) = input_value.as_str() {
-                                if parameters
-                                    .schema
-                                    .definitions
-                                    .get_object(input_str)
-                                    .is_some()
-                                {
-                                    *output_value = input_value.clone();
-                                } else {
-                                    return Err(InvalidValue);
-                                }
-                            }
-                        } else {
-                            path.push(ResponsePathElement::Key(field_name.as_str()));
-                            let res = self.format_value(
-                                parameters,
-                                &field_type.0,
-                                input_value,
-                                output_value,
-                                path,
-                                parent_type,
-                                selection_set,
-                            );
-                            path.pop();
-                            res?
-                        }
+
+                        path.push(ResponsePathElement::Key(field_name.as_str()));
+                        let res = self.format_value(
+                            parameters,
+                            &field_type.0,
+                            input_value,
+                            output_value,
+                            path,
+                            current_type,
+                            selection_set,
+                        );
+                        path.pop();
+                        res?
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
@@ -642,7 +720,7 @@ impl Query {
                         if field_type.is_non_null() {
                             parameters.errors.push(Error {
                                 message: format!(
-                                    "Cannot return null for non-nullable field {parent_type}.{}",
+                                    "Cannot return null for non-nullable field {current_type}.{}",
                                     field_name.as_str()
                                 ),
                                 path: Some(Path::from_response_slice(path)),
@@ -659,27 +737,17 @@ impl Query {
                     include_skip,
                     defer: _,
                     defer_label: _,
-                    known_type,
+                    known_type: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
-                    let is_apply = if let Some(input_type) =
-                        input.get(TYPENAME).and_then(|val| val.as_str())
-                    {
-                        // Only check if the fragment matches the input type directly, and if not, check if the
-                        // input type is a subtype of the fragment's type condition (interface, union)
-                        input_type == type_condition.as_str()
-                            || parameters.schema.is_subtype(type_condition, input_type)
-                    } else {
-                        known_type
-                            .as_ref()
-                            // We have no typename, we apply the selection set if the known_type implements the type_condition
-                            .map(|k| parameters.schema.is_subtype(type_condition, k))
-                            .unwrap_or_default()
-                            || known_type.as_deref() == Some(type_condition.as_str())
-                    };
+                    let is_apply = current_type.inner_named_type().as_str()
+                        == type_condition.as_str()
+                        || parameters
+                            .schema
+                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -695,13 +763,13 @@ impl Query {
                             input,
                             output,
                             path,
-                            parent_type,
+                            current_type,
                         )?;
                     }
                 }
                 Selection::FragmentSpread {
                     name,
-                    known_type,
+                    known_type: _,
                     include_skip,
                     defer: _,
                     defer_label: _,
@@ -711,23 +779,12 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        let is_apply = if let Some(input_type) =
-                            input.get(TYPENAME).and_then(|val| val.as_str())
-                        {
-                            // check if the fragment matches the input type directly, and if not, check if the
-                            // input type is a subtype of the fragment's type condition (interface, union)
-                            input_type == fragment.type_condition.as_str()
-                                || parameters
-                                    .schema
-                                    .is_subtype(&fragment.type_condition, input_type)
-                        } else {
-                            // If the type condition is an interface and the current known type implements it
-                            known_type
-                                .as_ref()
-                                .map(|k| parameters.schema.is_subtype(&fragment.type_condition, k))
-                                .unwrap_or_default()
-                                || known_type.as_deref() == Some(fragment.type_condition.as_str())
-                        };
+                        let is_apply = current_type.inner_named_type().as_str()
+                            == fragment.type_condition.as_str()
+                            || parameters.schema.is_subtype(
+                                &fragment.type_condition,
+                                current_type.inner_named_type().as_str(),
+                            );
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -743,7 +800,7 @@ impl Query {
                                 input,
                                 output,
                                 path,
-                                parent_type,
+                                current_type,
                             )?;
                         }
                     } else {
@@ -846,7 +903,9 @@ impl Query {
                         input,
                         output,
                         path,
-                        &FieldType::new_named(type_condition).0,
+                        // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                        #[allow(clippy::unwrap_used)]
+                        &FieldType::new_named(type_condition.try_into().unwrap()).0,
                     )?;
                 }
                 Selection::FragmentSpread {
@@ -880,7 +939,9 @@ impl Query {
                             input,
                             output,
                             path,
-                            &FieldType::new_named(root_type_name).0,
+                            // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                            #[allow(clippy::unwrap_used)]
+                            &FieldType::new_named(root_type_name.try_into().unwrap()).0,
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
@@ -1081,11 +1142,11 @@ pub(crate) struct Variable {
 
 impl Operation {
     pub(crate) fn from_hir(
-        operation: executable::OperationRef<'_>,
+        operation: &executable::Operation,
         schema: &Schema,
         defer_stats: &mut DeferStats,
     ) -> Result<Self, SpecError> {
-        let name = operation.name().map(|s| s.as_str().to_owned());
+        let name = operation.name.as_ref().map(|s| s.as_str().to_owned());
         let kind = operation.operation_type.into();
         let type_name = schema.root_operation_name(kind).to_owned();
         let selection_set = operation

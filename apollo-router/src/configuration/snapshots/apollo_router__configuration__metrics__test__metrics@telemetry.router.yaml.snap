@@ -1,22 +1,25 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.metrics"
+expression: "&metrics.non_zero()"
 ---
-value.apollo.router.config.telemetry:
-  - 1
-  - opt__events__: false
-    opt__instruments__: false
-    opt__logging__experimental_when_header__: true
-    opt__metrics__otlp__: true
-    opt__metrics__prometheus__: true
-    opt__spans__: true
-    opt__spans__default_attribute_requirement_level__: recommended
-    opt__spans__mode__: spec_compliant
-    opt__spans__router__: true
-    opt__spans__subgraph__: true
-    opt__spans__supergraph__: true
-    opt__tracing__datadog__: true
-    opt__tracing__jaeger__: true
-    opt__tracing__otlp__: true
-    opt__tracing__zipkin__: true
+- name: apollo.router.config.telemetry
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.events.: false
+          opt.instruments.: false
+          opt.logging.experimental_when_header.: true
+          opt.metrics.otlp.: true
+          opt.metrics.prometheus.: true
+          opt.spans.: true
+          opt.spans.default_attribute_requirement_level.: recommended
+          opt.spans.mode.: spec_compliant
+          opt.spans.router.: true
+          opt.spans.subgraph.: true
+          opt.spans.supergraph.: true
+          opt.tracing.datadog.: true
+          opt.tracing.jaeger.: true
+          opt.tracing.otlp.: true
+          opt.tracing.zipkin.: true
 

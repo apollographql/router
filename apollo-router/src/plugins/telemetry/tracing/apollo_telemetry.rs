@@ -16,14 +16,14 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
+use opentelemetry::sdk::export::trace::ExportResult;
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
-use opentelemetry_sdk::trace::EvictedHashMap;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use prost::Message;
 use serde::de::DeserializeOwned;
@@ -74,6 +74,7 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -145,19 +146,12 @@ struct LightSpanData {
 
 impl From<SpanData> for LightSpanData {
     fn from(value: SpanData) -> Self {
-        let attr_len = value.attributes.len();
         Self {
             span_id: value.span_context.span_id(),
             name: value.name,
             start_time: value.start_time,
             end_time: value.end_time,
-            attributes: value.attributes.into_iter().fold(
-                EvictedHashMap::new(attr_len as u32, attr_len),
-                |mut acc, attr| {
-                    acc.insert(attr);
-                    acc
-                },
-            ),
+            attributes: value.attributes,
         }
     }
 }
@@ -375,7 +369,7 @@ impl Exporter {
                     },
                 )),
             })],
-            FETCH_SPAN_NAME => {
+            FETCH_SPAN_NAME | SUBSCRIBE_SPAN_NAME => {
                 let (trace_parsing_failed, trace) = match child_nodes.pop() {
                     Some(TreeData::Trace(Some(Ok(trace)))) => (false, Some(trace)),
                     Some(TreeData::Trace(Some(Err(_err)))) => (true, None),
@@ -406,9 +400,6 @@ impl Exporter {
                     )),
                 })]
             }
-            // SUBSCRIBE_SPAN_NAME => {
-            // TODO: in the future we could add a subscription node in the report.proto and do exactly the same logic than in FETCH_SPAN_NAME branch
-            // }
             FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Flatten(
@@ -780,10 +771,7 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
-            if span
-                .attributes
-                .iter()
-                .any(|attr| attr.key == APOLLO_PRIVATE_REQUEST)
+            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
                 match self.extract_traces(span.into()) {

@@ -173,7 +173,7 @@ where
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
                 let doc = query_analysis.parse_document(&query);
-                let err_res = Query::check_errors(&doc.ast);
+                let err_res = Query::check_errors(&doc);
                 if let Err(error) = err_res {
                     let e = Arc::new(QueryPlannerError::SpecError(error));
                     entry.insert(Err(e)).await;
@@ -334,7 +334,7 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    let err_res = Query::check_errors(&doc.ast);
+                    let err_res = Query::check_errors(&doc);
 
                     if let Err(error) = err_res {
                         request

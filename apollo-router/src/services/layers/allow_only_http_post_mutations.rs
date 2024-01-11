@@ -254,20 +254,42 @@ mod forbid_http_get_mutations_tests {
 
     fn create_request(method: Method, operation_kind: OperationKind) -> SupergraphRequest {
         let query = match operation_kind {
-            OperationKind::Query => "query { a }\n type Query { a: Int }",
-            OperationKind::Mutation => "mutation { a }\n type Mutation { a: Int }",
-
-            OperationKind::Subscription => "subscription { a }\n type Subscription { a: Int }",
+            OperationKind::Query => {
+                "
+                    type Query { a: Int }
+                    query { a }
+                "
+            }
+            OperationKind::Mutation => {
+                "
+                    type Query { a: Int }
+                    type Mutation { a: Int }
+                    mutation { a }
+                "
+            }
+            OperationKind::Subscription => {
+                "
+                    type Query { a: Int }
+                    type Subscription { a: Int }
+                    subscription { a }
+                "
+            }
         };
 
-        let ast = ast::Document::parse(query, "");
-        let (_schema, executable) = ast.to_mixed();
+        let ast = ast::Document::parse(query, "").unwrap();
+        let (_schema, executable) = ast.to_mixed_validate().unwrap();
+        let executable = executable.into_inner();
 
         let context = Context::new();
         context
             .private_entries
             .lock()
-            .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner { ast, executable }));
+            .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
+                ast,
+                executable,
+                parse_errors: None,
+                validation_errors: None,
+            }));
 
         SupergraphRequest::fake_builder()
             .method(method)

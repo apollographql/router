@@ -658,6 +658,7 @@ jobs:
             and:
               - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
               - equal: [ true, << parameters.nightly >> ]
+              - equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
           steps:
             - setup_remote_docker:
                 version: 20.10.11
@@ -761,71 +762,83 @@ jobs:
       <<: *common_job_environment
       VERSION: << pipeline.git.tag >>
     steps:
-      - checkout
-      - setup_remote_docker:
-          version: 20.10.11
-          docker_layer_caching: true
-      - attach_workspace:
-          at: artifacts
-      - gh/setup
-      - run:
-          command: >
-            cd artifacts && sha256sum *.tar.gz > sha256sums.txt
-      - run:
-          command: >
-            cd artifacts && md5sum *.tar.gz > md5sums.txt
-      - run:
-          command: >
-            cd artifacts && sha1sum *.tar.gz > sha1sums.txt
-      - run:
-          name: Create GitHub Release
-          command: >
-            case "$VERSION" in
+      - when:
+          condition:
+            not:
+              equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+          steps:
+             - run:
+                command: >
+                  echo "Not publishing any github release."
+      - when:
+          condition:
+            equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+          steps:
+            - checkout
+            - setup_remote_docker:
+                version: 20.10.11
+                docker_layer_caching: true
+            - attach_workspace:
+                at: artifacts
+            - gh/setup
+            - run:
+                command: >
+                  cd artifacts && sha256sum *.tar.gz > sha256sums.txt
+            - run:
+                command: >
+                  cd artifacts && md5sum *.tar.gz > md5sums.txt
+            - run:
+                command: >
+                  cd artifacts && sha1sum *.tar.gz > sha1sums.txt
+            - run:
+                name: Create GitHub Release
+                command: >
+                  case "$VERSION" in
 
-              # If the VERSION contains a dash, consider it a pre-release version.
-              # This is in-line with SemVer's expectations/designations!
-              *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
+                    # If the VERSION contains a dash, consider it a pre-release version.
+                    # This is in-line with SemVer's expectations/designations!
+                    *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
 
-              # In all other cases, publish it as the latest version.
-              *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
+                    # In all other cases, publish it as the latest version.
+                    *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
 
-            esac
-      - run:
-          name: Docker build
-          command: |
-            ROUTER_TAG=ghcr.io/apollographql/router
-            # Create a multi-arch builder which works properly under qemu
-            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-            docker context create buildx-build
-            docker buildx create --driver docker-container --use buildx-build
-            docker buildx inspect --bootstrap
-            # Note: GH Token owned by apollo-bot2, no expire
-            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
-            # To prevent overwrite, check to see if our images already exists
-            # If the manifest command succeeds, the images already exist
-            docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
-            docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
-            # Build and push debug image
-            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
-            # Build and push release image
-            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
-      - run:
-          name: Helm build
-          command: |
-            # Install Helm
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-            # Package up the helm chart
-            helm package helm/chart/router
-            # Make sure we have the newest chart
-            CHART=$(ls -t router*.tgz| head -1)
-            # Note: GH Token owned by apollo-bot2, no expire
-            echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
-            # To prevent overwrite, check to see if our chart already exists
-            # If the show all command succeeds, the chart already exists
-            VERSION=$(basename ${CHART} .tgz)
-            helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${VERSION} > /dev/null && exit 1
-            # Push chart to repository
-            helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
+                  esac
+            - run:
+                name: Docker build
+                command: |
+                  ROUTER_TAG=ghcr.io/apollographql/router
+                  # Create a multi-arch builder which works properly under qemu
+                  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+                  docker context create buildx-build
+                  docker buildx create --driver docker-container --use buildx-build
+                  docker buildx inspect --bootstrap
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+                  # To prevent overwrite, check to see if our images already exists
+                  # If the manifest command succeeds, the images already exist
+                  docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
+                  docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
+                  # Build and push debug image
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  # Build and push release image
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+            - run:
+                name: Helm build
+                command: |
+                  # Install Helm
+                  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+                  # Package up the helm chart
+                  helm package helm/chart/router
+                  # Make sure we have the newest chart
+                  CHART=$(ls -t router*.tgz| head -1)
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
+                  # To prevent overwrite, check to see if our chart already exists
+                  # If the show all command succeeds, the chart already exists
+                  VERSION=$(basename ${CHART} .tgz)
+                  helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${VERSION} > /dev/null && exit 1
+                  # Push chart to repository
+                  helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
 workflows:
   ci_checks:

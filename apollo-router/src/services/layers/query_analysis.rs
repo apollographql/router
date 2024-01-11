@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use lru::LruCache;
@@ -110,7 +111,7 @@ impl QueryAnalysisLayer {
                 let operation = doc.executable.get_operation(op_name.as_deref()).ok();
                 let operation_name = operation
                     .as_ref()
-                    .and_then(|operation| operation.name().map(|s| s.as_str().to_owned()));
+                    .and_then(|operation| operation.name.as_ref().map(|s| s.as_str().to_owned()));
 
                 context.insert(OPERATION_NAME, operation_name).unwrap();
                 let operation_kind = operation.map(|op| OperationKind::from(op.operation_type));
@@ -159,4 +160,6 @@ pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: ExecutableDocument,
+    pub(crate) parse_errors: Option<DiagnosticList>,
+    pub(crate) validation_errors: Option<DiagnosticList>,
 }

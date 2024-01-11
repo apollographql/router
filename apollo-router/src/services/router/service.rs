@@ -88,7 +88,7 @@ pub(crate) struct RouterService {
     apq_layer: APQLayer,
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    experimental_http_max_request_bytes: usize,
+    http_max_request_bytes: usize,
     experimental_batching: Batching,
 }
 
@@ -98,7 +98,7 @@ impl RouterService {
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
-        experimental_http_max_request_bytes: usize,
+        http_max_request_bytes: usize,
         experimental_batching: Batching,
     ) -> Self {
         RouterService {
@@ -106,7 +106,7 @@ impl RouterService {
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
-            experimental_http_max_request_bytes,
+            http_max_request_bytes,
             experimental_batching,
         }
     }
@@ -567,15 +567,15 @@ impl RouterService {
                     .parse()
                     .ok()
             })();
-            if content_length.unwrap_or(0) > self.experimental_http_max_request_bytes {
+            if content_length.unwrap_or(0) > self.http_max_request_bytes {
                 Err(TranslateError {
                     status: StatusCode::PAYLOAD_TOO_LARGE,
-                    error: "payload too large for the `experimental_http_max_request_bytes` configuration",
+                    error: "payload too large for the `http_max_request_bytes` configuration",
                     extension_code: "INVALID_GRAPHQL_REQUEST",
                     extension_details: "payload too large".to_string(),
                 })
             } else {
-                let body = http_body::Limited::new(body, self.experimental_http_max_request_bytes);
+                let body = http_body::Limited::new(body, self.http_max_request_bytes);
                 hyper::body::to_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await
@@ -583,7 +583,7 @@ impl RouterService {
                         if e.is::<http_body::LengthLimitError>() {
                             TranslateError {
                                 status: StatusCode::PAYLOAD_TOO_LARGE,
-                                error: "payload too large for the `experimental_http_max_request_bytes` configuration",
+                                error: "payload too large for the `http_max_request_bytes` configuration",
                                 extension_code: "INVALID_GRAPHQL_REQUEST",
                                 extension_details: "payload too large".to_string(),
                             }
@@ -694,7 +694,7 @@ pub(crate) struct RouterCreator {
     apq_layer: APQLayer,
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    experimental_http_max_request_bytes: usize,
+    http_max_request_bytes: usize,
     experimental_batching: Batching,
 }
 
@@ -744,9 +744,7 @@ impl RouterCreator {
             static_page,
             apq_layer,
             query_analysis_layer,
-            experimental_http_max_request_bytes: configuration
-                .limits
-                .experimental_http_max_request_bytes,
+            http_max_request_bytes: configuration.limits.http_max_request_bytes,
             persisted_query_layer,
             experimental_batching: configuration.experimental_batching.clone(),
         })
@@ -765,7 +763,7 @@ impl RouterCreator {
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
-            self.experimental_http_max_request_bytes,
+            self.http_max_request_bytes,
             self.experimental_batching.clone(),
         ));
 

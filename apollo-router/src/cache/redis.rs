@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fred::interfaces::EventInterface;
-use fred::interfaces::RedisResult;
 use fred::prelude::ClientLike;
 use fred::prelude::KeysInterface;
 use fred::prelude::RedisClient;
@@ -14,11 +13,15 @@ use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use fred::types::TlsConfig;
+use fred::types::TlsHostMapping;
+use tower::BoxError;
 use url::Url;
 
 use super::KeyType;
 use super::ValueType;
 use crate::configuration::RedisCache;
+use crate::services::generate_tls_client_config;
 
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
@@ -42,7 +45,7 @@ where
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
-    ttl: Option<Duration>,
+    pub(crate) ttl: Option<Duration>,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -98,6 +101,9 @@ where
                     )
                 })
             }
+            fred::types::RedisValue::Null => {
+                Err(RedisError::new(RedisErrorKind::NotFound, "not found"))
+            }
             _res => Err(RedisError::new(
                 RedisErrorKind::Parse,
                 "the data is the wrong type",
@@ -126,9 +132,21 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(config: RedisCache) -> Result<Self, RedisError> {
+    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
-        let client_config = RedisConfig::from_url(url.as_str())?;
+        let mut client_config = RedisConfig::from_url(url.as_str())?;
+
+        if let Some(tls) = config.tls.as_ref() {
+            let tls_cert_store = tls.create_certificate_store().transpose()?;
+            let client_cert_config = tls.client_authentication.as_ref();
+            let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
+            let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_client_config));
+
+            client_config.tls = Some(TlsConfig {
+                connector: fred::types::TlsConnector::Rustls(connector),
+                hostnames: TlsHostMapping::None,
+            });
+        }
 
         let client = RedisClient::new(
             client_config,
@@ -168,6 +186,10 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             ttl: config.ttl,
         })
+    }
+
+    pub(crate) fn ttl(&self) -> Option<Duration> {
+        self.ttl
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
@@ -258,6 +280,7 @@ impl RedisCacheStorage {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
     }
@@ -266,28 +289,16 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
-        tracing::trace!("getting from redis: {:?}", key);
-
-        let result: RedisResult<String> = self.inner.get(key.to_string()).await;
-        match result.as_ref().map(|s| s.as_str()) {
-            // Fred returns nil rather than an error with not_found
-            // See `RedisErrorKind::NotFound` for why this should work
-            // To work around this we first read the value as a string and then deal with the value explicitly
-            Ok("nil") => None,
-            Ok(value) => serde_json::from_str(value)
-                .map(RedisValue)
-                .map_err(|e| {
-                    tracing::error!("couldn't deserialize value from redis: {}", e);
-                    e
-                })
-                .ok(),
-            Err(e) => {
+        self.inner
+            .get::<RedisValue<V>, _>(key.to_string())
+            .await
+            .map_err(|e| {
                 if !e.is_not_found() {
-                    tracing::error!("mget error: {}", e);
+                    tracing::error!("get error: {}", e);
                 }
-                None
-            }
-        }
+                e
+            })
+            .ok()
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
@@ -302,7 +313,9 @@ impl RedisCacheStorage {
                 .get::<RedisValue<V>, _>(keys.first().unwrap().to_string())
                 .await
                 .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
+                    if !e.is_not_found() {
+                        tracing::error!("get error: {}", e);
+                    }
                     e
                 })
                 .ok();
@@ -318,7 +331,9 @@ impl RedisCacheStorage {
                 )
                 .await
                 .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
+                    if !e.is_not_found() {
+                        tracing::error!("get error: {}", e);
+                    }
                     e
                 })
                 .ok()
@@ -332,11 +347,12 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
         value: RedisValue<V>,
+        ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
-        let expiration = self
-            .ttl
+        let expiration = ttl
             .as_ref()
+            .or(self.ttl.as_ref())
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         let r = self
@@ -349,10 +365,11 @@ impl RedisCacheStorage {
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
+        ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
 
-        let r = match self.ttl.as_ref() {
+        let r = match ttl.as_ref().or(self.ttl.as_ref()) {
             None => self.inner.mset(data.to_owned()).await,
             Some(ttl) => {
                 let expiration = Some(Expiration::EX(ttl.as_secs() as i64));
