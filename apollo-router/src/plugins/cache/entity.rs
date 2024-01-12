@@ -53,7 +53,7 @@ pub(crate) struct EntityCache {
 /// Configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Config {
+pub(crate) struct Config {
     redis: RedisCache,
     /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
     #[serde(default)]
@@ -66,7 +66,7 @@ struct Config {
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Subgraph {
+pub(crate) struct Subgraph {
     /// expiration for all keys
     pub(crate) ttl: Option<Ttl>,
 
@@ -78,7 +78,7 @@ struct Subgraph {
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Ttl(
+pub(crate) struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     Duration,
