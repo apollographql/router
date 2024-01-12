@@ -24,12 +24,14 @@ impl CacheMetricsService {
         name: String,
         service: subgraph::BoxService,
         ttl: Option<&Ttl>,
+        separate_per_type: bool,
     ) -> subgraph::BoxService {
         tower::util::BoxService::new(CacheMetricsService(Some(InnerCacheMetricsService {
             service,
             name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
                 ttl.map(|t| t.0).unwrap_or_else(|| Duration::from_secs(60)),
+                separate_per_type,
             )))),
         })))
     }
@@ -184,15 +186,17 @@ pub(crate) struct CacheCounter {
     secondary: Bloom<CacheKey>,
     created_at: Instant,
     ttl: Duration,
+    per_type: bool,
 }
 
 impl CacheCounter {
-    pub(crate) fn new(ttl: Duration) -> Self {
+    pub(crate) fn new(ttl: Duration, per_type: bool) -> Self {
         Self {
             primary: Self::make_filter(),
             secondary: Self::make_filter(),
             created_at: Instant::now(),
             ttl,
+            per_type,
         }
     }
 
@@ -208,11 +212,13 @@ impl CacheCounter {
         hashed_headers: Arc<String>,
         representations: Vec<(Arc<String>, Value)>,
     ) {
+        let separate_metrics_per_type;
         {
             let mut c = counter.lock();
             if c.created_at.elapsed() >= c.ttl {
                 c.clear();
             }
+            separate_metrics_per_type = c.per_type;
         }
 
         // typename -> (nb of cache hits, nb of entities)
@@ -242,11 +248,18 @@ impl CacheCounter {
         }
 
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
-            ::tracing::info!(
-                histogram.apollo.router.operations.entity.cache_hit = (cache_hit as f64 / total_entities as f64) * 100f64,
-                entity_type = %typename,
-                subgraph = %subgraph_name,
-            );
+            if separate_metrics_per_type {
+                ::tracing::info!(
+                    histogram.apollo.router.operations.entity.cache_hit = (cache_hit as f64 / total_entities as f64) * 100f64,
+                    entity_type = %typename,
+                    subgraph = %subgraph_name,
+                );
+            } else {
+                ::tracing::info!(
+                    histogram.apollo.router.operations.entity.cache_hit = (cache_hit as f64 / total_entities as f64) * 100f64,
+                    subgraph = %subgraph_name,
+                );
+            }
         }
     }
 

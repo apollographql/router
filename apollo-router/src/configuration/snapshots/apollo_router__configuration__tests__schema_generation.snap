@@ -1209,6 +1209,11 @@ expression: "&schema"
               "default": false,
               "type": "boolean"
             },
+            "separate_per_type": {
+              "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
+              "default": false,
+              "type": "boolean"
+            },
             "ttl": {
               "description": "Metrics counter TTL",
               "type": "string",

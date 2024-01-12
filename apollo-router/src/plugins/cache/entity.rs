@@ -99,6 +99,9 @@ struct Metrics {
     pub(crate) enabled: bool,
     /// Metrics counter TTL
     pub(crate) ttl: Option<Ttl>,
+    /// Adds the entity type name to attributes. This can greatly increase the cardinality
+    #[serde(default)]
+    pub(crate) separate_per_type: bool,
 }
 
 #[async_trait::async_trait]
@@ -159,8 +162,12 @@ impl Plugin for EntityCache {
         let name = name.to_string();
 
         if self.metrics.enabled {
-            service =
-                CacheMetricsService::new(name.to_string(), service, self.metrics.ttl.as_ref());
+            service = CacheMetricsService::new(
+                name.to_string(),
+                service,
+                self.metrics.ttl.as_ref(),
+                self.metrics.separate_per_type,
+            );
         }
 
         if subgraph_enabled {
