@@ -9,6 +9,7 @@ use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
@@ -27,6 +28,22 @@ pub(crate) enum MeterProvider {
 }
 
 impl MeterProvider {
+    fn versioned_meter(
+        &self,
+        name: impl Into<Cow<'static, str>>,
+        version: Option<impl Into<Cow<'static, str>>>,
+        schema_url: Option<impl Into<Cow<'static, str>>>,
+        attributes: Option<Vec<KeyValue>>,
+    ) -> Meter {
+        match &self {
+            MeterProvider::Regular(provider) => {
+                provider.versioned_meter(name, version, schema_url, attributes)
+            }
+            MeterProvider::Global(provider) => {
+                provider.versioned_meter(name, version, schema_url, attributes)
+            }
+        }
+    }
     fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
         match self {
             MeterProvider::Regular(provider) => provider.shutdown(),
@@ -214,17 +231,11 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         schema_url: Option<impl Into<Cow<'static, str>>>,
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
-        let delegate = match &self.delegate {
-            MeterProvider::Regular(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
-            }
-            MeterProvider::Global(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
-            }
-        };
         Meter::new(Arc::new(FilteredInstrumentProvider {
             noop: NoopMeterProvider::default().meter(""),
-            delegate,
+            delegate: self
+                .delegate
+                .versioned_meter(name, version, schema_url, attributes),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))
