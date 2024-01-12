@@ -33,7 +33,7 @@ lazy_static! {
         map.insert("subgraph_request", "graphql.operation.name");
         map
     };
-    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:8126/v0.4/traces");
+    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:8126");
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
