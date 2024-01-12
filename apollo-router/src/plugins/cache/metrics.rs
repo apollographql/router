@@ -139,7 +139,8 @@ impl InnerCacheMetricsService {
         };
         println!("will update cache counter");
 
-        counter.lock().unwrap().record(
+        CacheCounter::record(
+            &counter,
             cache_attributes.hashed_query.clone(),
             subgraph_name,
             hashed_headers,
@@ -205,26 +206,37 @@ impl CacheCounter {
     }
 
     pub(crate) fn record(
-        &mut self,
+        counter: &Mutex<CacheCounter>,
         query: Arc<String>,
         subgraph_name: &Arc<String>,
         hashed_headers: Arc<String>,
         representations: Vec<(Arc<String>, Value)>,
     ) {
-        if self.created_at.elapsed() >= self.ttl {
-            self.clear();
+        {
+            let mut c = counter.lock().unwrap();
+            if c.created_at.elapsed() >= c.ttl {
+                c.clear();
+            }
         }
 
         // typename -> (nb of cache hits, nb of entities)
         let mut seen: HashMap<Arc<String>, (usize, usize)> = HashMap::new();
+        let mut key = CacheKey {
+            representation: Value::Null,
+            typename: Arc::new(String::new()),
+            query: query.clone(),
+            subgraph_name: subgraph_name.clone(),
+            hashed_headers: hashed_headers.clone(),
+        };
         for (typename, representation) in representations {
-            let cache_hit = self.check(&CacheKey {
-                representation,
-                typename: typename.clone(),
-                query: query.clone(),
-                subgraph_name: subgraph_name.clone(),
-                hashed_headers: hashed_headers.clone(),
-            });
+            let cache_hit;
+            key.typename = typename.clone();
+            key.representation = representation;
+
+            {
+                let mut c = counter.lock().unwrap();
+                cache_hit = c.check(&key);
+            }
 
             let seen_entry = seen.entry(typename.clone()).or_default();
             if cache_hit {
