@@ -1,13 +1,156 @@
 use bloomfilter::Bloom;
+use http::header;
 use serde_json_bytes::Value;
 use tower::BoxError;
+use tower_service::Service;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
+use super::entity::hash_query;
+use super::entity::hash_vary_headers;
+use super::entity::REPRESENTATIONS;
+use crate::services::subgraph;
 use crate::spec::TYPENAME;
+
+pub(crate) struct CacheMetricsService(Option<InnerCacheMetricsService>);
+
+impl CacheMetricsService {
+    pub(crate) fn new(name: String, service: subgraph::BoxService) -> subgraph::BoxService {
+        tower::util::BoxService::new(CacheMetricsService(Some(InnerCacheMetricsService {
+            service,
+            name,
+            counter: Some(Arc::new(Mutex::new(CacheCounter::new(
+                Duration::from_secs(60),
+            )))),
+        })))
+    }
+}
+
+pub(crate) struct InnerCacheMetricsService {
+    service: subgraph::BoxService,
+    name: String,
+    counter: Option<Arc<Mutex<CacheCounter>>>,
+}
+
+impl Service<subgraph::Request> for CacheMetricsService {
+    type Response = subgraph::Response;
+    type Error = BoxError;
+    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        match &mut self.0 {
+            Some(s) => s.service.poll_ready(cx),
+            None => panic!("service should have been called only once"),
+        }
+    }
+
+    fn call(&mut self, request: subgraph::Request) -> Self::Future {
+        match self.0.take() {
+            None => panic!("service should have been called only once"),
+            Some(s) => Box::pin(s.call_inner(request)),
+        }
+    }
+}
+
+impl InnerCacheMetricsService {
+    async fn call_inner(
+        mut self,
+        mut request: subgraph::Request,
+    ) -> Result<subgraph::Response, BoxError> {
+        let cache_attributes =
+            Self::get_cache_attributes(/*FIXME*/ Arc::new(self.name.clone()), &mut request);
+        println!(
+            "inner metrics cache attributes in root req for {}: {:?}",
+            self.name, cache_attributes
+        );
+
+        /*if let Ok(cache_control) = response
+            .response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .ok_or(())
+            .and_then(|val| val.to_str().map(|v| v.to_string()).map_err(|_| ()))
+        {
+            metric_attrs.push(KeyValue::new("cache_control", cache_control));
+        }*/
+        let response = self.service.call(request).await?;
+
+        if let Some(cache_attributes) = cache_attributes {
+            if let Some(counter) = &self.counter {
+                println!("inner metrics cache {}: will update metrics", self.name,);
+                Self::update_cache_metrics(counter, &response, cache_attributes)
+            }
+        }
+
+        Ok(response)
+    }
+
+    fn get_cache_attributes(
+        subgraph_name: Arc<String>,
+        sub_request: &mut subgraph::Request,
+    ) -> Option<CacheAttributes> {
+        let body = sub_request.subgraph_request.body_mut();
+        let hashed_query = hash_query(&sub_request.query_hash, body);
+        let representations = body
+            .variables
+            .get(REPRESENTATIONS)
+            .and_then(|value| value.as_array())?;
+
+        let keys = extract_cache_attributes(representations).ok()?;
+
+        Some(CacheAttributes {
+            subgraph_name,
+            headers: sub_request.subgraph_request.headers().clone(),
+            hashed_query: Arc::new(hashed_query),
+            representations: keys,
+        })
+    }
+
+    fn update_cache_metrics(
+        counter: &Mutex<CacheCounter>,
+        sub_response: &subgraph::Response,
+        cache_attributes: CacheAttributes,
+    ) {
+        let mut vary_headers = sub_response
+            .response
+            .headers()
+            .get_all(header::VARY)
+            .into_iter()
+            .filter_map(|val| {
+                val.to_str().ok().map(|v| {
+                    v.to_string()
+                        .split(", ")
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>()
+                })
+            })
+            .flatten()
+            .collect::<Vec<String>>();
+        vary_headers.sort();
+        let vary_headers = vary_headers.join(", ");
+
+        let hashed_headers = if vary_headers.is_empty() {
+            Arc::default()
+        } else {
+            Arc::new(hash_vary_headers(&cache_attributes.headers))
+        };
+        println!("will update cache counter");
+
+        counter.lock().unwrap().record(
+            cache_attributes.hashed_query.clone(),
+            cache_attributes.subgraph_name.clone(),
+            hashed_headers,
+            cache_attributes.representations,
+        );
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct CacheAttributes {
