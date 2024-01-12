@@ -83,6 +83,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "password": {
+                      "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
+                      "type": "string",
+                      "nullable": true
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -140,6 +145,11 @@ expression: "&schema"
                         "type": "string",
                         "format": "uri"
                       }
+                    },
+                    "username": {
+                      "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
+                      "type": "string",
+                      "nullable": true
                     }
                   },
                   "additionalProperties": false,
@@ -1207,6 +1217,11 @@ expression: "&schema"
             "urls"
           ],
           "properties": {
+            "password": {
+              "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
+              "type": "string",
+              "nullable": true
+            },
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
               "default": null,
@@ -1264,6 +1279,11 @@ expression: "&schema"
                 "type": "string",
                 "format": "uri"
               }
+            },
+            "username": {
+              "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
+              "type": "string",
+              "nullable": true
             }
           },
           "additionalProperties": false
@@ -2309,6 +2329,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "password": {
+                      "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
+                      "type": "string",
+                      "nullable": true
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -2366,6 +2391,11 @@ expression: "&schema"
                         "type": "string",
                         "format": "uri"
                       }
+                    },
+                    "username": {
+                      "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
+                      "type": "string",
+                      "nullable": true
                     }
                   },
                   "additionalProperties": false,
