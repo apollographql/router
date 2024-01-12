@@ -144,7 +144,7 @@ impl QueryAnalysisLayer {
         request.context.extend(&context);
         request
             .context
-            .extensions
+            .extensions()
             .lock()
             .insert::<ParsedDocument>(doc);
 

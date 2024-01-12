@@ -105,7 +105,7 @@ impl Plugin for EntityCache {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
                 if let Some(cache_control) =
-                    response.context.extensions.lock().get::<CacheControl>()
+                    response.context.extensions().lock().get::<CacheControl>()
                 {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
@@ -257,7 +257,7 @@ async fn cache_lookup_root(
 
     match cache_result {
         Some(value) => {
-            request.context.extensions.lock().insert(value.0.control);
+            request.context.extensions().lock().insert(value.0.control);
 
             Ok(ControlFlow::Break(
                 subgraph::Response::builder()
@@ -335,12 +335,12 @@ async fn cache_lookup_entities(
 }
 
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
-    if let Some(c) = context.extensions.lock().get_mut::<CacheControl>() {
+    if let Some(c) = context.extensions().lock().get_mut::<CacheControl>() {
         *c = c.merge(cache_control);
         return;
     }
     //FIXME: race condition. We need an Entry API for private entries
-    context.extensions.lock().insert(cache_control.clone());
+    context.extensions().lock().insert(cache_control.clone());
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

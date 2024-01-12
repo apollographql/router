@@ -48,7 +48,7 @@ pub struct Context {
     entries: Entries,
 
     #[serde(skip)]
-    pub(crate) extensions: Arc<parking_lot::Mutex<Extensions>>,
+    extensions: Arc<parking_lot::Mutex<Extensions>>,
 
     /// Creation time
     #[serde(skip)]
@@ -80,6 +80,18 @@ impl Context {
 }
 
 impl Context {
+    /// Returns extensions of the context.
+    ///
+    /// You can use extensions to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
+    ///
+    /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.
+    /// Doing so may cause performance degradation or even deadlocks.
+    ///
+    /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
+    pub fn extensions(&self) -> &Arc<parking_lot::Mutex<Extensions>> {
+        &self.extensions
+    }
+
     /// Returns true if the context contains a value for the specified key.
     pub fn contains_key<K>(&self, key: K) -> bool
     where

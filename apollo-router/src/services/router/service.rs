@@ -255,7 +255,12 @@ impl RouterService {
             json: accepts_json,
             multipart_defer: accepts_multipart_defer,
             multipart_subscription: accepts_multipart_subscription,
-        } = context.extensions.lock().get().cloned().unwrap_or_default();
+        } = context
+            .extensions()
+            .lock()
+            .get()
+            .cloned()
+            .unwrap_or_default();
 
         let (mut parts, mut body) = response.into_parts();
         process_vary_header(&mut parts.headers);
@@ -602,7 +607,7 @@ impl RouterService {
 
         if ok_results.len() > 1 {
             context
-                .extensions
+                .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
         }
@@ -635,15 +640,18 @@ impl RouterService {
             let new_context = Context::new();
             new_context.extend(&context);
             let client_request_accepts_opt = context
-                .extensions
+                .extensions()
                 .lock()
                 .get::<ClientRequestAccepts>()
                 .cloned();
             if let Some(client_request_accepts) = client_request_accepts_opt {
-                new_context.extensions.lock().insert(client_request_accepts);
+                new_context
+                    .extensions()
+                    .lock()
+                    .insert(client_request_accepts);
             }
             new_context
-                .extensions
+                .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
             results.push(SupergraphRequest {

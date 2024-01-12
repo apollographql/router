@@ -1305,7 +1305,7 @@ async fn reconstruct_deferred_query_under_interface() {
 
 fn subscription_context() -> Context {
     let context = Context::new();
-    context.extensions.lock().insert(ClientRequestAccepts {
+    context.extensions().lock().insert(ClientRequestAccepts {
         multipart_subscription: true,
         ..Default::default()
     });
@@ -1315,7 +1315,7 @@ fn subscription_context() -> Context {
 
 fn defer_context() -> Context {
     let context = Context::new();
-    context.extensions.lock().insert(ClientRequestAccepts {
+    context.extensions().lock().insert(ClientRequestAccepts {
         multipart_defer: true,
         ..Default::default()
     });

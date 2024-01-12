@@ -280,7 +280,7 @@ impl AuthorizationPlugin {
             .unwrap_or_default();
         policies.sort();
 
-        context.extensions.lock().insert(CacheKeyMetadata {
+        context.extensions().lock().insert(CacheKeyMetadata {
             is_authenticated,
             scopes,
             policies,

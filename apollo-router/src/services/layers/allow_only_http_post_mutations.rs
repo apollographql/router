@@ -48,7 +48,7 @@ where
                         return Ok(ControlFlow::Continue(req));
                     }
 
-                    let doc = match req.context.extensions.lock().get::<ParsedDocument>() {
+                    let doc = match req.context.extensions().lock().get::<ParsedDocument>() {
                         None => {
                             let errors = vec![Error::builder()
                                 .message("Cannot find executable document".to_string())
@@ -282,7 +282,7 @@ mod forbid_http_get_mutations_tests {
 
         let context = Context::new();
         context
-            .extensions
+            .extensions()
             .lock()
             .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
                 ast,
