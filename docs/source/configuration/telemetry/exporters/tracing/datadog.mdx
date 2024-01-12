@@ -57,8 +57,8 @@ telemetry:
      tracing:
        datadog:
          enabled: true
-         # Optional endpoint, either 'default' or a URL (Defaults to http://localhost:8126/v0.4/traces)
-         endpoint: "http://${env.DATADOG_AGENT_HOST}:8126/v0.4/traces"
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
+         endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
 ```
 
 ### `enabled`

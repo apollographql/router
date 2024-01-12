@@ -187,8 +187,9 @@ impl PluginFactory {
     pub(crate) fn is_apollo(&self) -> bool {
         self.name.starts_with("apollo.") || self.name.starts_with("experimental.")
     }
+
     /// Create a plugin factory.
-    pub fn new<P: Plugin>(group: &str, name: &str) -> PluginFactory {
+    pub fn new<P: PluginUnstable>(group: &str, name: &str) -> PluginFactory {
         let plugin_factory_name = if group.is_empty() {
             name.to_string()
         } else {
@@ -208,7 +209,34 @@ impl PluginFactory {
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
             },
-            schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
+            schema_factory: |gen| gen.subschema_for::<<P as PluginUnstable>::Config>(),
+            type_id: TypeId::of::<P>(),
+        }
+    }
+
+    /// Create a plugin factory.
+    #[allow(dead_code)]
+    pub(crate) fn new_private<P: PluginPrivate>(group: &str, name: &str) -> PluginFactory {
+        let plugin_factory_name = if group.is_empty() {
+            name.to_string()
+        } else {
+            format!("{group}.{name}")
+        };
+        tracing::debug!(%plugin_factory_name, "creating plugin factory");
+        PluginFactory {
+            name: plugin_factory_name,
+            instance_factory: |configuration, schema, notify| {
+                Box::pin(async move {
+                    let init = PluginInit::try_builder()
+                        .config(configuration.clone())
+                        .supergraph_sdl(schema)
+                        .notify(notify)
+                        .build()?;
+                    let plugin = P::new(init).await?;
+                    Ok(Box::new(plugin) as Box<dyn DynPlugin>)
+                })
+            },
+            schema_factory: |gen| gen.subschema_for::<<P as PluginPrivate>::Config>(),
             type_id: TypeId::of::<P>(),
         }
     }
@@ -314,6 +342,256 @@ pub trait Plugin: Send + Sync + 'static {
     }
 }
 
+/// Plugin trait for unstable features
+///
+/// This trait defines lifecycle hooks that enable hooking into Apollo Router services. The hooks that are not already defined
+/// in the [Plugin] trait are not considered stable and may change at any moment.
+/// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
+/// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
+#[async_trait]
+pub trait PluginUnstable: Send + Sync + 'static {
+    /// The configuration for this plugin.
+    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    ///
+    /// If a plugin is [registered][register_plugin()!],
+    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// by having a sub-section named after the plugin.
+    /// The contents of this section are deserialized into this `Config` type
+    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: JsonSchema + DeserializeOwned + Send;
+
+    /// This is invoked once after the router starts and compiled-in
+    /// plugins are registered.
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized;
+
+    /// This function is EXPERIMENTAL and its signature is subject to change.
+    ///
+    /// This service runs at the very beginning and very end of the request lifecycle.
+    /// It's the entrypoint of every requests and also the last hook before sending the response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
+    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
+    /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
+    /// and before the GraphQL response payload is serialized into a raw HTTP response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        service
+    }
+
+    /// This service handles initiating the execution of a query plan after it's been generated.
+    /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        service
+    }
+
+    /// This service handles communication between the Apollo Router and your subgraphs.
+    /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only specific subgraphs.
+    fn subgraph_service(
+        &self,
+        _subgraph_name: &str,
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        service
+    }
+
+    /// Return the name of the plugin.
+    fn name(&self) -> &'static str
+    where
+        Self: Sized,
+    {
+        get_type_of(self)
+    }
+
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
+    ///
+    /// This method is experimental and subject to change post 1.0
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        MultiMap::new()
+    }
+
+    /// test
+    fn unstable_method(&self);
+}
+
+#[async_trait]
+impl<P> PluginUnstable for P
+where
+    P: Plugin,
+{
+    type Config = <P as Plugin>::Config;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        Plugin::new(init).await
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        Plugin::router_service(self, service)
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        Plugin::supergraph_service(self, service)
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        Plugin::execution_service(self, service)
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        Plugin::subgraph_service(self, subgraph_name, service)
+    }
+
+    /// Return the name of the plugin.
+    fn name(&self) -> &'static str
+    where
+        Self: Sized,
+    {
+        Plugin::name(self)
+    }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        Plugin::web_endpoints(self)
+    }
+
+    fn unstable_method(&self) {
+        todo!()
+    }
+}
+
+/// Internal Plugin trait
+///
+/// This trait defines lifecycle hooks that enable hooking into Apollo Router services. The hooks that are not already defined
+/// in the [Plugin] or [PluginUnstable] traits are internal hooks not yet open to public usage. This allows testing of new plugin
+/// hooks without committing to their API right away.
+/// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
+/// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
+#[async_trait]
+pub(crate) trait PluginPrivate: Send + Sync + 'static {
+    /// The configuration for this plugin.
+    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    ///
+    /// If a plugin is [registered][register_plugin()!],
+    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// by having a sub-section named after the plugin.
+    /// The contents of this section are deserialized into this `Config` type
+    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: JsonSchema + DeserializeOwned + Send;
+
+    /// This is invoked once after the router starts and compiled-in
+    /// plugins are registered.
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized;
+
+    /// This function is EXPERIMENTAL and its signature is subject to change.
+    ///
+    /// This service runs at the very beginning and very end of the request lifecycle.
+    /// It's the entrypoint of every requests and also the last hook before sending the response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
+    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
+    /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
+    /// and before the GraphQL response payload is serialized into a raw HTTP response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        service
+    }
+
+    /// This service handles initiating the execution of a query plan after it's been generated.
+    /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        service
+    }
+
+    /// This service handles communication between the Apollo Router and your subgraphs.
+    /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only specific subgraphs.
+    fn subgraph_service(
+        &self,
+        _subgraph_name: &str,
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        service
+    }
+
+    /// Return the name of the plugin.
+    fn name(&self) -> &'static str
+    where
+        Self: Sized,
+    {
+        get_type_of(self)
+    }
+
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
+    ///
+    /// This method is experimental and subject to change post 1.0
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        MultiMap::new()
+    }
+}
+
+#[async_trait]
+impl<P> PluginPrivate for P
+where
+    P: PluginUnstable,
+{
+    type Config = <P as PluginUnstable>::Config;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        PluginUnstable::new(init).await
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        PluginUnstable::router_service(self, service)
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        PluginUnstable::supergraph_service(self, service)
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        PluginUnstable::execution_service(self, service)
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        PluginUnstable::subgraph_service(self, subgraph_name, service)
+    }
+
+    /// Return the name of the plugin.
+    fn name(&self) -> &'static str
+    where
+        Self: Sized,
+    {
+        PluginUnstable::name(self)
+    }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        PluginUnstable::web_endpoints(self)
+    }
+}
+
 fn get_type_of<T>(_: &T) -> &'static str {
     std::any::type_name::<T>()
 }
@@ -365,8 +643,8 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 #[async_trait]
 impl<T> DynPlugin for T
 where
-    T: Plugin,
-    for<'de> <T as Plugin>::Config: Deserialize<'de>,
+    T: PluginPrivate,
+    for<'de> <T as PluginPrivate>::Config: Deserialize<'de>,
 {
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.router_service(service)
@@ -433,6 +711,42 @@ macro_rules! register_plugin {
             #[linkme(crate = $crate::_private::linkme)]
             static REGISTER_PLUGIN: Lazy<PluginFactory> =
                 Lazy::new(|| $crate::plugin::PluginFactory::new::<$plugin_type>($group, $name));
+        };
+    };
+}
+
+/// Register a private plugin with a group and a name
+/// Grouping prevent name clashes for plugins, so choose something unique, like your domain name.
+/// Plugins will appear in the configuration as a layer property called: {group}.{name}
+#[macro_export]
+macro_rules! register_private_plugin {
+    ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
+                $crate::plugin::PluginFactory::new_private::<$plugin_type<$generic>>($group, $name)
+            });
+        };
+    };
+
+    ($group: literal, $name: literal, $plugin_type: ident) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
+                $crate::plugin::PluginFactory::new_private::<$plugin_type>($group, $name)
+            });
         };
     };
 }

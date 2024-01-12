@@ -1,0 +1,5 @@
+description: HTTP request size limit is no longer experimental, `experimental_http_max_request_bytes` is renamed `http_max_request_bytes`
+actions:
+  - type: move
+    from: limits.experimental_http_max_request_bytes
+    to: limits.http_max_request_bytes

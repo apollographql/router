@@ -198,12 +198,12 @@ impl Request {
 
         if value.is_array() {
             tracing::info!(
-                histogram.apollo_router.operations.batching.size = result.len() as f64,
+                histogram.apollo.router.operations.batching.size = result.len() as f64,
                 mode = %BatchingMode::BatchHttpLink // Only supported mode right now
             );
 
             tracing::info!(
-                monotonic_counter.apollo_router.operations.batching = 1u64,
+                monotonic_counter.apollo.router.operations.batching = 1u64,
                 mode = %BatchingMode::BatchHttpLink // Only supported mode right now
             );
             for entry in value
@@ -225,12 +225,12 @@ impl Request {
 
         if value.is_array() {
             tracing::info!(
-                histogram.apollo_router.operations.batching.size = result.len() as f64,
+                histogram.apollo.router.operations.batching.size = result.len() as f64,
                 mode = "batch_http_link" // Only supported mode right now
             );
 
             tracing::info!(
-                monotonic_counter.apollo_router.operations.batching = 1u64,
+                monotonic_counter.apollo.router.operations.batching = 1u64,
                 mode = "batch_http_link" // Only supported mode right now
             );
             for entry in value

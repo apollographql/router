@@ -12,6 +12,7 @@ use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -21,6 +22,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::configuration::GraphQLValidationMode;
+use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -78,6 +80,18 @@ impl BridgeQueryPlanner {
                     configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                 ),
+                debug: Some(QueryPlannerDebugConfig {
+                    bypass_planner_for_single_subgraph: None,
+                    max_evaluated_plans: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_plans_limit
+                        .or(Some(10000)),
+                    paths_limit: configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_paths_limit,
+                }),
             },
         )
         .await;
@@ -91,7 +105,7 @@ impl BridgeQueryPlanner {
 
                     if has_validation_errors && !schema.has_errors() {
                         tracing::warn!(
-                            monotonic_counter.apollo.router.validation = 1u64,
+                            monotonic_counter.apollo.router.operations.validation = 1u64,
                             validation.source = VALIDATION_SOURCE_SCHEMA,
                             validation.result = VALIDATION_FALSE_NEGATIVE,
                             "validation mismatch: JS query planner reported a schema validation error, but apollo-rs did not"
@@ -106,7 +120,7 @@ impl BridgeQueryPlanner {
         if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::Both {
             if schema.has_errors() {
                 tracing::warn!(
-                    monotonic_counter.apollo.router.validation = 1u64,
+                    monotonic_counter.apollo.router.operations.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_SCHEMA,
                     validation.result = VALIDATION_FALSE_POSITIVE,
                     "validation mismatch: apollo-rs reported a schema validation error, but JS query planner did not"
@@ -114,7 +128,7 @@ impl BridgeQueryPlanner {
             } else {
                 // false_negative was an early return so we know it was correct here
                 tracing::info!(
-                    monotonic_counter.apollo.router.validation = 1u64,
+                    monotonic_counter.apollo.router.operations.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_SCHEMA,
                     validation.result = VALIDATION_MATCH
                 );
@@ -136,8 +150,8 @@ impl BridgeQueryPlanner {
 
                 if api_schema.schema != new_api_schema {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = "failed",
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = false,
                         "API schema generation mismatch: apollo-federation and router-bridge write different schema"
                     );
 
@@ -170,8 +184,8 @@ impl BridgeQueryPlanner {
                     );
                 } else {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = VALIDATION_MATCH,
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = true,
                     );
                 }
                 api_schema.schema
@@ -215,6 +229,18 @@ impl BridgeQueryPlanner {
                             GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                         ),
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                        debug: Some(QueryPlannerDebugConfig {
+                            bypass_planner_for_single_subgraph: None,
+                            max_evaluated_plans: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_plans_limit
+                                .or(Some(10000)),
+                            paths_limit: configuration
+                                .supergraph
+                                .query_planning
+                                .experimental_paths_limit,
+                        }),
                     },
                 )
                 .await?,
@@ -322,7 +348,7 @@ impl BridgeQueryPlanner {
         key: CacheKeyMetadata,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        fn is_validation_error(errors: &router_bridge::planner::PlanErrors) -> bool {
+        fn is_validation_error(errors: &PlanErrors) -> bool {
             errors.errors.iter().all(|err| err.validation_error)
         }
 
@@ -331,7 +357,7 @@ impl BridgeQueryPlanner {
         ///
         /// The result isn't inspected deeply: it only checks validation success/failure.
         fn compare_validation_errors(
-            js_validation_error: Option<&router_bridge::planner::PlanErrors>,
+            js_validation_error: Option<&PlanErrors>,
             rs_validation_error: Option<&crate::error::ValidationErrors>,
         ) {
             match (
@@ -340,7 +366,7 @@ impl BridgeQueryPlanner {
             ) {
                 (false, Some(validation_error)) => {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.validation = 1u64,
+                        monotonic_counter.apollo.router.operations.validation = 1u64,
                         validation.source = VALIDATION_SOURCE_OPERATION,
                         validation.result = VALIDATION_FALSE_POSITIVE,
                         "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
@@ -351,7 +377,7 @@ impl BridgeQueryPlanner {
                 }
                 (true, None) => {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.validation = 1u64,
+                        monotonic_counter.apollo.router.operations.validation = 1u64,
                         validation.source = VALIDATION_SOURCE_OPERATION,
                         validation.result = VALIDATION_FALSE_NEGATIVE,
                         "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
@@ -364,7 +390,7 @@ impl BridgeQueryPlanner {
                 }
                 // if JS and Rust implementations agree, we return the JS result for now.
                 _ => tracing::info!(
-                    monotonic_counter.apollo.router.validation = 1u64,
+                    monotonic_counter.apollo.router.operations.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_OPERATION,
                     validation.result = VALIDATION_MATCH,
                 ),
@@ -388,18 +414,17 @@ impl BridgeQueryPlanner {
                 plan
             }
             Err(err) => {
+                let plan_errors: PlanErrors = err.into();
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Both
                 ) {
-                    compare_validation_errors(Some(&err), selections.validation_error.as_ref());
-
-                    // If we had a validation error from apollo-rs, return it now.
-                    if let Some(errors) = selections.validation_error {
-                        return Err(QueryPlannerError::from(errors));
-                    }
+                    compare_validation_errors(
+                        Some(&plan_errors),
+                        selections.validation_error.as_ref(),
+                    );
                 }
-                return Err(QueryPlannerError::from(err));
+                return Err(QueryPlannerError::from(plan_errors));
             }
         };
 
@@ -764,11 +789,11 @@ mod tests {
         .unwrap_err();
 
         match err {
-            QueryPlannerError::OperationValidationErrors(errors) => {
+            QueryPlannerError::PlanningErrors(errors) => {
                 insta::assert_debug_snapshot!("plan_invalid_query_errors", errors);
             }
-            _ => {
-                panic!("invalid query planning should have failed");
+            e => {
+                panic!("invalid query planning should have failed: {e:?}");
             }
         }
     }
@@ -1007,7 +1032,7 @@ mod tests {
         s!(r#"query Q($s1:Boolean!) { me {
             username
             name {
-                ... @defer(label: "A") { 
+                ... @defer(label: "A") {
                     first
                     last @skip(if: $s1)
                 }

@@ -21,7 +21,7 @@ router:
     args: [--hot-reload]
     configuration:
       limits:
-        experimental_http_max_request_bytes: 20000000 #20MB
+        http_max_request_bytes: 20000000 #20MB
       traffic_shaping:
         router:
           timeout: 6min
