@@ -20,7 +20,7 @@ use crate::spec::TYPENAME;
 pub(crate) struct CacheMetricsService(Option<InnerCacheMetricsService>);
 
 impl CacheMetricsService {
-    pub(crate) fn new(
+    pub(crate) fn create(
         name: String,
         service: subgraph::BoxService,
         ttl: Option<&Ttl>,

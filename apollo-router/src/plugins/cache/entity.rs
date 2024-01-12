@@ -162,7 +162,7 @@ impl Plugin for EntityCache {
         let name = name.to_string();
 
         if self.metrics.enabled {
-            service = CacheMetricsService::new(
+            service = CacheMetricsService::create(
                 name.to_string(),
                 service,
                 self.metrics.ttl.as_ref(),
