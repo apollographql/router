@@ -75,15 +75,6 @@ impl InnerCacheMetricsService {
             self.name, cache_attributes
         );
 
-        /*if let Ok(cache_control) = response
-            .response
-            .headers()
-            .get(header::CACHE_CONTROL)
-            .ok_or(())
-            .and_then(|val| val.to_str().map(|v| v.to_string()).map_err(|_| ()))
-        {
-            metric_attrs.push(KeyValue::new("cache_control", cache_control));
-        }*/
         let response = self.service.call(request).await?;
 
         if let Some(cache_attributes) = cache_attributes {
