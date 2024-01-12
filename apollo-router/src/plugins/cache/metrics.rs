@@ -22,7 +22,7 @@ impl CacheMetricsService {
     pub(crate) fn new(name: String, service: subgraph::BoxService) -> subgraph::BoxService {
         tower::util::BoxService::new(CacheMetricsService(Some(InnerCacheMetricsService {
             service,
-            name,
+            name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
                 Duration::from_secs(60),
             )))),
@@ -32,7 +32,7 @@ impl CacheMetricsService {
 
 pub(crate) struct InnerCacheMetricsService {
     service: subgraph::BoxService,
-    name: String,
+    name: Arc<String>,
     counter: Option<Arc<Mutex<CacheCounter>>>,
 }
 
@@ -64,8 +64,7 @@ impl InnerCacheMetricsService {
         mut self,
         mut request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
-        let cache_attributes =
-            Self::get_cache_attributes(/*FIXME*/ Arc::new(self.name.clone()), &mut request);
+        let cache_attributes = Self::get_cache_attributes(&mut request);
         println!(
             "inner metrics cache attributes in root req for {}: {:?}",
             self.name, cache_attributes
@@ -85,17 +84,14 @@ impl InnerCacheMetricsService {
         if let Some(cache_attributes) = cache_attributes {
             if let Some(counter) = &self.counter {
                 println!("inner metrics cache {}: will update metrics", self.name,);
-                Self::update_cache_metrics(counter, &response, cache_attributes)
+                Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
             }
         }
 
         Ok(response)
     }
 
-    fn get_cache_attributes(
-        subgraph_name: Arc<String>,
-        sub_request: &mut subgraph::Request,
-    ) -> Option<CacheAttributes> {
+    fn get_cache_attributes(sub_request: &mut subgraph::Request) -> Option<CacheAttributes> {
         let body = sub_request.subgraph_request.body_mut();
         let hashed_query = hash_query(&sub_request.query_hash, body);
         let representations = body
@@ -106,7 +102,6 @@ impl InnerCacheMetricsService {
         let keys = extract_cache_attributes(representations).ok()?;
 
         Some(CacheAttributes {
-            subgraph_name,
             headers: sub_request.subgraph_request.headers().clone(),
             hashed_query: Arc::new(hashed_query),
             representations: keys,
@@ -114,6 +109,7 @@ impl InnerCacheMetricsService {
     }
 
     fn update_cache_metrics(
+        subgraph_name: &Arc<String>,
         counter: &Mutex<CacheCounter>,
         sub_response: &subgraph::Response,
         cache_attributes: CacheAttributes,
@@ -145,7 +141,7 @@ impl InnerCacheMetricsService {
 
         counter.lock().unwrap().record(
             cache_attributes.hashed_query.clone(),
-            cache_attributes.subgraph_name.clone(),
+            subgraph_name,
             hashed_headers,
             cache_attributes.representations,
         );
@@ -154,7 +150,6 @@ impl InnerCacheMetricsService {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CacheAttributes {
-    pub(crate) subgraph_name: Arc<String>,
     pub(crate) headers: http::HeaderMap,
     pub(crate) hashed_query: Arc<String>,
     // Typename + hashed_representation
@@ -212,7 +207,7 @@ impl CacheCounter {
     pub(crate) fn record(
         &mut self,
         query: Arc<String>,
-        subgraph_name: Arc<String>,
+        subgraph_name: &Arc<String>,
         hashed_headers: Arc<String>,
         representations: Vec<(Arc<String>, Value)>,
     ) {
