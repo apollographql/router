@@ -3,10 +3,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use std::time::Instant;
 
 use http::header;
-use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -37,7 +35,6 @@ use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::telemetry::metrics::AttributesForwardConf;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
