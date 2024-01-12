@@ -1,3 +1,4 @@
+use apollo_compiler::schema::ExtendedType;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -152,7 +153,7 @@ pub(crate) fn execute_selection_set<'a>(
             }) => match type_condition {
                 None => continue,
                 Some(condition) => {
-                    if is_object_of_type(current_type, condition, schema) {
+                    if type_condition_matches(schema, current_type, condition) {
                         if let Value::Object(selected) =
                             execute_selection_set(input_content, selections, schema, current_type)
                         {
@@ -176,32 +177,71 @@ pub(crate) fn execute_selection_set<'a>(
     Value::Object(output)
 }
 
-fn is_object_of_type(typename: Option<&str>, condition: &str, schema: &Schema) -> bool {
-    let typename = match typename {
-        None => return false,
+/// This is similar to DoesFragmentTypeApply from the GraphQL spec, but the
+/// `current_type` could be an abstract type or None (we're not yet implementing
+/// CompleteValue and ResolveAbstractType). So this function is more flexible,
+/// checking if the condition is a subtype of the current type, or vice versa.
+///
+/// <https://spec.graphql.org/October2021/#DoesFragmentTypeApply()>
+/// <https://spec.graphql.org/October2021/#CompleteValue()>
+/// <https://spec.graphql.org/October2021/#ResolveAbstractType()>
+fn type_condition_matches(
+    schema: &Schema,
+    current_type: Option<&str>,
+    type_condition: &str,
+) -> bool {
+    // Not having a current type is probably invalid, but this is not the place to check it.
+    let current_type = match current_type {
         Some(t) => t,
+        None => return false,
     };
 
-    if condition == typename {
+    if current_type == type_condition {
         return true;
     }
 
-    let object_type = match schema.definitions.types.get(typename) {
+    let current_type = match schema.definitions.types.get(current_type) {
         None => return false,
         Some(t) => t,
     };
 
-    let conditional_type = match schema.definitions.types.get(condition) {
+    let conditional_type = match schema.definitions.types.get(type_condition) {
         None => return false,
         Some(t) => t,
     };
 
-    if conditional_type.is_interface() || conditional_type.is_union() {
-        return (object_type.is_object() || object_type.is_interface())
-            && schema.is_subtype(condition, typename);
+    use ExtendedType::*;
+    match current_type {
+        Object(object_type) => match conditional_type {
+            Interface(interface_type) => object_type
+                .implements_interfaces
+                .contains(&interface_type.name),
+
+            Union(union_type) => union_type.members.contains(&object_type.name),
+
+            _ => false,
+        },
+
+        Interface(interface_type) => match conditional_type {
+            Interface(conditional_type) => conditional_type
+                .implements_interfaces
+                .contains(&interface_type.name),
+
+            Object(object_type) => object_type
+                .implements_interfaces
+                .contains(&interface_type.name),
+
+            _ => false,
+        },
+
+        Union(union_type) => match conditional_type {
+            Object(object_type) => union_type.members.contains(&object_type.name),
+
+            _ => false,
+        },
+
+        _ => false,
     }
-
-    false
 }
 
 #[cfg(test)]
@@ -401,6 +441,276 @@ mod tests {
                         "key": "b"
                     }
                 ]
+            })
+        );
+    }
+
+    #[test]
+    fn test_execute_selection_set_abstract_types() {
+        let schema = with_supergraph_boilerplate(
+            "type Query { hello: String }
+            type Entity {
+              id: Int!
+              nestedUnion: NestedUnion
+              nestedInterface: WrapperNestedInterface
+              objectWithinUnion: Union1
+              objectWithinInterface: NestedObject
+            }
+            union NestedUnion = Union1 | Union2
+            type Union1 {
+              id: Int!
+              field: Int!
+            }
+            type Union2 {
+              id: Int!
+            }
+            interface WrapperNestedInterface {
+              id: Int!
+            }
+            interface NestedInterface implements WrapperNestedInterface {
+              id: Int!
+            }
+            type NestedObject implements NestedInterface & WrapperNestedInterface {
+              id: Int!
+              field: Int!
+            }
+            type NestedObject2 implements NestedInterface & WrapperNestedInterface {
+              id: Int!
+            }",
+        );
+        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+
+        let response = bjson!({
+          "__typename": "Entity",
+          "id": 1780384,
+          "nestedUnion": {
+            "__typename": "Union1",
+            "id": 1780384,
+            "field": 1,
+          },
+          "nestedInterface": {
+            "__typename": "NestedObject",
+            "id": 1780384,
+            "field": 1,
+          },
+          "objectWithinUnion": {
+            "__typename": "Union2",
+            "id": 1780384,
+          },
+          "objectWithinInterface": {
+            "__typename": "NestedObject2",
+            "id": 1780384,
+          },
+        });
+
+        let requires = json!([
+          {
+            "kind": "InlineFragment",
+            "typeCondition": "Entity",
+            "selections": [
+              {
+                "kind": "Field",
+                "name": "__typename"
+              },
+              {
+                "kind": "Field",
+                "name": "nestedUnion",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Union1",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "field"
+                      },
+                    ]
+                  },
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Union2",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                    ]
+                  }
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "nestedInterface",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedObject",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "field"
+                      },
+                    ]
+                  },
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedObject2",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                    ]
+                  }
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "objectWithinUnion",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedUnion",
+                    "selections": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "Union1",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "field"
+                          },
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "Union2",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                        ]
+                      }
+                    ]
+                  },
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "objectWithinInterface",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedInterface",
+                    "selections": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "NestedObject",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "field"
+                          },
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "NestedObject2",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                        ]
+                      }
+                    ]
+                  },
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "id"
+              },
+            ]
+          }
+        ]);
+
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let value = execute_selection_set(&response, &selection, &schema, None);
+
+        assert_eq!(
+            value,
+            bjson!({
+                "__typename": "Entity",
+                "nestedUnion": {
+                    "__typename": "Union1",
+                    "id": 1780384,
+                    "field": 1,
+                },
+                "nestedInterface": {
+                  "__typename": "NestedObject",
+                  "id": 1780384,
+                  "field": 1,
+                },
+                "objectWithinUnion": {
+                  "__typename": "Union2",
+                  "id": 1780384,
+                },
+                "objectWithinInterface": {
+                  "__typename": "NestedObject2",
+                  "id": 1780384,
+                },
+                "id": 1780384,
             })
         );
     }
