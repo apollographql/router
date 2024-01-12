@@ -57,6 +57,7 @@ use uuid::Uuid;
 
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
+use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -204,25 +205,7 @@ impl SubgraphService {
                 .client_authentication
                 .as_ref());
 
-        let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
-        let tls_client_config = match (tls_cert_store, client_cert_config) {
-            (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
-            (Some(store), None) => tls_builder
-                .with_root_certificates(store)
-                .with_no_client_auth(),
-            (None, Some(client_auth_config)) => {
-                tls_builder.with_native_roots().with_client_auth_cert(
-                    client_auth_config.certificate_chain.clone(),
-                    client_auth_config.key.clone(),
-                )?
-            }
-            (Some(store), Some(client_auth_config)) => tls_builder
-                .with_root_certificates(store)
-                .with_client_auth_cert(
-                    client_auth_config.certificate_chain.clone(),
-                    client_auth_config.key.clone(),
-                )?,
-        };
+        let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
 
         SubgraphService::new(
             name,
@@ -272,6 +255,29 @@ impl SubgraphService {
             notify,
         })
     }
+}
+
+pub(crate) fn generate_tls_client_config(
+    tls_cert_store: Option<RootCertStore>,
+    client_cert_config: Option<&TlsClientAuth>,
+) -> Result<rustls::ClientConfig, BoxError> {
+    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    Ok(match (tls_cert_store, client_cert_config) {
+        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+        (Some(store), None) => tls_builder
+            .with_root_certificates(store)
+            .with_no_client_auth(),
+        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
+            client_auth_config.certificate_chain.clone(),
+            client_auth_config.key.clone(),
+        )?,
+        (Some(store), Some(client_auth_config)) => tls_builder
+            .with_root_certificates(store)
+            .with_client_auth_cert(
+                client_auth_config.certificate_chain.clone(),
+                client_auth_config.key.clone(),
+            )?,
+    })
 }
 
 impl tower::Service<SubgraphRequest> for SubgraphService {
@@ -1217,8 +1223,8 @@ mod tests {
     use super::*;
     use crate::configuration::load_certs;
     use crate::configuration::load_key;
+    use crate::configuration::TlsClient;
     use crate::configuration::TlsClientAuth;
-    use crate::configuration::TlsSubgraph;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
@@ -2699,7 +2705,7 @@ mod tests {
         let mut config = Configuration::default();
         config.tls.subgraph.subgraphs.insert(
             "test".to_string(),
-            TlsSubgraph {
+            TlsClient {
                 certificate_authorities: Some(certificate_pem.into()),
                 client_authentication: None,
             },
@@ -2745,7 +2751,7 @@ mod tests {
         let mut config = Configuration::default();
         config.tls.subgraph.subgraphs.insert(
             "test".to_string(),
-            TlsSubgraph {
+            TlsClient {
                 certificate_authorities: Some(ca_pem.into()),
                 client_authentication: None,
             },
@@ -2841,7 +2847,7 @@ mod tests {
         let mut config = Configuration::default();
         config.tls.subgraph.subgraphs.insert(
             "test".to_string(),
-            TlsSubgraph {
+            TlsClient {
                 certificate_authorities: Some(ca_pem.into()),
                 client_authentication: Some(TlsClientAuth {
                     certificate_chain: client_certificates,

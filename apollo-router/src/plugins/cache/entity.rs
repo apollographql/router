@@ -647,7 +647,7 @@ fn filter_representations(
             %subgraph_name
         );
         tracing::event!(
-            Level::INFO,
+            Level::TRACE,
             entity_type = ty.as_str(),
             cache_hit = hit,
             cache_miss = miss
@@ -747,7 +747,7 @@ async fn insert_entities_in_result(
     }
 
     for (ty, nb) in inserted_types {
-        tracing::event!(Level::INFO, entity_type = ty.as_str(), cache_insert = nb,);
+        tracing::event!(Level::TRACE, entity_type = ty.as_str(), cache_insert = nb,);
     }
 
     Ok((new_entities, new_errors))
