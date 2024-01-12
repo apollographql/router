@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub(crate) mod conditions;
 pub(crate) mod fetch_dependency_graph;
 pub(crate) mod fetch_dependency_graph_processor;
+pub mod generate;
 pub mod operation;
 pub mod query_planner;
 pub(crate) mod query_planning_traversal;
