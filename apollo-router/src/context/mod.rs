@@ -385,4 +385,14 @@ mod test {
         assert_eq!(c.get("one").unwrap(), Some(2));
         assert_eq!(c.get("two").unwrap(), Some(3));
     }
+
+    #[test]
+    fn context_extensions() {
+        // This is mostly tested in the extensions module.
+        let c = Context::new();
+        let mut extensions = c.extensions().lock();
+        extensions.insert(1usize);
+        let v = extensions.get::<usize>();
+        assert_eq!(v, Some(&1usize));
+    }
 }
