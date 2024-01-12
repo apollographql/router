@@ -1200,6 +1200,23 @@ expression: "&schema"
           "type": "boolean",
           "nullable": true
         },
+        "metrics": {
+          "description": "Entity caching evaluation metrics",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "enables metrics evaluating the benefits of entity caching",
+              "default": false,
+              "type": "boolean"
+            },
+            "ttl": {
+              "description": "Metrics counter TTL",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
         "redis": {
           "description": "Redis cache configuration",
           "type": "object",
