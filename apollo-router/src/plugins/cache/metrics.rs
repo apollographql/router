@@ -29,7 +29,7 @@ impl CacheMetricsService {
             service,
             name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
-                ttl.unwrap_or_else(|| Duration::from_secs(60)),
+                ttl.0.unwrap_or_else(|| Duration::from_secs(60)),
             )))),
         })))
     }
@@ -209,7 +209,7 @@ impl CacheCounter {
         representations: Vec<(Arc<String>, Value)>,
     ) {
         {
-            let mut c = counter.lock().unwrap();
+            let mut c = counter.lock();
             if c.created_at.elapsed() >= c.ttl {
                 c.clear();
             }
@@ -220,9 +220,9 @@ impl CacheCounter {
         let mut key = CacheKey {
             representation: Value::Null,
             typename: Arc::new(String::new()),
-            query: query.clone(),
+            query,
             subgraph_name: subgraph_name.clone(),
-            hashed_headers: hashed_headers.clone(),
+            hashed_headers,
         };
         for (typename, representation) in representations {
             let cache_hit;
@@ -230,7 +230,7 @@ impl CacheCounter {
             key.representation = representation;
 
             {
-                let mut c = counter.lock().unwrap();
+                let mut c = counter.lock();
                 cache_hit = c.check(&key);
             }
 

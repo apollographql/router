@@ -115,7 +115,7 @@ impl Plugin for EntityCache {
             storage,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraphs),
-            metrics: init.config.metrics
+            metrics: init.config.metrics,
         })
     }
 
@@ -137,7 +137,11 @@ impl Plugin for EntityCache {
             .boxed()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        mut service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         let storage = self.storage.clone();
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
