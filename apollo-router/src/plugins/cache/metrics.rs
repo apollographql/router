@@ -1,14 +1,14 @@
-use bloomfilter::Bloom;
-use http::header;
-use serde_json_bytes::Value;
-use tower::BoxError;
-use tower_service::Service;
-
-use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+
+use bloomfilter::Bloom;
+use http::header;
+use parking_lot::Mutex;
+use serde_json_bytes::Value;
+use tower::BoxError;
+use tower_service::Service;
 
 use super::entity::hash_query;
 use super::entity::hash_vary_headers;
@@ -23,13 +23,13 @@ impl CacheMetricsService {
     pub(crate) fn new(
         name: String,
         service: subgraph::BoxService,
-        ttl: Option<Ttl>,
+        ttl: Option<&Ttl>,
     ) -> subgraph::BoxService {
         tower::util::BoxService::new(CacheMetricsService(Some(InnerCacheMetricsService {
             service,
             name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
-                ttl.0.unwrap_or_else(|| Duration::from_secs(60)),
+                ttl.map(|t| t.0).unwrap_or_else(|| Duration::from_secs(60)),
             )))),
         })))
     }
@@ -136,7 +136,7 @@ impl InnerCacheMetricsService {
         println!("will update cache counter");
 
         CacheCounter::record(
-            &counter,
+            counter,
             cache_attributes.hashed_query.clone(),
             subgraph_name,
             hashed_headers,

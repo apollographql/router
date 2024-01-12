@@ -87,7 +87,7 @@ struct Subgraph {
 pub(crate) struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
-    Duration,
+    pub(crate) Duration,
 );
 
 /// Per subgraph configuration for entity caching
@@ -159,7 +159,8 @@ impl Plugin for EntityCache {
         let name = name.to_string();
 
         if self.metrics.enabled {
-            service = CacheMetricsService::new(name.to_string(), service, self.metrics.ttl);
+            service =
+                CacheMetricsService::new(name.to_string(), service, self.metrics.ttl.as_ref());
         }
 
         if subgraph_enabled {
