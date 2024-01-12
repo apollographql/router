@@ -374,7 +374,7 @@ impl SubgraphAuth {
             ServiceBuilder::new()
                 .map_request(move |req: SubgraphRequest| {
                     let signing_params = signing_params.clone();
-                    req.context.private_entries.lock().insert(signing_params);
+                    req.context.extensions.lock().insert(signing_params);
                     req
                 })
                 .service(service)
@@ -643,7 +643,7 @@ mod test {
         service_name: String,
     ) -> hyper::Request<hyper::Body> {
         let signing_params = {
-            let ctx = request.context.private_entries.lock();
+            let ctx = request.context.extensions.lock();
             let sp = ctx.get::<SigningParamsConfig>();
             sp.cloned().unwrap()
         };

@@ -593,7 +593,7 @@ async fn call_websocket(
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let signing_params = context
-        .private_entries
+        .extensions
         .lock()
         .get::<SigningParamsConfig>()
         .cloned();
@@ -806,7 +806,7 @@ async fn call_http(
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let signing_params = context
-        .private_entries
+        .extensions
         .lock()
         .get::<SigningParamsConfig>()
         .cloned();

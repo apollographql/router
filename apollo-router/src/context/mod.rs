@@ -48,7 +48,7 @@ pub struct Context {
     entries: Entries,
 
     #[serde(skip)]
-    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
+    pub(crate) extensions: Arc<parking_lot::Mutex<Extensions>>,
 
     /// Creation time
     #[serde(skip)]
@@ -71,7 +71,7 @@ impl Context {
             .to_string();
         Context {
             entries: Default::default(),
-            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
+            extensions: Arc::new(parking_lot::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,

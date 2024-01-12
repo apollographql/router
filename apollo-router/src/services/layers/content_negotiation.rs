@@ -82,7 +82,7 @@ where
                     || accepts.multipart_subscription
                     || accepts.json
                 {
-                    req.context.private_entries.lock().insert(accepts);
+                    req.context.extensions.lock().insert(accepts);
 
                     Ok(ControlFlow::Continue(req))
                 } else {
@@ -132,12 +132,7 @@ where
                     json: accepts_json,
                     multipart_defer: accepts_multipart_defer,
                     multipart_subscription: accepts_multipart_subscription,
-                } = context
-                    .private_entries
-                    .lock()
-                    .get()
-                    .cloned()
-                    .unwrap_or_default();
+                } = context.extensions.lock().get().cloned().unwrap_or_default();
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
                     parts
