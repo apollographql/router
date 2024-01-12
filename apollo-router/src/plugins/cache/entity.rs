@@ -49,6 +49,7 @@ struct EntityCache {
     storage: RedisCacheStorage,
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
+    metrics: Metrics,
 }
 
 /// Configuration for entity caching
@@ -62,6 +63,10 @@ struct Config {
     /// Per subgraph configuration
     #[serde(default)]
     subgraphs: HashMap<String, Subgraph>,
+
+    /// Entity caching evaluation metrics
+    #[serde(default)]
+    metrics: Metrics,
 }
 
 /// Per subgraph configuration for entity caching
@@ -79,11 +84,22 @@ struct Subgraph {
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Ttl(
+pub(crate) struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     Duration,
 );
+
+/// Per subgraph configuration for entity caching
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct Metrics {
+    /// enables metrics evaluating the benefits of entity caching
+    #[serde(default)]
+    pub(crate) enabled: bool,
+    /// Metrics counter TTL
+    pub(crate) ttl: Option<Ttl>,
+}
 
 #[async_trait::async_trait]
 impl Plugin for EntityCache {
@@ -99,6 +115,7 @@ impl Plugin for EntityCache {
             storage,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraphs),
+            metrics: init.config.metrics
         })
     }
 
@@ -137,7 +154,9 @@ impl Plugin for EntityCache {
         };
         let name = name.to_string();
 
-        let service = CacheMetricsService::new(name.to_string(), service);
+        if self.metrics.enabled {
+            service = CacheMetricsService::new(name.to_string(), service, self.metrics.ttl);
+        }
 
         if subgraph_enabled {
             tower::util::BoxService::new(CacheService(Some(InnerCacheService {

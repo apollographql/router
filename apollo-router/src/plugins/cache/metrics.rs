@@ -4,14 +4,15 @@ use serde_json_bytes::Value;
 use tower::BoxError;
 use tower_service::Service;
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use super::entity::hash_query;
 use super::entity::hash_vary_headers;
+use super::entity::Ttl;
 use super::entity::REPRESENTATIONS;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
@@ -19,12 +20,16 @@ use crate::spec::TYPENAME;
 pub(crate) struct CacheMetricsService(Option<InnerCacheMetricsService>);
 
 impl CacheMetricsService {
-    pub(crate) fn new(name: String, service: subgraph::BoxService) -> subgraph::BoxService {
+    pub(crate) fn new(
+        name: String,
+        service: subgraph::BoxService,
+        ttl: Option<Ttl>,
+    ) -> subgraph::BoxService {
         tower::util::BoxService::new(CacheMetricsService(Some(InnerCacheMetricsService {
             service,
             name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
-                Duration::from_secs(60),
+                ttl.unwrap_or_else(|| Duration::from_secs(60)),
             )))),
         })))
     }
