@@ -19,7 +19,7 @@
 ///               --response-derives='Debug' \
 ///               --custom-scalars-module='crate::commands::changeset::scalars' \
 ///               ./matching_pull_request.graphql
-/// a
+///
 mod matching_pull_request;
 mod scalars;
 
