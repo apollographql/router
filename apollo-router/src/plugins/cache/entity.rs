@@ -44,7 +44,7 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
 register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
-struct EntityCache {
+pub(crate) struct EntityCache {
     storage: RedisCacheStorage,
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
@@ -146,6 +146,23 @@ impl Plugin for EntityCache {
         } else {
             service
         }
+    }
+}
+
+impl EntityCache {
+    #[cfg(test)]
+    pub(crate) async fn with_mocks(
+        storage: RedisCacheStorage,
+        subgraphs: HashMap<String, Subgraph>,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        Ok(Self {
+            storage,
+            enabled: Some(true),
+            subgraphs: Arc::new(subgraphs),
+        })
     }
 }
 
