@@ -136,6 +136,14 @@ impl RedisCacheStorage {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
 
+        if let Some(username) = config.username {
+            client_config.username = Some(username);
+        }
+
+        if let Some(password) = config.password {
+            client_config.password = Some(password);
+        }
+
         if let Some(tls) = config.tls.as_ref() {
             let tls_cert_store = tls.create_certificate_store().transpose()?;
             let client_cert_config = tls.client_authentication.as_ref();
