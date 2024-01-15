@@ -358,7 +358,7 @@ mod test {
             .and_context(context);
         if is_subscription {
             request_builder =
-                request_builder.header("accept", "multipart/mixed; subscriptionSpec=1.0");
+                request_builder.header("accept", "multipart/mixed;subscriptionSpec=1.0");
         }
         TestHarness::builder()
             .extra_plugin(plugin)

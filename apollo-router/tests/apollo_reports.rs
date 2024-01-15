@@ -433,7 +433,7 @@ async fn test_condition_if() {
         let request = supergraph::Request::fake_builder()
             .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
             .variable("if", true)
-            .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+            .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
             .build()
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
@@ -449,7 +449,7 @@ async fn test_condition_else() {
         let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", false)
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");

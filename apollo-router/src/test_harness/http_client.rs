@@ -110,7 +110,7 @@ where
         .map_request(|mut request: http::Request<RequestBody>| {
             request.headers_mut().insert(
                 "accept",
-                "multipart/mixed; deferSpec=20220824".try_into().unwrap(),
+                "multipart/mixed;deferSpec=20220824".try_into().unwrap(),
             );
             request
         })
