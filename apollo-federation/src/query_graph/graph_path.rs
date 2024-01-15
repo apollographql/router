@@ -1,3 +1,4 @@
+use crate::error::FederationError;
 use crate::link::graphql_definition::{DeferDirectiveArguments, OperationConditional};
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
@@ -53,7 +54,11 @@ use std::sync::Arc;
 // runtime (introducing the new field `head_must_be_root`). This means the `RootPath` type in the
 // JS codebase is replaced with this one.
 #[derive(Debug, Clone)]
-pub(crate) struct GraphPath<TTrigger: Eq + Hash, TEdge: Into<Option<EdgeIndex>>> {
+pub(crate) struct GraphPath<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Into<Option<EdgeIndex>>,
+{
     /// The query graph of which this is a path.
     graph: Arc<QueryGraph>,
     /// The node at which the path starts. This should be the head of the first non-`None` edge in
@@ -161,7 +166,7 @@ impl Hash for OpGraphPathContext {
 /// for this by splitting a path into multiple paths (one for each possible outcome). The common
 /// example is abstract types, where we may end up taking a different edge depending on the runtime
 /// type (e.g. during type explosion).
-pub(crate) struct SimultaneousPaths(Vec<Arc<OpGraphPath>>);
+pub(crate) struct SimultaneousPaths(pub(crate) Vec<Arc<OpGraphPath>>);
 
 pub(crate) struct SimultaneousPathsWithLazyIndirectPaths;
 
@@ -172,14 +177,39 @@ pub(crate) struct SimultaneousPathsWithLazyIndirectPaths;
 /// for the leaf field. The selection set gets copied "as-is" into the `FetchNode`, and also avoids
 /// extra `GraphPath` creation and work during `PathTree` merging.
 pub(crate) struct ClosedPath {
-    paths: SimultaneousPaths,
-    selection_set: Option<Arc<NormalizedSelectionSet>>,
+    pub(crate) paths: SimultaneousPaths,
+    pub(crate) selection_set: Option<Arc<NormalizedSelectionSet>>,
 }
 
 /// A list of the options generated during query planning for a specific "closed branch", which is a
 /// full/closed path in a GraphQL operation (i.e. one that ends in a leaf field).
-pub(crate) struct ClosedBranch(Vec<Arc<ClosedPath>>);
+pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
 pub(crate) struct OpenBranch(Vec<SimultaneousPathsWithLazyIndirectPaths>);
+
+impl OpGraphPath {
+    pub(crate) fn is_overridden_by(&self, other: &Self) -> bool {
+        self.overriding_path_ids
+            .iter()
+            .any(|overriding_id| other.own_path_ids.contains(overriding_id))
+    }
+
+    pub(crate) fn subgraph_jumps(&self) -> Result<u32, FederationError> {
+        self.subgraph_jumps_at_idx(0)
+    }
+
+    pub(crate) fn subgraph_jumps_at_idx(&self, start_index: usize) -> Result<u32, FederationError> {
+        self.edges[start_index..]
+            .iter()
+            .flatten()
+            .try_fold(0, |sum, &edge_index| {
+                let (start, end) = self.graph.edge_endpoints(edge_index)?;
+                let start = self.graph.node_weight(start)?;
+                let end = self.graph.node_weight(end)?;
+                let changes_subgraph = start.source != end.source;
+                Ok(sum + if changes_subgraph { 1 } else { 0 })
+            })
+    }
+}

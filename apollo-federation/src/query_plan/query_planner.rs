@@ -85,7 +85,7 @@ pub struct QueryPlannerDebugConfig {
     /// debug a specific issue (with unexpectedly slow query planning for instance). Remember that
     /// setting this value too low can negatively affect query runtime (due to the use of
     /// sub-optimal query plans).
-    max_evaluated_plans: u32,
+    pub(crate) max_evaluated_plans: u32,
 
     /// Before creating query plans, for each path of fields in the query we compute all the
     /// possible options to traverse that path via the subgraphs. Multiple options can arise because
