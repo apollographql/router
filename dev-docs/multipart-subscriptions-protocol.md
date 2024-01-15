@@ -4,10 +4,10 @@ Instead of relying on WebSockets, the subscriptions protocol supported by the ro
 
 ## Communication
 
-When sending a request containing a subscription to the router, clients MUST support the `multipart/mixed; subscriptionSpec="1.0"` content-type in addition to the `application/json` content-type:
+When sending a request containing a subscription to the router, clients MUST support the `multipart/mixed;subscriptionSpec="1.0"` content-type in addition to the `application/json` content-type:
 
 ```
-Accept: multipart/mixed; subscriptionSpec="1.0", application/json
+Accept: multipart/mixed;subscriptionSpec="1.0", application/json
 ```
 
 The router will then respond with a stream of body parts, following the [definition of multipart content specified in RFC1341](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html).
