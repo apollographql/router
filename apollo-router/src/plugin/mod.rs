@@ -247,7 +247,10 @@ impl PluginFactory {
         supergraph_sdl: Arc<String>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, supergraph_sdl, notify).await
+        let span = info_span!("plugin", "name" = &self.name);
+        (self.instance_factory)(configuration, supergraph_sdl, notify)
+            .instrument(span)
+            .await
     }
 
     #[cfg(test)]
@@ -255,7 +258,9 @@ impl PluginFactory {
         &self,
         configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, Default::default(), Default::default()).await
+        let span = info_span!("plugin", "name" = &self.name);
+
+        (self.instance_factory)(configuration, Default::default(), Default::default()).instrument(span).await
     }
 
     pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {

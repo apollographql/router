@@ -14,6 +14,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
@@ -177,8 +178,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             configuration.notify.broadcast_schema(schema.clone());
         }
 
+        let span = tracing::info_span!("request");
+
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+        let plugins = create_plugins(&configuration, &schema, extra_plugins)
+            .instrument(span)
+            .await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
