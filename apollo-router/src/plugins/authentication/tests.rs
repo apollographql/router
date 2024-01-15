@@ -4,6 +4,7 @@ use std::path::Path;
 
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use insta::assert_yaml_snapshot;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::CommonParameters;
@@ -16,9 +17,12 @@ use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use serde::Serialize;
 use serde_json::Value;
+use tracing::subscriber;
 
 use super::*;
+use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
+use crate::plugins::authentication::jwks::parse_jwks;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
@@ -1051,4 +1055,12 @@ async fn it_accepts_rsa_key_without_alg() {
     };
 
     assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[test]
+fn test_parse_failure_logs() {
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let jwks = parse_jwks(include_str!("testdata/jwks.json")).expect("expected to parse jwks");
+        assert_yaml_snapshot!(jwks);
+    });
 }
