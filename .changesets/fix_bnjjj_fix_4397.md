@@ -1,6 +1,6 @@
-### Fix format_response for statically skipped root selection set  ([Issue #4397](https://github.com/apollographql/router/issues/4397))
+### Fix format_response for statically skipped root selection set ([Issue #4397](https://github.com/apollographql/router/issues/4397))
 
-Either you have query like this:
+If in your GraphQL operation you have a root selection set skipped by `@skip` or `@include` directive, before this fix the results you got if you hardcoded the value of the parameter in `@skip` directive like this for example:
 
 ```graphql
 {
@@ -11,7 +11,7 @@ Either you have query like this:
 }
 ```
 
-or 
+or if you used a variable like this:
 
 ```graphql
 {
@@ -22,7 +22,7 @@ or
 }
 ```
 
-you'll receive the same response
+you received different response. Now it both answers:
 
 ```json
 { "data": {}}
