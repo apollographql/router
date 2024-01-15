@@ -8,8 +8,8 @@ pub(crate) fn directive_optional_enum_argument(
     application: &Node<Directive>,
     name: &Name,
 ) -> Result<Option<Name>, FederationError> {
-    match application.arguments.iter().find(|a| a.name == *name) {
-        Some(a) => match a.value.deref() {
+    match application.argument_by_name(name) {
+        Some(value) => match value.deref() {
             Value::Enum(name) => Ok(Some(name.clone())),
             Value::Null => Ok(None),
             _ => Err(SingleFederationError::Internal {
@@ -43,8 +43,8 @@ pub(crate) fn directive_optional_string_argument(
     application: &Node<Directive>,
     name: &Name,
 ) -> Result<Option<NodeStr>, FederationError> {
-    match application.arguments.iter().find(|a| a.name == *name) {
-        Some(a) => match a.value.deref() {
+    match application.argument_by_name(name) {
+        Some(value) => match value.deref() {
             Value::String(name) => Ok(Some(name.clone())),
             Value::Null => Ok(None),
             _ => Err(SingleFederationError::Internal {
@@ -78,9 +78,8 @@ pub(crate) fn directive_optional_fieldset_argument(
     application: &Node<Directive>,
     name: &Name,
 ) -> Result<Option<NodeStr>, FederationError> {
-    let argument = application.arguments.iter().find(|a| a.name == *name);
-    match argument {
-        Some(argument) => match argument.value.deref() {
+    match application.argument_by_name(name) {
+        Some(value) => match value.deref() {
             Value::String(name) => Ok(Some(name.clone())),
             Value::Null => Ok(None),
             _ => Err(SingleFederationError::Internal {
@@ -111,8 +110,8 @@ pub(crate) fn directive_optional_boolean_argument(
     application: &Node<Directive>,
     name: &Name,
 ) -> Result<Option<bool>, FederationError> {
-    match application.arguments.iter().find(|a| a.name == *name) {
-        Some(a) => match a.value.deref() {
+    match application.argument_by_name(name) {
+        Some(value) => match value.deref() {
             Value::Boolean(value) => Ok(Some(*value)),
             Value::Null => Ok(None),
             _ => Err(SingleFederationError::Internal {

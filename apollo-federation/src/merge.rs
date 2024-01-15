@@ -383,9 +383,8 @@ impl Merger {
                     &mut supergraph_field.make_mut().description,
                     &field.description,
                 );
-                let mut existing_args = supergraph_field.arguments.iter();
                 for arg in field.arguments.iter() {
-                    if let Some(_existing_arg) = &existing_args.find(|a| a.name == arg.name) {
+                    if let Some(_existing_arg) = supergraph_field.argument_by_name(&arg.name) {
                     } else {
                         // TODO mismatch no args
                     }
