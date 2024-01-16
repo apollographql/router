@@ -25,6 +25,7 @@ download_binary() {
     need_cmd dirname
     need_cmd awk
     need_cmd cut
+    need_cmd sort
 
     # if $VERSION isn't provided or has 0 length, use version apollo-router's cargo.toml
     # ${VERSION:-} checks if version exists, and if doesn't uses the default
@@ -101,9 +102,25 @@ get_architecture() {
         # Darwin `uname -s` doesn't seem to lie on Big Sur
         # but we want to serve x86_64 binaries anyway so that they can
         # then run in x86_64 emulation mode on their arm64 devices
-        _cputype=x86_64
+        # The last version for which we want to do this substitution of
+        # _cputype is v1.37.0.
+        verlte "${DOWNLOAD_VERSION}" "v1.37.0"
+        if [ $? = 0 ]; then
+            _cputype=x86_64
+        fi
     fi
 
+    # If our OS is Darwin, since router v1.37.0 we only have binaries for arm64 machines.
+    # Check and exit early
+    if [ "$_ostype" = Darwin ] && [ "$_cputype" != arm64 ]; then
+        vergt "${DOWNLOAD_VERSION}" "v1.37.0"
+        if [ $? = 0 ]; then
+            say "No precompiled binaries available on mac os for CPU architecture: $_cputype"
+            say "The most recent mac os release which supports intel is 1.37.0"
+            say "Please refer to this issue for more details:  https://github.com/apollographql/router/issues/4483"
+            err "no precompiled binaries available on mac os for CPU architecture: $_cputype"
+        fi
+    fi
 
     case "$_ostype" in
         Linux)
@@ -134,6 +151,18 @@ get_architecture() {
     _arch="$_cputype-$_ostype"
 
     RETVAL="$_arch"
+}
+
+verlte() {
+    printf '%s\n' "$1" "$2" | sort -C -V
+}
+
+verlt() {
+    ! verlte "$2" "$1"
+}
+
+vergt() {
+    ! verlte "$1" "$2"
 }
 
 say() {
