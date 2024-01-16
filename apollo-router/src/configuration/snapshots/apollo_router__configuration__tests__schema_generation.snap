@@ -1293,6 +1293,54 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_file_uploads": {
+      "description": "File uploads configuration.",
+      "default": {
+        "protocols": {
+          "restricted_multipart_request": null
+        }
+      },
+      "type": "object",
+      "required": [
+        "protocols"
+      ],
+      "properties": {
+        "protocols": {
+          "description": "Protocols enable for file upload",
+          "type": "object",
+          "properties": {
+            "restricted_multipart_request": {
+              "type": "object",
+              "properties": {
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "max_file_size": {
+                      "default": 5242820,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    },
+                    "max_files": {
+                      "default": 5,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
       "default": "both",

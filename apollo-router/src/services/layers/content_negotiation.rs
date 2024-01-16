@@ -6,13 +6,16 @@ use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
 use mediatype::names::APPLICATION;
+use mediatype::names::FORM_DATA;
 use mediatype::names::JSON;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mediatype::names::_STAR;
+use mediatype::MediaTypeBuf;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
 use mime::APPLICATION_JSON;
+use mime::MULTIPART_FORM_DATA;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -25,6 +28,7 @@ use crate::services::router;
 use crate::services::router::service::MULTIPART_DEFER_HEADER_VALUE;
 use crate::services::router::service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
 use crate::services::router::ClientRequestAccepts;
+use crate::services::router::ClientRequestContentType;
 use crate::services::supergraph;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
@@ -36,8 +40,18 @@ use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
 /// [`Layer`] for Content-Type checks implementation.
-#[derive(Clone, Default)]
-pub(crate) struct RouterLayer {}
+#[derive(Clone)]
+pub(crate) struct RouterLayer {
+    allow_http_multipart: bool,
+}
+
+impl RouterLayer {
+    pub(crate) fn new(allow_http_multipart: bool) -> Self {
+        Self {
+            allow_http_multipart,
+        }
+    }
+}
 
 impl<S> Layer<S> for RouterLayer
 where
@@ -47,11 +61,29 @@ where
     type Service = CheckpointService<S, router::Request>;
 
     fn layer(&self, service: S) -> Self::Service {
+        let allow_http_multipart = self.allow_http_multipart;
         CheckpointService::new(
             move |req| {
+                let content_type = parse_content_type(req.router_request.headers());
                 if req.router_request.method() != Method::GET
-                    && !content_type_is_json(req.router_request.headers())
+                    && !(content_type.is_json()
+                        || (allow_http_multipart && content_type.is_multipart_form_data()))
                 {
+                    let message = if allow_http_multipart {
+                        format!(
+                            r#"'content-type' header must be one of: "{}", "{}" or "{}""#,
+                            APPLICATION_JSON.essence_str(),
+                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                            MULTIPART_FORM_DATA,
+                        )
+                    } else {
+                        format!(
+                            r#"'content-type' header must be one of: "{}" or "{}""#,
+                            APPLICATION_JSON.essence_str(),
+                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                        )
+                    };
+
                     let response: http::Response<hyper::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -59,11 +91,7 @@ where
                             serde_json::json!({
                                 "errors": [
                                     graphql::Error::builder()
-                                        .message(format!(
-                                            r#"'content-type' header must be one of: {:?} or {:?}"#,
-                                            APPLICATION_JSON.essence_str(),
-                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        ))
+                                        .message(message)
                                         .extension_code("INVALID_CONTENT_TYPE_HEADER")
                                         .build()
                                 ]
@@ -74,6 +102,7 @@ where
 
                     return Ok(ControlFlow::Break(response.into()));
                 }
+                req.context.private_entries.lock().insert(content_type);
 
                 let accepts = parse_accept(req.router_request.headers());
 
@@ -158,28 +187,28 @@ where
     }
 }
 
-/// Returns true if the headers content type is `application/json` or `application/graphql-response+json`
-fn content_type_is_json(headers: &HeaderMap) -> bool {
-    headers.get_all(CONTENT_TYPE).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| {
-                let mut list = MediaTypeList::new(accept_str);
-
-                list.any(|mime| {
-                    mime.as_ref()
-                        .map(|mime| {
-                            (mime.ty == APPLICATION && mime.subty == JSON)
-                                || (mime.ty == APPLICATION
-                                    && mime.subty.as_str() == "graphql-response"
-                                    && mime.suffix == Some(JSON))
-                        })
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false)
-    })
+/// Returns true if mime type is `application/json` or `application/graphql-response+json`
+fn mime_is_json(mime: &MediaTypeBuf) -> bool {
+    mime.ty() == APPLICATION
+        && (mime.subty() == JSON
+            || mime.subty().as_str() == "graphql-response" && mime.suffix() == Some(JSON))
 }
+
+fn parse_content_type(headers: &HeaderMap) -> ClientRequestContentType {
+    if let Some(value) = headers.get(CONTENT_TYPE) {
+        if let Ok(str) = value.to_str() {
+            if let Ok(mime) = MediaTypeBuf::from_string(str.to_owned()) {
+                if mime_is_json(&mime) {
+                    return ClientRequestContentType::JSON(mime);
+                } else if mime.ty() == MULTIPART && mime.subty() == FORM_DATA {
+                    return ClientRequestContentType::MultipartFormData(mime);
+                };
+            }
+        }
+    }
+    ClientRequestContentType::Other
+}
+
 // Clippy suggests `for mime in MediaTypeList::new(str).flatten()` but less indentation
 // does not seem worth making it invisible that Result is involved.
 #[allow(clippy::manual_flatten)]
@@ -238,6 +267,42 @@ mod tests {
     use http::HeaderValue;
 
     use super::*;
+
+    #[test]
+    fn it_checks_content_type_header() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        );
+        let content_type = parse_content_type(&default_headers);
+        assert!(content_type.is_json());
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
+        );
+        let content_type = parse_content_type(&default_headers);
+        assert!(content_type.is_json());
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static(MULTIPART_FORM_DATA.essence_str()),
+        );
+        let content_type = parse_content_type(&default_headers);
+        assert!(content_type.is_multipart_form_data());
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("foo/bar"));
+        let content_type = parse_content_type(&default_headers);
+        assert!(content_type == ClientRequestContentType::Other);
+
+        let default_headers = HeaderMap::new();
+        let content_type = parse_content_type(&default_headers);
+        assert!(content_type == ClientRequestContentType::Other);
+    }
 
     #[test]
     fn it_checks_accept_header() {

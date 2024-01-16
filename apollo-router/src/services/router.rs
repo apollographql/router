@@ -11,6 +11,7 @@ use http::Method;
 use http::StatusCode;
 use multer::Multipart;
 use multimap::MultiMap;
+use mediatype::MediaTypeBuf;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -348,4 +349,26 @@ pub(crate) struct ClientRequestAccepts {
     pub(crate) multipart_subscription: bool,
     pub(crate) json: bool,
     pub(crate) wildcard: bool,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) enum ClientRequestContentType {
+    JSON(MediaTypeBuf),
+    MultipartFormData(MediaTypeBuf),
+    Other,
+}
+
+impl ClientRequestContentType {
+    pub(crate) fn is_json(&self) -> bool {
+        match self {
+            Self::JSON(_) => true,
+            _ => false,
+        }
+    }
+    pub(crate) fn is_multipart_form_data(&self) -> bool {
+        match self {
+            Self::MultipartFormData(_) => true,
+            _ => false,
+        }
+    }
 }
