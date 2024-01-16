@@ -81,6 +81,7 @@ mod uplink;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
+pub use crate::context::extensions::sync::Extensions;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;

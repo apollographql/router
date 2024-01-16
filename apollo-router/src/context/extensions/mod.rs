@@ -1,3 +1,5 @@
+pub(crate) mod sync;
+
 // NOTE: this module is taken from tokio's tracing span's extensions
 //       which is taken from https://github.com/hyperium/http/blob/master/src/extensions.rs
 

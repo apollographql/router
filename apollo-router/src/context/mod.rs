@@ -5,18 +5,19 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(debug_assertions)]
 use std::time::Instant;
 
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
 use derivative::Derivative;
+use extensions::sync::Extensions;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use self::extensions::Extensions;
 use crate::json_ext::Value;
 
 pub(crate) mod extensions;
@@ -48,7 +49,7 @@ pub struct Context {
     entries: Entries,
 
     #[serde(skip)]
-    extensions: Arc<parking_lot::Mutex<Extensions>>,
+    extensions: Extensions,
 
     /// Creation time
     #[serde(skip)]
@@ -71,7 +72,7 @@ impl Context {
             .to_string();
         Context {
             entries: Default::default(),
-            extensions: Arc::new(parking_lot::Mutex::new(Extensions::default())),
+            extensions: Extensions::default(),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,
@@ -82,13 +83,13 @@ impl Context {
 impl Context {
     /// Returns extensions of the context.
     ///
-    /// You can use extensions to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
+    /// You can use `Extensions` to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
     ///
     /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.
     /// Doing so may cause performance degradation or even deadlocks.
     ///
     /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
-    pub fn extensions(&self) -> &Arc<parking_lot::Mutex<Extensions>> {
+    pub fn extensions(&self) -> &Extensions {
         &self.extensions
     }
 
