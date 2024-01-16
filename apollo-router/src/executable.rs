@@ -158,6 +158,7 @@ pub struct Opt {
         value_parser = add_log_filter,
         env = "APOLLO_ROUTER_LOG"
     )]
+    // FIXME: when upgrading to router 2.0 we should put this value in an Option
     log_level: String,
 
     /// Reload locally provided configuration and supergraph files automatically.  This only affects watching of local files and does not affect supergraphs and configuration provided by GraphOS through Uplink, which is always reloaded immediately.
@@ -262,10 +263,11 @@ fn add_log_filter(raw: &str) -> Result<String, String> {
             let rgx =
                 Regex::new(r"(^|,)(off|error|warn|info|debug|trace)").expect("regex must be valid");
             let res = rgx.replace_all(&lowered, |caps: &Captures| {
+                // The default level is info, then other ones can override the default one
                 // If the pattern matches, we must have caps 1 and 2
                 format!("{}apollo_router={}", &caps[1], &caps[2])
             });
-            Ok(res.into_owned())
+            Ok(format!("info,{res}"))
         }
     }
 }
@@ -732,7 +734,7 @@ mod tests {
         for level in ["off", "error", "warn", "info", "debug", "trace"] {
             assert_eq!(
                 add_log_filter(level).expect("conversion works"),
-                format!("apollo_router={level}")
+                format!("info,apollo_router={level}")
             );
         }
     }
@@ -743,49 +745,49 @@ mod tests {
     // which is a reasonably corpus of things to test.
     #[test]
     fn complex_logging_modifications() {
-        assert_eq!(add_log_filter("hello").unwrap(), "hello");
-        assert_eq!(add_log_filter("trace").unwrap(), "apollo_router=trace");
-        assert_eq!(add_log_filter("TRACE").unwrap(), "apollo_router=trace");
-        assert_eq!(add_log_filter("info").unwrap(), "apollo_router=info");
-        assert_eq!(add_log_filter("INFO").unwrap(), "apollo_router=info");
-        assert_eq!(add_log_filter("hello=debug").unwrap(), "hello=debug");
-        assert_eq!(add_log_filter("hello=DEBUG").unwrap(), "hello=debug");
+        assert_eq!(add_log_filter("hello").unwrap(), "info,hello");
+        assert_eq!(add_log_filter("trace").unwrap(), "info,apollo_router=trace");
+        assert_eq!(add_log_filter("TRACE").unwrap(), "info,apollo_router=trace");
+        assert_eq!(add_log_filter("info").unwrap(), "info,apollo_router=info");
+        assert_eq!(add_log_filter("INFO").unwrap(), "info,apollo_router=info");
+        assert_eq!(add_log_filter("hello=debug").unwrap(), "info,hello=debug");
+        assert_eq!(add_log_filter("hello=DEBUG").unwrap(), "info,hello=debug");
         assert_eq!(
             add_log_filter("hello,std::option").unwrap(),
-            "hello,std::option"
+            "info,hello,std::option"
         );
         assert_eq!(
             add_log_filter("error,hello=warn").unwrap(),
-            "apollo_router=error,hello=warn"
+            "info,apollo_router=error,hello=warn"
         );
         assert_eq!(
             add_log_filter("error,hello=off").unwrap(),
-            "apollo_router=error,hello=off"
+            "info,apollo_router=error,hello=off"
         );
-        assert_eq!(add_log_filter("off").unwrap(), "apollo_router=off");
-        assert_eq!(add_log_filter("OFF").unwrap(), "apollo_router=off");
-        assert_eq!(add_log_filter("hello/foo").unwrap(), "hello/foo");
-        assert_eq!(add_log_filter("hello/f.o").unwrap(), "hello/f.o");
+        assert_eq!(add_log_filter("off").unwrap(), "info,apollo_router=off");
+        assert_eq!(add_log_filter("OFF").unwrap(), "info,apollo_router=off");
+        assert_eq!(add_log_filter("hello/foo").unwrap(), "info,hello/foo");
+        assert_eq!(add_log_filter("hello/f.o").unwrap(), "info,hello/f.o");
         assert_eq!(
             add_log_filter("hello=debug/foo*foo").unwrap(),
-            "hello=debug/foo*foo"
+            "info,hello=debug/foo*foo"
         );
         assert_eq!(
             add_log_filter("error,hello=warn/[0-9]scopes").unwrap(),
-            "apollo_router=error,hello=warn/[0-9]scopes"
+            "info,apollo_router=error,hello=warn/[0-9]scopes"
         );
         // Add some hard ones
         assert_eq!(
             add_log_filter("hyper=debug,warn,regex=warn,h2=off").unwrap(),
-            "hyper=debug,apollo_router=warn,regex=warn,h2=off"
+            "info,hyper=debug,apollo_router=warn,regex=warn,h2=off"
         );
         assert_eq!(
             add_log_filter("hyper=debug,apollo_router=off,regex=info,h2=off").unwrap(),
-            "hyper=debug,apollo_router=off,regex=info,h2=off"
+            "info,hyper=debug,apollo_router=off,regex=info,h2=off"
         );
         assert_eq!(
             add_log_filter("apollo_router::plugins=debug").unwrap(),
-            "apollo_router::plugins=debug"
+            "info,apollo_router::plugins=debug"
         );
     }
 }
