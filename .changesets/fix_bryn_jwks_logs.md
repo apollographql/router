@@ -1,4 +1,4 @@
-### Improve logging for JWKS download failures. ([Issue #4448](https://github.com/apollographql/router/issues/4448))
+### Improve logging for JWKS download failures ([Issue #4448](https://github.com/apollographql/router/issues/4448))
 
 To enable users to debug JWKS download and parse failures more easily, we've added more detailed logging to the router. The router now logs the following information when a JWKS download or parse fails:
 
