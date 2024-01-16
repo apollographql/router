@@ -17,6 +17,219 @@ expression: get_spans()
     }
   },
   "children": {
+    "apollo_router::router_factory::plugin: apollo.include_subgraph_errors": {
+      "name": "apollo_router::router_factory::plugin: apollo.include_subgraph_errors",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.include_subgraph_errors",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.csrf": {
+      "name": "apollo_router::router_factory::plugin: apollo.csrf",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.csrf",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.headers": {
+      "name": "apollo_router::router_factory::plugin: apollo.headers",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.headers",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.telemetry": {
+      "name": "apollo_router::router_factory::plugin: apollo.telemetry",
+      "record": {
+        "entries": [
+          [
+            "message",
+            "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
+          ]
+        ],
+        "metadata": {
+          "name": "plugin: apollo.telemetry",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.traffic_shaping": {
+      "name": "apollo_router::router_factory::plugin: apollo.traffic_shaping",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.traffic_shaping",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.forbid_mutations": {
+      "name": "apollo_router::router_factory::plugin: apollo.forbid_mutations",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.forbid_mutations",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.subscription": {
+      "name": "apollo_router::router_factory::plugin: apollo.subscription",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.subscription",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.override_subgraph_url": {
+      "name": "apollo_router::router_factory::plugin: apollo.override_subgraph_url",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.override_subgraph_url",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.authorization": {
+      "name": "apollo_router::router_factory::plugin: apollo.authorization",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.authorization",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.authentication": {
+      "name": "apollo_router::router_factory::plugin: apollo.authentication",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.authentication",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.experimental_entity_cache": {
+      "name": "apollo_router::router_factory::plugin: apollo.experimental_entity_cache",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.experimental_entity_cache",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.rhai": {
+      "name": "apollo_router::router_factory::plugin: apollo.rhai",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.rhai",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router::router_factory::plugin: apollo.coprocessor": {
+      "name": "apollo_router::router_factory::plugin: apollo.coprocessor",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plugin: apollo.coprocessor",
+          "target": "apollo_router::router_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::router_factory",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
     "apollo_router::plugins::telemetry::span_factory::request": {
       "name": "apollo_router::plugins::telemetry::span_factory::request",
       "record": {
