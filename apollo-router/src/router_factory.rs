@@ -173,7 +173,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                             Arc::new(schema.clone()),
                             configuration.notify.clone(),
                         )
-                        //.instrument(span)
                         .await
                     {
                         Ok(mut plugin) => {
@@ -504,9 +503,6 @@ pub(crate) async fn create_plugins(
     macro_rules! add_apollo_plugin {
         ($name: literal, $opt_plugin_config: expr) => {{
             let name = concat!("apollo.", $name);
-
-            println!("creating apollo plugin span with name {}", $name);
-
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
 
             async {
