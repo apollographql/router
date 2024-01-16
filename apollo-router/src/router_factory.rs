@@ -661,6 +661,7 @@ mod test {
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
+    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -782,7 +783,7 @@ mod test {
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let mut config = json!({ "apollo": {} });
-        inject_schema_id(Some(schema), &mut config);
+        inject_schema_id(Some(Schema::schema_id(schema)), &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
