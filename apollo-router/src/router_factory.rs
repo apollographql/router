@@ -169,7 +169,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     inject_schema_id(Some(&Schema::schema_id(&schema)), plugin_config);
                     match factory
                         .create_instance(
-                            &plugin_config,
+                            plugin_config,
                             Arc::new(schema.clone()),
                             configuration.notify.clone(),
                         )
@@ -288,13 +288,13 @@ impl YamlRouterFactory {
                     )
                     .await;
             };
-            Ok(RouterCreator::new(
+            RouterCreator::new(
                 query_analysis_layer,
                 persisted_query_layer,
                 Arc::new(supergraph_creator),
                 configuration,
             )
-            .await?)
+            .await
         }
         .instrument(tracing::info_span!("supergraph"))
         .await
@@ -665,7 +665,6 @@ mod test {
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
-    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -786,9 +785,8 @@ mod test {
     #[test]
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         let mut config = json!({ "apollo": {} });
-        inject_schema_id(&schema, &mut config);
+        inject_schema_id(Some(schema), &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(

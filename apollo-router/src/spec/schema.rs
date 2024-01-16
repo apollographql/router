@@ -124,11 +124,6 @@ impl Schema {
             }
         }
 
-        /*
-        let mut hasher = Sha256::new();
-        hasher.update(sdl.as_bytes());
-        let schema_id = Some(format!("{:x}", hasher.finalize()));
-        */
         let schema_id = Some(Self::schema_id(sdl));
         tracing::info!(
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
