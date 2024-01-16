@@ -15,13 +15,12 @@ use super::fetch::Variables;
 use super::rewrites;
 use super::OperationKind;
 use crate::error::FetchError;
-use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
 use crate::json_ext::Path;
-use crate::notification::HandleStream;
+use crate::services::subgraph::BoxGqlStream;
 use crate::services::SubgraphRequest;
 use crate::services::SubscriptionTaskParams;
 
@@ -133,8 +132,7 @@ impl SubscriptionNode {
 
             match mode {
                 Some((subscription_config, _mode)) => {
-                    let (tx_handle, rx_handle) =
-                        mpsc::channel::<HandleStream<String, graphql::Response>>(1);
+                    let (tx_handle, rx_handle) = mpsc::channel::<BoxGqlStream>(1);
 
                     let subscription_conf_tx = match subscription_handle.subscription_conf_tx.take()
                     {
@@ -191,7 +189,7 @@ impl SubscriptionNode {
         parameters: &'a ExecutionParameters<'a>,
         current_dir: &'a Path,
         data: &Value,
-        tx_gql: mpsc::Sender<HandleStream<String, graphql::Response>>,
+        tx_gql: mpsc::Sender<BoxGqlStream>,
     ) -> Result<Vec<Error>, FetchError> {
         let SubscriptionNode {
             operation,
