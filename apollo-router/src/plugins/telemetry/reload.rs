@@ -175,9 +175,9 @@ where
         meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
-        // we ignore events
+        // we ignore metric events
         if !meta.is_span() {
-            return false;
+            return meta.fields().iter().any(|f| f.name() == "message");
         }
 
         // if there's an exsting otel context set by the client request, and it is sampled,
