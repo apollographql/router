@@ -253,42 +253,51 @@ impl YamlRouterFactory {
             .instrument(span)
             .await?;
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
-        builder = builder.with_configuration(configuration.clone());
-        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
-        for (name, subgraph_service) in subgraph_services {
-            builder = builder.with_subgraph_service(&name, subgraph_service);
+        async {
+            let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+            builder = builder.with_configuration(configuration.clone());
+            let subgraph_services =
+                create_subgraph_services(&plugins, &schema, &configuration).await?;
+            for (name, subgraph_service) in subgraph_services {
+                builder = builder.with_subgraph_service(&name, subgraph_service);
+            }
+            for (plugin_name, plugin) in plugins {
+                builder = builder.with_dyn_plugin(plugin_name, plugin);
+            }
+
+            // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+            let mut supergraph_creator = builder.build().await?;
+
+            // Instantiate the parser here so we can use it to warm up the planner below
+            let query_analysis_layer =
+                QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration))
+                    .await;
+
+            let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
+
+            if let Some(previous_router) = previous_router {
+                let cache_keys = previous_router
+                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                    .await;
+
+                supergraph_creator
+                    .warm_up_query_planner(
+                        &query_analysis_layer,
+                        &persisted_query_layer,
+                        cache_keys,
+                    )
+                    .await;
+            };
+            Ok(RouterCreator::new(
+                query_analysis_layer,
+                persisted_query_layer,
+                Arc::new(supergraph_creator),
+                configuration,
+            )
+            .await?)
         }
-        for (plugin_name, plugin) in plugins {
-            builder = builder.with_dyn_plugin(plugin_name, plugin);
-        }
-
-        // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-        let mut supergraph_creator = builder.build().await?;
-
-        // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis_layer =
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
-
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
-
-        if let Some(previous_router) = previous_router {
-            let cache_keys = previous_router
-                .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
-                .await;
-
-            supergraph_creator
-                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, cache_keys)
-                .await;
-        };
-
-        Ok(RouterCreator::new(
-            query_analysis_layer,
-            persisted_query_layer,
-            Arc::new(supergraph_creator),
-            configuration,
-        )
-        .await?)
+        .instrument(tracing::info_span!("supergraph"))
+        .await
     }
 }
 
