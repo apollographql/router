@@ -595,8 +595,8 @@ async fn plan_query(
     // So while we are updating the tests to create a document manually, this here will make sure current
     // tests will pass.
     // During a regular request, `ParsedDocument` is already populated during query analysis.
-    #[cfg(test)]
-    {
+    // Some tests do populate the document, so we only do it if it's not already there.
+    if !context.extensions().lock().contains_key::<ParsedDocument>() {
         let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
         Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
         Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
