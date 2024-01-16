@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(debug_assertions)]
 use std::time::Instant;
 
 use dashmap::mapref::multiple::RefMulti;

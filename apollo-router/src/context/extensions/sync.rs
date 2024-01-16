@@ -1,7 +1,9 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
+#[cfg(debug_assertions)]
 use std::time::Duration;
+#[cfg(debug_assertions)]
 use std::time::Instant;
 
 /// You can use `Extensions` to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
