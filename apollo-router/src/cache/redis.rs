@@ -289,7 +289,7 @@ impl RedisCacheStorage {
 
     fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
-            Some(namespace) => format!("{namespace}:{}", key.to_string()),
+            Some(namespace) => format!("{namespace}:{key}"),
             None => key.to_string(),
         }
     }
@@ -316,7 +316,7 @@ impl RedisCacheStorage {
     ) -> Option<Vec<Option<RedisValue<V>>>> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
-        let res = if keys.len() == 1 {
+        if keys.len() == 1 {
             let res = self
                 .inner
                 .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
@@ -345,9 +345,7 @@ impl RedisCacheStorage {
                     e
                 })
                 .ok()
-        };
-
-        res
+        }
     }
 
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
