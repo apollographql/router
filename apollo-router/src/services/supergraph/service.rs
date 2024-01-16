@@ -593,16 +593,14 @@ async fn plan_query(
     // none of those tests create an executable document to put it in the context, and the document cannot be created
     // from inside the supergraph request fake builder, because it needs a schema matching the query.
     // So while we are updating the tests to create a document manually, this here will make sure current
-    // tests will pass
+    // tests will pass.
+    // During a regular request, `ParsedDocument` is already populated during query analysis.
+    #[cfg(test)]
     {
-        let mut entries = context.extensions().lock();
-        if !entries.contains_key::<ParsedDocument>() {
-            let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
-            Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
-            Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
-            entries.insert::<ParsedDocument>(doc);
-        }
-        drop(entries);
+        let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
+        Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
+        Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
+        context.extensions().lock().insert::<ParsedDocument>(doc);
     }
 
     planning
