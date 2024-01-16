@@ -22,15 +22,15 @@ use crate::graphql;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::layers::ServiceExt as _;
 use crate::services::router;
-use crate::services::router::service::MULTIPART_DEFER_HEADER_VALUE;
-use crate::services::router::service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
+use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
+use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::supergraph;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
-use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_PARAMETER;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
 
@@ -95,8 +95,8 @@ where
                                             r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
                                             APPLICATION_JSON.essence_str(),
                                             GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE,
-                                            MULTIPART_DEFER_CONTENT_TYPE
+                                            MULTIPART_SUBSCRIPTION_ACCEPT,
+                                            MULTIPART_DEFER_ACCEPT
                                         ))
                                         .extension_code("INVALID_ACCEPT_HEADER")
                                         .build()
@@ -144,13 +144,15 @@ where
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                 } else if accepts_multipart_defer {
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, MULTIPART_DEFER_HEADER_VALUE.clone());
+                    parts.headers.insert(
+                        CONTENT_TYPE,
+                        MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
+                    );
                 } else if accepts_multipart_subscription {
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, MULTIPART_SUBSCRIPTION_HEADER_VALUE.clone());
+                    parts.headers.insert(
+                        CONTENT_TYPE,
+                        MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
+                    );
                 }
                 (parts, res)
             })
@@ -276,10 +278,7 @@ mod tests {
             ACCEPT,
             HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
         );
-        default_headers.append(
-            ACCEPT,
-            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-        );
+        default_headers.append(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT));
         let accepts = parse_accept(&default_headers);
         assert!(accepts.multipart_defer);
     }
