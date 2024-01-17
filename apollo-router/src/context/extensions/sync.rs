@@ -58,7 +58,7 @@ impl DerefMut for ExtensionsGuard<'_> {
 impl Drop for ExtensionsGuard<'_> {
     fn drop(&mut self) {
         // In debug builds we check that extensions is never held for too long.
-        // We  only check if the current runtime is multi-threaded, because a bunch of unit tests fail the assertion and these need to be investigated separately. 
+        // We  only check if the current runtime is multi-threaded, because a bunch of unit tests fail the assertion and these need to be investigated separately.
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             if runtime.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread {
                 let elapsed = self.start.elapsed();
