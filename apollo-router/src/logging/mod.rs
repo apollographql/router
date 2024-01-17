@@ -86,7 +86,7 @@ pub(crate) mod test {
 /// You can also use subscriber::with_default(assert_snapshot_subscriber!(), || { ... }) to assert the logs in non async code.
 macro_rules! assert_snapshot_subscriber {
     () => {
-        $crate::assert_snapshot_subscriber!(tracing_core::LevelFilter::TRACE, {})
+        $crate::assert_snapshot_subscriber!(tracing_core::LevelFilter::INFO, {})
     };
 
     ($level:expr) => {
