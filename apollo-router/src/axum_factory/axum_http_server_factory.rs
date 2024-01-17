@@ -418,7 +418,8 @@ where
     })?;
     let span_mode = span_mode(configuration);
 
-    let main_route = main_router::<RF>(configuration)
+    #[allow(unused_mut)]
+    let mut main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(middleware::from_fn_with_state(
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
@@ -433,12 +434,46 @@ where
         )
         .layer(middleware::from_fn(metrics_handler));
 
+    #[cfg(feature = "apollo_unsupported")]
+    {
+        if let Some(main_endpoint_layer) = unsafe { ADD_MAIN_ENDPOINT_LAYER.get() } {
+            main_route = main_endpoint_layer(main_route);
+        }
+    }
+
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+        .fold(main_route, |acc, r| {
+            #[allow(unused_mut)]
+            let mut router = r.into_router();
+            #[cfg(feature = "apollo_unsupported")]
+            {
+                if let Some(main_endpoint_layer) = unsafe { ADD_MAIN_ENDPOINT_LAYER.get() } {
+                    router = main_endpoint_layer(router);
+                }
+            }
+
+            acc.merge(router)
+        });
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+#[cfg(feature = "apollo_unsupported")]
+use std::sync::OnceLock;
+
+#[cfg(feature = "apollo_unsupported")]
+static mut ADD_MAIN_ENDPOINT_LAYER: OnceLock<Box<dyn Fn(Router) -> Router>> = OnceLock::new();
+
+#[cfg(feature = "apollo_unsupported")]
+pub unsafe fn set_add_main_endpoint_layer(
+    add_main_endpoint_layer: impl Fn(Router) -> Router + 'static,
+) {
+    ADD_MAIN_ENDPOINT_LAYER
+        .set(Box::new(add_main_endpoint_layer))
+        .map_err(|_| "add_main_endpoint_layer was already set")
+        .unwrap();
 }
 
 async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {

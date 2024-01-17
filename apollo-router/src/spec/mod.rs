@@ -27,6 +27,7 @@ pub(crate) const LINK_DIRECTIVE_NAME: &str = "link";
 pub(crate) const LINK_URL_ARGUMENT: &str = "url";
 
 /// GraphQL parsing errors.
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub(crate) enum SpecError {
@@ -42,6 +43,28 @@ pub(crate) enum SpecError {
     ParsingError(String),
     /// validation error
     ValidationError(Vec<apollo_compiler::execution::GraphQLError>),
+    /// Unknown operation named "{0}"
+    UnknownOperation(String),
+    /// subscription operation is not supported
+    SubscriptionNotSupported,
+}
+
+#[cfg(feature = "apollo_unsupported")]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum SpecError {
+    /// missing input file for query
+    UnknownFileId,
+    /// selection processing recursion limit exceeded
+    RecursionLimitExceeded,
+    /// invalid type error, expected another type than '{0}'
+    InvalidType(String),
+    /// cannot query field '{0}' on type '{1}'
+    InvalidField(String, String),
+    /// parsing error: {0}
+    ParsingError(String),
+    /// validation error
+    ValidationError(Vec<apollo_compiler::GraphQLError>),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
     /// subscription operation is not supported

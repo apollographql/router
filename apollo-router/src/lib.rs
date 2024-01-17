@@ -79,6 +79,29 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+#[cfg(feature = "apollo_unsupported")]
+pub use axum_factory::set_add_extra_endpoints_layer;
+#[cfg(feature = "apollo_unsupported")]
+pub use axum_factory::set_add_main_endpoint_layer;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::set_into_graphql_errors;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::set_to_graphql_error;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::CacheResolverError;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::FetchError;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::PlannerErrors;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::QueryPlannerError;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::RouterError;
+#[cfg(feature = "apollo_unsupported")]
+pub use json_ext::Path;
+#[cfg(feature = "apollo_unsupported")]
+pub use spec::operation_limits::OperationLimits;
+
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;

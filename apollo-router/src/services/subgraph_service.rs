@@ -381,7 +381,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             }
                         })?;
                         stream_tx.send(Box::pin(handle.into_stream())).await?;
-
                         tracing::info!(
                             monotonic_counter.apollo.router.operations.subscriptions = 1u64,
                             subscriptions.mode = %"callback",
