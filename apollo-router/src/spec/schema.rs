@@ -1,12 +1,12 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
@@ -29,7 +29,7 @@ pub(crate) struct Schema {
     /// Stored for comparison with the validation errors from query planning.
     diagnostics: Option<DiagnosticList>,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
+    pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
 }
@@ -144,10 +144,12 @@ impl Schema {
         })
     }
 
-    pub(crate) fn create_api_schema(&self) -> String {
-        apollo_federation::Supergraph::from(self.definitions.clone())
-            .to_api_schema()
-            .to_string()
+    pub(crate) fn create_api_schema(
+        &self,
+    ) -> Result<String, apollo_federation::error::FederationError> {
+        let schema =
+            apollo_federation::Supergraph::from(self.definitions.clone()).to_api_schema()?;
+        Ok(schema.to_string())
     }
 
     pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {

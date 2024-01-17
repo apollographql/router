@@ -201,9 +201,9 @@ checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2f12a04dc5164646affc9ef40f519741321b59d3503d0ca06719ce750741594"
+checksum = "93138712f22ebc142e59fc0150f269d53700e4a01b4678f0d82f8e088e210629"
 dependencies = [
  "apollo-parser",
  "ariadne",
@@ -211,6 +211,7 @@ dependencies = [
  "rowan",
  "salsa",
  "serde",
+ "serde_json_bytes",
  "sptr",
  "thiserror",
  "triomphe",
@@ -230,15 +231,16 @@ dependencies = [
 [[package]]
 name = "apollo-federation"
 version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e1f1a447ab0e78b150b076fa53fd0ac0a58563a493c9e588f447db842c18486"
+source = "git+https://github.com/apollographql/federation-next?branch=renee/api-schema#361020f5b093005c1582a2a40a0698ee1d35be04"
 dependencies = [
  "apollo-compiler",
  "derive_more",
  "indexmap 2.1.0",
  "lazy_static",
+ "linked-hash-map",
  "petgraph",
  "salsa",
+ "serde_json",
  "strum",
  "strum_macros",
  "thiserror",
@@ -469,9 +471,9 @@ checksum = "bddcadddf5e9015d310179a59bb28c4d4b9920ad0f11e8e14dbadf654890c9a6"
 
 [[package]]
 name = "ariadne"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72fe02fc62033df9ba41cba57ee19acf5e742511a140c7dbc3a873e19a19a1bd"
+checksum = "dd002a6223f12c7a95cdd4b1cb3a0149d22d37f7a9ecdb2cb691a071fe236c29"
 dependencies = [
  "concolor",
  "unicode-width",

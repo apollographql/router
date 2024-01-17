@@ -142,11 +142,11 @@ impl BridgeQueryPlanner {
                 let api_schema = planner.api_schema().await?;
                 api_schema.schema
             }
-            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(),
+            crate::configuration::ApiSchemaMode::New => schema.create_api_schema()?,
 
             crate::configuration::ApiSchemaMode::Both => {
                 let api_schema = planner.api_schema().await?;
-                let new_api_schema = schema.create_api_schema();
+                let new_api_schema = schema.create_api_schema()?;
 
                 if api_schema.schema != new_api_schema {
                     tracing::warn!(
