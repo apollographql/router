@@ -83,6 +83,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "namespace": {
+                      "description": "namespace used to prefix Redis keys",
+                      "type": "string",
+                      "nullable": true
+                    },
                     "password": {
                       "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
@@ -1217,6 +1222,11 @@ expression: "&schema"
             "urls"
           ],
           "properties": {
+            "namespace": {
+              "description": "namespace used to prefix Redis keys",
+              "type": "string",
+              "nullable": true
+            },
             "password": {
               "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
               "type": "string",
@@ -2329,6 +2339,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "namespace": {
+                      "description": "namespace used to prefix Redis keys",
+                      "type": "string",
+                      "nullable": true
+                    },
                     "password": {
                       "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
