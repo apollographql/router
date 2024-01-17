@@ -86,36 +86,14 @@ pub(crate) mod test {
 /// You can also use subscriber::with_default(assert_snapshot_subscriber!(), || { ... }) to assert the logs in non async code.
 macro_rules! assert_snapshot_subscriber {
     () => {
-        $crate::logging::test::SnapshotSubscriber::create_subscriber(tracing_core::metadata::LevelFilter::INFO, |yaml| {
-            insta::with_settings!({sort_maps => true}, {
-                // the tests here will force maps to sort
-                let mut settings = insta::Settings::clone_current();
-                settings.set_snapshot_suffix("logs");
-                settings.set_sort_maps(true);
-                settings.bind(|| {
-                    // runs the assertion with the changed settings enabled
-                    insta::assert_yaml_snapshot!(yaml);
-                });
-
-            });
-        })
+        $crate::assert_snapshot_subscriber!(tracing_core::LevelFilter::TRACE, {})
     };
 
-    ($redactions:tt) => {
-        $crate::logging::test::SnapshotSubscriber::create_subscriber(tracing_core::metadata::LevelFilter::INFO, |yaml| {
-            insta::with_settings!({sort_maps => true}, {
-                // the tests here will force maps to sort
-                let mut settings = insta::Settings::clone_current();
-                settings.set_snapshot_suffix("logs");
-                settings.set_sort_maps(true);
-                settings.bind(|| {
-                    insta::assert_yaml_snapshot!(yaml, $redactions);
-                });
-            });
-        })
+    ($level:expr) => {
+        $crate::assert_snapshot_subscriber!($level, {})
     };
 
-    ($redactions:tt, $level:tt) => {
+    ($level:expr, $redactions:tt) => {
         $crate::logging::test::SnapshotSubscriber::create_subscriber($level, |yaml| {
             insta::with_settings!({sort_maps => true}, {
                 // the tests here will force maps to sort
