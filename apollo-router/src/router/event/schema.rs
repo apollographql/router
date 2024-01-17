@@ -253,7 +253,6 @@ mod tests {
 
     use futures::select;
     use test_log::test;
-    use tracing_core::LevelFilter;
     use tracing_futures::WithSubscriber;
     use wiremock::matchers::method;
     use wiremock::matchers::path;
@@ -388,7 +387,7 @@ mod tests {
                 matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_2)
             );
         }
-        .with_subscriber(assert_snapshot_subscriber!(LevelFilter::INFO, {
+        .with_subscriber(assert_snapshot_subscriber!({
             "[].fields[\"url.full\"]" => "[url.full]"
         }))
         .await;
@@ -421,7 +420,7 @@ mod tests {
 
             assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
         }
-        .with_subscriber(assert_snapshot_subscriber!(LevelFilter::INFO, {
+        .with_subscriber(assert_snapshot_subscriber!({
             "[].fields[\"url.full\"]" => "[url.full]"
         }))
         .await;
@@ -471,7 +470,7 @@ mod tests {
                 matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_1)
             );
         }
-        .with_subscriber(assert_snapshot_subscriber!(LevelFilter::INFO, {
+        .with_subscriber(assert_snapshot_subscriber!({
             "[].fields[\"url.full\"]" => "[url.full]"
         }))
         .await;

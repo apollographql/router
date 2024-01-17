@@ -89,6 +89,10 @@ macro_rules! assert_snapshot_subscriber {
         $crate::assert_snapshot_subscriber!(tracing_core::LevelFilter::INFO, {})
     };
 
+    ($redactions:tt) => {
+        $crate::assert_snapshot_subscriber!(tracing_core::LevelFilter::INFO, $redactions)
+    };
+
     ($level:expr) => {
         $crate::assert_snapshot_subscriber!($level, {})
     };
