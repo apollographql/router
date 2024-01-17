@@ -45,7 +45,7 @@ where
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
-    namespace: Option<String>,
+    namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
 }
 
@@ -193,7 +193,7 @@ impl RedisCacheStorage {
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(client),
-            namespace: config.namespace,
+            namespace: config.namespace.map(Arc::new),
             ttl: config.ttl,
         })
     }
