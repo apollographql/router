@@ -704,6 +704,7 @@ async fn call_websocket(
     });
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
+
     Ok(SubgraphResponse::new_from_response(
         resp.map(|_| graphql::Response::default()),
         context,

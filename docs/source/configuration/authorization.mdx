@@ -172,9 +172,9 @@ fn router_service(service) {
     }
 
     if roles.len() > 2 {
-      for role in roles[1..] {
+      for i in 1..roles.len() {
         scope += ' ';
-        scope += role;
+        scope += roles[i];
       }
     }
 

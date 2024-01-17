@@ -267,9 +267,9 @@ async fn service_call(
                 || (is_subscription && !accepts_multipart_subscription)
             {
                 let (error_message, error_code) = if is_deferred {
-                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"), "DEFER_BAD_HEADER")
+                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'"), "DEFER_BAD_HEADER")
                 } else {
-                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed; boundary=graphql; subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
+                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
                 };
                 let mut response = SupergraphResponse::new_from_graphql_response(
                     graphql::Response::builder()

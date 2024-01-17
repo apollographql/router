@@ -99,8 +99,8 @@ impl Request {
         subgraph_request: Option<http::Request<graphql::Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
-        subgraph_name: Option<String>,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+        subgraph_name: Option<String>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Request::new(
