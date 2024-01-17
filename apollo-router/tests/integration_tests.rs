@@ -798,7 +798,7 @@ async fn query_just_at_token_limit() {
 async fn normal_query_with_defer_accept_header() {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
     let (mut response, _registry) = {
@@ -841,7 +841,7 @@ async fn defer_path_with_disabled_config() {
             }
         }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting failure due to disabled config defer support");
 
@@ -878,7 +878,7 @@ async fn defer_path() {
             }
         }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -921,7 +921,7 @@ async fn defer_path_in_array() {
                 }
             }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -994,7 +994,7 @@ async fn defer_empty_primary_response() {
             }
         }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -1031,7 +1031,7 @@ async fn defer_default_variable() {
 
     let request = supergraph::Request::fake_builder()
         .query(query)
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -1051,7 +1051,7 @@ async fn defer_default_variable() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .variable("if", false)
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 

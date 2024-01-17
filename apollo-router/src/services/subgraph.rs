@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::pin::Pin;
 use std::sync::Arc;
 
 use http::StatusCode;
@@ -13,6 +14,7 @@ use sha2::Sha256;
 use static_assertions::assert_impl_all;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio_stream::Stream;
 use tower::BoxError;
 
 use crate::error::Error;
@@ -22,7 +24,6 @@ use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
-use crate::notification::HandleStream;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
@@ -32,6 +33,7 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
+pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send + Sync>>;
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
@@ -48,7 +50,7 @@ pub struct Request {
     /// Name of the subgraph, it's an Option to not introduce breaking change
     pub(crate) subgraph_name: Option<String>,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
-    pub(crate) subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
+    pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
     /// Channel triggered when the client connection has been dropped
     pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
 
@@ -69,8 +71,8 @@ impl Request {
         subgraph_request: http::Request<graphql::Request>,
         operation_kind: OperationKind,
         context: Context,
+        subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         subgraph_name: Option<String>,
-        subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Self {
@@ -97,8 +99,8 @@ impl Request {
         subgraph_request: Option<http::Request<graphql::Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
+        subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         subgraph_name: Option<String>,
-        subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Request::new(
@@ -106,8 +108,8 @@ impl Request {
             subgraph_request.unwrap_or_default(),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
-            subgraph_name,
             subscription_stream,
+            subgraph_name,
             connection_closed_signal,
         )
     }

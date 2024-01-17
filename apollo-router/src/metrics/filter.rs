@@ -9,7 +9,7 @@ use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
-use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
@@ -22,8 +22,58 @@ use opentelemetry_api::KeyValue;
 use regex::Regex;
 
 #[derive(Clone)]
+pub(crate) enum MeterProvider {
+    Regular(opentelemetry::sdk::metrics::MeterProvider),
+    Global(opentelemetry::global::GlobalMeterProvider),
+}
+
+impl MeterProvider {
+    fn versioned_meter(
+        &self,
+        name: impl Into<Cow<'static, str>>,
+        version: Option<impl Into<Cow<'static, str>>>,
+        schema_url: Option<impl Into<Cow<'static, str>>>,
+        attributes: Option<Vec<KeyValue>>,
+    ) -> Meter {
+        match &self {
+            MeterProvider::Regular(provider) => {
+                provider.versioned_meter(name, version, schema_url, attributes)
+            }
+            MeterProvider::Global(provider) => {
+                provider.versioned_meter(name, version, schema_url, attributes)
+            }
+        }
+    }
+    fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+        match self {
+            MeterProvider::Regular(provider) => provider.shutdown(),
+            MeterProvider::Global(_provider) => Ok(()),
+        }
+    }
+
+    fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
+        match self {
+            MeterProvider::Regular(provider) => provider.force_flush(cx),
+            MeterProvider::Global(_provider) => Ok(()),
+        }
+    }
+}
+
+impl From<opentelemetry::sdk::metrics::MeterProvider> for MeterProvider {
+    fn from(provider: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+        MeterProvider::Regular(provider)
+    }
+}
+
+impl From<opentelemetry::global::GlobalMeterProvider> for MeterProvider {
+    fn from(provider: opentelemetry::global::GlobalMeterProvider) -> Self {
+        MeterProvider::Global(provider)
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct FilterMeterProvider {
-    delegate: opentelemetry::sdk::metrics::MeterProvider,
+    delegate: MeterProvider,
     deny: Option<Regex>,
     allow: Option<Regex>,
 }
@@ -31,19 +81,15 @@ pub(crate) struct FilterMeterProvider {
 #[buildstructor]
 impl FilterMeterProvider {
     #[builder]
-    fn new(
-        delegate: opentelemetry::sdk::metrics::MeterProvider,
-        deny: Option<Regex>,
-        allow: Option<Regex>,
-    ) -> Self {
+    fn new<T: Into<MeterProvider>>(delegate: T, deny: Option<Regex>, allow: Option<Regex>) -> Self {
         FilterMeterProvider {
-            delegate,
+            delegate: delegate.into(),
             deny,
             allow,
         }
     }
 
-    pub(crate) fn private(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+    pub(crate) fn private<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
@@ -55,7 +101,7 @@ impl FilterMeterProvider {
             .build()
     }
 
-    pub(crate) fn public(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+    pub(crate) fn public<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
@@ -66,7 +112,7 @@ impl FilterMeterProvider {
     }
 
     #[cfg(test)]
-    pub(crate) fn all(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+    pub(crate) fn all<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder().delegate(delegate).build()
     }
 
@@ -177,7 +223,7 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     }
 }
 
-impl MeterProvider for FilterMeterProvider {
+impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
     fn versioned_meter(
         &self,
         name: impl Into<Cow<'static, str>>,
@@ -185,12 +231,11 @@ impl MeterProvider for FilterMeterProvider {
         schema_url: Option<impl Into<Cow<'static, str>>>,
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
-        let delegate = self
-            .delegate
-            .versioned_meter(name, version, schema_url, attributes);
         Meter::new(Arc::new(FilteredInstrumentProvider {
             noop: NoopMeterProvider::default().meter(""),
-            delegate,
+            delegate: self
+                .delegate
+                .versioned_meter(name, version, schema_url, attributes),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))
@@ -206,6 +251,7 @@ mod test {
     use opentelemetry::sdk::metrics::MeterProviderBuilder;
     use opentelemetry::sdk::metrics::PeriodicReader;
     use opentelemetry::testing::metrics::InMemoryMetricsExporter;
+    use opentelemetry_api::global::GlobalMeterProvider;
     use opentelemetry_api::Context;
 
     use crate::metrics::filter::FilterMeterProvider;
@@ -261,13 +307,66 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_public_metrics() {
+    async fn test_description_and_unit() {
         let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::public(
+        let meter_provider = FilterMeterProvider::private(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
+        let cx = Context::default();
+        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        filtered
+            .u64_counter("apollo.router.operations")
+            .with_description("desc")
+            .with_unit(Unit::new("ms"))
+            .init()
+            .add(1, &[]);
+        meter_provider.force_flush(&cx).unwrap();
+
+        let metrics: Vec<_> = exporter
+            .get_finished_metrics()
+            .unwrap()
+            .into_iter()
+            .flat_map(|m| m.scope_metrics.into_iter())
+            .flat_map(|m| m.metrics)
+            .collect();
+        assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"
+            && m.description == "desc"
+            && m.unit == Unit::new("ms")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_public_metrics_using_meter_provider() {
+        let exporter = InMemoryMetricsExporter::default();
+        test_public_metrics(
+            exporter.clone(),
+            MeterProviderBuilder::default()
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .build(),
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_public_metrics_using_global_meter_provider() {
+        let exporter = InMemoryMetricsExporter::default();
+
+        test_public_metrics(
+            exporter.clone(),
+            GlobalMeterProvider::new(
+                MeterProviderBuilder::default()
+                    .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                    .build(),
+            ),
+        )
+        .await;
+    }
+    async fn test_public_metrics<T: Into<super::MeterProvider>>(
+        exporter: InMemoryMetricsExporter,
+        meter_provider: T,
+    ) {
+        let meter_provider = FilterMeterProvider::public(meter_provider);
         let cx = Context::default();
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
@@ -304,35 +403,5 @@ mod test {
         assert!(!metrics
             .iter()
             .any(|m| m.name == "apollo.router.entities.test"));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_description_and_unit() {
-        let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::private(
-            MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-                .build(),
-        );
-        let cx = Context::default();
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
-        filtered
-            .u64_counter("apollo.router.operations")
-            .with_description("desc")
-            .with_unit(Unit::new("ms"))
-            .init()
-            .add(1, &[]);
-        meter_provider.force_flush(&cx).unwrap();
-
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
-            .collect();
-        assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"
-            && m.description == "desc"
-            && m.unit == Unit::new("ms")));
     }
 }
