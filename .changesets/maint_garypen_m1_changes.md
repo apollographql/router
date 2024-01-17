@@ -8,6 +8,6 @@ This will have the following effects:
  - Older, Intel based, macOS systems will no longer be able to execute our macOS router binaries
  - Newer, Apple Silicon based, macOS systems will get a performance boost due to no longer requiring Rosetta2 support.
 
-We have raised an [issue](https://github.com/apollographql/router/issues/4483) that describes options for Intel based macOS users. Please let us know in that issue if the alternatives we suggest (Docker, source build) don't work for you and you'd like us to add support for universal macOS binaries.
+We have raised [an issue](https://github.com/apollographql/router/issues/4483) that describes options for Intel based macOS users. Please let us know in that issue if the alternatives we suggest (e.g., Docker, source build) don't work for you so we can discuss alternatives.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4484
