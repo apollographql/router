@@ -1176,7 +1176,6 @@ impl Operation {
             })
             .collect::<Result<_, _>>()?;
 
-        // TODO: check here if it's an inline
         Ok(Operation {
             selection_set,
             name,
