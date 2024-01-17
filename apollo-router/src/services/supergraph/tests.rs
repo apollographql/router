@@ -136,6 +136,158 @@ async fn root_selection_set_statically_skipped() {
 }
 
 #[tokio::test]
+async fn root_selection_set_with_fragment_statically_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query {
+  ...TestFragment
+}
+
+fragment TestFragment on Query {
+  currentUser @skip(if: true) {
+    id
+    name
+    activeOrganization {
+      id
+    }
+  }
+}"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_set_with_inline_fragment_statically_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query {
+  ... on Query {
+    currentUser @skip(if: true) {
+        id
+        name
+        activeOrganization {
+        id
+        }
+    }
+  }
+}"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_with_several_fields_statically_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query {
+  ...TestFragment
+  currentUser @skip(if: true) {
+    id
+    name
+    activeOrganization {
+      id
+    }
+  }
+}
+
+fragment TestFragment on Query {
+  currentUser @skip(if: true) {
+    id
+    name
+    activeOrganization {
+      id
+    }
+  }
+}"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
 async fn root_selection_skipped_with_other_fields() {
     const SCHEMA: &str = r#"schema
         @core(feature: "https://specs.apollo.dev/core/v0.1")
