@@ -1,4 +1,4 @@
-### update macOS builds in CI to use new m1 machines ([Issue #3902](https://github.com/apollographql/router/issues/3902))
+### Pre-built binaries are only available for Apple Silicon ([Issue #3902](https://github.com/apollographql/router/issues/3902))
 
 Prior to this release, macOS binaries were produced on Intel build machines in our CI pipeline. The binaries produced would also work on Apple Silicon (M1, etc.. chips) through the functionality provided by [Rosetta2](https://support.apple.com/en-gb/HT211861).
 
