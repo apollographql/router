@@ -50,6 +50,7 @@ use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
+use crate::services::layers::file_uploads;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -812,6 +813,7 @@ impl SupergraphCreator {
 
         ServiceBuilder::new()
             .layer(content_negotiation::SupergraphLayer::default())
+            .layer(file_uploads::SupergraphLayer::new(&self.config))
             .service(
                 self.plugins
                     .iter()
