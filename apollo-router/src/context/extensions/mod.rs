@@ -85,6 +85,7 @@ impl Extensions {
             .and_then(|boxed| (&mut **boxed as &mut (dyn Any + 'static)).downcast_mut())
     }
 
+    /// Returns `true` type has been stored in `Extensions`.
     pub fn contains_key<T: Send + Sync + 'static>(&self) -> bool {
         self.map
             .as_ref()

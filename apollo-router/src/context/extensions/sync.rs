@@ -14,11 +14,11 @@ use std::time::Instant;
 /// For example:
 /// `context.extensions().lock().insert::<MyData>(data);`
 #[derive(Default, Clone, Debug)]
-pub struct Extensions {
+pub struct ExtensionsMutex {
     extensions: Arc<parking_lot::Mutex<super::Extensions>>,
 }
 
-impl Extensions {
+impl ExtensionsMutex {
     /// Locks the extensions for mutation.
     ///
     /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.

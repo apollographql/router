@@ -11,7 +11,7 @@ use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
 use derivative::Derivative;
-use extensions::sync::Extensions;
+use extensions::sync::ExtensionsMutex;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -48,7 +48,7 @@ pub struct Context {
     entries: Entries,
 
     #[serde(skip)]
-    extensions: Extensions,
+    extensions: ExtensionsMutex,
 
     /// Creation time
     #[serde(skip)]
@@ -71,7 +71,7 @@ impl Context {
             .to_string();
         Context {
             entries: Default::default(),
-            extensions: Extensions::default(),
+            extensions: ExtensionsMutex::default(),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,
@@ -88,7 +88,7 @@ impl Context {
     /// Doing so may cause performance degradation or even deadlocks.
     ///
     /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
-    pub fn extensions(&self) -> &Extensions {
+    pub fn extensions(&self) -> &ExtensionsMutex {
         &self.extensions
     }
 
