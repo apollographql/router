@@ -456,7 +456,7 @@ impl Plugin for Telemetry {
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
                 if let Some(usage_reporting) =
-                    resp.context.private_entries.lock().get::<UsageReporting>()
+                    resp.context.extensions().lock().get::<UsageReporting>()
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -571,7 +571,7 @@ impl Plugin for Telemetry {
                     .then(|| Self::get_cache_attributes(subgraph_name_arc.clone(), &mut req))
                     .flatten();
                 if let Some(cache_attributes) = cache_attributes {
-                    req.context.private_entries.lock().insert(cache_attributes);
+                    req.context.extensions().lock().insert(cache_attributes);
                 }
 
                 request_ftv1(req)
@@ -583,7 +583,7 @@ impl Plugin for Telemetry {
                         subgraph_metrics_conf_req.as_ref(),
                         sub_request,
                     );
-                    let cache_attributes = sub_request.context.private_entries.lock().remove();
+                    let cache_attributes = sub_request.context.extensions().lock().remove();
                     let custom_attributes = config
                         .instrumentation
                         .spans
@@ -824,7 +824,7 @@ impl Telemetry {
     ) -> Result<SupergraphResponse, BoxError> {
         let mut metric_attrs = {
             context
-                .private_entries
+                .extensions()
                 .lock()
                 .get::<MetricsAttributes>()
                 .cloned()
@@ -949,11 +949,11 @@ impl Telemetry {
         attributes.extend(router_attributes_conf.get_attributes_from_context(context));
 
         let _ = context
-            .private_entries
+            .extensions()
             .lock()
             .insert(MetricsAttributes(attributes));
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
-            context.private_entries.lock().insert(EnableSubgraphFtv1);
+            context.extensions().lock().insert(EnableSubgraphFtv1);
         }
     }
 
@@ -1067,7 +1067,7 @@ impl Telemetry {
             .extend(attribute_forward_config.get_attributes_from_context(&sub_request.context));
         sub_request
             .context
-            .private_entries
+            .extensions()
             .lock()
             .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
     }
@@ -1084,7 +1084,7 @@ impl Telemetry {
     ) {
         let mut metric_attrs = {
             context
-                .private_entries
+                .extensions()
                 .lock()
                 .get::<SubgraphMetricsAttributes>()
                 .cloned()
@@ -1311,11 +1311,8 @@ impl Telemetry {
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
     ) {
-        let metrics = if let Some(usage_reporting) = context
-            .private_entries
-            .lock()
-            .get::<UsageReporting>()
-            .cloned()
+        let metrics = if let Some(usage_reporting) =
+            context.extensions().lock().get::<UsageReporting>().cloned()
         {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
@@ -1871,7 +1868,7 @@ register_plugin!("apollo", "telemetry", Telemetry);
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     if req
         .context
-        .private_entries
+        .extensions()
         .lock()
         .contains_key::<EnableSubgraphFtv1>()
         && Span::current().context().span().span_context().is_sampled()
@@ -1887,7 +1884,7 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
     // Stash the FTV1 data
     if resp
         .context
-        .private_entries
+        .extensions()
         .lock()
         .contains_key::<EnableSubgraphFtv1>()
     {
