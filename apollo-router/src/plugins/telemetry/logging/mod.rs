@@ -72,7 +72,7 @@ mod test {
                 .as_mapping_mut()
                 .unwrap()
                 .remove(&serde_yaml::Value::String(name.to_string()))
-                .expect(format!("no config for plugin {}", name).as_str());
+                .expect("no config for plugin");
             let supergraph_sdl = supergraph
                 .map(|s| Arc::new(s.to_string()))
                 .unwrap_or_default();
@@ -82,7 +82,7 @@ mod test {
                 notify: Default::default(),
             })
             .await
-            .expect(&format!("failed to initialize plugin {}", name));
+            .expect("failed to initialize plugin");
 
             Self { plugin }
         }
