@@ -132,6 +132,7 @@ pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod fmt_layer;
 pub(crate) mod formatters;
+mod logging;
 pub(crate) mod metrics;
 mod otlp;
 pub(crate) mod reload;

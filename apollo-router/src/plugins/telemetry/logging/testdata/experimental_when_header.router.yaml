@@ -1,0 +1,9 @@
+telemetry:
+  exporters:
+    logging:
+      experimental_when_header:
+        - name: "custom-header"
+          match: "^foo.*"
+          headers: true
+          body: true
+
