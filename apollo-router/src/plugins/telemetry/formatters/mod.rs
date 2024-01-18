@@ -8,6 +8,7 @@ use std::fmt;
 use std::time::Instant;
 
 use opentelemetry::sdk::Resource;
+use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
@@ -18,12 +19,12 @@ use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
+use super::config_new::logging::RateLimit;
+use super::dynamic_attribute::LogAttributes;
 use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
-
-use super::config_new::logging::RateLimit;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
@@ -81,7 +82,33 @@ where
         writer: Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> fmt::Result {
-        if (self.filter_fn)(event) && self.rate_limit(event) {
+        if (self.filter_fn)(event) {
+            match self.rate_limit(event) {
+                RateResult::Deny => return Ok(()),
+
+                RateResult::Allow => {}
+                RateResult::AllowSkipped(skipped) => {
+                    if let Some(span) = event
+                        .parent()
+                        .and_then(|id| ctx.span(id))
+                        .or_else(|| ctx.lookup_current())
+                    {
+                        let mut extensions = span.extensions_mut();
+                        match extensions.get_mut::<LogAttributes>() {
+                            None => {
+                                let mut attributes = LogAttributes::default();
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                                extensions.insert(attributes);
+                            }
+                            Some(attributes) => {
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                            }
+                        }
+                    }
+                }
+            }
             self.inner.format_event(ctx, writer, event)
         } else {
             Ok(())
@@ -104,7 +131,33 @@ where
     where
         W: std::fmt::Write,
     {
-        if (self.filter_fn)(event) && self.rate_limit(event) {
+        if (self.filter_fn)(event) {
+            match self.rate_limit(event) {
+                RateResult::Deny => return Ok(()),
+
+                RateResult::Allow => {}
+                RateResult::AllowSkipped(skipped) => {
+                    if let Some(span) = event
+                        .parent()
+                        .and_then(|id| ctx.span(id))
+                        .or_else(|| ctx.lookup_current())
+                    {
+                        let mut extensions = span.extensions_mut();
+                        match extensions.get_mut::<LogAttributes>() {
+                            None => {
+                                let mut attributes = LogAttributes::default();
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                                extensions.insert(attributes);
+                            }
+                            Some(attributes) => {
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                            }
+                        }
+                    }
+                }
+            }
             self.inner.format_event(ctx, writer, event)
         } else {
             Ok(())
@@ -112,8 +165,13 @@ where
     }
 }
 
+enum RateResult {
+    Allow,
+    AllowSkipped(u32),
+    Deny,
+}
 impl<T, F> FilteringFormatter<T, F> {
-    fn rate_limit(&self, event: &tracing::Event<'_>) -> bool {
+    fn rate_limit(&self, event: &tracing::Event<'_>) -> RateResult {
         if let Some(rate_limit) = self.config.as_ref() {
             let now = Instant::now();
             if let Some(counter) = self
@@ -125,14 +183,22 @@ impl<T, F> FilteringFormatter<T, F> {
                     counter.count += 1;
 
                     if counter.count >= rate_limit.count {
-                        return false;
+                        return RateResult::Deny;
                     }
                 } else {
+                    if counter.count > rate_limit.count {
+                        let skipped = counter.count - rate_limit.count;
+                        counter.last = now;
+                        counter.count += 1;
+
+                        return RateResult::AllowSkipped(skipped);
+                    }
+
                     counter.last = now;
                     counter.count += 1;
                 }
 
-                return true;
+                return RateResult::Allow;
             }
 
             // this is racy but not a very large issue, we can accept an initial burst
@@ -145,7 +211,7 @@ impl<T, F> FilteringFormatter<T, F> {
             );
         }
 
-        true
+        RateResult::Allow
     }
 }
 
