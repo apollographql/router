@@ -30,7 +30,6 @@ use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
-use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -56,6 +55,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
+use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::services::supergraph;
@@ -207,7 +207,7 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Introspection { response }) => Ok(
+        Some(QueryPlannerContent::Response { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
@@ -341,7 +341,7 @@ pub struct SubscriptionTaskParams {
     pub(crate) client_sender: tokio::sync::mpsc::Sender<Response>,
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
-    pub(crate) stream_rx: ReceiverStream<HandleStream<String, graphql::Response>>,
+    pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
     pub(crate) service_name: String,
 }
 

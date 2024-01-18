@@ -380,7 +380,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                                 reason: "cannot get the callback stream".to_string(),
                             }
                         })?;
-                        stream_tx.send(handle.into_stream()).await?;
+                        stream_tx.send(Box::pin(handle.into_stream())).await?;
+
                         tracing::info!(
                             monotonic_counter.apollo.router.operations.subscriptions = 1u64,
                             subscriptions.mode = %"callback",
@@ -559,7 +560,9 @@ async fn call_websocket(
         subgraph.service.name = service_name,
     );
     if !created {
-        subscription_stream_tx.send(handle.into_stream()).await?;
+        subscription_stream_tx
+            .send(Box::pin(handle.into_stream()))
+            .await?;
         tracing::info!(
             monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
             mode = %"passthrough",
@@ -701,7 +704,7 @@ async fn call_websocket(
         }
     });
 
-    subscription_stream_tx.send(handle_stream).await?;
+    subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
     Ok(SubgraphResponse::new_from_response(
         resp.map(|_| graphql::Response::default()),
