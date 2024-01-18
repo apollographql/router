@@ -371,7 +371,7 @@ impl Query {
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
         let operations = document
             .all_operations()
-            .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
+            .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         let mut visitor = QueryHashVisitor::new(&schema.definitions, ast);
@@ -1145,16 +1145,19 @@ impl Operation {
         operation: &executable::Operation,
         schema: &Schema,
         defer_stats: &mut DeferStats,
+        fragments: &Fragments,
     ) -> Result<Self, SpecError> {
         let name = operation.name.as_ref().map(|s| s.as_str().to_owned());
         let kind = operation.operation_type.into();
         let type_name = schema.root_operation_name(kind).to_owned();
+
         let selection_set = operation
             .selection_set
             .selections
             .iter()
             .filter_map(|selection| {
-                Selection::from_hir(selection, &type_name, schema, 0, defer_stats).transpose()
+                Selection::from_hir(selection, &type_name, schema, 0, defer_stats, fragments)
+                    .transpose()
             })
             .collect::<Result<_, _>>()?;
         let variables = operation
@@ -1172,6 +1175,7 @@ impl Operation {
                 Ok((name, variable))
             })
             .collect::<Result<_, _>>()?;
+
         Ok(Operation {
             selection_set,
             name,
