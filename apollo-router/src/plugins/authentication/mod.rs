@@ -438,7 +438,7 @@ impl Plugin for AuthenticationPlugin {
             ServiceBuilder::new()
                 .instrument(authentication_service_span())
                 .checkpoint(move |request: router::Request| {
-                    authenticate(&configuration, &jwks_manager, request)
+                    Ok(authenticate(&configuration, &jwks_manager, request))
                 })
                 .service(service)
                 .boxed()
@@ -464,7 +464,7 @@ fn authenticate(
     config: &JWTConf,
     jwks_manager: &JwksManager,
     request: router::Request,
-) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+) -> ControlFlow<router::Response, router::Request> {
     const AUTHENTICATION_KIND: &str = "JWT";
 
     // We are going to do a lot of similar checking so let's define a local function
@@ -473,7 +473,7 @@ fn authenticate(
         context: Context,
         error: AuthenticationError,
         status: StatusCode,
-    ) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+    ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
         tracing::info!(
             monotonic_counter.apollo_authentication_failure_count = 1u64,
@@ -489,7 +489,7 @@ fn authenticate(
             authentication.jwt.failed = true
         );
         tracing::info!(message = %error, "jwt authentication failure");
-        let response = router::Response::error_builder()
+        let response = router::Response::infallible_builder()
             .error(
                 graphql::Error::builder()
                     .message(error.to_string())
@@ -498,8 +498,8 @@ fn authenticate(
             )
             .status_code(status)
             .context(context)
-            .build()?;
-        Ok(ControlFlow::Break(response))
+            .build();
+        ControlFlow::Break(response)
     }
 
     // The http_request is stored in a `Router::Request` context.
@@ -507,7 +507,7 @@ fn authenticate(
     let jwt_value_result = match request.router_request.headers().get(&config.header_name) {
         Some(value) => value.to_str(),
         None => {
-            return Ok(ControlFlow::Continue(request));
+            return ControlFlow::Continue(request);
         }
     };
 
@@ -638,7 +638,7 @@ fn authenticate(
             kind = %AUTHENTICATION_KIND
         );
         tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1u64);
-        return Ok(ControlFlow::Continue(request));
+        return ControlFlow::Continue(request);
     }
 
     // We can't find a key to process this JWT.
