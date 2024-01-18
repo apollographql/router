@@ -5,7 +5,6 @@ pub(crate) mod text;
 use std::collections::HashMap;
 use std::collections::LinkedList;
 use std::fmt;
-use std::time::Duration;
 use std::time::Instant;
 
 use opentelemetry::sdk::Resource;
@@ -23,6 +22,8 @@ use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
+
+use super::config_new::logging::RateLimit;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
@@ -49,18 +50,20 @@ pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
 pub(crate) struct FilteringFormatter<T, F> {
     inner: T,
     filter_fn: F,
-    last_logged: Mutex<HashMap<Identifier, Instant>>,
+    rate_limiter: Mutex<HashMap<Identifier, RateCounter>>,
+    config: Option<RateLimit>,
 }
 
 impl<T, F> FilteringFormatter<T, F>
 where
     F: Fn(&tracing::Event<'_>) -> bool,
 {
-    pub(crate) fn new(inner: T, filter_fn: F) -> Self {
+    pub(crate) fn new(inner: T, filter_fn: F, rate_limit: Option<&RateLimit>) -> Self {
         Self {
             inner,
             filter_fn,
-            last_logged: Mutex::new(HashMap::new()),
+            rate_limiter: Mutex::new(HashMap::new()),
+            config: rate_limit.cloned(),
         }
     }
 }
@@ -78,7 +81,7 @@ where
         writer: Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> fmt::Result {
-        if (self.filter_fn)(event) {
+        if (self.filter_fn)(event) && self.rate_limit(event) {
             self.inner.format_event(ctx, writer, event)
         } else {
             Ok(())
@@ -111,26 +114,44 @@ where
 
 impl<T, F> FilteringFormatter<T, F> {
     fn rate_limit(&self, event: &tracing::Event<'_>) -> bool {
-        let now = Instant::now();
-        if let Some(last) = self
-            .last_logged
-            .lock()
-            .get_mut(&event.metadata().callsite())
-        {
-            if now - *last < Duration::from_secs(10) {
-                return false;
-            }
-            *last = now;
-            return true;
-        }
+        if let Some(rate_limit) = self.config.as_ref() {
+            let now = Instant::now();
+            if let Some(counter) = self
+                .rate_limiter
+                .lock()
+                .get_mut(&event.metadata().callsite())
+            {
+                if now - counter.last < rate_limit.interval {
+                    counter.count += 1;
 
-        // this is racy but not a very large issue, we can accept an initial burst
-        self.last_logged
-            .lock()
-            .insert(event.metadata().callsite(), now);
+                    if counter.count >= rate_limit.count {
+                        return false;
+                    }
+                } else {
+                    counter.last = now;
+                    counter.count += 1;
+                }
+
+                return true;
+            }
+
+            // this is racy but not a very large issue, we can accept an initial burst
+            self.rate_limiter.lock().insert(
+                event.metadata().callsite(),
+                RateCounter {
+                    last: now,
+                    count: 1,
+                },
+            );
+        }
 
         true
     }
+}
+
+struct RateCounter {
+    last: Instant,
+    count: u32,
 }
 
 // Function to filter metric event for the filter formatter

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
+use std::time::Duration;
 
 use schemars::gen::SchemaGenerator;
 use schemars::schema::InstanceType;
@@ -104,12 +105,36 @@ pub(crate) struct StdOut {
     pub(crate) enabled: bool,
     /// The format to log to stdout.
     pub(crate) format: Format,
+    /// Log rate limiting. The limit is set per type of log message
+    pub(crate) rate_limit: Option<RateLimit>,
 }
+
 impl Default for StdOut {
     fn default() -> Self {
         StdOut {
             enabled: true,
             format: Format::default(),
+            rate_limit: None,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct RateLimit {
+    /// Number of log lines allowed in interval per message
+    pub(crate) count: u32,
+    /// Interval for rate limiting
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    pub(crate) interval: Duration,
+}
+
+impl Default for RateLimit {
+    fn default() -> Self {
+        RateLimit {
+            count: 0,
+            interval: Duration::from_secs(1),
         }
     }
 }
