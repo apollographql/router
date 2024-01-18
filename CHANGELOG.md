@@ -4,6 +4,184 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.38.0-rc.1] - 2024-01-18
+
+## 🚀 Features
+
+### Redis key namespace ([Issue #4247](https://github.com/apollographql/router/issues/4247))
+
+This implements key namespacing in redis caching. The namespace, if provided, will be added as a prefix to the key: `namespace:key`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4458
+
+### Promote HTTP request size limit from experimental to general availability ([PR #4442](https://github.com/apollographql/router/pull/4442))
+
+By default Apollo Router limits the size of the HTTP request body it will read from the network to 2 MB. In this version, the YAML configuration to change the limit is promoted from experimental to general availability.
+
+For more information about launch stages, please see the documentation here: https://www.apollographql.com/docs/resources/product-launch-stages/
+
+Before increasing this limit significantly consider testing performance in an environment similar to your production,
+especially if some clients are untrusted. Many concurrent large requests could cause the Router to run out of memory.
+
+Previous configuration will warn but still work:
+
+```yaml
+limits:
+  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
+```
+
+The warning can be fixed by removing the `experimental_` prefix:
+
+```yaml
+limits:
+  http_max_request_bytes: 2000000 # Default value: 2 MB
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/4442
+
+### Add options to set username and password separately for Redis ([Issue #4346](https://github.com/apollographql/router/issues/4346))
+
+Example of configuration:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    experimental_cache:
+      redis: #highlight-line
+        urls: ["redis://..."] #highlight-line
+        username: admin/123 # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the username in the URL
+        password: admin # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the password in the URL
+        timeout: 5ms # Optional, by default: 2ms
+        ttl: 24h # Optional, by default no expiration
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4453
+
+## 🐛 Fixes
+
+### Fix the Datadog default tracing exporter URL ([Issue #4415](https://github.com/apollographql/router/issues/4416))
+
+The default URL for the Datadog exporter was incorrectly set to `http://localhost:8126/v0.4/traces` which caused issues for users that were running different agent versions.
+This is now fixed and matches the exporter URL of `http://127.0.0.1:8126`.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4444
+
+### Use the right conventions for batching metrics ([PR #4424](https://github.com/apollographql/router/pull/4424))
+
+Rename `apollo_router.operations.batching` to  `apollo.router.operations.batching` because it doesn't follow our conventions with `apollo.router.` prefix.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4424
+
+### Fix format_response for statically skipped root selection set ([Issue #4397](https://github.com/apollographql/router/issues/4397))
+
+If in your GraphQL operation you have a root selection set skipped by `@skip` or `@include` directive, before this fix the results you got if you hardcoded the value of the parameter in `@skip` directive like this for example:
+
+```graphql
+{
+    get @skip(if: true) {
+        id
+        name
+    }
+}
+```
+
+or if you used a variable like this:
+
+```graphql
+{
+    get(: Boolean = true) @skip(if: ) {
+        id
+        name
+    }
+}
+```
+
+you received different response. Now it both answers:
+
+```json
+{ "data": {}}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4466
+
+### Improve JWKS parse error handling ([Issue #4463](https://github.com/apollographql/router/issues/4463))
+
+When parsing a JWKS the Router should ignore any JWKs that fail to parse, rather than failing the entire JWKS parse. 
+This can happen when the JWK is malformed, or when a JWK uses an unknown algorithm. When this happens a warning will be output to the logs, for example: 
+
+```
+2024-01-11T15:32:01.220034Z WARN fetch jwks{url=file:///tmp/jwks.json,}  ignoring a key since it is not valid, enable debug logs to full content err=unknown variant `UnknownAlg`, expected one of `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA` alg="UnknownAlg" index=2
+```
+
+Log messages have the following attributes:
+* `alg` The JWK algorithm if known or `<unknown>`
+* `index` The index of the JWK within the JWKS.
+* `url` The URL of the JWKS that had the issue.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4465
+
+### update router-bridge to v0.5.14+v2.6.3 ([PR #4468](https://github.com/apollographql/router/pull/4468))
+
+This federation update contains query planning fixes for:
+* invalid typename used when calling into a subgraph that uses `@interfaceObject`
+* performance issue when generating planning paths for union members that use `@requires`
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4468
+
+### Set log level to `info` by default for the entire application ([PR #4451](https://github.com/apollographql/router/pull/4451))
+
+By default the log level of the application if `RUST_LOG` is not set is `info` and if you provide `--log` or `APOLLO_RUST_LOG` value then it overrides the default `info` log level with `apollo_router=...` because it only impacts the `apollo_router` crate, not external custom plugin and so one.
+
+By doing this fix, by default if you have a custom plugin with info logs or metrics you won't have to enforce `RUST_LOG=info` everytime, it will work as expected.
+
+> Note: it doesn't impact the behavior of `RUST_LOG` if you set it.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4451
+
+### fix: build entity representations with inline fragments correctly ([PR #4441](https://github.com/apollographql/router/pull/4441))
+
+This uses a more flexible abstract type / concrete type check when applying a selection set to an entity reference before it's used in a fetch node. Previous to this change, we would drop data from the reference when it selected using an inline fragment (e.g. `@requires(fields: "... on Foo { a } ... on Bar { b }")`).
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/4441
+
+### Improve logging for JWKS download failures ([Issue #4448](https://github.com/apollographql/router/issues/4448))
+
+To enable users to debug JWKS download and parse failures more easily, we've added more detailed logging to the router. The router now logs the following information when a JWKS download or parse fails:
+
+```
+2024-01-09T12:32:20.174144Z ERROR fetch jwks{url=http://bad.jwks.com/,}  could not create JSON Value from url content, enable debug logs to see content e=expected value at line 1 column 1
+```
+Enabling debug logs via `APOLLO_LOG=debug` or `--logs DEBUG` will show the full JWKS content being parsed:
+```
+2024-01-09T12:32:20.153055Z DEBUG fetch jwks{url=http://bad.jwks.com/,}  parsing JWKS data="invalid jwks"
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4449
+
+### make OperationKind public ([Issue #4410](https://github.com/apollographql/router/issues/4410))
+
+`OperationKind` was already used in a public field but the type itself was still private.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4489
+
+## 🛠 Maintenance
+
+### Pre-built binaries are only available for Apple Silicon ([Issue #3902](https://github.com/apollographql/router/issues/3902))
+
+Prior to this release, macOS binaries were produced on Intel build machines in our CI pipeline. The binaries produced would also work on Apple Silicon (M1, etc.. chips) through the functionality provided by [Rosetta2](https://support.apple.com/en-gb/HT211861).
+
+Our [CI provider has announced the deprecation of the macOS Intel build machines](https://discuss.circleci.com/t/macos-intel-support-deprecation-in-january-2024/48718) and we are updating our build pipeline to use the new Apple Silicon based machines.
+
+This will have the following effects:
+ - Older, Intel based, macOS systems will no longer be able to execute our macOS router binaries
+ - Newer, Apple Silicon based, macOS systems will get a performance boost due to no longer requiring Rosetta2 support.
+
+We have raised [an issue](https://github.com/apollographql/router/issues/4483) that describes options for Intel based macOS users. Please let us know in that issue if the alternatives we suggest (e.g., Docker, source build) don't work for you so we can discuss alternatives.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4484
+
+
+
 # [1.37.0] - 2024-01-05
 
 ## 🚀 Features
