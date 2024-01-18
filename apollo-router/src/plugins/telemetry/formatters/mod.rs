@@ -2,12 +2,17 @@
 pub(crate) mod json;
 pub(crate) mod text;
 
+use std::collections::HashMap;
 use std::collections::LinkedList;
 use std::fmt;
+use std::time::Duration;
+use std::time::Instant;
 
 use opentelemetry::sdk::Resource;
+use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
+use tracing_core::callsite::Identifier;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
@@ -44,6 +49,7 @@ pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
 pub(crate) struct FilteringFormatter<T, F> {
     inner: T,
     filter_fn: F,
+    last_logged: Mutex<HashMap<Identifier, Instant>>,
 }
 
 impl<T, F> FilteringFormatter<T, F>
@@ -51,7 +57,11 @@ where
     F: Fn(&tracing::Event<'_>) -> bool,
 {
     pub(crate) fn new(inner: T, filter_fn: F) -> Self {
-        Self { inner, filter_fn }
+        Self {
+            inner,
+            filter_fn,
+            last_logged: Mutex::new(HashMap::new()),
+        }
     }
 }
 
@@ -91,11 +101,29 @@ where
     where
         W: std::fmt::Write,
     {
-        if (self.filter_fn)(event) {
+        if (self.filter_fn)(event) && self.rate_limit(event) {
             self.inner.format_event(ctx, writer, event)
         } else {
             Ok(())
         }
+    }
+}
+
+impl<T, F> FilteringFormatter<T, F> {
+    fn rate_limit(&self, event: &tracing::Event<'_>) -> bool {
+        let now = Instant::now();
+        match self.last_logged.lock().entry(event.metadata().callsite()) {
+            std::collections::hash_map::Entry::Occupied(mut last) => {
+                if now - *last.get() < Duration::from_secs(10) {
+                    return false;
+                }
+                last.insert(now);
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(now);
+            }
+        }
+        true
     }
 }
 
