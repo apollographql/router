@@ -3801,6 +3801,59 @@ fn skip() {
         body: String
     }";
 
+    // with variables
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query($skip: Boolean = false)  {
+                get @skip(if: $skip) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+        )
+        .variables(json! {{
+            "skip": true
+        }})
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "review": {
+                    "id": "b",
+                }
+            },
+        }})
+        .expected(json! {{}})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query {
+                get @skip(if: true) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+        )
+        .variables(json! {{
+            "skip": true
+        }})
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "review": {
+                    "id": "b",
+                }
+            },
+        }})
+        .expected(json! {{}})
+        .test();
+
     // duplicate operation name
     FormatTest::builder()
         .schema(schema)
@@ -3810,7 +3863,7 @@ fn skip() {
                     name @skip(if: true)
                 }
                 get @skip(if: false) {
-                    id 
+                    id
                     review {
                         id
                     }
