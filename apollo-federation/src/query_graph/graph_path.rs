@@ -57,7 +57,7 @@ use std::sync::Arc;
 pub(crate) struct GraphPath<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
-    TEdge: Into<Option<EdgeIndex>>,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
 {
     /// The query graph of which this is a path.
     graph: Arc<QueryGraph>,
@@ -113,6 +113,10 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
     /// The cost of resolving the conditions for this edge.
     conditions_cost: QueryPlanCost,
 }
+
+/// The item type for [`GraphPath::iter`]
+pub(crate) type GraphPathItem<'path, TTrigger, TEdge> =
+    (TEdge, &'path Arc<TTrigger>, &'path Option<Arc<OpPathTree>>);
 
 /// A `GraphPath` whose triggers are operation elements (essentially meaning that the path has been
 /// guided by a GraphQL operation).
@@ -188,6 +192,23 @@ pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
 pub(crate) struct OpenBranch(Vec<SimultaneousPathsWithLazyIndirectPaths>);
+
+impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+{
+    pub(crate) fn iter(&self) -> impl Iterator<Item = GraphPathItem<'_, TTrigger, TEdge>> {
+        debug_assert_eq!(self.edges.len(), self.edge_triggers.len());
+        debug_assert_eq!(self.edges.len(), self.edge_conditions.len());
+        self.edges
+            .iter()
+            .copied()
+            .zip(&self.edge_triggers)
+            .zip(&self.edge_conditions)
+            .map(|((edge, trigger), condition)| (edge, trigger, condition))
+    }
+}
 
 impl OpGraphPath {
     pub(crate) fn is_overridden_by(&self, other: &Self) -> bool {
