@@ -127,6 +127,10 @@ get_architecture() {
     case "$_cputype" in
         x86_64 | x86-64 | x64 | amd64 | aarch64)
             ;;
+        arm64)
+            # Our binaries use aarch64 as part of their name, not arm64
+            _cputype=aarch64
+            ;;
         *)
             err "no precompiled binaries available for CPU architecture: $_cputype"
 
