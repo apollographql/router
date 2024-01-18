@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
@@ -264,7 +265,7 @@ lazy_static! {
     // second hop.
     // In addition because our requests are not regular proxy requests content-type, content-length
     // and host are also in the exclude list.
-    static ref RESERVED_HEADERS: Vec<HeaderName> = [
+    static ref RESERVED_HEADERS: HashSet<HeaderName> = [
         CONNECTION,
         PROXY_AUTHENTICATE,
         PROXY_AUTHORIZATION,
@@ -390,7 +391,7 @@ where
                         .headers()
                         .iter()
                         .filter(|(name, _)| {
-                            !RESERVED_HEADERS.contains(name) && matching.is_match(name.as_str())
+                            !RESERVED_HEADERS.contains(*name) && matching.is_match(name.as_str())
                         })
                         .for_each(|(name, value)| {
                             headers.append(name, value.clone());
