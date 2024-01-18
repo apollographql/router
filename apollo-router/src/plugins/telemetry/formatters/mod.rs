@@ -112,17 +112,23 @@ where
 impl<T, F> FilteringFormatter<T, F> {
     fn rate_limit(&self, event: &tracing::Event<'_>) -> bool {
         let now = Instant::now();
-        match self.last_logged.lock().entry(event.metadata().callsite()) {
-            std::collections::hash_map::Entry::Occupied(mut last) => {
-                if now - *last.get() < Duration::from_secs(10) {
-                    return false;
-                }
-                last.insert(now);
+        if let Some(last) = self
+            .last_logged
+            .lock()
+            .get_mut(&event.metadata().callsite())
+        {
+            if now - *last < Duration::from_secs(10) {
+                return false;
             }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(now);
-            }
+            *last = now;
+            return true;
         }
+
+        // this is racy but not a very large issue, we can accept an initial burst
+        self.last_logged
+            .lock()
+            .insert(event.metadata().callsite(), now);
+
         true
     }
 }
