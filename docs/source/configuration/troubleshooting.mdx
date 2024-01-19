@@ -11,6 +11,20 @@ When investigating an issue related to the Apollo Router there is a number of to
 If possible, the most useful source of information would be to set up [telemetry](../telemetry/overview.mdx) with [tracing](../telemetry/exporters/tracing/overview.mdx). The router provides spans for every step of the query execution, with related log events.
 In particular, specific information can be logged from responses with [selectors](../telemetry/instrumentation/selectors) and [span attributes](../telemetry/instrumentation/standard-attributes).
 
+#### Prometheus configuration
+
+Metrics can be quickly exposed by the router using the configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     metrics:
+       prometheus:
+         enabled: true
+         listen: 127.0.0.1:9090
+         path: /metrics
+```
+
 ### Subgraph errors
 
 By default, the Apollo Router redacts the details of subgraph errors in its responses to clients, for security reasons. [Those errors can be exposed](./subgraph-error-inclusion.mdx) through this configuration option:
