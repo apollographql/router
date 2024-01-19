@@ -1,0 +1,40 @@
+---
+title: Troubleshooting the Apollo Router
+---
+
+When investigating an issue related to the Apollo Router there is a number of tools we can use to gather insight into its behaviour.
+
+## Debugging
+
+### Telemetry
+
+If possible, the most useful source of information would be to set up [telemetry](../telemetry/overview.mdx) with [tracing](../telemetry/exporters/tracing/overview.mdx). The router provides spans for every step of the query execution, with related log events.
+In particular, specific information can be logged from responses with [selectors](../telemetry/instrumentation/selectors) and [span attributes](../telemetry/instrumentation/standard-attributes).
+
+### Subgraph errors
+
+By default, the Apollo Router redacts the details of subgraph errors in its responses to clients, for security reasons. [Those errors can be exposed](./subgraph-error-inclusion.mdx) through this configuration option:
+
+```router.yaml
+include_subgraph_errors:
+  all: true
+```
+
+### Query plan
+
+The query plan can also be returned with the response, like this:
+
+```router.yaml
+plugins:
+  experimental.expose_query_plan:true
+```
+
+## Reporting an issue in the Apollo Router
+
+Please include the following information:
+
+* router version. Try with the [most recent version](https://github.com/apollographql/router/releases)
+* relevant configuration
+* is there a coprocessor, rhai script, rust plugin?
+* schema, if necessary. Use the [schema shaker](https://github.com/apollosolutions/schema-shaker) to reduce a large schema to only the parts relevant to a query
+* Use the [Record/Replay plugin](https://github.com/apollographql/router/blob/dev/dev-docs/record-replay.md) to record a faulty query and its entire execution. This will help in getting a quick bug reproduction, and inspecting the content often gives enough information on what happened in a query
