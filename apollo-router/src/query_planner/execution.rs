@@ -354,6 +354,10 @@ impl PlanNode {
                                     .await;
                                 value.deep_merge(v);
                                 errors.extend(err.into_iter());
+                            } else if current_dir.is_empty() {
+                                // If the condition is on the root selection set and it's the only one
+                                // For queries like {get @skip(if: true) {id name}}
+                                value.deep_merge(Value::Object(Default::default()));
                             }
                         } else if let Some(node) = else_clause {
                             let (v, err) = node
@@ -370,6 +374,10 @@ impl PlanNode {
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
+                        } else if current_dir.is_empty() {
+                            // If the condition is on the root selection set and it's the only one
+                            // For queries like {get @include(if: false) {id name}}
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(

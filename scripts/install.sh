@@ -97,13 +97,14 @@ get_architecture() {
         fi
     fi
 
-    if [ "$_ostype" = Darwin ] && [ "$_cputype" = arm64 ]; then
-        # Darwin `uname -s` doesn't seem to lie on Big Sur
-        # but we want to serve x86_64 binaries anyway so that they can
-        # then run in x86_64 emulation mode on their arm64 devices
-        _cputype=x86_64
+    # If our OS is Darwin, we only have binaries for arm64 machines.
+    # Check and exit early
+    if [ "$_ostype" = Darwin ] && [ "$_cputype" != arm64 ]; then
+        say "No precompiled binaries available on macOS for CPU architecture: $_cputype"
+        say "The most recent macOS release which supports Intel is 1.37.0"
+        say "Please refer to this issue for more details:  https://github.com/apollographql/router/issues/4483"
+        err "No precompiled binaries available on macOS for CPU architecture: $_cputype"
     fi
-
 
     case "$_ostype" in
         Linux)
@@ -125,6 +126,10 @@ get_architecture() {
 
     case "$_cputype" in
         x86_64 | x86-64 | x64 | amd64 | aarch64)
+            ;;
+        arm64)
+            # Our binaries use aarch64 as part of their name, not arm64
+            _cputype=aarch64
             ;;
         *)
             err "no precompiled binaries available for CPU architecture: $_cputype"

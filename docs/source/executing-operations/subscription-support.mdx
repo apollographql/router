@@ -339,7 +339,7 @@ To quickly try out the Apollo Router's HTTP-based subscriptions _without_ settin
 
 ```bash
  curl 'http://localhost:4000/' -v \
-  -H 'accept: multipart/mixed; boundary="graphql"; subscriptionSpec=1.0, application/json' \
+  -H 'accept: multipart/mixed;subscriptionSpec=1.0, application/json' \
   -H 'content-type: application/json' \
   --data-raw '{"query":"subscription OnProductPriceChanged { productPriceChanged { name price reviews { score } } }","operationName":"OnProductPriceChanged"}'
 ```

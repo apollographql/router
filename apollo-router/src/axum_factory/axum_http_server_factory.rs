@@ -542,7 +542,7 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Release) + 1;
+    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
     tracing::info!(value.apollo_router_session_count_active = session_count,);
 
     let request: router::Request = http_request.into();
@@ -561,7 +561,7 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
             tracing::info!(value.apollo_router_session_count_active = session_count,);
 
             if let Some(source_err) = e.source() {
@@ -604,7 +604,7 @@ async fn handle_graphql(
             };
 
             // FIXME: we should instead reduce it after the response has been entirely written
-            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
             tracing::info!(value.apollo_router_session_count_active = session_count,);
 
             http::Response::from_parts(parts, body).into_response()
