@@ -152,6 +152,8 @@ pub(crate) struct File {
     pub(crate) format: Format,
     /// The period to rollover the log file.
     pub(crate) rollover: Rollover,
+    /// Log rate limiting. The limit is set per type of log message
+    pub(crate) rate_limit: Option<RateLimit>,
 }
 
 /// The format for logging.
