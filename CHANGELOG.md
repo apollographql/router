@@ -14,7 +14,7 @@ In this release, the router YAML configuration option to set the maximum size of
 
 The previous `experimental_http_max_request_bytes` option works but produces a warning.
 
-To migrate, rename `experimental_http_max_request_bytes` to the generally available `http_max_request_bytes` option: 
+To migrate, rename `experimental_http_max_request_bytes` to the generally available `http_max_request_bytes` option:
 
 ```yaml
 limits:
@@ -48,7 +48,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Support Redis key namespace ([Issue #4247](https://github.com/apollographql/router/issues/4247))
 
-This release introduces support for Redis key namespace. 
+This release introduces support for Redis key namespace.
 
 The namespace, if provided, is prefixed to the key: `namespace:key`.
 
@@ -76,7 +76,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Fix response format for statically skipped root selection set ([Issue #4397](https://github.com/apollographql/router/issues/4397))
 
-Previously, the Apollo Router didn't return responses with the same format for some operations with a root selection set that were skipped by `@skip` or `@include` directives.  
+Previously, the Apollo Router didn't return responses with the same format for some operations with a root selection set that were skipped by `@skip` or `@include` directives.
 
 For example, if you hardcoded the parameter in a `@skip` directive:
 
@@ -115,7 +115,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 Previously, when applying a selection set to an entity reference before it's used in a fetch node, the router would drop data from the reference when it selected using an inline fragment, for example `@requires(fields: "... on Foo { a } ... on Bar { b }")`).
 
-This release uses a more flexible abstract type / concrete type check when applying a selection set to an entity reference before it's used in a fetch node. 
+This release uses a more flexible abstract type / concrete type check when applying a selection set to an entity reference before it's used in a fetch node.
 
 By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/4441
 
@@ -142,8 +142,8 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 ### Improve JWKS parse error handling ([Issue #4463](https://github.com/apollographql/router/issues/4463))
 
 When parsing a JSON Web Key Set (JWKS), the router now ignores any JWK that fails to parse rather than failing the entire JWKS parse.
- 
-This can happen when the JWK is malformed, or when a JWK uses an unknown algorithm. When this happens a warning is output to the logs, for example: 
+
+This can happen when the JWK is malformed, or when a JWK uses an unknown algorithm. When this happens a warning is output to the logs, for example:
 
 ```
 2024-01-11T15:32:01.220034Z WARN fetch jwks{url=file:///tmp/jwks.json,}  ignoring a key since it is not valid, enable debug logs to full content err=unknown variant `UnknownAlg`, expected one of `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA` alg="UnknownAlg" index=2
@@ -202,24 +202,24 @@ The subscription callback protocol feature is now generally available (GA).
 
 You must update your router configuration with the following steps:
 
-1. Change the name of the option from `subscription.mode.preview_callback` to `subscription.mode.callback`. 
+1. Change the name of the option from `subscription.mode.preview_callback` to `subscription.mode.callback`.
 
     Failure to use the updated option name when running the router will result in an error and the router won't start.
 
 
     In the example of the GA configuration below, the option is renamed as `callback`.
-    
+
 
 2. Update the `public_url` field to include the full URL of your callback endpoint.
 
     Previously in preview, the public URL used by the router was the automatic concatenation of the `public_url` and `path` fields. In GA, the behavior has changed, and the router uses exactly the value set in `public_url`. This enables you to configure your own public URL, for example if you have a proxy in front of the router and want to configure redirection with the public URL.
-    
+
     In the example of the GA configuration below, the path `/custom_callback` is no longer automatically appended to `public_url`, so instead it has to be set explicitly as `public_url: http://127.0.0.1:4000/custom_callback`.
 
-3. Configure the new `heartbeat_interval` field to set the period that a heartbeat must be sent to the callback endpoint for the subscription operation. 
+3. Configure the new `heartbeat_interval` field to set the period that a heartbeat must be sent to the callback endpoint for the subscription operation.
 
     The default heartbeat interval is 5 seconds. Heartbeats can be disabled by setting `heartbeat_interval: disabled`.
-    
+
 ```yaml
 subscription:
   enabled: true
@@ -354,7 +354,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 Two new configuration options have been added to reduce the impact of complex queries on the planner:
 
-- `experimental_plans_limit` limits the number of generated plans. (Note: already generated plans remain valid, but they may not be optimal.) 
+- `experimental_plans_limit` limits the number of generated plans. (Note: already generated plans remain valid, but they may not be optimal.)
 
 - `experimental_paths_limit` stops the planning process entirely if the number of possible paths for a selection in the schema gets too large.
 
@@ -395,8 +395,8 @@ apq:
         tls:
           certificate_authorities: ""
           client_authentication:
-            certificate_chain: 
-            key: 
+            certificate_chain:
+            key:
 ```
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4304
@@ -462,7 +462,7 @@ The enhanced telemetry enables new benefits. They include:
 * Diagnosing network related issues with standard [Open Telemetry HTTP attributes](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/).
 * Improving performance by avoiding the use of large attributes on spans such as `graphql.document`.
 
-See the updated [telemetry documentation](configuration/telemetry/overview) for details on the new enhancements. 
+See the updated [telemetry documentation](configuration/telemetry/overview) for details on the new enhancements.
 
 By [@bnjjj](https://github.com/bnjjj), [@bryncooke](https://github.com/bryncooke) and [Edward Huang](https://github.com/shorgi) in https://github.com/apollographql/router/pull/4102 and https://github.com/apollographql/router/pull/4129
 
