@@ -2,4 +2,4 @@
 source: apollo-router/tests/integration_tests.rs
 expression: "std::str::from_utf8(first.to_vec().as_slice()).unwrap()"
 ---
-{"errors":[{"message":"the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'","extensions":{"code":"DEFER_BAD_HEADER"}}]}
+{"errors":[{"message":"the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'","extensions":{"code":"DEFER_BAD_HEADER"}}]}

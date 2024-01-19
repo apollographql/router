@@ -1,3 +1,5 @@
+pub(crate) mod sync;
+
 // NOTE: this module is taken from tokio's tracing span's extensions
 //       which is taken from https://github.com/hyperium/http/blob/master/src/extensions.rs
 
@@ -37,7 +39,7 @@ impl Hasher for IdHasher {
 /// `Extensions` can be used by `Request` and `Response` to store
 /// extra data derived from the underlying protocol.
 #[derive(Default)]
-pub(crate) struct Extensions {
+pub struct Extensions {
     // If extensions are never used, no need to carry around an empty HashMap.
     // That's 3 words. Instead, this is only 1 word.
     map: Option<Box<AnyMap>>,
@@ -55,7 +57,7 @@ impl Extensions {
     ///
     /// If a extension of this type already existed, it will
     /// be returned.
-    pub(crate) fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
+    pub fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
         self.map
             .get_or_insert_with(Box::default)
             .insert(TypeId::of::<T>(), Box::new(val))
@@ -68,7 +70,7 @@ impl Extensions {
     }
 
     /// Get a reference to a type previously inserted on this `Extensions`.
-    pub(crate) fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
+    pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.map
             .as_ref()
             .and_then(|map| map.get(&TypeId::of::<T>()))
@@ -76,14 +78,15 @@ impl Extensions {
     }
 
     /// Get a mutable reference to a type previously inserted on this `Extensions`.
-    pub(crate) fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
+    pub fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
         self.map
             .as_mut()
             .and_then(|map| map.get_mut(&TypeId::of::<T>()))
             .and_then(|boxed| (&mut **boxed as &mut (dyn Any + 'static)).downcast_mut())
     }
 
-    pub(crate) fn contains_key<T: Send + Sync + 'static>(&self) -> bool {
+    /// Returns `true` type has been stored in `Extensions`.
+    pub fn contains_key<T: Send + Sync + 'static>(&self) -> bool {
         self.map
             .as_ref()
             .map(|map| map.contains_key(&TypeId::of::<T>()))
@@ -93,7 +96,7 @@ impl Extensions {
     /// Remove a type from this `Extensions`.
     ///
     /// If a extension of this type existed, it will be returned.
-    pub(crate) fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
+    pub fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
         self.map
             .as_mut()
             .and_then(|map| map.remove(&TypeId::of::<T>()))
@@ -107,7 +110,7 @@ impl Extensions {
 
     /// Clear the `Extensions` of all inserted extensions.
     #[inline]
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         if let Some(ref mut map) = self.map {
             map.clear();
         }
@@ -115,13 +118,13 @@ impl Extensions {
 
     /// Check whether the extension set is empty or not.
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.map.as_ref().map_or(true, |map| map.is_empty())
     }
 
     /// Get the numer of extensions available.
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.map.as_ref().map_or(0, |map| map.len())
     }
 }
