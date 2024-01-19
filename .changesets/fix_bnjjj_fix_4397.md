@@ -1,6 +1,8 @@
-### Fix format_response for statically skipped root selection set ([Issue #4397](https://github.com/apollographql/router/issues/4397))
+### Fix response format for statically skipped root selection set ([Issue #4397](https://github.com/apollographql/router/issues/4397))
 
-If in your GraphQL operation you have a root selection set skipped by `@skip` or `@include` directive, before this fix the results you got if you hardcoded the value of the parameter in `@skip` directive like this for example:
+Previously, the Apollo Router didn't return responses with the same format for some operations with a root selection set that were skipped by `@skip` or `@include` directives.  
+
+For example, if you hardcoded the parameter in a `@skip` directive:
 
 ```graphql
 {
@@ -11,7 +13,7 @@ If in your GraphQL operation you have a root selection set skipped by `@skip` or
 }
 ```
 
-or if you used a variable like this:
+Or if you used a variable:
 
 ```graphql
 {
@@ -21,6 +23,7 @@ or if you used a variable like this:
     }
 }
 ```
+
 
 The router returned responses with different formats.
 
