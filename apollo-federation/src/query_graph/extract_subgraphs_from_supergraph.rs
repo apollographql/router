@@ -8,7 +8,7 @@ use crate::link::join_spec_definition::{
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::{Identity, Version};
 use crate::link::spec_definition::SpecDefinition;
-use crate::query_graph::field_set::parse_field_set;
+use crate::query_graph::field_set::parse_field_set_without_normalization;
 use crate::schema::position::{
     is_graphql_reserved_name, CompositeTypeDefinitionPosition, DirectiveDefinitionPosition,
     EnumTypeDefinitionPosition, FieldDefinitionPosition, InputObjectFieldDefinitionPosition,
@@ -1895,8 +1895,11 @@ fn remove_inactive_applications(
         // directives instead of returning error here, as it pollutes the list of error messages
         // during composition (another site in composition will properly check for field set
         // validity and give better error messaging).
-        let mut fields =
-            parse_field_set(valid_schema, parent_type_pos.type_name().clone(), fields)?;
+        let mut fields = parse_field_set_without_normalization(
+            valid_schema,
+            parent_type_pos.type_name().clone(),
+            fields,
+        )?;
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {

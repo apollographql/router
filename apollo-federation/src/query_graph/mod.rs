@@ -1,16 +1,17 @@
 use crate::error::{FederationError, SingleFederationError};
+use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::schema::position::{
     CompositeTypeDefinitionPosition, FieldDefinitionPosition, OutputTypeDefinitionPosition,
     SchemaRootDefinitionKind,
 };
 use crate::schema::ValidFederationSchema;
-use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::{Name, NamedType};
-use apollo_compiler::{Node, NodeStr};
+use apollo_compiler::NodeStr;
 use indexmap::{IndexMap, IndexSet};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
+use std::sync::Arc;
 
 pub mod build_query_graph;
 pub(crate) mod extract_subgraphs_from_supergraph;
@@ -86,7 +87,7 @@ pub(crate) struct QueryGraphEdge {
     /// represent the fact that you need the key to be able to use an @key edge.
     ///
     /// Outside of keys, @requires edges also rely on conditions.
-    pub(crate) conditions: Option<Node<SelectionSet>>,
+    pub(crate) conditions: Option<Arc<NormalizedSelectionSet>>,
 }
 
 impl Display for QueryGraphEdge {
@@ -99,12 +100,7 @@ impl Display for QueryGraphEdge {
             return Ok(());
         }
         if let Some(conditions) = &self.conditions {
-            write!(
-                f,
-                "{} ⊢ {}",
-                conditions.serialize().no_indent(),
-                self.transition
-            )
+            write!(f, "{} ⊢ {}", conditions, self.transition)
         } else {
             self.transition.fmt(f)
         }

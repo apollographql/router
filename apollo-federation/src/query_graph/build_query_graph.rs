@@ -3,9 +3,12 @@ use crate::link::federation_spec_definition::{
     get_federation_spec_definition_from_subgraph, FederationSpecDefinition, KeyDirectiveArguments,
 };
 use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
-use crate::query_graph::field_set::{equal_selection_sets, merge_selection_sets, parse_field_set};
+use crate::query_graph::field_set::parse_field_set;
 use crate::query_graph::{
     QueryGraph, QueryGraphEdge, QueryGraphEdgeTransition, QueryGraphNode, QueryGraphNodeType,
+};
+use crate::query_plan::operation::{
+    equal_selection_sets, merge_selection_sets, NormalizedSelection, NormalizedSelectionSet,
 };
 use crate::schema::position::{
     AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition, FieldDefinitionPosition,
@@ -15,14 +18,14 @@ use crate::schema::position::{
     TypeDefinitionPosition, UnionTypeDefinitionPosition,
 };
 use crate::schema::ValidFederationSchema;
-use apollo_compiler::executable::{Selection, SelectionSet};
 use apollo_compiler::schema::{DirectiveList as ComponentDirectiveList, ExtendedType, Name};
 use apollo_compiler::validation::Valid;
-use apollo_compiler::{Node, NodeStr, Schema};
+use apollo_compiler::{NodeStr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
@@ -111,7 +114,7 @@ impl BaseQueryGraphBuilder {
         head: NodeIndex,
         tail: NodeIndex,
         transition: QueryGraphEdgeTransition,
-        conditions: Option<Node<SelectionSet>>,
+        conditions: Option<Arc<NormalizedSelectionSet>>,
     ) -> Result<(), FederationError> {
         self.query_graph.graph.add_edge(
             head,
@@ -1125,8 +1128,8 @@ impl FederatedQueryGraphBuilder {
                             )
                         }.into());
                 };
-                let conditions = Node::new(parse_field_set(
-                    schema.schema(),
+                let conditions = Arc::new(parse_field_set(
+                    schema,
                     type_pos.type_name().clone(),
                     application.fields.clone(),
                 )?);
@@ -1249,7 +1252,7 @@ impl FederatedQueryGraphBuilder {
                             let implementation_type_in_other_subgraph_pos: CompositeTypeDefinitionPosition =
                                 other_schema.get_type(implementation_type_in_supergraph_pos.type_name.clone())?.try_into()?;
                             let Ok(implementation_conditions) = parse_field_set(
-                                other_schema.schema(),
+                                other_schema,
                                 implementation_type_in_other_subgraph_pos
                                     .type_name()
                                     .clone(),
@@ -1263,7 +1266,7 @@ impl FederatedQueryGraphBuilder {
                                 head: *head,
                                 tail,
                                 transition: QueryGraphEdgeTransition::KeyResolution,
-                                conditions: Some(Node::new(implementation_conditions)),
+                                conditions: Some(Arc::new(implementation_conditions)),
                             })
                         }
                     }
@@ -1316,7 +1319,7 @@ impl FederatedQueryGraphBuilder {
                     .federation_spec_definition
                     .requires_directive_arguments(directive)?;
                 let conditions = parse_field_set(
-                    schema.schema(),
+                    schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
                 )?;
@@ -1341,10 +1344,10 @@ impl FederatedQueryGraphBuilder {
                         message: "Singleton list was unexpectedly empty".to_owned(),
                     })?
             } else {
-                merge_selection_sets(&all_conditions.iter().collect::<Vec<_>>())?
+                merge_selection_sets(all_conditions.into_iter())?
             };
             let edge_weight_mut = self.base.query_graph.edge_weight_mut(edge)?;
-            edge_weight_mut.conditions = Some(Node::new(new_conditions));
+            edge_weight_mut.conditions = Some(Arc::new(new_conditions));
         }
         Ok(())
     }
@@ -1381,7 +1384,7 @@ impl FederatedQueryGraphBuilder {
                 let field_type_pos: CompositeTypeDefinitionPosition =
                     field_type_pos.clone().try_into()?;
                 let conditions = parse_field_set(
-                    schema.schema(),
+                    schema,
                     field_type_pos.type_name().clone(),
                     application.fields,
                 )?;
@@ -1412,7 +1415,7 @@ impl FederatedQueryGraphBuilder {
                         message: "Singleton list was unexpectedly empty".to_owned(),
                     })?
             } else {
-                merge_selection_sets(&all_conditions.iter().collect::<Vec<_>>())?
+                merge_selection_sets(all_conditions.into_iter())?
             };
             // We make a copy of the tail node (representing the field's type) with all the same
             // out-edges, and we change this particular in-edge to point to the new copy. We then
@@ -1435,16 +1438,16 @@ impl FederatedQueryGraphBuilder {
         base: &mut BaseQueryGraphBuilder,
         source: &NodeStr,
         head: NodeIndex,
-        provided: &SelectionSet,
+        provided: &NormalizedSelectionSet,
         provide_id: u32,
     ) -> Result<(), FederationError> {
         let mut stack = vec![(head, provided)];
         while let Some((node, selection_set)) = stack.pop() {
             // We reverse-iterate through the selections to cancel out the reversing that the stack
             // does.
-            for selection in selection_set.selections.iter().rev() {
+            for selection in selection_set.selections.values().rev() {
                 match selection {
-                    Selection::Field(field) => {
+                    NormalizedSelection::Field(field_selection) => {
                         let existing_edge_info = base
                             .query_graph
                             .graph
@@ -1458,7 +1461,9 @@ impl FederatedQueryGraphBuilder {
                                 else {
                                     return None;
                                 };
-                                if *field_definition_position.field_name() == field.name {
+                                if field_definition_position.field_name()
+                                    == field_selection.field.data().name()
+                                {
                                     Some((edge_ref.id(), edge_ref.target()))
                                 } else {
                                     None
@@ -1468,10 +1473,10 @@ impl FederatedQueryGraphBuilder {
                             // If this is a leaf field, then we don't really have anything to do.
                             // Otherwise, we need to copy the tail and continue propagating the
                             // provided selections from there.
-                            if !field.selection_set.selections.is_empty() {
+                            if let Some(selections) = &field_selection.selection_set {
                                 let new_tail = Self::copy_for_provides(base, tail, provide_id)?;
                                 Self::update_edge_tail(base, edge, new_tail)?;
-                                stack.push((new_tail, &field.selection_set))
+                                stack.push((new_tail, selections))
                             }
                         } else {
                             // There are no existing edges, which means that it's an edge added by
@@ -1488,7 +1493,12 @@ impl FederatedQueryGraphBuilder {
                             // that the node has no provide_id (i.e. it may be a copied node), which
                             // means they may have extra edges that accordingly can't be taken. We
                             // fix this below by filtering by provide_id.
-                            let tail_type = field.definition.ty.inner_named_type();
+                            let field = field_selection
+                                .field
+                                .data()
+                                .field_position
+                                .get(field_selection.field.data().schema.schema())?;
+                            let tail_type = field.ty.inner_named_type();
                             let possible_tails = base
                                 .query_graph
                                 .types_to_nodes_by_source(source)?
@@ -1525,34 +1535,30 @@ impl FederatedQueryGraphBuilder {
                             // If this is a leaf field, then just create the new edge and we're
                             // done. Otherwise, we should copy the node, add the edge, and continue
                             // propagating.
-                            let node_weight = base.query_graph.node_weight(node)?;
-                            let QueryGraphNodeType::SchemaType(node_type_pos) =
-                                node_weight.type_.clone()
-                            else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Unexpectedly found @provides containing federated root node".to_owned(),
-                                }
-                                    .into());
-                            };
-                            let node_type_pos: CompositeTypeDefinitionPosition =
-                                node_type_pos.try_into()?;
-                            let field_pos = node_type_pos.field(field.name.clone())?;
                             let transition = QueryGraphEdgeTransition::FieldCollection {
                                 source: source.clone(),
-                                field_definition_position: field_pos,
+                                field_definition_position: field_selection
+                                    .field
+                                    .data()
+                                    .field_position
+                                    .clone(),
                                 is_part_of_provides: true,
                             };
-                            if !field.selection_set.selections.is_empty() {
+                            if let Some(selections) = &field_selection.selection_set {
                                 let new_tail = Self::copy_for_provides(base, tail, provide_id)?;
                                 base.add_edge(node, new_tail, transition, None)?;
-                                stack.push((new_tail, &field.selection_set))
+                                stack.push((new_tail, selections))
                             } else {
                                 base.add_edge(node, tail, transition, None)?;
                             }
                         }
                     }
-                    Selection::InlineFragment(inline_fragment) => {
-                        if let Some(type_condition_name) = &inline_fragment.type_condition {
+                    NormalizedSelection::InlineFragment(inline_fragment_selection) => {
+                        if let Some(type_condition_pos) = &inline_fragment_selection
+                            .inline_fragment
+                            .data()
+                            .type_condition_position
+                        {
                             // We should always have an edge: otherwise it would mean we list a type
                             // condition for a type that isn't in the subgraph, but the @provides
                             // shouldn't have validated in the first place (another way to put this
@@ -1582,7 +1588,7 @@ impl FederatedQueryGraphBuilder {
                                     else {
                                         return None;
                                     };
-                                    if to_type_position.type_name() == type_condition_name {
+                                    if to_type_position == type_condition_pos {
                                         Some((edge_ref.id(), edge_ref.target()))
                                     } else {
                                         None
@@ -1592,20 +1598,20 @@ impl FederatedQueryGraphBuilder {
                                     SingleFederationError::Internal {
                                         message: format!(
                                             "Shouldn't have selection \"{}\" in an @provides, as its type condition has no query graph edge",
-                                            selection.serialize().no_indent(),
+                                            inline_fragment_selection,
                                         )
                                     }
                                 })?;
                             let new_tail = Self::copy_for_provides(base, tail, provide_id)?;
                             Self::update_edge_tail(base, edge, new_tail)?;
-                            stack.push((new_tail, &inline_fragment.selection_set))
+                            stack.push((new_tail, &inline_fragment_selection.selection_set))
                         } else {
                             // Essentially ignore the condition in this case, and continue
                             // propagating the provided selections.
-                            stack.push((node, &inline_fragment.selection_set));
+                            stack.push((node, &inline_fragment_selection.selection_set));
                         }
                     }
-                    Selection::FragmentSpread(_) => {
+                    NormalizedSelection::FragmentSpread(_) => {
                         return Err(SingleFederationError::Internal {
                             message: "Unexpectedly found named fragment in FieldSet scalar"
                                 .to_owned(),
@@ -1809,8 +1815,8 @@ impl FederatedQueryGraphBuilder {
                             )
                         }.into());
                 };
-                let conditions = Node::new(parse_field_set(
-                    schema.schema(),
+                let conditions = Arc::new(parse_field_set(
+                    schema,
                     type_in_supergraph_pos.type_name.clone(),
                     NodeStr::from_static(&"__typename"),
                 )?);
@@ -2000,7 +2006,7 @@ struct QueryGraphEdgeData {
     head: NodeIndex,
     tail: NodeIndex,
     transition: QueryGraphEdgeTransition,
-    conditions: Option<Node<SelectionSet>>,
+    conditions: Option<Arc<NormalizedSelectionSet>>,
 }
 
 impl QueryGraphEdgeData {
