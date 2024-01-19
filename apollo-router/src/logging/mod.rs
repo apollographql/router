@@ -84,7 +84,14 @@ macro_rules! assert_snapshot_subscriber {
         $crate::logging::test::SnapshotSubscriber::create_subscriber(|yaml| {
             insta::with_settings!({sort_maps => true}, {
                 // the tests here will force maps to sort
-                insta::assert_yaml_snapshot!(yaml);
+                let mut settings = insta::Settings::clone_current();
+                settings.set_snapshot_suffix("logs");
+                settings.set_sort_maps(true);
+                settings.bind(|| {
+                    // runs the assertion with the changed settings enabled
+                    insta::assert_yaml_snapshot!(yaml);
+                });
+
             });
         })
     };
@@ -93,7 +100,12 @@ macro_rules! assert_snapshot_subscriber {
         $crate::logging::test::SnapshotSubscriber::create_subscriber(|yaml| {
             insta::with_settings!({sort_maps => true}, {
                 // the tests here will force maps to sort
-                insta::assert_yaml_snapshot!(yaml, $redactions);
+                let mut settings = insta::Settings::clone_current();
+                settings.set_snapshot_suffix("logs");
+                settings.set_sort_maps(true);
+                settings.bind(|| {
+                    insta::assert_yaml_snapshot!(yaml, $redactions);
+                });
             });
         })
     };

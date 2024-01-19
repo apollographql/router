@@ -30,7 +30,6 @@ use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
-use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -56,6 +55,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
+use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::services::supergraph;
@@ -207,7 +207,7 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Introspection { response }) => Ok(
+        Some(QueryPlannerContent::Response { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
@@ -267,9 +267,9 @@ async fn service_call(
                 || (is_subscription && !accepts_multipart_subscription)
             {
                 let (error_message, error_code) = if is_deferred {
-                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"), "DEFER_BAD_HEADER")
+                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'"), "DEFER_BAD_HEADER")
                 } else {
-                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed; boundary=graphql; subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
+                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
                 };
                 let mut response = SupergraphResponse::new_from_graphql_response(
                     graphql::Response::builder()
@@ -341,7 +341,7 @@ pub struct SubscriptionTaskParams {
     pub(crate) client_sender: tokio::sync::mpsc::Sender<Response>,
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
-    pub(crate) stream_rx: ReceiverStream<HandleStream<String, graphql::Response>>,
+    pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
     pub(crate) service_name: String,
 }
 

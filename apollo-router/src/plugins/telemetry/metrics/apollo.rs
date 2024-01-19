@@ -357,10 +357,8 @@ mod test {
             .and_operation_name(operation_name)
             .and_context(context);
         if is_subscription {
-            request_builder = request_builder.header(
-                "accept",
-                "multipart/mixed; boundary=graphql; subscriptionSpec=1.0",
-            );
+            request_builder =
+                request_builder.header("accept", "multipart/mixed;subscriptionSpec=1.0");
         }
         TestHarness::builder()
             .extra_plugin(plugin)

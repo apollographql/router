@@ -258,7 +258,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.37.0"
+version = "1.38.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.37.0"
+version = "1.38.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.37.0"
+version = "1.38.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -3197,9 +3197,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91fc23aa11be92976ef4729127f1a74adf36d8436f7816b185d18df956790833"
+checksum = "bb2c4422095b67ee78da96fbb51a4cc413b3b25883c7717ff7ca1ab31022c9c9"
 dependencies = [
  "bytes",
  "fnv",
@@ -3207,7 +3207,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http",
- "indexmap 1.9.3",
+ "indexmap 2.1.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -3493,7 +3493,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.5",
+ "socket2 0.4.9",
  "tokio",
  "tower-service",
  "tracing",
@@ -5742,9 +5742,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.13+v2.6.2"
+version = "0.5.14+v2.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa10abe3baa710fd7b151c0b886e74f9fc73c63d23c0c91f3ab5fe87ce2674ed"
+checksum = "6e9a7b9f24a33123d8cab236ac916c07aeefe9f1ce422b0e7f49fc0019d3ac71"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",

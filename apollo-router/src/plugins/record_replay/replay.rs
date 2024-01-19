@@ -9,6 +9,9 @@ use console::style;
 use http::Method;
 use http::Uri;
 use multimap::MultiMap;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -217,6 +220,20 @@ impl Plugin for Replay {
                         req.context.clone(),
                     );
 
+                    let runtime_variables = req.subgraph_request.body().variables.clone();
+                    let recorded_variables = fetch.request.variables.clone();
+
+                    if runtime_variables != recorded_variables {
+                        report
+                            .lock()
+                            .unwrap()
+                            .push(ReplayReport::VariablesDifference {
+                                name: operation_name.clone(),
+                                runtime: runtime_variables,
+                                recorded: recorded_variables,
+                            });
+                    }
+
                     Ok(ControlFlow::Break(subgraph_response))
                 } else {
                     report
@@ -247,6 +264,11 @@ pub(crate) enum ReplayReport {
         name: String,
         recorded: Vec<String>,
         runtime: Vec<String>,
+    },
+    VariablesDifference {
+        name: String,
+        recorded: Map<ByteString, Value>,
+        runtime: Map<ByteString, Value>,
     },
 }
 
@@ -293,6 +315,23 @@ impl ReplayReport {
                 println!(
                     "{} {}",
                     style("Mismatched Header:").bold(),
+                    style(name).red().bold()
+                );
+                self.print_changeset(
+                    serde_json::to_string_pretty(&recorded).unwrap().as_str(),
+                    serde_json::to_string_pretty(&runtime).unwrap().as_str(),
+                    "From Recording",
+                    "From Runtime",
+                );
+            }
+            ReplayReport::VariablesDifference {
+                name,
+                recorded,
+                runtime,
+            } => {
+                println!(
+                    "{} {}",
+                    style("Mismatched Variables:").bold(),
                     style(name).red().bold()
                 );
                 self.print_changeset(
