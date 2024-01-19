@@ -182,12 +182,12 @@ impl<T, F> FilteringFormatter<T, F> {
                 if now - counter.last < rate_limit.interval {
                     counter.count += 1;
 
-                    if counter.count >= rate_limit.count {
+                    if counter.count >= rate_limit.capacity {
                         return RateResult::Deny;
                     }
                 } else {
-                    if counter.count > rate_limit.count {
-                        let skipped = counter.count - rate_limit.count;
+                    if counter.count > rate_limit.capacity {
+                        let skipped = counter.count - rate_limit.capacity;
                         counter.last = now;
                         counter.count += 1;
 

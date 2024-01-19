@@ -123,7 +123,7 @@ impl Default for StdOut {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RateLimit {
     /// Number of log lines allowed in interval per message
-    pub(crate) count: u32,
+    pub(crate) capacity: u32,
     /// Interval for rate limiting
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
@@ -133,7 +133,7 @@ pub(crate) struct RateLimit {
 impl Default for RateLimit {
     fn default() -> Self {
         RateLimit {
-            count: 0,
+            capacity: 0,
             interval: Duration::from_secs(1),
         }
     }

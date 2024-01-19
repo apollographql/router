@@ -55,7 +55,7 @@ telemetry:
       stdout:
         format: json
         rate_limit: #highlight-line
-          count: 1     # number of allowed messages during the rate limiting interval
+          capacity: 1  # number of allowed messages during the rate limiting interval
           interval: 3s
 ```
 
