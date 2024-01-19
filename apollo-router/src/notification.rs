@@ -614,8 +614,10 @@ async fn task<K, V>(
             _ = ttl_fut.next() => {
                 let heartbeat_error_message = heartbeat_error_message.clone();
                 pubsub.kill_dead_topics(heartbeat_error_message).await;
-                tracing::info!(
-                    value.apollo_router_opened_subscriptions = pubsub.subscriptions.len() as u64,
+                u64_counter!(
+                    "apollo_router_opened_subscriptions",
+                    "Number of opened subscriptions",
+                    pubsub.subscriptions.len() as u64
                 );
             }
             message = receiver.next() => {

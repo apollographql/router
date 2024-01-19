@@ -43,6 +43,7 @@ mod tests {
                     );
                     Ok(supergraph::Response::fake_builder()
                         .data(expected_mock_response_data)
+                        .context(req.context)
                         .build()
                         .unwrap())
                 });
