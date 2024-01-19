@@ -106,7 +106,7 @@ pub(crate) struct StdOut {
     /// The format to log to stdout.
     pub(crate) format: Format,
     /// Log rate limiting. The limit is set per type of log message
-    pub(crate) rate_limit: Option<RateLimit>,
+    pub(crate) rate_limit: RateLimit,
 }
 
 impl Default for StdOut {
@@ -114,7 +114,7 @@ impl Default for StdOut {
         StdOut {
             enabled: true,
             format: Format::default(),
-            rate_limit: None,
+            rate_limit: RateLimit::default(),
         }
     }
 }
@@ -122,6 +122,8 @@ impl Default for StdOut {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RateLimit {
+    /// Set to true to limit the rate of log messages
+    pub(crate) enabled: bool,
     /// Number of log lines allowed in interval per message
     pub(crate) capacity: u32,
     /// Interval for rate limiting
@@ -133,7 +135,8 @@ pub(crate) struct RateLimit {
 impl Default for RateLimit {
     fn default() -> Self {
         RateLimit {
-            capacity: 0,
+            enabled: false,
+            capacity: 1,
             interval: Duration::from_secs(1),
         }
     }

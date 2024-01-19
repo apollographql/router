@@ -52,19 +52,19 @@ pub(crate) struct FilteringFormatter<T, F> {
     inner: T,
     filter_fn: F,
     rate_limiter: Mutex<HashMap<Identifier, RateCounter>>,
-    config: Option<RateLimit>,
+    config: RateLimit,
 }
 
 impl<T, F> FilteringFormatter<T, F>
 where
     F: Fn(&tracing::Event<'_>) -> bool,
 {
-    pub(crate) fn new(inner: T, filter_fn: F, rate_limit: Option<&RateLimit>) -> Self {
+    pub(crate) fn new(inner: T, filter_fn: F, rate_limit: &RateLimit) -> Self {
         Self {
             inner,
             filter_fn,
             rate_limiter: Mutex::new(HashMap::new()),
-            config: rate_limit.cloned(),
+            config: rate_limit.clone(),
         }
     }
 }
@@ -172,22 +172,22 @@ enum RateResult {
 }
 impl<T, F> FilteringFormatter<T, F> {
     fn rate_limit(&self, event: &tracing::Event<'_>) -> RateResult {
-        if let Some(rate_limit) = self.config.as_ref() {
+        if self.config.enabled {
             let now = Instant::now();
             if let Some(counter) = self
                 .rate_limiter
                 .lock()
                 .get_mut(&event.metadata().callsite())
             {
-                if now - counter.last < rate_limit.interval {
+                if now - counter.last < self.config.interval {
                     counter.count += 1;
 
-                    if counter.count >= rate_limit.capacity {
+                    if counter.count >= self.config.capacity {
                         return RateResult::Deny;
                     }
                 } else {
-                    if counter.count > rate_limit.capacity {
-                        let skipped = counter.count - rate_limit.capacity;
+                    if counter.count > self.config.capacity {
+                        let skipped = counter.count - self.config.capacity;
                         counter.last = now;
                         counter.count += 1;
 
