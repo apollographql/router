@@ -70,12 +70,14 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                 // directive of the same name. So one cannot import a direcitive with the
                 // same name than a linked spec.
                 if let Some(other) = by_name_in_schema.get(imported_name) {
-                    Err(LinkError::BootstrapError(format!(
-                        "import for '{}' of {} conflicts with spec {}",
-                        import.imported_display_name(),
-                        link.url,
-                        other.url
-                    )))?
+                    if !Arc::ptr_eq(other, link) {
+                        return Err(LinkError::BootstrapError(format!(
+                            "import for '{}' of {} conflicts with spec {}",
+                            import.imported_display_name(),
+                            link.url,
+                            other.url
+                        )));
+                    }
                 }
                 &mut directives_by_imported_name
             } else {
@@ -85,12 +87,12 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                 imported_name.clone(),
                 (Arc::clone(link), Arc::clone(import)),
             ) {
-                Err(LinkError::BootstrapError(format!(
+                return Err(LinkError::BootstrapError(format!(
                     "name conflict: both {} and {} import {}",
                     link.url,
                     other_link.url,
                     import.imported_display_name()
-                )))?
+                )));
             }
         }
     }
@@ -159,6 +161,76 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explicit_root_directive_import() -> Result<(), LinkError> {
+        let schema = r#"
+          extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0", import: ["Import"])
+            @link(url: "https://specs.apollo.dev/inaccessible/v0.2", import: ["@inaccessible"])
+
+          type Query { x: Int }
+
+          enum link__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          scalar Import
+
+          directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+        "#;
+
+        let schema = Schema::parse(schema, "root_directive.graphqls").unwrap();
+
+        let meta = links_metadata(&schema)?;
+        let meta = meta.expect("should have metadata");
+
+        assert!(meta
+            .source_link_of_directive(&name!("inaccessible"))
+            .is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn url_syntax() -> Result<(), LinkError> {
+        let schema = r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+              @link(url: "https://example.com/my-directive/v1.0", import: ["@myDirective"])
+
+          type Query { x: Int }
+
+            directive @myDirective on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        "#;
+
+        let schema = Schema::parse(schema, "url_dash.graphqls").unwrap();
+
+        let meta = links_metadata(&schema)?;
+        let meta = meta.expect("should have metadata");
+
+        assert!(meta
+            .source_link_of_directive(&name!("myDirective"))
+            .is_some());
+
+        Ok(())
+    }
+
+    #[test]
     fn computes_link_metadata() {
         let schema = r#"
           extend schema
@@ -185,8 +257,8 @@ mod tests {
 
         let meta = links_metadata(&schema)
             // TODO: error handling?
-            .unwrap_or_default()
-            .unwrap_or_default();
+            .unwrap()
+            .unwrap();
         let names_in_schema = meta
             .all_links()
             .iter()
@@ -272,5 +344,86 @@ mod tests {
             tag_source.import.as_ref().unwrap().alias,
             Some(name!("myTag"))
         );
+    }
+
+    mod link_import {
+        use super::*;
+
+        #[test]
+        fn errors_on_malformed_values() {
+            let schema = r#"
+                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+                extend schema @link(
+                  url: "https://specs.apollo.dev/federation/v2.0",
+                  import: [
+                    2,
+                    { foo: "bar" },
+                    { name: "@key", badName: "foo"},
+                    { name: 42 },
+                    { as: "bar" },
+                   ]
+                )
+
+                type Query {
+                  q: Int
+                }
+
+                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+            "#;
+
+            let schema = Schema::parse(schema, "testSchema").unwrap();
+            let errors = links_metadata(&schema).expect_err("should error");
+            // TODO Multiple errors
+            insta::assert_display_snapshot!(errors, @r###"Invalid use of @link in schema: invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: "<importedElement>", as: "<alias>" }."###);
+        }
+
+        #[test]
+        fn errors_on_mismatch_between_name_and_alias() {
+            let schema = r#"
+                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+                extend schema @link(
+                  url: "https://specs.apollo.dev/federation/v2.0",
+                  import: [
+                    { name: "@key", as: "myKey" },
+                    { name: "FieldSet", as: "@fieldSet" },
+                  ]
+                )
+
+                type Query {
+                  q: Int
+                }
+
+                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+            "#;
+
+            let schema = Schema::parse(schema, "testSchema").unwrap();
+            let errors = links_metadata(&schema).expect_err("should error");
+            // TODO Multiple errors
+            insta::assert_display_snapshot!(errors, @"Invalid use of @link in schema: invalid alias 'myKey' for import name '@key': should start with '@' since the imported name does");
+        }
+
+        // TODO Implement
+        /*
+        #[test]
+        fn errors_on_importing_unknown_elements_for_known_features() {
+            let schema = r#"
+                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+                extend schema @link(
+                  url: "https://specs.apollo.dev/federation/v2.0",
+                  import: [ "@foo", "key", { name: "@sharable" } ]
+                )
+
+                type Query {
+                  q: Int
+                }
+
+                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+            "#;
+
+            let schema = Schema::parse(schema, "testSchema").unwrap();
+            let errors = links_metadata(&schema).expect_err("should error");
+            insta::assert_display_snapshot!(errors, @"");
+        }
+        */
     }
 }

@@ -205,13 +205,12 @@ impl str::FromStr for Url {
                     .ok_or(SpecError::ParseError(
                         "invalid `@link` specification url: missing specification name".to_string(),
                     ))
-                    .and_then(|segment| {
-                        Name::new(segment).map_err(|err| {
-                            SpecError::ParseError(format!(
-                                "invalid `@link` specification url: {err}"
-                            ))
-                        })
-                    })?;
+                    // Note this is SUPER wrong, but the JS federation implementation didn't check
+                    // if the name was valid, and customers are actively using URLs with for example dashes.
+                    // So we pretend that it's fine. You can't reference an imported element by the
+                    // namespaced name because it's not valid GraphQL to do so--but you can
+                    // explicitly import elements from a spec with an invalid name.
+                    .map(|segment| Name::new_unchecked(segment.into()))?;
                 let scheme = url.scheme();
                 if !scheme.starts_with("http") {
                     return Err(SpecError::ParseError("invalid `@link` specification url: only http(s) urls are supported currently".to_string()));
