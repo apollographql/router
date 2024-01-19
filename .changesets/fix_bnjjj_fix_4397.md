@@ -22,7 +22,9 @@ or if you used a variable like this:
 }
 ```
 
-you received different response. Now it both answers:
+The router returned responses with different formats.
+
+This release fixes the issue, and the router returns the same response for both examples:
 
 ```json
 { "data": {}}
