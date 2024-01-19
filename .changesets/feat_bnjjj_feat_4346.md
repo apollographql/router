@@ -1,4 +1,6 @@
-### Add options to set username and password separately for Redis ([Issue #4346](https://github.com/apollographql/router/issues/4346))
+### New configuration options for Redis username and password ([Issue #4346](https://github.com/apollographql/router/issues/4346))
+
+This release introduces new configuration options to set your Redis username and password.
 
 Example of configuration:
 

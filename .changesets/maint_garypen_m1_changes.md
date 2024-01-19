@@ -5,7 +5,7 @@ Prior to this release, macOS binaries were produced on Intel build machines in o
 Our [CI provider has announced the deprecation of the macOS Intel build machines](https://discuss.circleci.com/t/macos-intel-support-deprecation-in-january-2024/48718) and we are updating our build pipeline to use the new Apple Silicon based machines.
 
 This will have the following effects:
- - Older, Intel based, macOS systems will no longer be able to execute our macOS router binaries
+ - Older, Intel based, macOS systems will no longer be able to execute our macOS router binaries.
  - Newer, Apple Silicon based, macOS systems will get a performance boost due to no longer requiring Rosetta2 support.
 
 We have raised [an issue](https://github.com/apollographql/router/issues/4483) that describes options for Intel based macOS users. Please let us know in that issue if the alternatives we suggest (e.g., Docker, source build) don't work for you so we can discuss alternatives.
