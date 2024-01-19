@@ -32,22 +32,29 @@ With entity caching, we are able to:
 - cache the cart per user, with a small amount of data
 - cache inventory data with a low TTL or even not cache it at all
 
+### Details
+
+To prevent transient errors from affecting the cache on a long period, responses with errors are not cached.
+
+When used along with the Router's authorization directives, cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope and the ones without will have different cache entries. This means that data requiring authorization can still be safely cached, and even shared across users, and will not need invalidation when a user's roles change, as their queries will be directed to a different part of the cache automatically.
+
+On schema updates, the Router makes sure that queries unaffected by the changes will keep their cache entries. Queries with affected fields will need to be cached again, making sure that we don't serve invalid data from the cache after the update.
+
+Invalidation is not yet implemented, but planned.
+
 ## Configuration
 
 It is setup as follows:
 
 ```yaml title="router.yaml"
 experimental_entity_cache:
-    redis: #highlight-line
-        urls: ["redis://..."] #highlight-line
-        timeout: 5ms # Optional, by default: 2ms
-        ttl: 24h # Optional, by default no expiration
-experimental_entity_cache:
+  enabled: true
+
   redis:
     urls: ["redis://..."]
     timeout: 5ms # Optional, by default: 2ms
     ttl: 24h # Optional, by default no expiration
-  enabled: true
+
   subgraphs:
     accounts:
       enabled: false # disable for a specific subgraph
@@ -62,3 +69,18 @@ The `redis` section follows the same convention as in [distributed caching](./di
 We can configure a global TTL for all the entries in Redis.
 
 The Apollo Router will also honor the `Cache-Control` header returned with the subgraph response, and generate a `Cache-Control` header for the client response by aggregating the TTL information from all the response parts.
+
+## Cache key manipulation
+
+If we need to store data for a particular query in different cache entries, the cache key can be influenced through the `apollo_entity_cache::key` context entry. This entry contains an object with the fields `all` to affect all subgraph queries under one client query, and fields named after subgr aph operation names to affect individual subgraph queries. The value of the field can be any valid JSON value (object, string, etc).
+
+```json
+{
+    "all": 1,
+    "subgraph_operation1": "key1",
+    "subgraph_operation2": {
+      "data": "key2"
+    }
+}
+
+```
