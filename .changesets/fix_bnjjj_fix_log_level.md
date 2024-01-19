@@ -1,9 +1,9 @@
-### Set log level to `info` by default for the entire application ([PR #4451](https://github.com/apollographql/router/pull/4451))
+### Set application default log level to `info` ([PR #4451](https://github.com/apollographql/router/pull/4451))
 
-By default the log level of the application if `RUST_LOG` is not set is `info` and if you provide `--log` or `APOLLO_RUST_LOG` value then it overrides the default `info` log level with `apollo_router=...` because it only impacts the `apollo_router` crate, not external custom plugin and so one.
+This release sets the default log level to `info` for an entire application, including custom external plugins, when the [`RUST_LOG` environment variable](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/logging/overview/#log-level) isn't set.
 
-By doing this fix, by default if you have a custom plugin with info logs or metrics you won't have to enforce `RUST_LOG=info` everytime, it will work as expected.
+Previously, if you set the `--log` command-line option or `APOLLO_RUST_LOG` environment variable, their log level setting impacted more than the `apollo_router` crate and caused custom plugins with `info` logs or metrics to have to manually set `RUST_LOG=info`.
 
-> Note: it doesn't impact the behavior of `RUST_LOG` if you set it.
+> Note: setting `RUST_LOG` changes the application log level.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4451
