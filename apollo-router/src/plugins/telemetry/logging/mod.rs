@@ -26,14 +26,13 @@ mod test {
             let mut response = test_harness
                 .call_router(
                     router::Request::fake_builder()
-                        .header("custom-header", "foobar")
                         .body("query { foo }")
                         .build()
                         .expect("expecting valid request"),
                     |_r| {
                         tracing::info!("response");
                         router::Response::fake_builder()
-                            .header("custom-header", "foobar")
+                            .header("custom-header", "val1")
                             .data(serde_json::json!({"data": "res"}))
                             .build()
                             .expect("expecting valid response")
@@ -56,7 +55,6 @@ mod test {
             let mut response = test_harness
                 .call_supergraph(
                     supergraph::Request::fake_builder()
-                        .header("custom-header", "foobar")
                         .query("query { foo }")
                         .variable("a", "b")
                         .build()
@@ -64,7 +62,7 @@ mod test {
                     |_r| {
                         tracing::info!("response");
                         supergraph::Response::fake_builder()
-                            .header("custom-header", "foobar")
+                            .header("custom-header", "val1")
                             .data(serde_json::json!({"data": "res"}))
                             .build()
                             .expect("expecting valid response")
@@ -97,7 +95,7 @@ mod test {
                     |_r| {
                         tracing::info!("response");
                         subgraph::Response::fake2_builder()
-                            .header("custom-header", "foobar")
+                            .header("custom-header", "val1")
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
                             .expect("expecting valid response")
@@ -123,13 +121,16 @@ mod test {
             let mut response = test_harness
                 .call_supergraph(
                     supergraph::Request::fake_builder()
-                        .header("custom-header", "foobar")
+                        .header("custom-header1", "val1")
+                        .header("custom-header2", "val2")
                         .query("query { foo }")
                         .build()
                         .expect("expecting valid request"),
                     |_r| {
+                        tracing::info!("response");
                         supergraph::Response::fake_builder()
-                            .header("custom-header", "foobar")
+                            .header("custom-header1", "val1")
+                            .header("custom-header2", "val2")
                             .data(serde_json::json!({"data": "res"}))
                             .build()
                             .expect("expecting valid response")
