@@ -1,4 +1,4 @@
-### make OperationKind public ([Issue #4410](https://github.com/apollographql/router/issues/4410))
+### make `OperationKind` public ([Issue #4410](https://github.com/apollographql/router/issues/4410))
 
 `OperationKind` was already used in a public field but the type itself was still private.
 
