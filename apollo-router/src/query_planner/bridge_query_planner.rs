@@ -557,7 +557,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             }
 
             let plan_options = PlanOptions {
-                overridden_labels: context
+                override_conditions: context
                     .get(OVERRIDE_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default(),

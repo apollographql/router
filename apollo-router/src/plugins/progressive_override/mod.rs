@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -123,7 +122,7 @@ impl Plugin for ProgressiveOverridePlugin {
                         .filter_map(|(label, percentage)| {
                             (rand::random::<f64>() * 100.0 < *percentage).then(|| label.clone())
                         })
-                        .collect::<HashSet<String>>();
+                        .collect::<Vec<String>>();
 
                     // TODO: handle the Err case here
                     tracing::info!(

@@ -1,7 +1,7 @@
 ---
 source: apollo-router/src/plugins/progressive_override/tests.rs
 assertion_line: 99
-expression: response
+expression: "serde_json::to_value(response).unwrap()"
 ---
 {
   "data": {
@@ -62,7 +62,7 @@ expression: response
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
-                "schemaAwareHash": "a81e4cbd1c0b24fda886e39bb8421f790edfb56556918feb44fe04d01b089288",
+                "schemaAwareHash": "76528cd29d48b8687204899dab9622742fd14bc52ffb4e4e70a1d3c9fc3cd4ec",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

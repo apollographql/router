@@ -289,7 +289,7 @@ where
         }
 
         let plan_options = PlanOptions {
-            overridden_labels: request
+            override_conditions: request
                 .context
                 .get(OVERRIDE_KEY)
                 .unwrap_or_default()

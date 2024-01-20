@@ -60,7 +60,7 @@ const SCHEMA: &str = r#"
     @join__type(graph: SUBGRAPH2, key: "k")
   {
     k: ID
-    a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo")
+    a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
     b: Int @join__field(graph: SUBGRAPH2)
   }
 "#;
