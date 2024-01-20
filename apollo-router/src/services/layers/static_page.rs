@@ -3,7 +3,6 @@
 //!  For more information on APQ see:
 //!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
-use std::borrow::Cow;
 use std::ops::ControlFlow;
 
 use askama::Template;
@@ -25,19 +24,24 @@ use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
 use crate::Configuration;
 
+#[derive(Clone)]
+enum StaticPage {
+    Sandbox,
+    HomePage(Homepage),
+}
+
 /// [`Layer`] That serves Static pages such as Homepage and Sandbox.
 #[derive(Clone)]
 pub(crate) struct StaticPageLayer {
-    static_page: Option<String>,
+    static_page: Option<StaticPage>,
 }
 
 impl StaticPageLayer {
     pub(crate) fn new(configuration: &Configuration) -> Self {
         let static_page = if configuration.sandbox.enabled {
-            Some(sandbox_page_content())
+            Some(StaticPage::Sandbox)
         } else if configuration.homepage.enabled {
-            let homepage_config = configuration.homepage.clone();
-            Some(home_page_content(homepage_config))
+            Some(StaticPage::HomePage(configuration.homepage.clone()))
         } else {
             None
         };
@@ -54,37 +58,53 @@ where
     type Service = CheckpointService<S, router::Request>;
 
     fn layer(&self, service: S) -> Self::Service {
-        if let Some(page) = self.static_page.as_ref() {
-            let page = page.clone();
-            let cow = Cow::from(page);
-
-            CheckpointService::new(
-                move |req| {
-                    let res = if req.router_request.method() == Method::GET
-                        && prefers_html(req.router_request.headers())
-                    {
-                        let response = http::Response::builder()
-                            .header(
-                                CONTENT_TYPE,
-                                HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
-                            )
-                            .body(Body::from(cow.clone()))
-                            .unwrap();
-                        ControlFlow::Break(router::Response {
-                            response,
-                            context: req.context,
-                        })
-                    } else {
-                        ControlFlow::Continue(req)
-                    };
-
-                    Ok(res)
-                },
-                service,
-            )
+        if let Some(static_page) = &self.static_page {
+            self.static_page_service(static_page.clone(), service)
         } else {
             CheckpointService::new(move |req| Ok(ControlFlow::Continue(req)), service)
         }
+    }
+}
+
+impl StaticPageLayer {
+    fn static_page_service<S>(
+        &self,
+        static_page: StaticPage,
+        service: S,
+    ) -> CheckpointService<S, router::Request>
+    where
+        S: Service<router::Request, Response = router::Response, Error = BoxError> + Send + 'static,
+        <S as Service<router::Request>>::Future: Send + 'static,
+    {
+        CheckpointService::new(
+            move |req| {
+                let res = if req.router_request.method() == Method::GET
+                    && prefers_html(req.router_request.headers())
+                {
+                    let content = match &static_page {
+                        StaticPage::Sandbox => sandbox_page_content(),
+                        StaticPage::HomePage(hp) => home_page_content(hp),
+                    };
+
+                    let response = http::Response::builder()
+                        .header(
+                            CONTENT_TYPE,
+                            HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
+                        )
+                        .body(Body::from(content))
+                        .unwrap();
+                    ControlFlow::Break(router::Response {
+                        response,
+                        context: req.context,
+                    })
+                } else {
+                    ControlFlow::Continue(req)
+                };
+
+                Ok(res)
+            },
+            service,
+        )
     }
 }
 
@@ -122,9 +142,13 @@ struct HomepageTemplate {
     graph_ref: String,
 }
 
-pub(crate) fn home_page_content(homepage_config: Homepage) -> String {
+pub(crate) fn home_page_content(homepage_config: &Homepage) -> String {
     let template = HomepageTemplate {
-        graph_ref: homepage_config.graph_ref.unwrap_or_default(),
+        graph_ref: homepage_config
+            .graph_ref
+            .as_ref()
+            .cloned()
+            .unwrap_or_default(),
     };
     template.render().expect("cannot fail")
 }

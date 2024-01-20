@@ -1201,7 +1201,7 @@ async fn it_displays_homepage() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.text().await.unwrap(),
-        home_page_content(Homepage::fake_builder().enabled(false).build())
+        home_page_content(&Homepage::fake_builder().enabled(false).build())
     );
     server.shutdown().await.unwrap();
 }
