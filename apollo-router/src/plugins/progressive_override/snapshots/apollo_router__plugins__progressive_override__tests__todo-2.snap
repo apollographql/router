@@ -19,7 +19,7 @@ expression: "serde_json::to_value(overridden_response).unwrap()"
           "id": null,
           "inputRewrites": null,
           "outputRewrites": null,
-          "schemaAwareHash": "9ea1faecccac83224d47c7c3e63fa0e740636f2b6f6e53ad9a115cd06834f387",
+          "schemaAwareHash": "ffe56a28bee71e070ae0109d52b949b888ca55fe93d6a0fb34a27fbed88e05de",
           "authorization": {
             "is_authenticated": false,
             "scopes": [],

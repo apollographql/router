@@ -100,10 +100,7 @@ impl LicenseEnforcementReport {
                 configuration,
                 &Self::configuration_restrictions(),
             ),
-            restricted_schema_in_use: Self::validate_schema(
-                schema,
-                &Self::schema_restrictions(),
-            ),
+            restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions()),
         }
     }
 
@@ -440,8 +437,12 @@ impl Display for SchemaRestriction {
         match self {
             SchemaRestriction::Directive { name, url } => {
                 write!(f, "* {}\n  {}", name, url)
-            },
-            SchemaRestriction::DirectiveArgument { name, url, argument } => {
+            }
+            SchemaRestriction::DirectiveArgument {
+                name,
+                url,
+                argument,
+            } => {
                 write!(f, "* {}.{}\n  {}", name, argument, url)
             }
         }
