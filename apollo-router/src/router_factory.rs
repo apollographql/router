@@ -154,9 +154,9 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // we have to create afirst telemetry plugin before creating everything else, to generate a trace
         // of router and plugin creation
         let plugin_registry = &*crate::plugin::PLUGINS;
-        let mut _initial_telemetry_plugin = None;
+        let mut initial_telemetry_plugin = None;
 
-        if previous_router.is_none() {
+        if previous_router.is_none() && apollo_opentelemetry_initialized() {
             if let Some(factory) = plugin_registry
                 .iter()
                 .find(|factory| factory.name == "apollo.telemetry")
@@ -183,7 +183,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                             ) {
                                 telemetry.activate();
                             }
-                            _initial_telemetry_plugin = Some(plugin);
+                            initial_telemetry_plugin = Some(plugin);
                         }
                         Err(e) => return Err(e),
                     }
@@ -193,9 +193,15 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         // for now we need the root span to be named request, otherwise the trace is not registered
         let router_span = tracing::info_span!("request");
-        Self.inner_create(configuration, schema, previous_router, extra_plugins)
-            .instrument(router_span)
-            .await
+        Self.inner_create(
+            configuration,
+            schema,
+            previous_router,
+            initial_telemetry_plugin,
+            extra_plugins,
+        )
+        .instrument(router_span)
+        .await
     }
 }
 
@@ -205,6 +211,7 @@ impl YamlRouterFactory {
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a RouterCreator>,
+        initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<RouterCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query planner creation");
@@ -249,9 +256,14 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema, extra_plugins)
-            .instrument(span)
-            .await?;
+        let plugins = create_plugins(
+            &configuration,
+            &schema,
+            initial_telemetry_plugin,
+            extra_plugins,
+        )
+        .instrument(span)
+        .await?;
 
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
@@ -379,7 +391,7 @@ impl YamlRouterFactory {
         let schema = bridge_query_planner.schema();
 
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+        let plugins = create_plugins(&configuration, &schema, None, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
@@ -467,6 +479,7 @@ caused by
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
+    initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
@@ -584,7 +597,16 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("headers");
     if apollo_telemetry_plugin_mandatory {
-        add_mandatory_apollo_plugin!("telemetry");
+        match initial_telemetry_plugin {
+            None => {
+                add_mandatory_apollo_plugin!("telemetry");
+            }
+            Some(plugin) => {
+                plugin_instances.push(("apollo.telemetry".to_string(), plugin));
+                apollo_plugins_config.remove("apollo.telemetry");
+                apollo_plugin_factories.remove("apollo.telemetry");
+            }
+        }
     }
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
