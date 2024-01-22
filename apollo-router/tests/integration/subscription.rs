@@ -186,10 +186,7 @@ async fn run_subscription(sub_query: &str, id: Option<i64>) -> reqwest::Response
 
     let mut request = client
         .post("http://localhost:4000")
-        .header(
-            "accept",
-            "multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0",
-        )
+        .header("accept", "multipart/mixed;subscriptionSpec=1.0")
         .header("apollographql-client-name", "custom_name")
         .header("apollographql-client-version", "1.0")
         .json(&json!({"query":sub_query,"variables":{}}));

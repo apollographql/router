@@ -913,6 +913,11 @@ pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
 
+    /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
+    pub(crate) username: Option<String>,
+    /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
+    pub(crate) password: Option<String>,
+
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
@@ -922,6 +927,9 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// TTL for entries
     pub(crate) ttl: Option<Duration>,
+
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
 
     #[serde(default)]
     /// TLS client configuration

@@ -130,12 +130,12 @@ impl Service<SubgraphRequest> for MockSubgraph {
 
         if let Some(sub_stream) = &mut req.subscription_stream {
             sub_stream
-                .try_send(
+                .try_send(Box::pin(
                     self.subscription_stream
                         .take()
                         .expect("must have a subscription stream set")
                         .into_stream(),
-                )
+                ))
                 .unwrap();
         }
 
