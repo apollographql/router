@@ -46,6 +46,8 @@ use crate::services::SupergraphCreator;
 use crate::spec::Schema;
 use crate::ListenAddr;
 
+pub(crate) const STARTING_SPAN_NAME: &str = "starting";
+
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
 pub struct Endpoint {
@@ -192,7 +194,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         // for now we need the root span to be named request, otherwise the trace is not registered
-        let router_span = tracing::info_span!("request");
+        let router_span = tracing::info_span!(STARTING_SPAN_NAME);
         Self.inner_create(
             configuration,
             schema,
