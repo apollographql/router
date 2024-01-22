@@ -44,7 +44,9 @@ telemetry:
 
 ### `rate_limit`
 
-Log messages ca become too frequent, especially when reporting errors when processing a request. To prevent the router from filling the logs with similar messages, it is possible to limit their rate. The rate is set per log location, which means that two different log messages are limited independently, but log lines with the same message with different sets of attributes fal l under the same rate. This rate limiting only applies to logging to stdout, and does not affect event sent to trace exporters like OTLP, which have their own sampling configuration.
+The rate at which log messages are produced can become too high, especially for request processing errors. To prevent the router from filling its logs with redundant messages, you can use the `rate_limit` option to set the logging rate limit.
+
+You can set the logging rate limit for each log location, where different log messages are rate limited independently, and log lines with the same message but different sets of attributes are limited under the same rate. This rate limiting only applies to logging to stdout and doesn't affect events sent to trace exporters like OTLP, which have their own sampling configuration.
 
 To enable rate limiting, set the `rate_limit` option:
 
