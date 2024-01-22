@@ -6,6 +6,7 @@
 use std::ops::ControlFlow;
 
 use askama::Template;
+use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -24,24 +25,18 @@ use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
 use crate::Configuration;
 
-#[derive(Clone)]
-enum StaticPage {
-    Sandbox,
-    HomePage(Homepage),
-}
-
 /// [`Layer`] That serves Static pages such as Homepage and Sandbox.
 #[derive(Clone)]
 pub(crate) struct StaticPageLayer {
-    static_page: Option<StaticPage>,
+    static_page: Option<Bytes>,
 }
 
 impl StaticPageLayer {
     pub(crate) fn new(configuration: &Configuration) -> Self {
         let static_page = if configuration.sandbox.enabled {
-            Some(StaticPage::Sandbox)
+            Some(Bytes::from(sandbox_page_content()))
         } else if configuration.homepage.enabled {
-            Some(StaticPage::HomePage(configuration.homepage.clone()))
+            Some(Bytes::from(home_page_content(&configuration.homepage)))
         } else {
             None
         };
@@ -59,52 +54,35 @@ where
 
     fn layer(&self, service: S) -> Self::Service {
         if let Some(static_page) = &self.static_page {
-            self.static_page_service(static_page.clone(), service)
+            let page = static_page.clone();
+
+            CheckpointService::new(
+                move |req| {
+                    let res = if req.router_request.method() == Method::GET
+                        && prefers_html(req.router_request.headers())
+                    {
+                        let response = http::Response::builder()
+                            .header(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
+                            )
+                            .body(Body::from(page.clone()))
+                            .unwrap();
+                        ControlFlow::Break(router::Response {
+                            response,
+                            context: req.context,
+                        })
+                    } else {
+                        ControlFlow::Continue(req)
+                    };
+
+                    Ok(res)
+                },
+                service,
+            )
         } else {
             CheckpointService::new(move |req| Ok(ControlFlow::Continue(req)), service)
         }
-    }
-}
-
-impl StaticPageLayer {
-    fn static_page_service<S>(
-        &self,
-        static_page: StaticPage,
-        service: S,
-    ) -> CheckpointService<S, router::Request>
-    where
-        S: Service<router::Request, Response = router::Response, Error = BoxError> + Send + 'static,
-        <S as Service<router::Request>>::Future: Send + 'static,
-    {
-        CheckpointService::new(
-            move |req| {
-                let res = if req.router_request.method() == Method::GET
-                    && prefers_html(req.router_request.headers())
-                {
-                    let content = match &static_page {
-                        StaticPage::Sandbox => sandbox_page_content(),
-                        StaticPage::HomePage(hp) => home_page_content(hp),
-                    };
-
-                    let response = http::Response::builder()
-                        .header(
-                            CONTENT_TYPE,
-                            HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
-                        )
-                        .body(Body::from(content))
-                        .unwrap();
-                    ControlFlow::Break(router::Response {
-                        response,
-                        context: req.context,
-                    })
-                } else {
-                    ControlFlow::Continue(req)
-                };
-
-                Ok(res)
-            },
-            service,
-        )
     }
 }
 
@@ -129,11 +107,13 @@ struct SandboxTemplate {
     apollo_router_version: &'static str,
 }
 
-pub(crate) fn sandbox_page_content() -> String {
+pub(crate) fn sandbox_page_content() -> Vec<u8> {
     let template = SandboxTemplate {
         apollo_router_version: std::env!("CARGO_PKG_VERSION"),
     };
-    template.render().expect("cannot fail")
+    let mut buffer = Vec::new();
+    template.write_into(&mut buffer).expect("cannot fail");
+    buffer
 }
 
 #[derive(Template)]
@@ -142,7 +122,7 @@ struct HomepageTemplate {
     graph_ref: String,
 }
 
-pub(crate) fn home_page_content(homepage_config: &Homepage) -> String {
+pub(crate) fn home_page_content(homepage_config: &Homepage) -> Vec<u8> {
     let template = HomepageTemplate {
         graph_ref: homepage_config
             .graph_ref
@@ -150,5 +130,7 @@ pub(crate) fn home_page_content(homepage_config: &Homepage) -> String {
             .cloned()
             .unwrap_or_default(),
     };
-    template.render().expect("cannot fail")
+    let mut buffer = Vec::new();
+    template.write_into(&mut buffer).expect("cannot fail");
+    buffer
 }

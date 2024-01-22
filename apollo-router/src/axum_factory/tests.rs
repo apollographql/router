@@ -385,7 +385,7 @@ async fn it_displays_sandbox() {
         "{}",
         response.text().await.unwrap()
     );
-    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+    assert_eq!(response.bytes().await.unwrap(), sandbox_page_content());
 }
 
 #[tokio::test]
@@ -431,7 +431,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
         "{}",
         response.text().await.unwrap()
     );
-    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+    assert_eq!(response.bytes().await.unwrap(), sandbox_page_content());
 }
 
 #[tokio::test]
@@ -1200,7 +1200,7 @@ async fn it_displays_homepage() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.text().await.unwrap(),
+        response.bytes().await.unwrap(),
         home_page_content(&Homepage::fake_builder().enabled(false).build())
     );
     server.shutdown().await.unwrap();
