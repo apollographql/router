@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
@@ -16,7 +17,6 @@ use http::header::TRAILER;
 use http::header::TRANSFER_ENCODING;
 use http::header::UPGRADE;
 use http::HeaderValue;
-use lazy_static::lazy_static;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -235,11 +235,15 @@ impl Plugin for Headers {
 
 struct HeadersLayer {
     operations: Arc<Vec<Operation>>,
+    reserved_headers: Arc<HashSet<&'static HeaderName>>,
 }
 
 impl HeadersLayer {
     fn new(operations: Arc<Vec<Operation>>) -> Self {
-        Self { operations }
+        Self {
+            operations,
+            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
+        }
     }
 }
 
@@ -250,35 +254,34 @@ impl<S> Layer<S> for HeadersLayer {
         HeadersService {
             inner,
             operations: self.operations.clone(),
+            reserved_headers: self.reserved_headers.clone(),
         }
     }
 }
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
+    reserved_headers: Arc<HashSet<&'static HeaderName>>,
 }
 
-lazy_static! {
-    // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
-    // These are not propagated by default using a regex match as they will not make sense for the
-    // second hop.
-    // In addition because our requests are not regular proxy requests content-type, content-length
-    // and host are also in the exclude list.
-    static ref RESERVED_HEADERS: Vec<HeaderName> = [
-        CONNECTION,
-        PROXY_AUTHENTICATE,
-        PROXY_AUTHORIZATION,
-        TE,
-        TRAILER,
-        TRANSFER_ENCODING,
-        UPGRADE,
-        CONTENT_LENGTH,
-        CONTENT_TYPE,
-        HOST,
-        HeaderName::from_static("keep-alive")
-    ]
-    .into();
-}
+// Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
+// These are not propagated by default using a regex match as they will not make sense for the
+// second hop.
+// In addition because our requests are not regular proxy requests content-type, content-length
+// and host are also in the exclude list.
+static RESERVED_HEADERS: [HeaderName; 11] = [
+    CONNECTION,
+    PROXY_AUTHENTICATE,
+    PROXY_AUTHORIZATION,
+    TE,
+    TRAILER,
+    TRANSFER_ENCODING,
+    UPGRADE,
+    CONTENT_LENGTH,
+    CONTENT_TYPE,
+    HOST,
+    HeaderName::from_static("keep-alive"),
+];
 
 impl<S> Service<SubgraphRequest> for HeadersService<S>
 where
@@ -358,7 +361,7 @@ where
                         .drain()
                         .filter_map(|(name, value)| {
                             name.and_then(|name| {
-                                (RESERVED_HEADERS.contains(&name)
+                                (self.reserved_headers.contains(&name)
                                     || !matching.is_match(name.as_str()))
                                 .then_some((name, value))
                             })
@@ -390,7 +393,8 @@ where
                         .headers()
                         .iter()
                         .filter(|(name, _)| {
-                            !RESERVED_HEADERS.contains(name) && matching.is_match(name.as_str())
+                            !self.reserved_headers.contains(*name)
+                                && matching.is_match(name.as_str())
                         })
                         .for_each(|(name, value)| {
                             headers.append(name, value.clone());

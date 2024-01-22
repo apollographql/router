@@ -1656,7 +1656,7 @@ mod tests {
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
         headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
-        context.private_entries.lock().insert(ClientRequestAccepts {
+        context.extensions().lock().insert(ClientRequestAccepts {
             multipart_defer: true,
             multipart_subscription: true,
             json: true,
