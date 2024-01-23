@@ -6,7 +6,10 @@ use std::task::Poll;
 
 use access_json::JSONQuery;
 use http::header::HeaderName;
+use http::header::ACCEPT;
+use http::header::ACCEPT_ENCODING;
 use http::header::CONNECTION;
+use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use http::header::HOST;
@@ -269,7 +272,7 @@ struct HeadersService<S> {
 // second hop.
 // In addition because our requests are not regular proxy requests content-type, content-length
 // and host are also in the exclude list.
-static RESERVED_HEADERS: [HeaderName; 11] = [
+static RESERVED_HEADERS: [HeaderName; 14] = [
     CONNECTION,
     PROXY_AUTHENTICATE,
     PROXY_AUTHORIZATION,
@@ -279,7 +282,10 @@ static RESERVED_HEADERS: [HeaderName; 11] = [
     UPGRADE,
     CONTENT_LENGTH,
     CONTENT_TYPE,
+    CONTENT_ENCODING,
     HOST,
+    ACCEPT,
+    ACCEPT_ENCODING,
     HeaderName::from_static("keep-alive"),
 ];
 
@@ -296,6 +302,13 @@ where
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
+        self.modify_request(&mut req);
+        self.inner.call(req)
+    }
+}
+
+impl<S> HeadersService<S> {
+    fn modify_request(&self, req: &mut SubgraphRequest) {
         for operation in &*self.operations {
             match operation {
                 Operation::Insert(insert_config) => match insert_config {
@@ -402,7 +415,6 @@ where
                 }
             }
         }
-        self.inner.call(req)
     }
 }
 
@@ -753,6 +765,80 @@ mod test {
             .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_propagate_reserved() -> Result<(), BoxError> {
+        let service = HeadersService {
+            inner: MockSubgraphService::new(),
+            operations: Arc::new(vec![Operation::Propagate(Propagate::Matching {
+                matching: Regex::from_str(".*")?,
+            })]),
+            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
+        };
+
+        let mut request = SubgraphRequest {
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("db", "vdb")
+                    .header("db", "vdb2")
+                    .header(HOST, "host")
+                    .header(CONTENT_LENGTH, "2")
+                    .header(CONTENT_TYPE, "graphql")
+                    .header(CONTENT_ENCODING, "identity")
+                    .header(ACCEPT, "application/json")
+                    .header(ACCEPT_ENCODING, "gzip")
+                    .body(
+                        Request::builder()
+                            .query("query")
+                            .operation_name("my_operation_name")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+            ),
+            subgraph_request: http::Request::builder()
+                .header("aa", "vaa")
+                .header("ab", "vab")
+                .header("ac", "vac")
+                .header(HOST, "rhost")
+                .header(CONTENT_LENGTH, "22")
+                .header(CONTENT_TYPE, "graphql")
+                .body(Request::builder().query("query").build())
+                .expect("expecting valid request"),
+            operation_kind: OperationKind::Query,
+            context: Context::new(),
+            subgraph_name: String::from("test").into(),
+            subscription_stream: None,
+            connection_closed_signal: None,
+            query_hash: Default::default(),
+            authorization: Default::default(),
+        };
+        service.modify_request(&mut request);
+        let headers = request
+            .subgraph_request
+            .headers()
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            headers,
+            vec![
+                ("aa", "vaa"),
+                ("ab", "vab"),
+                ("ac", "vac"),
+                ("host", "rhost"),
+                ("content-length", "22"),
+                ("content-type", "graphql"),
+                ("da", "vda"),
+                ("db", "vdb"),
+                ("db", "vdb"),
+                ("db", "vdb2"),
+            ]
+        );
+
         Ok(())
     }
 
