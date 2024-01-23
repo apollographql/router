@@ -132,6 +132,7 @@ pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod fmt_layer;
 pub(crate) mod formatters;
+mod logging;
 pub(crate) mod metrics;
 mod otlp;
 pub(crate) mod reload;
@@ -480,7 +481,13 @@ impl Plugin for Telemetry {
                 }
 
                 if resp.context.contains_key(LOGGING_DISPLAY_HEADERS) {
-                    ::tracing::info!(http.response.headers = ?resp.response.headers(), "Supergraph response headers");
+                    let sorted_headers = resp
+                        .response
+                        .headers()
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v))
+                        .collect::<BTreeMap<_, _>>();
+                    ::tracing::info!(http.response.headers = ?sorted_headers, "Supergraph response headers");
                 }
                 let display_body = resp.context.contains_key(LOGGING_DISPLAY_BODY);
                 resp.map_stream(move |gql_response| {
@@ -922,7 +929,13 @@ impl Telemetry {
 
         let (should_log_headers, should_log_body) = config.exporters.logging.should_log(req);
         if should_log_headers {
-            ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
+            let sorted_headers = req
+                .supergraph_request
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.as_str(), v))
+                .collect::<BTreeMap<_, _>>();
+            ::tracing::info!(http.request.headers = ?sorted_headers, "Supergraph request headers");
 
             let _ = req.context.insert(LOGGING_DISPLAY_HEADERS, true);
         }

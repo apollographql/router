@@ -663,6 +663,113 @@ expression: "&schema"
         "url"
       ],
       "properties": {
+        "execution": {
+          "description": "The execution stage request/response configuration",
+          "default": {
+            "request": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "method": false,
+              "query_plan": false
+            },
+            "response": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "status_code": false
+            }
+          },
+          "type": "object",
+          "properties": {
+            "request": {
+              "description": "The request configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "method": false,
+                "query_plan": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "method": {
+                  "description": "Send the method",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "query_plan": {
+                  "description": "Send the query plan",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "response": {
+              "description": "What information is passed to a router request/response stage",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "status_code": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "status_code": {
+                  "description": "Send the HTTP status",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
         "router": {
           "description": "The router stage request/response configuration",
           "default": {

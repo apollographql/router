@@ -433,7 +433,15 @@ impl Executable {
         }
 
         copy_args_to_env();
-        init_telemetry(&opt.log_level)?;
+
+        let apollo_telemetry_initialized = if graph_os() {
+            init_telemetry(&opt.log_level)?;
+            true
+        } else {
+            // Best effort init telemetry
+            init_telemetry(&opt.log_level).is_ok()
+        };
+
         setup_panic_handler();
 
         if opt.schema {
@@ -474,12 +482,14 @@ impl Executable {
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
-        // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
-        tokio::task::spawn_blocking(move || {
-            opentelemetry::global::shutdown_tracer_provider();
-            meter_provider().shutdown();
-        })
-        .await?;
+        if apollo_telemetry_initialized {
+            // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
+            tokio::task::spawn_blocking(move || {
+                opentelemetry::global::shutdown_tracer_provider();
+                meter_provider().shutdown();
+            })
+            .await?;
+        }
         result
     }
 
@@ -678,6 +688,10 @@ impl Executable {
         }
         Ok(())
     }
+}
+
+fn graph_os() -> bool {
+    std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
 }
 
 fn setup_panic_handler() {
