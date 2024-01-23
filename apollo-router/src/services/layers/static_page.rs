@@ -20,7 +20,8 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
-use crate::configuration::{Explorer, Homepage};
+use crate::configuration::Explorer;
+use crate::configuration::Homepage;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
 use crate::Configuration;
