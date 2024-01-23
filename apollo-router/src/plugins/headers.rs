@@ -309,7 +309,7 @@ where
 
 impl<S> HeadersService<S> {
     fn modify_request(&self, req: &mut SubgraphRequest) {
-        let mut already_propagated: HashSet<&HeaderName> = HashSet::new();
+        let mut already_propagated: HashSet<&str> = HashSet::new();
 
         for operation in &*self.operations {
             match operation {
@@ -390,7 +390,7 @@ impl<S> HeadersService<S> {
                     rename,
                     default,
                 }) => {
-                    if !already_propagated.contains(named) {
+                    if !already_propagated.contains(named.as_str()) {
                         let headers = req.subgraph_request.headers_mut();
                         let values = req.supergraph_request.headers().get_all(named);
                         if values.iter().count() == 0 {
@@ -402,7 +402,7 @@ impl<S> HeadersService<S> {
                                 headers.append(rename.as_ref().unwrap_or(named), value.clone());
                             }
                         }
-                        already_propagated.insert(named);
+                        already_propagated.insert(named.as_str());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
@@ -416,7 +416,7 @@ impl<S> HeadersService<S> {
                                 && matching.is_match(name.as_str())
                         })
                         .for_each(|(name, value)| {
-                            if !already_propagated.contains(name) {
+                            if !already_propagated.contains(name.as_str()) {
                                 headers.append(name, value.clone());
 
                                 // we have to this because don't want to propagate headers that are accounted for in the
@@ -426,7 +426,7 @@ impl<S> HeadersService<S> {
                                     None => previous_name = Some(name),
                                     Some(previous) => {
                                         if previous != name {
-                                            already_propagated.insert(previous);
+                                            already_propagated.insert(previous.as_str());
                                             previous_name = Some(name);
                                         }
                                     }
@@ -434,7 +434,7 @@ impl<S> HeadersService<S> {
                             }
                         });
                     if let Some(name) = previous_name {
-                        already_propagated.insert(name);
+                        already_propagated.insert(name.as_str());
                     }
                 }
             }
