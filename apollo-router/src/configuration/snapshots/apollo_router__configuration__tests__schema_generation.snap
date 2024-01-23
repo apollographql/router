@@ -5639,6 +5639,25 @@ expression: "&schema"
                       "default": false,
                       "type": "boolean"
                     },
+                    "format": {
+                      "description": "Format of the trace ID in response headers",
+                      "oneOf": [
+                        {
+                          "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
+                          "type": "string",
+                          "enum": [
+                            "hexadecimal"
+                          ]
+                        },
+                        {
+                          "description": "Format the Trace ID as a decimal number\n\n(e.g. Trace ID 16 -> 16)",
+                          "type": "string",
+                          "enum": [
+                            "decimal"
+                          ]
+                        }
+                      ]
+                    },
                     "header_name": {
                       "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
                       "type": "string",
