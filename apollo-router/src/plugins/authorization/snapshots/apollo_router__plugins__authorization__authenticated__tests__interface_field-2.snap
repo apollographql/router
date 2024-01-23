@@ -20,7 +20,7 @@ query:
         }
         
 filtered:
-query {
+{
   test
   itf {
     ... on A {

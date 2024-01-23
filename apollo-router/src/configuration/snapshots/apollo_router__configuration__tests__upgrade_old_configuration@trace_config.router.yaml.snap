@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  exporters:
+    tracing:
+      common:
+        service_name: foo
+

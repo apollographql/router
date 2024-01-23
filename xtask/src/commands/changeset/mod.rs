@@ -392,11 +392,9 @@ impl Create {
                                     let pr_body = pr_info.body.clone().replace("\r\n", "\n");
 
                                     // Remove the trailing part of the checklist from the PR body.
-                                    // In the future, we will use the "start metadata" HTML tag, but for now,
-                                    // we support both.
-                                    let pr_body_trailer_regex = regex::Regex::new(
-                                    r"(?ms)(^<!-- start metadata -->\n$\n)?^\*\*Checklist\*\*$[\s\S]*",
-                                    )?;
+                                    let pr_body_meta_regex = regex::Regex::new(
+                                        r"(?m)<!-- start metadata -->\n---",
+                                        )?;
 
                                     // Remove all the "Fixes" references, since we're already going to reference
                                     // those in the course of generating the template.
@@ -404,13 +402,13 @@ impl Create {
                                         r"(?m)^(- )?Fix(es)? #.*$",
                                     )?;
 
-                                    // Run the above Regexes and trim the blurb.
+                                    let index = pr_body_meta_regex.find(&pr_body).map(|mat| mat.start()).unwrap_or(pr_body.len());
+                                    // Run the above Regex and trim the blurb.
                                     let clean_pr_body = pr_body_fixes_regex
-                                        .replace_all(pr_body_trailer_regex
-                                        .replace(&pr_body, "")
-                                        .trim(), "")
+                                        .replace_all(&pr_body[..index].trim(), "")
                                         .trim()
                                         .to_string();
+
 
                                     TemplateContext {
                                         title: pr_info.title.clone(),

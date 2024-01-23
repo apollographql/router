@@ -5,11 +5,13 @@ cors:
     - https://studio.apollographql.com
 
 telemetry:
-  tracing:
-    trace_config:
-      service_name: router
-    jaeger:
-      agent:
-        endpoint: jaeger:6831
-    propagation:
-      jaeger: true
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      jaeger:
+        enabled: true
+        agent:
+          endpoint: jaeger:6831
+      propagation:
+        jaeger: true

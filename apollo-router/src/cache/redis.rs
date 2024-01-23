@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fred::interfaces::RedisResult;
+use fred::interfaces::EventInterface;
 use fred::prelude::ClientLike;
 use fred::prelude::KeysInterface;
 use fred::prelude::RedisClient;
@@ -13,10 +13,24 @@ use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use fred::types::TlsConfig;
+use fred::types::TlsHostMapping;
+use tower::BoxError;
 use url::Url;
 
 use super::KeyType;
 use super::ValueType;
+use crate::configuration::RedisCache;
+use crate::services::generate_tls_client_config;
+
+const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
+    "redis",
+    "rediss",
+    "redis-cluster",
+    "rediss-cluster",
+    "redis-sentinel",
+    "rediss-sentinel",
+];
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RedisKey<K>(pub(crate) K)
@@ -31,7 +45,8 @@ where
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
-    ttl: Option<Duration>,
+    namespace: Option<Arc<String>>,
+    pub(crate) ttl: Option<Duration>,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -87,6 +102,9 @@ where
                     )
                 })
             }
+            fred::types::RedisValue::Null => {
+                Err(RedisError::new(RedisErrorKind::NotFound, "not found"))
+            }
             _res => Err(RedisError::new(
                 RedisErrorKind::Parse,
                 "the data is the wrong type",
@@ -115,23 +133,44 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(urls: Vec<Url>, ttl: Option<Duration>) -> Result<Self, RedisError> {
-        let url = Self::preprocess_urls(urls)?;
-        let config = RedisConfig::from_url(url.as_str())?;
+    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
+        let url = Self::preprocess_urls(config.urls)?;
+        let mut client_config = RedisConfig::from_url(url.as_str())?;
+
+        if let Some(username) = config.username {
+            client_config.username = Some(username);
+        }
+
+        if let Some(password) = config.password {
+            client_config.password = Some(password);
+        }
+
+        if let Some(tls) = config.tls.as_ref() {
+            let tls_cert_store = tls.create_certificate_store().transpose()?;
+            let client_cert_config = tls.client_authentication.as_ref();
+            let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
+            let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_client_config));
+
+            client_config.tls = Some(TlsConfig {
+                connector: fred::types::TlsConnector::Rustls(connector),
+                hostnames: TlsHostMapping::None,
+            });
+        }
 
         let client = RedisClient::new(
-            config,
+            client_config,
             Some(PerformanceConfig {
-                default_command_timeout_ms: 1,
+                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(2)),
                 ..Default::default()
             }),
+            None,
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
         );
         let _handle = client.connect();
 
         // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.on_error();
-        let mut reconnect_rx = client.on_reconnect();
+        let mut error_rx = client.error_rx();
+        let mut reconnect_rx = client.reconnect_rx();
 
         tokio::spawn(async move {
             while let Ok(error) = error_rx.recv().await {
@@ -154,18 +193,26 @@ impl RedisCacheStorage {
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(client),
-            ttl,
+            namespace: config.namespace.map(Arc::new),
+            ttl: config.ttl,
         })
     }
 
+    pub(crate) fn ttl(&self) -> Option<Duration> {
+        self.ttl
+    }
+
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
-        match urls.get(0) {
+        let url_len = urls.len();
+        let mut urls_iter = urls.into_iter();
+        let first = urls_iter.next();
+        match first {
             None => Err(RedisError::new(
                 RedisErrorKind::Config,
                 "empty Redis URL list",
             )),
             Some(first) => {
-                if urls.len() == 1 {
+                if url_len == 1 {
                     return Ok(first.clone());
                 }
 
@@ -176,25 +223,19 @@ impl RedisCacheStorage {
 
                 let mut result = first.clone();
 
-                match scheme {
-                    "redis" => {
-                        let _ = result.set_scheme("redis-cluster");
-                    }
-                    "rediss" => {
-                        let _ = result.set_scheme("rediss-cluster");
-                    }
-                    other => {
-                        return Err(RedisError::new(
-                            RedisErrorKind::Config,
-                            format!(
-                                "invalid Redis URL scheme, expected 'redis' or 'rediss', got: {}",
-                                other
-                            ),
-                        ))
-                    }
+                if SUPPORTED_REDIS_SCHEMES.contains(&scheme) {
+                    let _ = result.set_scheme(scheme);
+                } else {
+                    return Err(RedisError::new(
+                        RedisErrorKind::Config,
+                        format!(
+                            "invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {}",
+                            scheme
+                        ),
+                    ));
                 }
 
-                for url in &urls[1..] {
+                for mut url in urls_iter {
                     if url.username() != username {
                         return Err(RedisError::new(
                             RedisErrorKind::Config,
@@ -207,7 +248,24 @@ impl RedisCacheStorage {
                             "incompatible passwords between Redis URLs",
                         ));
                     }
-                    if url.scheme() != scheme {
+
+                    // Backwords compatibility with old redis client
+                    // If our url has a scheme of redis or rediss, convert it to be cluster form
+                    // and if our result is of matching scheme, convert that to be cluster form.
+                    if url.scheme() == "redis" {
+                        let _ = url.set_scheme("redis-cluster");
+                        if result.scheme() == "redis" {
+                            let _ = result.set_scheme("redis-cluster");
+                        }
+                    }
+                    if url.scheme() == "rediss" {
+                        let _ = url.set_scheme("rediss-cluster");
+                        if result.scheme() == "rediss" {
+                            let _ = result.set_scheme("rediss-cluster");
+                        }
+                    }
+                    // Now check to make sure our schemes match
+                    if url.scheme() != result.scheme() {
                         return Err(RedisError::new(
                             RedisErrorKind::Config,
                             "incompatible schemes between Redis URLs",
@@ -232,51 +290,49 @@ impl RedisCacheStorage {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
+    }
+
+    fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
+        match &self.namespace {
+            Some(namespace) => format!("{namespace}:{key}"),
+            None => key.to_string(),
+        }
     }
 
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
-        tracing::trace!("getting from redis: {:?}", key);
-
-        let result: RedisResult<String> = self.inner.get(key.to_string()).await;
-        match result.as_ref().map(|s| s.as_str()) {
-            // Fred returns nil rather than an error with not_found
-            // See `RedisErrorKind::NotFound` for why this should work
-            // To work around this we first read the value as a string and then deal with the value explicitly
-            Ok("nil") => None,
-            Ok(value) => serde_json::from_str(value)
-                .map(RedisValue)
-                .map_err(|e| {
-                    tracing::error!("couldn't deserialize value from redis: {}", e);
-                    e
-                })
-                .ok(),
-            Err(e) => {
+        self.inner
+            .get::<RedisValue<V>, _>(self.make_key(key))
+            .await
+            .map_err(|e| {
                 if !e.is_not_found() {
-                    tracing::error!("mget error: {}", e);
+                    tracing::error!("get error: {}", e);
                 }
-                None
-            }
-        }
+                e
+            })
+            .ok()
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
-        keys: Vec<RedisKey<K>>,
+        mut keys: Vec<RedisKey<K>>,
     ) -> Option<Vec<Option<RedisValue<V>>>> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
-        let res = if keys.len() == 1 {
+        if keys.len() == 1 {
             let res = self
                 .inner
-                .get::<RedisValue<V>, _>(keys.first().unwrap().to_string())
+                .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
                 .await
                 .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
+                    if !e.is_not_found() {
+                        tracing::error!("get error: {}", e);
+                    }
                     e
                 })
                 .ok();
@@ -285,32 +341,32 @@ impl RedisCacheStorage {
         } else {
             self.inner
                 .mget(
-                    keys.clone()
-                        .into_iter()
-                        .map(|k| k.to_string())
+                    keys.into_iter()
+                        .map(|k| self.make_key(k))
                         .collect::<Vec<_>>(),
                 )
                 .await
                 .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
+                    if !e.is_not_found() {
+                        tracing::error!("get error: {}", e);
+                    }
                     e
                 })
                 .ok()
-        };
-        tracing::trace!("result for '{:?}': {:?}", keys, res);
-
-        res
+        }
     }
 
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
         value: RedisValue<V>,
+        ttl: Option<Duration>,
     ) {
+        let key = self.make_key(key);
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
-        let expiration = self
-            .ttl
+        let expiration = ttl
             .as_ref()
+            .or(self.ttl.as_ref())
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         let r = self
@@ -323,10 +379,11 @@ impl RedisCacheStorage {
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
+        ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
 
-        let r = match self.ttl.as_ref() {
+        let r = match ttl.as_ref().or(self.ttl.as_ref()) {
             None => self.inner.mset(data.to_owned()).await,
             Some(ttl) => {
                 let expiration = Some(Expiration::EX(ttl.as_secs() as i64));
@@ -335,7 +392,7 @@ impl RedisCacheStorage {
                 for (key, value) in data {
                     let _ = pipeline
                         .set::<(), _, _>(
-                            key.clone(),
+                            self.make_key(key.clone()),
                             value.clone(),
                             expiration.clone(),
                             None,
@@ -355,6 +412,8 @@ impl RedisCacheStorage {
 mod test {
     use std::time::SystemTime;
 
+    use url::Url;
+
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -370,5 +429,91 @@ mod test {
         let as_value: Result<fred::types::RedisValue, _> = invalid_json_payload.try_into();
 
         assert!(as_value.is_err());
+    }
+
+    #[test]
+    fn it_preprocesses_redis_schemas_correctly() {
+        // Base Format
+        for scheme in ["redis", "rediss"] {
+            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        }
+        // Cluster Format
+        for scheme in ["redis-cluster", "rediss-cluster"] {
+            let url_s = format!(
+                "{}://username:password@host:6666?node=host1:6667&node=host2:6668",
+                scheme
+            );
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        }
+        // Sentinel Format
+        for scheme in ["redis-sentinel", "rediss-sentinel"] {
+            let url_s = format!(
+                "{}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2",
+                scheme
+            );
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        }
+        // Make sure it fails on sample invalid schemes
+        for scheme in ["wrong", "something"] {
+            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        }
+    }
+
+    // This isn't an exhaustive list of combinations, but some of the more common likely mistakes
+    // that we should catch.
+    #[test]
+    fn it_preprocesses_redis_schemas_correctly_backwards_compatibility() {
+        // Two redis schemes
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        // redis-cluster, redis
+        let url_s = "redis-cluster://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        // redis, redis-cluster
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis-cluster://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        // redis-sentinel, redis
+        let url_s = "redis-sentinel://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        // redis, rediss
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "rediss://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        // redis, rediss-cluster
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "rediss-cluster://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
     }
 }

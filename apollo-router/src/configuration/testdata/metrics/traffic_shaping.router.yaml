@@ -11,7 +11,7 @@ traffic_shaping:
     global_rate_limit:
       capacity: 100
       interval: 1s
-    experimental_enable_http2: true
+    experimental_http2: enable
     experimental_retry:
       ttl: 1s
       min_per_sec: 2

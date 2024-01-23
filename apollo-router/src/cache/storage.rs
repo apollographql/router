@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use super::redis::*;
+use crate::configuration::RedisCache;
 
 pub(crate) trait KeyType:
     Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
@@ -57,14 +58,14 @@ where
 {
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
-        _redis_urls: Option<Vec<url::Url>>,
+        config: Option<RedisCache>,
         caller: &str,
     ) -> Self {
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(urls) = _redis_urls {
-                match RedisCacheStorage::new(urls, None).await {
+            redis: if let Some(config) = config {
+                match RedisCacheStorage::new(config).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
@@ -158,7 +159,7 @@ where
     pub(crate) async fn insert(&self, key: K, value: V) {
         if let Some(redis) = self.redis.as_ref() {
             redis
-                .insert(RedisKey(key.clone()), RedisValue(value.clone()))
+                .insert(RedisKey(key.clone()), RedisValue(value.clone()), None)
                 .await;
         }
 

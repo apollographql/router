@@ -3,17 +3,13 @@ use std::io;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
-use futures::future::BoxFuture;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
-use tower::retry::Retry;
 use tower::service_fn;
-use tower::util::Either;
-use tower::util::Oneshot;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -21,23 +17,24 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::configuration::TlsSubgraph;
+use crate::configuration::TlsClient;
 use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::traffic_shaping::rate;
-use crate::plugins::traffic_shaping::timeout;
-use crate::plugins::traffic_shaping::RetryPolicy;
+use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::transport;
 use crate::services::HasConfig;
@@ -173,7 +170,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         if config_changed {
             configuration
                 .notify
-                .broadcast_configuration(configuration.clone());
+                .broadcast_configuration(Arc::downgrade(&configuration));
         }
 
         let schema = bridge_query_planner.schema();
@@ -198,30 +195,24 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let mut supergraph_creator = builder.build().await?;
 
         // Instantiate the parser here so we can use it to warm up the planner below
-        let query_parsing_layer =
+        let query_analysis_layer =
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
 
+        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
+
         if let Some(previous_router) = previous_router {
-            if configuration.supergraph.query_planning.warmed_up_queries > 0 {
-                let cache_keys = previous_router
-                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
-                    .await;
+            let cache_keys = previous_router
+                .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                .await;
 
-                if !cache_keys.is_empty() {
-                    tracing::info!(
-                        "warming up the query plan cache with {} queries, this might take a while",
-                        cache_keys.len()
-                    );
-
-                    supergraph_creator
-                        .warm_up_query_planner(&query_parsing_layer, cache_keys)
-                        .await;
-                }
-            }
+            supergraph_creator
+                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, cache_keys)
+                .await;
         };
 
         Ok(Self::RouterFactory::new(
-            query_parsing_layer,
+            query_analysis_layer,
+            persisted_query_layer,
             Arc::new(supergraph_creator),
             configuration,
         )
@@ -240,32 +231,8 @@ pub(crate) async fn create_subgraph_services(
                 subgraph::Request,
                 Response = subgraph::Response,
                 Error = BoxError,
-                Future = Either<
-                    Either<
-                        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                        Either<
-                            BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                            timeout::future::ResponseFuture<
-                                Oneshot<
-                                    Either<
-                                        Retry<
-                                            RetryPolicy,
-                                            Either<
-                                                rate::service::RateLimit<SubgraphService>,
-                                                SubgraphService,
-                                            >,
-                                        >,
-                                        Either<
-                                            rate::service::RateLimit<SubgraphService>,
-                                            SubgraphService,
-                                        >,
-                                    >,
-                                    subgraph::Request,
-                                >,
-                            >,
-                        >,
-                    >,
-                    <SubgraphService as Service<subgraph::Request>>::Future,
+                Future = crate::plugins::traffic_shaping::TrafficShapingSubgraphFuture<
+                    SubgraphService,
                 >,
             > + Clone
             + Send
@@ -295,32 +262,15 @@ pub(crate) async fn create_subgraph_services(
 
     let mut subgraph_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
-        let subgraph_root_store = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .or_else(|| tls_root_store.clone());
-
         let subgraph_service = shaping.subgraph_service_internal(
             name,
-            SubgraphService::new(
+            SubgraphService::from_config(
                 name,
-                configuration
-                    .apq
-                    .subgraph
-                    .subgraphs
-                    .get(name)
-                    .map(|apq| apq.enabled)
-                    .unwrap_or(configuration.apq.subgraph.all.enabled),
-                subgraph_root_store,
+                configuration,
+                &tls_root_store,
                 shaping.enable_subgraph_http2(name),
                 subscription_plugin_conf.clone(),
-                configuration.notify.clone(),
-            ),
+            )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
     }
@@ -364,15 +314,17 @@ impl YamlRouterFactory {
     }
 }
 
-impl TlsSubgraph {
-    fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
+impl TlsClient {
+    pub(crate) fn create_certificate_store(
+        &self,
+    ) -> Option<Result<RootCertStore, ConfigurationError>> {
         self.certificate_authorities
             .as_deref()
             .map(create_certificate_store)
     }
 }
 
-fn create_certificate_store(
+pub(crate) fn create_certificate_store(
     certificate_authorities: &str,
 ) -> Result<RootCertStore, ConfigurationError> {
     let mut store = RootCertStore::empty();
@@ -440,9 +392,19 @@ pub(crate) async fn create_plugins(
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
     let plugin_registry = &*crate::plugin::PLUGINS;
+    let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
     let mut apollo_plugin_factories: HashMap<&str, &PluginFactory> = plugin_registry
         .iter()
-        .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+        .filter(|factory| {
+            // the name starts with apollo
+            factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
+                && (
+                    // the plugin is mandatory
+                    apollo_telemetry_plugin_mandatory ||
+                    // the name isn't apollo.telemetry
+                    factory.name != "apollo.telemetry"
+                )
+        })
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
@@ -522,13 +484,16 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("include_subgraph_errors");
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("headers");
-    add_mandatory_apollo_plugin!("telemetry");
+    if apollo_telemetry_plugin_mandatory {
+        add_mandatory_apollo_plugin!("telemetry");
+    }
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
     add_optional_apollo_plugin!("override_subgraph_url");
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
+    add_optional_apollo_plugin!("experimental_entity_cache");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
@@ -573,8 +538,13 @@ pub(crate) async fn create_plugins(
 
 fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
-        if let Some(telemetry) = configuration.as_object_mut() {
-            telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
+        // Warning: this must be done here, otherwise studio reporting will not work
+        if apollo_key().is_some() && apollo_graph_reference().is_some() {
+            if let Some(telemetry) = configuration.as_object_mut() {
+                telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
+            }
+        } else {
+            return;
         }
     }
     if let (Some(schema_id), Some(apollo)) = (
@@ -730,12 +700,12 @@ mod test {
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        let mut config = json!({});
+        let mut config = json!({ "apollo": {} });
         inject_schema_id(&schema, &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
-            &config.apollo.unwrap().schema_id,
+            &config.apollo.schema_id,
             "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909"
         );
     }

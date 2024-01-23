@@ -15,7 +15,7 @@ query:
 extracted_scopes: {}
 request scopes: []
 filtered:
-query {
+{
   test
   itf {
     other

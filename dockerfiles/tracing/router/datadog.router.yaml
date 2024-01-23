@@ -5,10 +5,12 @@ cors:
     - https://studio.apollographql.com
 
 telemetry:
-  tracing:
-    trace_config:
-      service_name: router
-    datadog:
-      endpoint: datadog-agent:8126
-    propagation:
-      datadog: true
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      datadog:
+        enabled: true
+        endpoint: datadog-agent:8126
+      propagation:
+        datadog: true

@@ -3,15 +3,15 @@ title: Rhai scripts for the Apollo Router
 description: Add custom functionality directly to your router
 ---
 
-You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). Rhai is ideal for performing common scripting tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
+You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). In a Rust-based project, Rhai is ideal for performing common scripting tasks such as manipulating strings and processing headers. Your Rhai scripts can also hook into multiple stages of the router's [request handling lifecycle](#router-request-lifecycle).
 
-> To start familiarizing yourself with Rhai, see the [language reference](https://rhai.rs/book/language/) and some basic [syntax examples](https://rhai.rs/book/start/examples/scripts.html).
+## Rhai language reference
 
-Your Rhai scripts can hook into multiple stages of the Apollo Router's [request-handling lifecycle](#router-request-lifecycle).
+To learn about Rhai, see the [Rhai language reference](https://rhai.rs/book/language/) and some [example scripts](https://rhai.rs/book/start/examples/scripts.html).
 
 ## Use cases
 
-Common use cases for Apollo Router Rhai scripts include:
+Common use cases for Rhai scripts in Apollo Router include:
 
 * Modifying the details of HTTP requests and responses. This includes requests sent from clients to your router, along with requests sent from your router to your subgraphs. You can modify any combination of the following:
     * Request and response bodies
@@ -129,8 +129,11 @@ fn supergraph_service(service) {
   service.map_request(request_callback);
 }
 ```
+<Note>
 
-> [Learn more about Rhai modules.](https://rhai.rs/book/language/modules/export.html)
+[Learn more about Rhai modules.](https://rhai.rs/book/language/modules/export.html)
+
+</Note>
 
 ## Router request lifecycle
 
@@ -164,11 +167,11 @@ sequenceDiagram
 
 As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
 
-Your Rhai scripts can hook into any combination of the above services _except_ the `RouterService` (which is reserved for built-in features). They can modify the request, response, and/or related metadata as they're passed along.
+Your Rhai scripts can hook into any combination of the above services (if you are using the Apollo Router v1.30.0 and later). The scripts can modify the request, response, and/or related metadata as they're passed along.
 
 ### Service descriptions
 
-Each Apollo Router service (except `RouterService`) has a corresponding function that a Rhai script can define to hook into that service:
+Each Apollo Router service has a corresponding function that a Rhai script can define to hook into that service:
 
 <table class="field-table">
   <thead>
@@ -187,7 +190,7 @@ Each Apollo Router service (except `RouterService`) has a corresponding function
 </td>
 <td>
 
-**Reserved for built-in functionality.** Runs at the very beginning and very end of the HTTP request lifecycle.
+Runs at the very beginning and very end of the HTTP request lifecycle.
 
 For example, [JWT authentication](../configuration/authn-jwt) is performed within the `RouterService`.
 
@@ -263,8 +266,9 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     ```mermaid
     graph LR;
       client(Client);
-      client --> supergraph(supergraph_service);
+      client --> router(router_service);
       subgraph Apollo Router
+      router --> supergraph(supergraph_service);
       supergraph --> execution(execution_service);
       execution --> subs_a(subgraph_service);
       execution --> subs_b(subgraph_service);
@@ -278,7 +282,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     
     Additionally, callbacks for `subgraph_service` can access and modify the sub-operation request that the router will send to the corresponding subgraph via `request.subgraph`.
     
-    > [See fields of `request`](./rhai-api/#request-interface)
+    For reference, see the fields of [`request`](./rhai-api/#request-interface).
     
 * `map_response` callbacks are called in each service as execution proceeds back "to the left" from subgraphs resolving their individual sub-operations:
 
@@ -286,8 +290,9 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     graph RL;
       client(Client);
       subgraph Apollo Router
-      supergraph(supergraph_service);
       execution(execution_service);
+      supergraph(supergraph_service);
+      router(router_service);
       subs_a(subgraph_service);
       subs_b(subgraph_service);
       end;
@@ -298,13 +303,14 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
       subs_a --> execution;
       subs_b --> execution;
       execution --> supergraph;
-      supergraph --> client;
+      supergraph --> router;;
+      router --> client;
       class client,sub_a,sub_b secondary;
     ```
     
     First, callbacks for `subgraph_service` are each passed the `response` from the corresponding subgraph.
     
-    Afterward, callbacks for `execution_service` and then `supergraph_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
+    Afterward, callbacks for `execution_service`, `supergraph_service` and then `router_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
     
 
 
@@ -369,6 +375,31 @@ fn process_response(response) {
 }
 ```
 
+<Caution>
+
+**Accessing a non-existent header throws an exception**. 
+
+To safely check for the existence of a header before reading it, use `request.headers.contains("header-name")`. 
+
+When using `contains` within `subgraph_service`, you must assign your headers to a temporary local variable. Otherwise, `contains` throws an exception that it "cannot mutate" the original request.
+
+For example, the following `subgraph_service` function checks whether the `x-custom-header` exists before processing it.
+
+```rhai
+// Ensure existence of header before processing
+fn subgraph_service(service, subgraph){
+    service.map_request(|request|{
+        // Reassign to local variable, as contains cannot modify request
+        let headers = request.headers; 
+        if headers.contains("x-custom-header") {
+            // Process existing header
+        }
+    });
+}
+```
+
+</Caution>
+
 ### Converting cookies to headers
 
 This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
@@ -418,7 +449,11 @@ The router "watches" your `rhai.scripts` directory (along with all subdirectorie
 
 The router attempts to identify any errors in your scripts before applying changes. If errors are detected, the router logs them and continues using its _existing_ set of scripts.
 
-> Not all error types can be detected reliably! Whenever you make changes to your scripts, check your router's log output to make sure they were applied.
+<Note>
+
+Whenever you make changes to your scripts, check your router's log output to make sure they were applied.
+
+</Note>
 
 ## Limitations
 
@@ -490,6 +525,10 @@ The Apollo Router requires that its Rhai engine implements the [sync feature](ht
 
 This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains an example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
 
+### Services
+
+Callbacks of `router_service` cannot access the body of a request or response. At the router service stage, a request or response body is an opaque sequence of bytes.
+
 ## Debugging
 
 ### Understanding errors
@@ -502,4 +541,4 @@ Syntax highlighting can make it easier to spot errors in a script. We recommend 
 
 ### Logging
 
-For tracking down runtime errors, insert [logging](/docs/router/customizations/rhai-api#logging) statements to narrow down the issue.
+For tracking down runtime errors, insert [logging](./rhai-api#logging) statements to narrow down the issue.

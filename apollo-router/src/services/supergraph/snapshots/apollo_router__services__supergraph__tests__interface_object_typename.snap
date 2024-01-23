@@ -1,0 +1,16 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "searchContacts": [
+      {
+        "inner": {
+          "__typename": "Person",
+          "country": "Fr"
+        }
+      }
+    ]
+  }
+}

@@ -10,12 +10,12 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -94,16 +94,6 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// subquery requires field '{field}' but it was not found in the current response
-    ExecutionFieldNotFound {
-        /// The field that is not found.
-        field: String,
-    },
-
-    #[cfg(test)]
-    /// invalid content: {reason}
-    ExecutionInvalidContent { reason: String },
-
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
     /// could not compress request: {reason}
@@ -147,11 +137,6 @@ impl FetchError {
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
                 }
-                FetchError::ExecutionFieldNotFound { field, .. } => {
-                    extensions
-                        .entry("field")
-                        .or_insert_with(|| field.clone().into());
-                }
                 FetchError::ValidationInvalidTypeVariable { name } => {
                     extensions
                         .entry("name")
@@ -189,11 +174,8 @@ impl ErrorExtension for FetchError {
             }
             FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
             FetchError::SubrequestWsError { .. } => "SUBREQUEST_WEBSOCKET_ERROR",
-            FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
             FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
-            #[cfg(test)]
-            FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
@@ -267,6 +249,9 @@ pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
+    /// invalid query
+    OperationValidationErrors(Vec<apollo_compiler::execution::GraphQLError>),
+
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
 
@@ -298,6 +283,29 @@ pub(crate) enum QueryPlannerError {
     Unauthorized(Vec<Path>),
 }
 
+impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self
+            .into_iter()
+            .map(|err| {
+                Error::builder()
+                    .message(err.message)
+                    .locations(
+                        err.locations
+                            .into_iter()
+                            .map(|location| ErrorLocation {
+                                line: location.line as u32,
+                                column: location.column as u32,
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build()
+            })
+            .collect())
+    }
+}
+
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
@@ -319,6 +327,9 @@ impl IntoGraphQLErrors for QueryPlannerError {
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
+            QueryPlannerError::OperationValidationErrors(errs) => errs
+                .into_graphql_errors()
+                .map_err(QueryPlannerError::OperationValidationErrors),
             QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
                 .errors
                 .iter()
@@ -433,7 +444,20 @@ impl From<CacheResolverError> for QueryPlannerError {
 
 impl From<SpecError> for QueryPlannerError {
     fn from(err: SpecError) -> Self {
-        QueryPlannerError::SpecError(err)
+        match err {
+            SpecError::ValidationError(errors) => {
+                QueryPlannerError::OperationValidationErrors(errors)
+            }
+            _ => QueryPlannerError::SpecError(err),
+        }
+    }
+}
+
+impl From<ValidationErrors> for QueryPlannerError {
+    fn from(err: ValidationErrors) -> Self {
+        QueryPlannerError::OperationValidationErrors(
+            err.errors.iter().map(|e| e.to_json()).collect(),
+        )
     }
 }
 
@@ -502,73 +526,88 @@ pub(crate) enum SchemaError {
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
-    /// GraphQL parser error(s).
+    /// GraphQL parser error: {0}
     Parse(ParseErrors),
-    /// GraphQL parser or validation error(s).
+    /// GraphQL validation error: {0}
     Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
 }
 
 /// Collection of schema validation errors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) errors: Vec<apollo_parser::Error>,
+    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
 }
 
 impl std::fmt::Display for ParseErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut errors = self.errors.iter();
-        if let Some(error) = errors.next() {
-            write!(f, "{}", error.message())?;
+        for (i, error) in errors.by_ref().take(5).enumerate() {
+            if i > 0 {
+                f.write_str("\n")?;
+            }
+            write!(f, "{}", error)?;
         }
-        for error in errors {
-            write!(f, "\n{}", error.message())?;
+        let remaining = errors.count();
+        if remaining > 0 {
+            write!(f, "\n...and {remaining} other errors")?;
         }
         Ok(())
     }
 }
 
 /// Collection of schema validation errors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ValidationErrors {
-    pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
+    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
+}
+
+impl IntoGraphQLErrors for ValidationErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self
+            .errors
+            .iter()
+            .map(|diagnostic| {
+                Error::builder()
+                    .message(diagnostic.message().to_string())
+                    .locations(
+                        diagnostic
+                            .get_line_column()
+                            .map(|location| {
+                                vec![ErrorLocation {
+                                    line: location.line as u32,
+                                    column: location.column as u32,
+                                }]
+                            })
+                            .unwrap_or_default(),
+                    )
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build()
+            })
+            .collect())
+    }
 }
 
 impl std::fmt::Display for ValidationErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut errors = self.errors.iter();
-        if let Some(error) = errors.next() {
-            write!(f, "{}", error.data)?;
-        }
-        for error in errors {
-            write!(f, "\n{}", error.data)?;
+        for (index, error) in self.errors.iter().enumerate() {
+            if index > 0 {
+                f.write_str("\n")?;
+            }
+            if let Some(location) = error.get_line_column() {
+                write!(
+                    f,
+                    "[{}:{}] {}",
+                    location.line,
+                    location.column,
+                    error.message()
+                )?;
+            } else {
+                write!(f, "{}", error.message())?;
+            }
         }
         Ok(())
-    }
-}
-
-impl ValidationErrors {
-    #[allow(clippy::needless_return)]
-    pub(crate) fn print(&self) {
-        if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
-            return;
-        } else if atty::is(atty::Stream::Stdout) {
-            // Fancy reports for TTYs
-            self.errors.iter().for_each(|err| {
-                // `format!` works around https://github.com/rust-lang/rust/issues/107118
-                // to test the panic from https://github.com/apollographql/router/issues/2269
-                #[allow(clippy::format_in_format_args)]
-                {
-                    println!("{}", format!("{err}"));
-                }
-            });
-        } else {
-            // Best effort to display errors
-            self.errors.iter().for_each(|diag| {
-                println!("{}", diag.data);
-            });
-        };
     }
 }
 

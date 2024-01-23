@@ -276,6 +276,20 @@ flowchart LR;
 
 Additionally, some requests and responses may happen multiple times for the same operation. With subscriptions, for example, a subgraph sends a new `SubgraphResponse` whenever data is updated. Each response object travels through all the services in the response path and interacts with any customizations you've created.
 
+### Request and Response buffering
+
+The router expects to execute on a stream of data. In order to work correctly and provide high performance, the following expectations must be met:
+
+* **Request Path**: No buffering before the end of the `router_service` processing step
+* **Response Path**: No buffering
+
+> In general, it's best to avoid buffering where possible. If necessary, it is ok to do so on the request path once the `router_service` step is complete.
+
+This guidance applies if you are:
+ - Modifying the router
+ - Creating a native Rust plugin
+ - Creating a custom binary
+
 ## Customization creation
 
 To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](./rhai/) and [external coprocessing](./coprocessor/) docs.

@@ -23,14 +23,16 @@ telemetry:
       except:
         - "foo"
         - "bar"
-  tracing:
-    otlp:
-      protocol: grpc
-      endpoint: default
-      grpc:
-        metadata:
-          foo: bar
-          bar: baz
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        protocol: grpc
+        endpoint: default
+        grpc:
+          metadata:
+            foo: bar
+            bar: baz
 
 override_subgraph_url:
   products: http://example.com

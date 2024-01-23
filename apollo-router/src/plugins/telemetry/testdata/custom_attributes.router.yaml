@@ -1,0 +1,52 @@
+telemetry:
+  apollo:
+    client_name_header: name_header
+    client_version_header: version_header
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        attributes:
+          supergraph:
+            static:
+              - name: myname
+                value: label_value
+            request:
+              header:
+                - named: test
+                  default: default_value
+                  rename: renamed_value
+                - named: another_test
+                  default: my_default_value
+            response:
+              header:
+                - named: x-custom
+              body:
+                - path: .data.data.my_value
+                  name: my_value
+          subgraph:
+            all:
+              errors:
+                include_messages: true
+                extensions:
+                  - name: subgraph_error_extended_code
+                    path: .code
+                  - name: message
+                    path: .reason
+            subgraphs:
+              my_subgraph_name:
+                request:
+                  body:
+                    - path: .query
+                      name: query_from_request
+                    - path: .data
+                      name: unknown_data
+                      default: default_value
+                    - path: .data2
+                      name: unknown_data_bis
+                response:
+                  body:
+                    - path: .errors[0].extensions.status
+                      name: error
+                context:
+                  - named: my_key

@@ -1,0 +1,210 @@
+```yaml
+# Common values. Overridden by in-house configurations.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Anything set here applies to the in-house-router chart, and 
+# all configuration that set here is pushed to all sub-charts
+# because of the way Helm works:
+#  https://helm.sh/docs/chart_template_guide/subcharts_and_globals/
+
+# Set fullnameOverride here for virtualservice to use
+fullnameOverride: router
+
+router:
+  serviceAccount:
+    # The service account is created permissions.yaml
+    create: false
+    name: router
+  fullnameOverride: router
+  router:
+    args: [--hot-reload]
+    configuration:
+      limits:
+        http_max_request_bytes: 20000000 #20MB
+      traffic_shaping:
+        router:
+          timeout: 6min
+        all:
+          experimental_enable_http2: false # to disable for all subgraphs
+          timeout: 5min
+      supergraph:
+        introspection: true
+        #  this intentionally disables `@defer` support in the router until
+        # until the transition from the gateway to the router is complete.
+        defer_support: false
+        listen: 0.0.0.0:80
+        path: /graphql
+      # We recommend keeping subgraph errors on in your own environment, always.
+      include_subgraph_errors:
+        all: true
+      cors:
+        allow_credentials: true
+        expose_headers:
+          - logged_in
+          - identity
+      headers:
+        all:
+          request:
+            - propagate:
+                named: "x-api-key"
+            - propagate:
+                named: "apollo-sudo"
+            - propagate:
+                named: "x-request-id"
+            - propagate:
+                named: "x-ot-span-context"
+            - propagate:
+                named: "x-cloud-trace-context"
+            - propagate:
+                named: "grpc-trace-bin"
+        subgraphs:
+          linter:
+            request:
+              - propagate:
+                  named: apollographql-client-name
+              - propagate:
+                  named: apollographql-client-version
+              - propagate:
+                  named: apollo-client-name
+              - propagate:
+                  named: apollo-client-version
+          kotlin:
+            request:
+              - propagate:
+                  named: apollographql-client-name
+              - propagate:
+                  named: apollographql-client-version
+              - propagate:
+                  named: apollo-client-name
+              - propagate:
+                  named: apollo-client-version
+      rhai:
+        scripts: /dist/rhai
+        main: in-house.rhai
+      telemetry:
+        apollo:
+          batch_processor:
+            # default 5s
+            scheduled_delay: 3s
+            # default 1
+            max_concurrent_exports: 100
+            max_export_batch_size: 512
+            # default 30s
+            max_export_timeout: 10s
+            max_queue_size: 2048
+        metrics:
+          prometheus:
+            enabled: false
+          otlp:
+            temporality: delta
+            endpoint: "${env.NODE_IP}:4317"
+        # Enabling this both includes the `apollo-trace-id` value on the HTTP response,
+        # but also creates "Response Header" nodes in the trace that we send to Studio.
+        # This allows us to correlate traces from Studio to logs:
+        # https://www.apollographql.com/docs/router/configuration/tracing/#trace-id
+        tracing:
+          propagation:
+            zipkin: true
+            trace_context: true
+          experimental_response_trace_id:
+            enabled: true
+      coprocessor:
+        timeout: 3s
+        url: http://127.0.0.1:4001
+        router:
+          request:
+            body: true
+            headers: true
+            method: true
+            path: true
+          response:
+            body: true
+            context: true
+            headers: true
+            status_code: true
+        subgraph:
+          all:
+            response:
+              headers: true
+              body: true
+  extraContainers:
+    - name: apilogger
+      image: "us-central1-docker.pkg.dev/platform-cross-environment/platform-docker/apilogger:{{ .Values.global.apilogger.release }}"
+      imagePullPolicy: IfNotPresent
+      ports:
+        - containerPort: 4001
+      env:
+        - name: NODE_OPTIONS
+          value: "--max-old-space-size=768"
+        - name: NODE_ENV
+          value: production
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: STACK
+          value: "{{ .Values.global.apilogger.stack }}"
+      resources:
+        limits:
+          cpu: "1.5"
+          memory: 1Gi
+        requests:
+          cpu: "1"
+          memory: 1Gi
+  extraLabels:
+    tags.datadoghq.com/service: "router"
+    tags.datadoghq.com/version: "{{ .Chart.AppVersion | quote }}"
+  extraVolumeMounts:
+    - name: rhai-volume
+      mountPath: /dist/rhai
+      readOnly: true
+  extraVolumes:
+    - name: rhai-volume
+      configMap:
+        # Provide the name of the ConfigMap containing the files
+        # to add to the container
+        name: rhai-config
+  probes:
+    # -- Configure readiness probe
+    readiness:
+      initialDelaySeconds: 1
+    # -- Configure liveness probe
+    liveness:
+      initialDelaySeconds: 1
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 75
+  affinity:
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                - router-domain-ingress
+                - router-internal-domain-ingress
+            topologyKey: "kubernetes.io/hostname"
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: NotIn
+                values:
+                - router
+            topologyKey: "kubernetes.io/hostname"
+  podDisruptionBudget:
+    minAvailable: 2
+```

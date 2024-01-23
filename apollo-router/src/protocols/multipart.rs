@@ -8,6 +8,7 @@ use futures::stream::StreamExt;
 use futures::Stream;
 use serde::Serialize;
 use serde_json_bytes::Value;
+use tokio_stream::once;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::graphql;
@@ -36,8 +37,14 @@ struct SubscriptionPayload {
     errors: Vec<graphql::Error>,
 }
 
+enum MessageKind {
+    Heartbeat,
+    Message(graphql::Response),
+    Eof,
+}
+
 pub(crate) struct Multipart {
-    stream: Pin<Box<dyn Stream<Item = Option<graphql::Response>> + Send>>,
+    stream: Pin<Box<dyn Stream<Item = MessageKind> + Send>>,
     is_first_chunk: bool,
     is_terminated: bool,
     mode: ProtocolMode,
@@ -50,11 +57,14 @@ impl Multipart {
     {
         let stream = match mode {
             ProtocolMode::Subscription => select(
-                stream.map(Some),
-                IntervalStream::new(tokio::time::interval(HEARTBEAT_INTERVAL)).map(|_| None),
+                stream
+                    .map(MessageKind::Message)
+                    .chain(once(MessageKind::Eof)),
+                IntervalStream::new(tokio::time::interval(HEARTBEAT_INTERVAL))
+                    .map(|_| MessageKind::Heartbeat),
             )
             .boxed(),
-            ProtocolMode::Defer => stream.map(Some).boxed(),
+            ProtocolMode::Defer => stream.map(MessageKind::Message).boxed(),
         };
 
         Self {
@@ -78,7 +88,7 @@ impl Stream for Multipart {
         }
         match self.stream.as_mut().poll_next(cx) {
             Poll::Ready(message) => match message {
-                Some(None) => {
+                Some(MessageKind::Heartbeat) => {
                     // It's the ticker for heartbeat for subscription
                     let buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
@@ -93,7 +103,7 @@ impl Stream for Multipart {
 
                     Poll::Ready(Some(Ok(buf)))
                 }
-                Some(Some(mut response)) => {
+                Some(MessageKind::Message(mut response)) => {
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
                         Vec::from(&b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..])
@@ -111,7 +121,9 @@ impl Stream for Multipart {
                                     response.errors.drain(..).collect()
                                 },
                                 payload: match response.data {
-                                    None | Some(Value::Null) => None,
+                                    None | Some(Value::Null) if response.extensions.is_empty() => {
+                                        None
+                                    }
                                     _ => response.into(),
                                 },
                             };
@@ -132,7 +144,26 @@ impl Stream for Multipart {
 
                     Poll::Ready(Some(Ok(buf.into())))
                 }
-                None => Poll::Ready(None),
+                Some(MessageKind::Eof) => {
+                    // If the stream ends or is empty
+                    let buf = if self.is_first_chunk {
+                        self.is_first_chunk = false;
+                        Bytes::from_static(
+                            &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql--\r\n"[..]
+                        )
+                    } else {
+                        Bytes::from_static(
+                            &b"content-type: application/json\r\n\r\n{}\r\n--graphql--\r\n"[..],
+                        )
+                    };
+                    self.is_terminated = true;
+
+                    Poll::Ready(Some(Ok(buf)))
+                }
+                None => {
+                    self.is_terminated = true;
+                    Poll::Ready(None)
+                }
             },
             Poll::Pending => Poll::Pending,
         }
@@ -145,8 +176,6 @@ mod tests {
     use serde_json_bytes::ByteString;
 
     use super::*;
-
-    // TODO add test with empty stream
 
     #[tokio::test]
     async fn test_heartbeat_and_boundaries() {
@@ -167,6 +196,14 @@ mod tests {
                 .data(serde_json_bytes::Value::String(ByteString::from(
                     String::from("foobar"),
                 )))
+                .subscribed(true)
+                .build(),
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::Null)
+                .extension(
+                    "test",
+                    serde_json_bytes::Value::String("test_extension".into()),
+                )
                 .build(),
         ];
         let gql_responses = stream::iter(responses);
@@ -194,11 +231,48 @@ mod tests {
                     2 => {
                         assert_eq!(
                             res,
-                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foobar\"}}\r\n--graphql--\r\n"
+                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foobar\"}}\r\n--graphql\r\n"
+                        );
+                    }
+                    3 => {
+                        assert_eq!(
+                            res,
+                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":null,\"extensions\":{\"test\":\"test_extension\"}}}\r\n--graphql--\r\n"
                         );
                     }
                     _ => {
-                        panic!("should not happened, test failed");
+                        panic!("should not happen, test failed");
+                    }
+                }
+                curr_index += 1;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_stream() {
+        let responses = vec![];
+        let gql_responses = stream::iter(responses);
+
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+        let heartbeat = String::from(
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql\r\n",
+        );
+        let mut curr_index = 0;
+        while let Some(resp) = protocol.next().await {
+            let res = String::from_utf8(resp.unwrap().to_vec()).unwrap();
+            if res == heartbeat {
+                continue;
+            } else {
+                match curr_index {
+                    0 => {
+                        assert_eq!(
+                            res,
+                            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql--\r\n"
+                        );
+                    }
+                    _ => {
+                        panic!("should not happen, test failed");
                     }
                 }
                 curr_index += 1;

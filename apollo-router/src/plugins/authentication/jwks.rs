@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::mem;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::time::Duration;
 
 use futures::future::join_all;
 use futures::future::select;
@@ -11,17 +13,19 @@ use futures::stream::repeat;
 use futures::stream::select_all;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::Algorithm;
 use mime::APPLICATION_JSON;
+use serde_json::Value;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use tower::BoxError;
+use tracing_futures::Instrument;
 use url::Url;
 
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
-use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
@@ -35,6 +39,7 @@ pub(super) struct JwksConfig {
     pub(super) url: Url,
     pub(super) issuer: Option<String>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
+    pub(super) poll_interval: Duration,
 }
 
 #[derive(Clone)]
@@ -52,7 +57,10 @@ impl JwksManager {
             .iter()
             .cloned()
             .map(|JwksConfig { url, .. }| {
-                get_jwks(url.clone()).map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+                let span = tracing::info_span!("fetch jwks", url = %url);
+                get_jwks(url.clone())
+                    .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+                    .instrument(span)
             })
             .collect::<Vec<_>>();
 
@@ -100,7 +108,7 @@ async fn poll(
         let jwks_map = jwks_map.clone();
         Box::pin(
             repeat((config, jwks_map)).then(|(config, jwks_map)| async move {
-                tokio::time::sleep(DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL).await;
+                tokio::time::sleep(config.poll_interval).await;
 
                 if let Some(jwks) = get_jwks(config.url.clone()).await {
                     if let Ok(mut map) = jwks_map.write() {
@@ -137,7 +145,7 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
         let path = url
             .to_file_path()
             .map_err(|e| {
-                tracing::error!("could not process url: {:?}", url);
+                tracing::error!("url cannot be converted to filesystem path");
                 e
             })
             .ok()?;
@@ -178,9 +186,43 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
             })
             .ok()?
     };
-    let jwks: JwkSet = serde_json::from_str(&data)
+
+    let jwks = parse_jwks(&data)?;
+    Some(jwks)
+}
+
+pub(crate) fn parse_jwks(data: &str) -> Option<JwkSet> {
+    // Some JWKS contain algorithms which are not supported by the jsonwebtoken library. That means
+    // we can't just deserialize from the retrieved data and proceed. Any unrecognised
+    // algorithms will cause deserialization to fail.
+    //
+    // Try to identify any entries which contain algorithms which are not supported by
+    // jsonwebtoken and exclude them
+    tracing::debug!(data, "parsing JWKS");
+
+    let mut raw_json: Value = serde_json::from_str(data)
         .map_err(|e| {
-            tracing::error!(%e, "could not create JWKS from url content");
+            tracing::error!(%e, "could not create JSON Value from url content, enable debug logs to see content");
+            e
+        })
+        .ok()?;
+
+    // remove any keys that can't be parsed
+    raw_json.get_mut("keys").and_then(|keys| {
+        keys.as_array_mut().map(|array| {
+            *array = mem::take(array).into_iter().enumerate().filter(|(index, key)| {
+                if let Err(err) = serde_json::from_value::<Jwk>(key.clone()) {
+                    let alg = key.get("alg").and_then(|alg|alg.as_str()).unwrap_or("<unknown>");
+                    tracing::warn!(%err, alg, index, "ignoring a key since it is not valid, enable debug logs to full content");
+                    return false;
+                }
+                true
+            }).map(|(_, key)| key).collect();
+        })
+    });
+    let jwks: JwkSet = serde_json::from_value(raw_json)
+        .map_err(|e| {
+            tracing::error!(%e, "could not create JWKS from url content, enable debug logs to see content");
             e
         })
         .ok()?;

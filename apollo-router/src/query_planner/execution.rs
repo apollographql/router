@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use futures::prelude::*;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
@@ -46,7 +47,7 @@ impl QueryPlan {
         service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
-        sender: futures::channel::mpsc::Sender<Response>,
+        sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
         initial_value: Option<Value>,
@@ -76,7 +77,7 @@ impl QueryPlan {
             )
             .await;
         if !deferred_fetches.is_empty() {
-            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1);
+            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1u64);
         }
 
         Response::builder().data(value).errors(errors).build()
@@ -97,7 +98,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
-    pub(crate) deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
+    pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
@@ -110,7 +111,7 @@ impl PlanNode {
         parameters: &'a ExecutionParameters<'a>,
         current_dir: &'a Path,
         parent_value: &'a Value,
-        sender: futures::channel::mpsc::Sender<Response>,
+        sender: mpsc::Sender<Response>,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
@@ -250,8 +251,10 @@ impl PlanNode {
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {
-                        let mut deferred_fetches: HashMap<String, Sender<(Value, Vec<Error>)>> =
-                            HashMap::new();
+                        let mut deferred_fetches: HashMap<
+                            String,
+                            broadcast::Sender<(Value, Vec<Error>)>,
+                        > = HashMap::new();
                         let mut futures = Vec::new();
 
                         let (primary_sender, _) =
@@ -351,6 +354,10 @@ impl PlanNode {
                                     .await;
                                 value.deep_merge(v);
                                 errors.extend(err.into_iter());
+                            } else if current_dir.is_empty() {
+                                // If the condition is on the root selection set and it's the only one
+                                // For queries like {get @skip(if: true) {id name}}
+                                value.deep_merge(Value::Object(Default::default()));
                             }
                         } else if let Some(node) = else_clause {
                             let (v, err) = node
@@ -367,6 +374,10 @@ impl PlanNode {
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
+                        } else if current_dir.is_empty() {
+                            // If the condition is on the root selection set and it's the only one
+                            // For queries like {get @include(if: false) {id name}}
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -388,9 +399,9 @@ impl DeferredNode {
         &self,
         parameters: &'a ExecutionParameters<'a>,
         parent_value: &Value,
-        sender: futures::channel::mpsc::Sender<Response>,
-        primary_sender: &Sender<(Value, Vec<Error>)>,
-        deferred_fetches: &mut HashMap<String, Sender<(Value, Vec<Error>)>>,
+        sender: mpsc::Sender<Response>,
+        primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
+        deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> impl Future<Output = ()> {
         let mut deferred_receivers = Vec::new();
 
@@ -420,7 +431,7 @@ impl DeferredNode {
         let deferred_inner = self.node.clone();
         let deferred_path = self.query_path.clone();
         let label = self.label.clone();
-        let mut tx = sender;
+        let tx = sender;
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
@@ -439,7 +450,7 @@ impl DeferredNode {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
-                errors.extend(primary_errors.into_iter())
+                errors.extend(primary_errors)
             } else {
                 while let Some((v, _remaining)) = stream.next().await {
                     // a Err(RecvError) means either that the fetch was not performed and the
@@ -486,7 +497,7 @@ impl DeferredNode {
                     let (primary_value, primary_errors) =
                         primary_receiver.recv().await.unwrap_or_default();
                     v.deep_merge(primary_value);
-                    errors.extend(primary_errors.into_iter())
+                    errors.extend(primary_errors)
                 }
 
                 if let Err(e) = tx
@@ -506,12 +517,12 @@ impl DeferredNode {
                         e
                     );
                 };
-                tx.disconnect();
+                drop(tx);
             } else {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
-                errors.extend(primary_errors.into_iter());
+                errors.extend(primary_errors);
 
                 if let Err(e) = tx
                     .send(
@@ -530,7 +541,7 @@ impl DeferredNode {
                         e
                     );
                 }
-                tx.disconnect();
+                drop(tx);
             };
         }
     }

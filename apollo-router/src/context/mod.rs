@@ -11,18 +11,20 @@ use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
 use derivative::Derivative;
+use extensions::sync::ExtensionsMutex;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use self::extensions::Extensions;
 use crate::json_ext::Value;
 
 pub(crate) mod extensions;
 
 /// The key of the resolved operation name. This is subject to change and should not be relied on.
 pub(crate) const OPERATION_NAME: &str = "operation_name";
+/// The key of the resolved operation kind. This is subject to change and should not be relied on.
+pub(crate) const OPERATION_KIND: &str = "operation_kind";
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -39,42 +41,55 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
 #[derive(Clone, Deserialize, Serialize, Derivative)]
+#[serde(default)]
 #[derivative(Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
-    #[serde(skip, default)]
-    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
+    #[serde(skip)]
+    extensions: ExtensionsMutex,
 
     /// Creation time
     #[serde(skip)]
-    #[serde(default = "Instant::now")]
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
     #[derivative(Debug = "ignore")]
     busy_timer: Arc<Mutex<BusyTimer>>,
+
+    #[serde(skip)]
+    pub(crate) id: String,
 }
 
 impl Context {
     /// Create a new context.
     pub fn new() -> Self {
+        let id = uuid::Uuid::new_v4()
+            .as_hyphenated()
+            .encode_lower(&mut uuid::Uuid::encode_buffer())
+            .to_string();
         Context {
             entries: Default::default(),
-            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
+            extensions: ExtensionsMutex::default(),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
+            id,
         }
     }
 }
 
 impl Context {
-    pub(crate) fn operation_name(&self) -> Option<String> {
-        // This method should be removed once we have a proper way to get the operation name.
-        self.entries
-            .get(OPERATION_NAME)
-            .map(|v| v.value().as_str().unwrap().to_string())
+    /// Returns extensions of the context.
+    ///
+    /// You can use `Extensions` to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
+    ///
+    /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.
+    /// Doing so may cause performance degradation or even deadlocks.
+    ///
+    /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
+    pub fn extensions(&self) -> &ExtensionsMutex {
+        &self.extensions
     }
 
     /// Returns true if the context contains a value for the specified key.
@@ -369,5 +384,15 @@ mod test {
         });
         assert_eq!(c.get("one").unwrap(), Some(2));
         assert_eq!(c.get("two").unwrap(), Some(3));
+    }
+
+    #[test]
+    fn context_extensions() {
+        // This is mostly tested in the extensions module.
+        let c = Context::new();
+        let mut extensions = c.extensions().lock();
+        extensions.insert(1usize);
+        let v = extensions.get::<usize>();
+        assert_eq!(v, Some(&1usize));
     }
 }

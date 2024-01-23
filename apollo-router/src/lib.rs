@@ -47,6 +47,9 @@ mod json_ext;
 #[macro_use]
 pub mod plugin;
 
+#[macro_use]
+pub(crate) mod metrics;
+
 pub(crate) mod axum_factory;
 mod cache;
 mod configuration;
@@ -59,6 +62,7 @@ mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+pub(crate) mod logging;
 pub(crate) mod notification;
 mod orbiter;
 mod plugins;
@@ -77,6 +81,8 @@ mod uplink;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
+pub use crate::context::extensions::sync::ExtensionsMutex;
+pub use crate::context::extensions::Extensions;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
