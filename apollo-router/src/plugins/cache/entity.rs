@@ -45,7 +45,7 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
 struct EntityCache {
-    storage: RedisCacheStorage,
+    storage: Option<RedisCacheStorage>,
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
 }
@@ -61,6 +61,9 @@ struct Config {
     /// Per subgraph configuration
     #[serde(default)]
     subgraphs: HashMap<String, Subgraph>,
+    #[serde(default)]
+    /// Allow the router to start without a connection to Redis. Option name TBD
+    pub(crate) fail_open: bool,
 }
 
 /// Per subgraph configuration for entity caching
@@ -92,7 +95,16 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
-        let storage = RedisCacheStorage::new(init.config.redis).await?;
+        let storage = match RedisCacheStorage::new(init.config.redis).await {
+            Ok(storage) => Some(storage),
+            Err(e) => {
+                if init.config.fail_open {
+                    None
+                } else {
+                    return Err(e);
+                }
+            }
+        };
 
         Ok(Self {
             storage,
@@ -120,19 +132,18 @@ impl Plugin for EntityCache {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let storage = self.storage.clone();
+        let storage = match self.storage.clone() {
+            Some(storage) => storage,
+            None => return service,
+        };
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
             (
-                config
-                    .ttl
-                    .clone()
-                    .map(|t| t.0)
-                    .or_else(|| self.storage.ttl()),
+                config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
                 config.enabled.or(self.enabled).unwrap_or(false),
             )
         } else {
-            (self.storage.ttl(), self.enabled.unwrap_or(false))
+            (storage.ttl(), self.enabled.unwrap_or(false))
         };
         let name = name.to_string();
 

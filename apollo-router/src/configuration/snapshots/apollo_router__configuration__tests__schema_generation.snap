@@ -1210,6 +1210,11 @@ expression: "&schema"
           "type": "boolean",
           "nullable": true
         },
+        "fail_open": {
+          "description": "Allow the router to start without a connection to Redis. Option name TBD",
+          "default": false,
+          "type": "boolean"
+        },
         "redis": {
           "description": "Redis cache configuration",
           "type": "object",
