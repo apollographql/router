@@ -309,6 +309,8 @@ where
 
 impl<S> HeadersService<S> {
     fn modify_request(&self, req: &mut SubgraphRequest) {
+        let mut already_propagated: HashSet<&HeaderName> = HashSet::new();
+
         for operation in &*self.operations {
             match operation {
                 Operation::Insert(insert_config) => match insert_config {
@@ -388,19 +390,23 @@ impl<S> HeadersService<S> {
                     rename,
                     default,
                 }) => {
-                    let headers = req.subgraph_request.headers_mut();
-                    let values = req.supergraph_request.headers().get_all(named);
-                    if values.iter().count() == 0 {
-                        if let Some(default) = default {
-                            headers.append(rename.as_ref().unwrap_or(named), default.clone());
+                    if !already_propagated.contains(named) {
+                        let headers = req.subgraph_request.headers_mut();
+                        let values = req.supergraph_request.headers().get_all(named);
+                        if values.iter().count() == 0 {
+                            if let Some(default) = default {
+                                headers.append(rename.as_ref().unwrap_or(named), default.clone());
+                            }
+                        } else {
+                            for value in values {
+                                headers.append(rename.as_ref().unwrap_or(named), value.clone());
+                            }
                         }
-                    } else {
-                        for value in values {
-                            headers.append(rename.as_ref().unwrap_or(named), value.clone());
-                        }
+                        already_propagated.insert(named);
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
+                    let mut previous_name = None;
                     let headers = req.subgraph_request.headers_mut();
                     req.supergraph_request
                         .headers()
@@ -410,8 +416,26 @@ impl<S> HeadersService<S> {
                                 && matching.is_match(name.as_str())
                         })
                         .for_each(|(name, value)| {
-                            headers.append(name, value.clone());
+                            if !already_propagated.contains(name) {
+                                headers.append(name, value.clone());
+
+                                // we have to this because don't want to propagate headers that are accounted for in the
+                                // `already_propagated` set, but in the iteration here we might go through the same header
+                                // multiple times
+                                match previous_name {
+                                    None => previous_name = Some(name),
+                                    Some(previous) => {
+                                        if previous != name {
+                                            already_propagated.insert(previous);
+                                            previous_name = Some(name);
+                                        }
+                                    }
+                                }
+                            }
                         });
+                    if let Some(name) = previous_name {
+                        already_propagated.insert(name);
+                    }
                 }
             }
         }
@@ -837,6 +861,66 @@ mod test {
                 ("db", "vdb"),
                 ("db", "vdb2"),
             ]
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_propagate_multiple_matching_rules() -> Result<(), BoxError> {
+        let service = HeadersService {
+            inner: MockSubgraphService::new(),
+            operations: Arc::new(vec![
+                Operation::Propagate(Propagate::Named {
+                    named: HeaderName::from_static("dc"),
+                    rename: None,
+                    default: None,
+                }),
+                Operation::Propagate(Propagate::Matching {
+                    matching: Regex::from_str("dc")?,
+                }),
+            ]),
+            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
+        };
+
+        let mut request = SubgraphRequest {
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("dc", "vdb2")
+                    .body(
+                        Request::builder()
+                            .query("query")
+                            .operation_name("my_operation_name")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+            ),
+            subgraph_request: http::Request::builder()
+                .header("aa", "vaa")
+                .header("ab", "vab")
+                .header("ac", "vac")
+                .body(Request::builder().query("query").build())
+                .expect("expecting valid request"),
+            operation_kind: OperationKind::Query,
+            context: Context::new(),
+            subgraph_name: String::from("test").into(),
+            subscription_stream: None,
+            connection_closed_signal: None,
+            query_hash: Default::default(),
+            authorization: Default::default(),
+        };
+        service.modify_request(&mut request);
+        let headers = request
+            .subgraph_request
+            .headers()
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            headers,
+            vec![("aa", "vaa"), ("ab", "vab"), ("ac", "vac"), ("dc", "vdb2"),]
         );
 
         Ok(())
