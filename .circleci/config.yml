@@ -693,7 +693,7 @@ jobs:
             - persist_to_workspace:
                 root: .
                 paths:
-                  - "build-containers/*.tar"
+                  - "built-containers/*.tar"
             - run:
                 name: Helm build
                 command: |
