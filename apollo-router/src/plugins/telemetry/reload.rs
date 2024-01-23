@@ -133,6 +133,10 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     }
 }
 
+pub(crate) fn apollo_opentelemetry_initialized() -> bool {
+    OPENTELEMETRY_TRACER_HANDLE.get().is_some()
+}
+
 pub(crate) struct SamplingFilter;
 
 #[allow(dead_code)]
@@ -175,9 +179,9 @@ where
         meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
-        // we ignore events
+        // we ignore metric events
         if !meta.is_span() {
-            return false;
+            return meta.fields().iter().any(|f| f.name() == "message");
         }
 
         // if there's an exsting otel context set by the client request, and it is sampled,

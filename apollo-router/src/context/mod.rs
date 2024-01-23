@@ -11,12 +11,12 @@ use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
 use derivative::Derivative;
+use extensions::sync::ExtensionsMutex;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use self::extensions::Extensions;
 use crate::json_ext::Value;
 
 pub(crate) mod extensions;
@@ -48,7 +48,7 @@ pub struct Context {
     entries: Entries,
 
     #[serde(skip)]
-    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
+    extensions: ExtensionsMutex,
 
     /// Creation time
     #[serde(skip)]
@@ -71,7 +71,7 @@ impl Context {
             .to_string();
         Context {
             entries: Default::default(),
-            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
+            extensions: ExtensionsMutex::default(),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,
@@ -80,6 +80,18 @@ impl Context {
 }
 
 impl Context {
+    /// Returns extensions of the context.
+    ///
+    /// You can use `Extensions` to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
+    ///
+    /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.
+    /// Doing so may cause performance degradation or even deadlocks.
+    ///
+    /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
+    pub fn extensions(&self) -> &ExtensionsMutex {
+        &self.extensions
+    }
+
     /// Returns true if the context contains a value for the specified key.
     pub fn contains_key<K>(&self, key: K) -> bool
     where
@@ -372,5 +384,15 @@ mod test {
         });
         assert_eq!(c.get("one").unwrap(), Some(2));
         assert_eq!(c.get("two").unwrap(), Some(3));
+    }
+
+    #[test]
+    fn context_extensions() {
+        // This is mostly tested in the extensions module.
+        let c = Context::new();
+        let mut extensions = c.extensions().lock();
+        extensions.insert(1usize);
+        let v = extensions.get::<usize>();
+        assert_eq!(v, Some(&1usize));
     }
 }

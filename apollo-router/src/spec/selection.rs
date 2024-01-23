@@ -47,6 +47,7 @@ impl Selection {
         schema: &Schema,
         mut count: usize,
         defer_stats: &mut DeferStats,
+        fragments: &Fragments,
     ) -> Result<Option<Self>, SpecError> {
         // The RECURSION_LIMIT is chosen to be:
         //   < # expected to cause stack overflow &&
@@ -83,6 +84,7 @@ impl Selection {
                                     schema,
                                     count,
                                     defer_stats,
+                                    fragments,
                                 )
                                 .transpose()
                             })
@@ -121,38 +123,35 @@ impl Selection {
                 // than the interface.
                 // If it is not, then we use the type condition
                 let relevant_type = if schema.is_interface(type_condition.as_str()) {
-                    // Query validation should have already verified that current type implements that interface
-                    debug_assert!(
-                        schema.is_subtype(
-                            type_condition.as_str(),
-                            current_type
-                        ) || schema.is_implementation(
-                            type_condition.as_str(),
-                            current_type
-                        )
-                     ||
-                        // if the current type and the type condition are both the same interface, it is still valid
-                        type_condition.as_str()
-                            == current_type
-                    );
                     let relevant_type = schema.most_precise(current_type, fragment_type);
-                    debug_assert!(relevant_type.is_some());
                     relevant_type.unwrap_or(fragment_type)
                 } else {
                     fragment_type
                 };
 
-                let selection_set = inline_fragment
+                let selection_set: Vec<Selection> = inline_fragment
                     .selection_set
                     .selections
                     .iter()
                     .filter_map(|selection| {
-                        Selection::from_hir(selection, relevant_type, schema, count, defer_stats)
-                            .transpose()
+                        Selection::from_hir(
+                            selection,
+                            relevant_type,
+                            schema,
+                            count,
+                            defer_stats,
+                            fragments,
+                        )
+                        .transpose()
                     })
                     .collect::<Result<_, _>>()?;
 
                 let known_type = Some(inline_fragment.selection_set.ty.as_str().to_owned());
+
+                // Can be empty with a statically skipped selection set
+                if selection_set.is_empty() {
+                    return Ok(None);
+                }
 
                 Some(Self::InlineFragment {
                     type_condition,
@@ -170,9 +169,18 @@ impl Selection {
                     return Ok(None);
                 }
                 let (defer, defer_label) = parse_defer(&fragment_spread.directives, defer_stats);
+                let name = fragment_spread.fragment_name.as_str().to_owned();
+                // Can be empty with a statically skipped selection set
+                if fragments
+                    .get(&name)
+                    .map(|f| f.selection_set.is_empty())
+                    .unwrap_or_default()
+                {
+                    return Ok(None);
+                }
 
                 Some(Self::FragmentSpread {
-                    name: fragment_spread.fragment_name.as_str().to_owned(),
+                    name,
                     known_type: Some(current_type.to_owned()),
                     include_skip,
                     defer,
