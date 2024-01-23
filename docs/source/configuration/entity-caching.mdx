@@ -1,50 +1,76 @@
 ---
 title: Subgraph entity caching for the Apollo Router
 subtitle: Redis-backed caching for entities
-description: Subgraph entity caching for Apollo Router with GraphOS Enterprise. Cache and reuse individual entities across queries
+description: Subgraph entity caching for Apollo Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
 ---
 
 <EnterpriseFeature />
 
-The Apollo Router can cache, in Redis, data returned by subgraph queries, split per entity. This means that the same client query performed by different clients, with different arguments, will be able to share data from subgraph responses.
+Learn how the Apollo Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
-## Prerequisites
+## Overview
 
-To use this feature:
+An entity gets its fields from one or more subgraphs. To respond to a client query for an entity, the Apollo Router must make multiple subgraph queries. Different clients querying the same entity can make identical, redundant subgraph queries. 
 
-- You must have a Redis cluster (or single instance) that your router instances can communicate with.
-- You must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) and [connect your router to GraphOS](./overview/#environment-variables).
+Entity caching enables the router to respond to identical subgraph queries with cached subgraph responses. The router uses Redis to cache data from subgraph query responses. Because cached data is keyed per subgraph and entity, different clients making the same client query&mdash;with the same or different query arguments&mdash;hit the same cache entries of subgraph response data.
 
-## How it works
+### Benefits of entity caching
 
-As an example, we might have a query requesting:
-- the cart of the current user
-- for each product in the cart:
-    - its description and price
-    - its availability in inventory
+Compared to an alternative of caching entire client responses, entity caching supports finer control over both the amount of data being cached and the time to live (TTL) of cached data. If caching an entire client response, the router would have to store it with a shorter time to live, because application data can change often, with real-time data needing more frequent updates. A client-response cache might not be shareable between users, because the application data might contain personal and private information. A client-reponse cache might also duplicate a lot of data between client responses.
 
-If we were caching the entire client response, we would have to store it with a short time to live, because the cart data can change often, and inventory has to be up to date. That cache cannot be shared between users, because the cart is personal. We would also duplicate a lot of data between responses, because a lot of the products might appear in multiple carts.
+For example, consider the `Products` and `Inventory` subgraphs from the [Entities guide](/federation/entities):
 
-With entity caching, we are able to:
-- store each product's description and price separately, with a large TTL
-- for each query, some of the products might already be in cache, so we will send smaller queries to the subgraph, or even no query at all
-- share the product cache between all users
-- cache the cart per user, with a small amount of data
-- cache inventory data with a low TTL or even not cache it at all
+<CodeColumns>
 
-### Details
+```graphql title="Products subgraph"
+type Product @key(fields: "id") {
+  id: ID!
+  name: String!
+  price: Int
+}
+```
 
-To prevent transient errors from affecting the cache on a long period, responses with errors are not cached.
+```graphql title="Inventory subgraph"
+type Product @key(fields: "id") {
+  id: ID!
+  inStock: Boolean!
+}
+```
 
-When used along with the Router's authorization directives, cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope and the ones without will have different cache entries. This means that data requiring authorization can still be safely cached, and even shared across users, and will not need invalidation when a user's roles change, as their queries will be directed to a different part of the cache automatically.
+</CodeColumns>
 
-On schema updates, the Router makes sure that queries unaffected by the changes will keep their cache entries. Queries with affected fields will need to be cached again, making sure that we don't serve invalid data from the cache after the update.
+Assume we have a client for a shopping cart application, and it makes a query that requests the following for each product in the cart:
+- The product's name and price. This data is from the `Products` subgraph.
+- The product's availability in inventory. This data is from the `Inventory` subgraph.
 
-Invalidation is not yet implemented, but planned.
+If we were caching the entire client response, we would have to store it with a short time to live, because the cart data can change often and the real-time inventory has to be up to date. A client-response cache couldn't be shared between users, because the cart is personal. We might also duplicate a lot of data between client responses, because a lot of the products might appear in multiple carts.
 
-## Configuration
+With entity caching enabled for this example, the router is able to:
+- Store each product's description and price separately with large TTL.
+- Minimize the number of subgraph queries made by each client query, with potentially some client queries making zero subgraph queries and instead fetching all product data from cache.
+- Share the product cache between all users.
+- Cache the cart per user, with a small amount of data.
+- Cache inventory data with a low TTL or not cache it at all.
 
-It is setup as follows:
+## Use entity caching
+
+Follow this guide to enable and configure entity caching in the Apollo Router.
+
+### Prerequisites
+
+To use entity caching in the Apollo Router, you must set up:
+
+- A Redis instance or cluster that your router instances can communicate with.
+- A [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) that [connects your router to GraphOS](./overview/#environment-variables).
+
+### Configure router for entity caching
+
+In `router.yaml`, configure `experimental_entity_cache`:
+- Enable entity caching globally.
+- Configure Redis, using the same conventions described in [distributed caching](./distributed-caching).
+- Configure entity caching per subgraph, with overrides per subgraph for disabling entity caching and TTL.
+
+For example:
 
 ```yaml title="router.yaml"
 experimental_entity_cache:
@@ -62,17 +88,13 @@ experimental_entity_cache:
       ttl: 120s # overrides the global TTL
 ```
 
-The `redis` section follows the same convention as in [distributed caching](./distributed-caching).
+### Configure time to live (TTL)
 
-## Time to live
+Besides configuring a global TTL for all the entries in Redis, the Apollo Router also honors the `Cache-Control` header returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
 
-We can configure a global TTL for all the entries in Redis.
+### Customize Redis cache key
 
-The Apollo Router will also honor the `Cache-Control` header returned with the subgraph response, and generate a `Cache-Control` header for the client response by aggregating the TTL information from all the response parts.
-
-## Cache key manipulation
-
-If we need to store data for a particular query in different cache entries, the cache key can be influenced through the `apollo_entity_cache::key` context entry. This entry contains an object with the fields `all` to affect all subgraph queries under one client query, and fields named after subgr aph operation names to affect individual subgraph queries. The value of the field can be any valid JSON value (object, string, etc).
+If you need to store data for a particular query in different cache entries, the cache key can be configured through the `apollo_entity_cache::key` context entry. This entry contains an object with the `all` field to affect all subgraph queries under one client query, and fields named after subgraph operation names to affect individual subgraph queries. The value of the field can be any valid JSON value (object, string, etc).
 
 ```json
 {
@@ -84,3 +106,21 @@ If we need to store data for a particular query in different cache entries, the 
 }
 
 ```
+
+## Implementation notes
+
+### Responses with errors not cached
+
+To prevent transient errors from affecting the cache for a long duration, subgraph responses with errors are not cached.
+
+### Authorization and entity caching
+
+When used alongside the router's [authorization directives](./authorization), cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing and not providing that scope have different cache entries. This means that data requiring authorization can still be safely cached and even shared across users, without needing invalidation when a user's roles change because their queries are automatically directed to a different part of the cache.
+
+### Schema updates and entity caching
+
+On schema updates, the router makes sure that queries unaffected by the changes will keep their cache entries. Queries with affected fields will need to be cached again, making sure that we don't serve invalid data from the cache after the update.
+
+### Entity cache invalidation not supported
+
+Cache invalidation is not yet supported and is planned for a future release.
