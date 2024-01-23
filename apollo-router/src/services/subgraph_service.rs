@@ -134,6 +134,7 @@ impl Display for Compression {
             Compression::Gzip => write!(f, "gzip"),
             Compression::Deflate => write!(f, "deflate"),
             Compression::Br => write!(f, "br"),
+            Compression::Identity => write!(f, "identity"),
         }
     }
 }
