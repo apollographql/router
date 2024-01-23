@@ -132,6 +132,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
+    /// Explorer configuration
+    #[serde(default)]
+    pub(crate) explorer: Explorer,
+
     /// Homepage configuration
     #[serde(default)]
     pub(crate) homepage: Homepage,
@@ -241,6 +245,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         struct AdHocConfiguration {
             health_check: HealthCheck,
             sandbox: Sandbox,
+            explorer: Explorer,
             homepage: Homepage,
             supergraph: Supergraph,
             cors: Cors,
@@ -262,6 +267,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         Configuration::builder()
             .health_check(ad_hoc.health_check)
             .sandbox(ad_hoc.sandbox)
+            .explorer(ad_hoc.explorer)
             .homepage(ad_hoc.homepage)
             .supergraph(ad_hoc.supergraph)
             .cors(ad_hoc.cors)
@@ -299,6 +305,7 @@ impl Configuration {
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
+        explorer: Option<Explorer>,
         homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
@@ -332,6 +339,7 @@ impl Configuration {
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
+            explorer: explorer.unwrap_or_default(),
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
@@ -375,6 +383,7 @@ impl Configuration {
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
+        explorer: Option<Explorer>,
         homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
@@ -395,6 +404,7 @@ impl Configuration {
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
+            explorer: explorer.unwrap_or_else(|| Explorer::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
@@ -434,6 +444,20 @@ impl Configuration {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "sandbox requires introspection",
                 error: "sandbox needs introspection to be enabled".to_string(),
+            });
+        }
+        // Explorer and Homepage cannot be both enabled
+        if self.explorer.enabled && self.homepage.enabled {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "explorer and homepage cannot be enabled at the same time",
+                error: "disable the homepage if you want to enable explorer".to_string(),
+            });
+        }
+        // Explorer and Sandbox cannot be both enabled
+        if self.explorer.enabled && self.sandbox.enabled {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "explorer and sandbox cannot be enabled at the same time",
+                error: "disable the sandbox if you want to enable explorer".to_string(),
             });
         }
         if !self.supergraph.path.starts_with('/') {
@@ -1142,6 +1166,68 @@ impl Sandbox {
 }
 
 impl Default for Sandbox {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the explorer page.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Explorer {
+    /// Set to true to enable explorer
+    pub(crate) enabled: bool,
+    /// Graph reference
+    /// This will allow you to set the graph ref used in explorer
+    pub(crate) graph_ref: Option<String>,
+}
+
+fn default_explorer() -> bool {
+    false
+}
+
+fn default_explorer_graph_ref() -> Option<String> {
+    let graph_ref = std::env::var("APOLLO_GRAPH_REF");
+    match graph_ref {
+        Ok(graph_ref) => Some(graph_ref),
+        Err(_) => None,
+    }
+}
+
+#[buildstructor::buildstructor]
+impl Explorer {
+    #[builder]
+    pub(crate) fn new(enabled: Option<bool>, graph_ref: Option<String>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_explorer),
+            graph_ref: graph_ref.or_else(default_explorer_graph_ref),
+        }
+    }
+}
+
+#[cfg(test)]
+fn test_explorer_graph_ref() -> Option<String> {
+    let graph_ref = std::env::var("TEST_APOLLO_GRAPH_REF");
+    match graph_ref {
+        Ok(graph_ref) => Some(graph_ref),
+        Err(_) => None,
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Explorer {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>, graph_ref: Option<String>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_explorer),
+            graph_ref: graph_ref.or_else(test_explorer_graph_ref),
+        }
+    }
+}
+
+impl Default for Explorer {
     fn default() -> Self {
         Self::builder().build()
     }
