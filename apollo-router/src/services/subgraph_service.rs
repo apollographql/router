@@ -124,6 +124,8 @@ pub(crate) enum Compression {
     Deflate,
     /// brotli
     Br,
+    /// identity
+    Identity,
 }
 
 impl Display for Compression {
