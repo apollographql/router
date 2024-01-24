@@ -105,7 +105,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
         .get_or_try_init(move || {
             // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
             let log_level = format!("{log_level},salsa=error");
-
+            tracing::debug!("Running the router with log level set to {log_level}");
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
@@ -131,6 +131,10 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
     }
+}
+
+pub(crate) fn apollo_opentelemetry_initialized() -> bool {
+    OPENTELEMETRY_TRACER_HANDLE.get().is_some()
 }
 
 pub(crate) struct SamplingFilter;
@@ -175,9 +179,9 @@ where
         meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
-        // we ignore events
+        // we ignore metric events
         if !meta.is_span() {
-            return false;
+            return meta.fields().iter().any(|f| f.name() == "message");
         }
 
         // if there's an exsting otel context set by the client request, and it is sampled,

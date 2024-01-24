@@ -158,6 +158,22 @@ pub(crate) struct ExposeTraceId {
     #[schemars(with = "Option<String>")]
     #[serde(deserialize_with = "deserialize_option_header_name")]
     pub(crate) header_name: Option<HeaderName>,
+    /// Format of the trace ID in response headers
+    pub(crate) format: TraceIdFormat,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum TraceIdFormat {
+    /// Format the Trace ID as a hexadecimal number
+    ///
+    /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
+    #[default]
+    Hexadecimal,
+    /// Format the Trace ID as a decimal number
+    ///
+    /// (e.g. Trace ID 16 -> 16)
+    Decimal,
 }
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured

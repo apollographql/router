@@ -491,10 +491,7 @@ impl IntegrationTest {
         let mut request = client
             .post("http://localhost:4000")
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .header(
-                ACCEPT,
-                "multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0",
-            )
+            .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .json(&json!({"query":subscription,"variables":{}}))

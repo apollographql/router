@@ -24,6 +24,7 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -391,9 +392,19 @@ pub(crate) async fn create_plugins(
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
     let plugin_registry = &*crate::plugin::PLUGINS;
+    let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
     let mut apollo_plugin_factories: HashMap<&str, &PluginFactory> = plugin_registry
         .iter()
-        .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+        .filter(|factory| {
+            // the name starts with apollo
+            factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
+                && (
+                    // the plugin is mandatory
+                    apollo_telemetry_plugin_mandatory ||
+                    // the name isn't apollo.telemetry
+                    factory.name != "apollo.telemetry"
+                )
+        })
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
@@ -473,7 +484,9 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("include_subgraph_errors");
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("headers");
-    add_mandatory_apollo_plugin!("telemetry");
+    if apollo_telemetry_plugin_mandatory {
+        add_mandatory_apollo_plugin!("telemetry");
+    }
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
