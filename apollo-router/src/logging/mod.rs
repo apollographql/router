@@ -4,6 +4,7 @@ pub(crate) mod test {
     use std::sync::Mutex;
 
     use serde_json::Value;
+    use tracing_core::LevelFilter;
     use tracing_core::Subscriber;
 
     pub(crate) struct SnapshotSubscriber {
@@ -41,7 +42,7 @@ pub(crate) mod test {
                             .unwrap()
                             .as_object_mut()
                             .unwrap();
-                        let message = fields.remove("message").unwrap();
+                        let message = fields.remove("message").unwrap_or_default();
                         line.as_object_mut()
                             .unwrap()
                             .insert("message".to_string(), message);
@@ -56,7 +57,10 @@ pub(crate) mod test {
     }
 
     impl SnapshotSubscriber {
-        pub(crate) fn create_subscriber(assertion: fn(Value)) -> impl Subscriber {
+        pub(crate) fn create_subscriber(
+            level: LevelFilter,
+            assertion: fn(Value),
+        ) -> impl Subscriber {
             let collector = Self {
                 buffer: Arc::new(Mutex::new(Vec::new())),
                 assertion,
@@ -64,6 +68,7 @@ pub(crate) mod test {
 
             tracing_subscriber::fmt()
                 .json()
+                .with_max_level(level)
                 .without_time()
                 .with_target(false)
                 .with_file(false)
@@ -81,19 +86,27 @@ pub(crate) mod test {
 /// You can also use subscriber::with_default(assert_snapshot_subscriber!(), || { ... }) to assert the logs in non async code.
 macro_rules! assert_snapshot_subscriber {
     () => {
-        $crate::logging::test::SnapshotSubscriber::create_subscriber(|yaml| {
-            insta::with_settings!({sort_maps => true}, {
-                // the tests here will force maps to sort
-                insta::assert_yaml_snapshot!(yaml);
-            });
-        })
+        $crate::assert_snapshot_subscriber!(tracing_core::LevelFilter::INFO, {})
     };
 
     ($redactions:tt) => {
-        $crate::logging::test::SnapshotSubscriber::create_subscriber(|yaml| {
+        $crate::assert_snapshot_subscriber!(tracing_core::LevelFilter::INFO, $redactions)
+    };
+
+    ($level:expr) => {
+        $crate::assert_snapshot_subscriber!($level, {})
+    };
+
+    ($level:expr, $redactions:tt) => {
+        $crate::logging::test::SnapshotSubscriber::create_subscriber($level, |yaml| {
             insta::with_settings!({sort_maps => true}, {
                 // the tests here will force maps to sort
-                insta::assert_yaml_snapshot!(yaml, $redactions);
+                let mut settings = insta::Settings::clone_current();
+                settings.set_snapshot_suffix("logs");
+                settings.set_sort_maps(true);
+                settings.bind(|| {
+                    insta::assert_yaml_snapshot!(yaml, $redactions);
+                });
             });
         })
     };

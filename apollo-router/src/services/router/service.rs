@@ -66,16 +66,18 @@ use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 
-pub(crate) static MULTIPART_DEFER_HEADER_VALUE: HeaderValue =
+pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
-pub(crate) static MULTIPART_SUBSCRIPTION_HEADER_VALUE: HeaderValue =
+pub(crate) static MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE);
 static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
@@ -256,7 +258,7 @@ impl RouterService {
             multipart_defer: accepts_multipart_defer,
             multipart_subscription: accepts_multipart_subscription,
         } = context
-            .private_entries
+            .extensions()
             .lock()
             .get()
             .cloned()
@@ -295,13 +297,15 @@ impl RouterService {
                     })
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
-                        parts
-                            .headers
-                            .insert(CONTENT_TYPE, MULTIPART_DEFER_HEADER_VALUE.clone());
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
+                        );
                     } else if accepts_multipart_subscription {
-                        parts
-                            .headers
-                            .insert(CONTENT_TYPE, MULTIPART_SUBSCRIPTION_HEADER_VALUE.clone());
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
+                        );
                     }
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
@@ -340,10 +344,11 @@ impl RouterService {
                             .error(
                                 graphql::Error::builder()
                                     .message(format!(
-                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
+                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
                                         APPLICATION_JSON.essence_str(),
                                         GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        MULTIPART_DEFER_CONTENT_TYPE
+                                        MULTIPART_DEFER_ACCEPT,
+                                        MULTIPART_SUBSCRIPTION_ACCEPT,
                                     ))
                                     .extension_code("INVALID_ACCEPT_HEADER")
                                     .build(),
@@ -607,7 +612,7 @@ impl RouterService {
 
         if ok_results.len() > 1 {
             context
-                .private_entries
+                .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
         }
@@ -640,18 +645,18 @@ impl RouterService {
             let new_context = Context::new();
             new_context.extend(&context);
             let client_request_accepts_opt = context
-                .private_entries
+                .extensions()
                 .lock()
                 .get::<ClientRequestAccepts>()
                 .cloned();
             if let Some(client_request_accepts) = client_request_accepts_opt {
                 new_context
-                    .private_entries
+                    .extensions()
                     .lock()
                     .insert(client_request_accepts);
             }
             new_context
-                .private_entries
+                .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
             results.push(SupergraphRequest {

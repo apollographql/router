@@ -4,12 +4,11 @@ Instead of relying on WebSockets, the subscriptions protocol supported by the ro
 
 ## Communication
 
-When sending a request containing a subscription to the router, clients should include the following `Accept` header to indicate their support for the multipart subscriptions protocol:
-```
-Accept: multipart/mixed; boundary="graphql"; subscriptionSpec="1.0", application/json
-```
+When sending a request containing a subscription to the router, clients MUST support the `multipart/mixed;subscriptionSpec="1.0"` content-type in addition to the `application/json` content-type:
 
-> Note that `boundary` should always be `graphql` for now, and `subscriptionSpec` is `1.0` for the current version of the protocol.
+```
+Accept: multipart/mixed;subscriptionSpec="1.0", application/json
+```
 
 The router will then respond with a stream of body parts, following the [definition of multipart content specified in RFC1341](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html).
 
@@ -26,6 +25,9 @@ Content-Type: application/json
 {"payload": {"data": { "newPost": { "id": 123, "title": "Hello!"}}}}
 --graphql--
 ```
+
+> Note: because the parts are always JSON, it is never possible for `\r\n--graphql` to appear in the contents of a part. For convenience, servers MAY use `graphql` as a boundary.
+> Clients MUST accomodate any boundary returned by the server in `Content-Type`.
 
 When HTTP/1 is used, the response will use `Transfer-Encoding: chunked`, but this is not needed for HTTP/2 (which has built-in support for data streaming) and actually [disallowed](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding).
 

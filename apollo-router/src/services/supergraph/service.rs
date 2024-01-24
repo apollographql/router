@@ -30,7 +30,6 @@ use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
-use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -56,6 +55,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
+use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::services::supergraph;
@@ -207,7 +207,7 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Introspection { response }) => Ok(
+        Some(QueryPlannerContent::Response { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
@@ -229,7 +229,7 @@ async fn service_call(
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
 
-            if let Some(batching) = context.private_entries.lock().get::<Batching>() {
+            if let Some(batching) = context.extensions().lock().get::<Batching>() {
                 if batching.enabled && (is_deferred || is_subscription) {
                     let message = if is_deferred {
                         "BATCHING_DEFER_UNSUPPORTED"
@@ -257,7 +257,7 @@ async fn service_call(
                 multipart_subscription: accepts_multipart_subscription,
                 ..
             } = context
-                .private_entries
+                .extensions()
                 .lock()
                 .get()
                 .cloned()
@@ -267,9 +267,9 @@ async fn service_call(
                 || (is_subscription && !accepts_multipart_subscription)
             {
                 let (error_message, error_code) = if is_deferred {
-                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"), "DEFER_BAD_HEADER")
+                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'"), "DEFER_BAD_HEADER")
                 } else {
-                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed; boundary=graphql; subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
+                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
                 };
                 let mut response = SupergraphResponse::new_from_graphql_response(
                     graphql::Response::builder()
@@ -341,7 +341,7 @@ pub struct SubscriptionTaskParams {
     pub(crate) client_sender: tokio::sync::mpsc::Sender<Response>,
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
-    pub(crate) stream_rx: ReceiverStream<HandleStream<String, graphql::Response>>,
+    pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
     pub(crate) service_name: String,
 }
 
@@ -395,7 +395,7 @@ async fn subscription_task(
     let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
     let mut subscription_handle = subscription_handle.clone();
     let operation_signature = context
-        .private_entries
+        .extensions()
         .lock()
         .get::<UsageReporting>()
         .map(|usage_reporting| usage_reporting.stats_report_key.clone())
@@ -473,7 +473,7 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None).await {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None, None).await {
                         Ok(plugins) => plugins,
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
@@ -593,16 +593,14 @@ async fn plan_query(
     // none of those tests create an executable document to put it in the context, and the document cannot be created
     // from inside the supergraph request fake builder, because it needs a schema matching the query.
     // So while we are updating the tests to create a document manually, this here will make sure current
-    // tests will pass
-    {
-        let mut entries = context.private_entries.lock();
-        if !entries.contains_key::<ParsedDocument>() {
-            let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
-            Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
-            Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
-            entries.insert::<ParsedDocument>(doc);
-        }
-        drop(entries);
+    // tests will pass.
+    // During a regular request, `ParsedDocument` is already populated during query analysis.
+    // Some tests do populate the document, so we only do it if it's not already there.
+    if !context.extensions().lock().contains_key::<ParsedDocument>() {
+        let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
+        Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
+        Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
+        context.extensions().lock().insert::<ParsedDocument>(doc);
     }
 
     planning
