@@ -21,7 +21,7 @@ impl LogAttributes {
         &self.attributes
     }
 
-    fn insert(&mut self, kv: KeyValue) {
+    pub(crate) fn insert(&mut self, kv: KeyValue) {
         self.attributes.push_back(kv);
     }
 

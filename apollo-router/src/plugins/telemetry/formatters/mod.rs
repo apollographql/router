@@ -2,18 +2,25 @@
 pub(crate) mod json;
 pub(crate) mod text;
 
+use std::collections::HashMap;
 use std::collections::LinkedList;
 use std::fmt;
+use std::time::Instant;
 
 use opentelemetry::sdk::Resource;
+use opentelemetry_api::KeyValue;
+use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
+use tracing_core::callsite::Identifier;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
+use super::config_new::logging::RateLimit;
+use super::dynamic_attribute::LogAttributes;
 use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
@@ -44,14 +51,21 @@ pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
 pub(crate) struct FilteringFormatter<T, F> {
     inner: T,
     filter_fn: F,
+    rate_limiter: Mutex<HashMap<Identifier, RateCounter>>,
+    config: RateLimit,
 }
 
 impl<T, F> FilteringFormatter<T, F>
 where
     F: Fn(&tracing::Event<'_>) -> bool,
 {
-    pub(crate) fn new(inner: T, filter_fn: F) -> Self {
-        Self { inner, filter_fn }
+    pub(crate) fn new(inner: T, filter_fn: F, rate_limit: &RateLimit) -> Self {
+        Self {
+            inner,
+            filter_fn,
+            rate_limiter: Mutex::new(HashMap::new()),
+            config: rate_limit.clone(),
+        }
     }
 }
 
@@ -69,6 +83,32 @@ where
         event: &tracing::Event<'_>,
     ) -> fmt::Result {
         if (self.filter_fn)(event) {
+            match self.rate_limit(event) {
+                RateResult::Deny => return Ok(()),
+
+                RateResult::Allow => {}
+                RateResult::AllowSkipped(skipped) => {
+                    if let Some(span) = event
+                        .parent()
+                        .and_then(|id| ctx.span(id))
+                        .or_else(|| ctx.lookup_current())
+                    {
+                        let mut extensions = span.extensions_mut();
+                        match extensions.get_mut::<LogAttributes>() {
+                            None => {
+                                let mut attributes = LogAttributes::default();
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                                extensions.insert(attributes);
+                            }
+                            Some(attributes) => {
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                            }
+                        }
+                    }
+                }
+            }
             self.inner.format_event(ctx, writer, event)
         } else {
             Ok(())
@@ -92,11 +132,92 @@ where
         W: std::fmt::Write,
     {
         if (self.filter_fn)(event) {
+            match self.rate_limit(event) {
+                RateResult::Deny => return Ok(()),
+
+                RateResult::Allow => {}
+                RateResult::AllowSkipped(skipped) => {
+                    if let Some(span) = event
+                        .parent()
+                        .and_then(|id| ctx.span(id))
+                        .or_else(|| ctx.lookup_current())
+                    {
+                        let mut extensions = span.extensions_mut();
+                        match extensions.get_mut::<LogAttributes>() {
+                            None => {
+                                let mut attributes = LogAttributes::default();
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                                extensions.insert(attributes);
+                            }
+                            Some(attributes) => {
+                                attributes
+                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
+                            }
+                        }
+                    }
+                }
+            }
             self.inner.format_event(ctx, writer, event)
         } else {
             Ok(())
         }
     }
+}
+
+enum RateResult {
+    Allow,
+    AllowSkipped(u32),
+    Deny,
+}
+impl<T, F> FilteringFormatter<T, F> {
+    fn rate_limit(&self, event: &tracing::Event<'_>) -> RateResult {
+        if self.config.enabled {
+            let now = Instant::now();
+            if let Some(counter) = self
+                .rate_limiter
+                .lock()
+                .get_mut(&event.metadata().callsite())
+            {
+                if now - counter.last < self.config.interval {
+                    counter.count += 1;
+
+                    if counter.count >= self.config.capacity {
+                        return RateResult::Deny;
+                    }
+                } else {
+                    if counter.count > self.config.capacity {
+                        let skipped = counter.count - self.config.capacity;
+                        counter.last = now;
+                        counter.count += 1;
+
+                        return RateResult::AllowSkipped(skipped);
+                    }
+
+                    counter.last = now;
+                    counter.count += 1;
+                }
+
+                return RateResult::Allow;
+            }
+
+            // this is racy but not a very large issue, we can accept an initial burst
+            self.rate_limiter.lock().insert(
+                event.metadata().callsite(),
+                RateCounter {
+                    last: now,
+                    count: 1,
+                },
+            );
+        }
+
+        RateResult::Allow
+    }
+}
+
+struct RateCounter {
+    last: Instant,
+    count: u32,
 }
 
 // Function to filter metric event for the filter formatter
