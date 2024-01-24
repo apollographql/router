@@ -6148,6 +6148,12 @@ expression: "&schema"
                       "description": "Custom attributes that are attached to the router span.",
                       "type": "object",
                       "properties": {
+                        "baggage": {
+                          "description": "All key values from trace baggage.",
+                          "default": null,
+                          "type": "boolean",
+                          "nullable": true
+                        },
                         "dd.trace_id": {
                           "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
                           "default": null,
