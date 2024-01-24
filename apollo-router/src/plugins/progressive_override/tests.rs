@@ -1,6 +1,6 @@
 use tower::ServiceExt;
 
-use crate::plugins::progressive_override::OVERRIDE_KEY;
+use crate::plugins::progressive_override::LABELS_TO_OVERRIDE;
 use crate::services::supergraph;
 use crate::Context;
 use crate::TestHarness;
@@ -65,6 +65,8 @@ const SCHEMA: &str = r#"
   }
 "#;
 
+// TODO: unit tests around specifically router_service and supergraph_service lifecycle
+
 async fn get_supergraph_service() -> supergraph::BoxCloneService {
     TestHarness::builder()
         .configuration_json(serde_json::json! {{
@@ -100,7 +102,7 @@ async fn todo() {
 
     let context = Context::new();
     context
-        .insert(OVERRIDE_KEY, vec!["foo".to_string()])
+        .insert(LABELS_TO_OVERRIDE, vec!["foo".to_string()])
         .unwrap();
 
     let overridden_request = supergraph::Request::fake_builder()

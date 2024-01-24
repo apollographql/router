@@ -357,6 +357,7 @@ dependencies = [
  "rustls",
  "rustls-pemfile",
  "schemars",
+ "semver 1.0.21",
  "serde",
  "serde_derive_default",
  "serde_json",
@@ -2832,7 +2833,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-webpki",
- "semver 1.0.18",
+ "semver 1.0.21",
  "socket2 0.5.5",
  "tokio",
  "tokio-rustls",
@@ -3581,7 +3582,7 @@ version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7baab56125e25686df467fe470785512329883aab42696d661247aca2a2896e4"
 dependencies = [
- "console 0.12.0",
+ "console 0.15.8",
  "lazy_static",
  "number_prefix",
  "regex",
@@ -5743,7 +5744,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.5.15+v2.7.0"
-source = "git+https://github.com/apollographql/federation-rs?branch=trevor/progressive-override#84023c48fbc667933d6bdd849ed39a0ba3c7169e"
+source = "git+https://github.com/apollographql/federation-rs?branch=main#170bc3981df50a109a6cd6674ffdd38c144aa36a"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -5885,7 +5886,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.18",
+ "semver 1.0.21",
 ]
 
 [[package]]
@@ -6120,9 +6121,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.18"
+version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0293b4b29daaf487284529cc2f5675b8e57c61f70167ba415a463651fd6a918"
+checksum = "b97ed7a9823b74f99c7742f5336af7be5ecd3eeafcb1507d1fa93347b1d589b0"
 
 [[package]]
 name = "semver-parser"

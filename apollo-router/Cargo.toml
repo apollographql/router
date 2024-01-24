@@ -184,7 +184,7 @@ reqwest = { version = "0.11.23", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = { git = "https://github.com/apollographql/federation-rs", branch = "trevor/progressive-override" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs", branch = "main" }
 #router-bridge = "=0.5.14+v2.6.3"
 rust-embed = "8.1.0"
 rustls = "0.21.10"
@@ -192,6 +192,7 @@ rustls-pemfile = "1.0.4"
 schemars = { version = "0.8.16", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.8"
+semver = "1.0.21"
 serde = { version = "1.0.193", features = ["derive", "rc"] }
 serde_derive_default = "0.1"
 serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }

@@ -11,6 +11,7 @@ use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use http::Uri;
+use semver::Version;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -233,22 +234,45 @@ impl Schema {
         self.diagnostics.is_some()
     }
 
-    pub(crate) fn has_spec(&self, url: &str) -> bool {
+    pub(crate) fn has_spec(&self, base_url: &str, min_version: &str) -> bool {
         self.definitions
             .schema_definition
             .directives
             .iter()
             .filter(|dir| dir.name.as_str() == "link")
             .any(|link| {
-                link.argument_by_name("url")
+                if let Some(url_in_link) = link
+                    .argument_by_name("url")
                     .and_then(|value| value.as_str())
-                    == Some(url)
+                {
+                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_in_url) =
+                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    let Some(min_version) =
+                        Version::parse(format!("{}.0", min_version).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    base_url_in_link == base_url && version_in_url >= min_version
+                } else {
+                    false
+                }
             })
     }
 
     pub(crate) fn directive_name(
         schema: &apollo_compiler::schema::Schema,
-        url: &str,
+        base_url: &str,
+        min_version: &str,
         default: &str,
     ) -> Option<String> {
         schema
@@ -257,9 +281,31 @@ impl Schema {
             .iter()
             .filter(|dir| dir.name.as_str() == "link")
             .find(|link| {
-                link.argument_by_name("url")
+                if let Some(url_in_link) = link
+                    .argument_by_name("url")
                     .and_then(|value| value.as_str())
-                    == Some(url)
+                {
+                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_in_url) =
+                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    let Some(min_version) =
+                        Version::parse(format!("{}.0", min_version).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    base_url_in_link == base_url && version_in_url >= min_version
+                } else {
+                    false
+                }
             })
             .map(|link| {
                 link.argument_by_name("as")
