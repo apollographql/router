@@ -241,7 +241,7 @@ fn search_jwks(
             // If we have an algorithm that matches, boost the score
             match key.common.key_algorithm {
                 Some(algorithm) => {
-                    if convert_key_algorithm(algorithm).ok() != Some(criteria.alg) {
+                    if convert_key_algorithm(algorithm) != Some(criteria.alg) {
                         continue;
                     }
                     key_score += 1;
@@ -691,9 +691,12 @@ fn decode_jwt(
         };
 
         let algorithm = match convert_key_algorithm(key_algorithm) {
-            Ok(a) => a,
-            Err(e) => {
-                error = Some((e, StatusCode::INTERNAL_SERVER_ERROR));
+            Some(a) => a,
+            None => {
+                error = Some((
+                    AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
                 continue;
             }
         };
@@ -767,10 +770,8 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
 }
 
 //Apparently the jsonwebtoken crate now has 2 different enums for algorithms
-pub(crate) fn convert_key_algorithm<'a>(
-    algorithm: KeyAlgorithm,
-) -> Result<Algorithm, AuthenticationError<'a>> {
-    Ok(match algorithm {
+pub(crate) fn convert_key_algorithm(algorithm: KeyAlgorithm) -> Option<Algorithm> {
+    Some(match algorithm {
         jsonwebtoken::jwk::KeyAlgorithm::HS256 => jsonwebtoken::Algorithm::HS256,
         jsonwebtoken::jwk::KeyAlgorithm::HS384 => jsonwebtoken::Algorithm::HS384,
         jsonwebtoken::jwk::KeyAlgorithm::HS512 => jsonwebtoken::Algorithm::HS512,
@@ -786,13 +787,11 @@ pub(crate) fn convert_key_algorithm<'a>(
         // we do not use the encryption algorithms
         jsonwebtoken::jwk::KeyAlgorithm::RSA1_5
         | jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP
-        | jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP_256 => {
-            return Err(AuthenticationError::UnsupportedKeyAlgorithm(algorithm))
-        }
+        | jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP_256 => return None,
     })
 }
 
-pub(crate) fn convert_algorithm<'a>(algorithm: Algorithm) -> KeyAlgorithm {
+pub(crate) fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
     match algorithm {
         jsonwebtoken::Algorithm::HS256 => jsonwebtoken::jwk::KeyAlgorithm::HS256,
         jsonwebtoken::Algorithm::HS384 => jsonwebtoken::jwk::KeyAlgorithm::HS384,
