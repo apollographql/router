@@ -27,6 +27,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
+use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::DynAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
@@ -85,13 +86,13 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
         FmtLayer::new(
-            FilteringFormatter::new(Text::default(), filter_metric_events),
+            FilteringFormatter::new(Text::default(), filter_metric_events, &RateLimit::default()),
             std::io::stdout,
         )
         .boxed()
     } else {
         FmtLayer::new(
-            FilteringFormatter::new(Json::default(), filter_metric_events),
+            FilteringFormatter::new(Json::default(), filter_metric_events, &RateLimit::default()),
             std::io::stdout,
         )
         .boxed()

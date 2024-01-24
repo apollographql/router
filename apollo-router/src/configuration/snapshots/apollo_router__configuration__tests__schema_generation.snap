@@ -3175,6 +3175,33 @@ expression: "&schema"
                           ]
                         }
                       ]
+                    },
+                    "rate_limit": {
+                      "description": "Log rate limiting. The limit is set per type of log message",
+                      "type": "object",
+                      "properties": {
+                        "capacity": {
+                          "description": "Number of log lines allowed in interval per message",
+                          "default": 1,
+                          "type": "integer",
+                          "format": "uint32",
+                          "minimum": 0.0
+                        },
+                        "enabled": {
+                          "description": "Set to true to limit the rate of log messages",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "interval": {
+                          "description": "Interval for rate limiting",
+                          "default": {
+                            "secs": 1,
+                            "nanos": 0
+                          },
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
