@@ -61,6 +61,7 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
+use self::config::TraceIdFormat;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -475,9 +476,18 @@ impl Plugin for Telemetry {
                         .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
                 });
 
+                // Append the trace ID with the right format, based on the config
+                let format_id = |trace: TraceId| {
+                    let id = match config.exporters.tracing.response_trace_id.format {
+                        TraceIdFormat::Hexadecimal => format!("{:032x}", trace.to_u128()),
+                        TraceIdFormat::Decimal => format!("{}", trace.to_u128()),
+                    };
+
+                    HeaderValue::from_str(&id).ok()
+                };
                 if let (Some(header_name), Some(trace_id)) = (
                     expose_trace_id_header,
-                    TraceId::maybe_new().and_then(|t| HeaderValue::from_str(&t.to_string()).ok()),
+                    TraceId::maybe_new().and_then(format_id),
                 ) {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }
