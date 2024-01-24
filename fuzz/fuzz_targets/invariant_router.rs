@@ -1,4 +1,5 @@
 //! Fuzz target to generate random invalid body and query to the router and check it doesn't panic
+#![allow(unused_attributes)]
 #![no_main]
 
 use std::char::REPLACEMENT_CHARACTER;
