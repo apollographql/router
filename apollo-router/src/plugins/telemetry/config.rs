@@ -110,28 +110,6 @@ pub(crate) struct MetricsCommon {
     pub(crate) resource: BTreeMap<String, AttributeValue>,
     /// Custom buckets for histograms
     pub(crate) buckets: Vec<f64>,
-    /// Experimental metrics to know more about caching strategies
-    pub(crate) experimental_cache_metrics: ExperimentalCacheMetricsConf,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct ExperimentalCacheMetricsConf {
-    /// Enable experimental metrics
-    pub(crate) enabled: bool,
-    #[serde(with = "humantime_serde")]
-    #[schemars(with = "String")]
-    /// Potential TTL for a cache if we had one (default: 5secs)
-    pub(crate) ttl: Duration,
-}
-
-impl Default for ExperimentalCacheMetricsConf {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            ttl: Duration::from_secs(5),
-        }
-    }
 }
 
 impl Default for MetricsCommon {
@@ -144,7 +122,6 @@ impl Default for MetricsCommon {
             buckets: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
-            experimental_cache_metrics: ExperimentalCacheMetricsConf::default(),
         }
     }
 }
@@ -181,6 +158,22 @@ pub(crate) struct ExposeTraceId {
     #[schemars(with = "Option<String>")]
     #[serde(deserialize_with = "deserialize_option_header_name")]
     pub(crate) header_name: Option<HeaderName>,
+    /// Format of the trace ID in response headers
+    pub(crate) format: TraceIdFormat,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum TraceIdFormat {
+    /// Format the Trace ID as a hexadecimal number
+    ///
+    /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
+    #[default]
+    Hexadecimal,
+    /// Format the Trace ID as a decimal number
+    ///
+    /// (e.g. Trace ID 16 -> 16)
+    Decimal,
 }
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
