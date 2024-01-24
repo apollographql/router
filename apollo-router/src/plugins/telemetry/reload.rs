@@ -39,6 +39,7 @@ use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
+use crate::router_factory::STARTING_SPAN_NAME;
 
 pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
 
@@ -199,6 +200,11 @@ where
             .and_then(|id| cx.span(id))
         {
             return spanref.is_sampled();
+        }
+
+        // always sample the router loading trace
+        if meta.name() == STARTING_SPAN_NAME {
+            return true;
         }
 
         // we only make the sampling decision on the root span. If we reach here for any other span,

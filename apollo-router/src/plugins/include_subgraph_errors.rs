@@ -197,7 +197,7 @@ mod test {
 
         let mut builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let plugins = create_plugins(&Configuration::default(), &schema, None)
+        let plugins = create_plugins(&Configuration::default(), &schema, None, None)
             .await
             .unwrap();
 

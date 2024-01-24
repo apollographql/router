@@ -473,7 +473,7 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None).await {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None, None).await {
                         Ok(plugins) => plugins,
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");

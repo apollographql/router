@@ -168,6 +168,7 @@ pub(crate) struct Telemetry {
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
     private_meter_provider: Option<FilterMeterProvider>,
+    is_active: bool,
 }
 
 #[derive(Debug)]
@@ -257,6 +258,7 @@ impl Plugin for Telemetry {
                 .map(FilterMeterProvider::public),
             sampling_filter_ratio,
             config: Arc::new(config),
+            is_active: false,
         })
     }
 
@@ -629,6 +631,10 @@ impl Plugin for Telemetry {
 
 impl Telemetry {
     pub(crate) fn activate(&mut self) {
+        if self.is_active {
+            return;
+        }
+
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
@@ -661,6 +667,7 @@ impl Telemetry {
         self.reload_metrics();
 
         reload_fmt(create_fmt_layer(&self.config));
+        self.is_active = true;
     }
 
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {

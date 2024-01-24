@@ -2308,7 +2308,7 @@ async fn test_supergraph_timeout() {
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
-    let plugins = create_plugins(&conf, &schema, None).await.unwrap();
+    let plugins = create_plugins(&conf, &schema, None, None).await.unwrap();
 
     let mut builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())
