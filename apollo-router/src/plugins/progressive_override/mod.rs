@@ -15,10 +15,6 @@ use self::layers::query_analysis::ParsedDocument;
 use self::visitor::OverrideLabelVisitor;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::progressive_override::visitor::JOIN_FIELD_DIRECTIVE_NAME;
-use crate::plugins::progressive_override::visitor::JOIN_SPEC_BASE_URL;
-use crate::plugins::progressive_override::visitor::JOIN_SPEC_VERSION;
-use crate::plugins::progressive_override::visitor::OVERRIDE_LABEL_ARG_NAME;
 use crate::register_plugin;
 use crate::services::*;
 use crate::spec;
@@ -35,11 +31,17 @@ pub(crate) mod visitor;
 pub(crate) const UNRESOLVED_LABELS: &str = "apollo_override::unresolved_labels";
 pub(crate) const LABELS_TO_OVERRIDE: &str = "apollo_override::labels_to_override";
 
+pub(crate) const JOIN_FIELD_DIRECTIVE_NAME: &str = "join__field";
+pub(crate) const JOIN_SPEC_BASE_URL: &str = "https://specs.apollo.dev/join";
+pub(crate) const JOIN_SPEC_VERSION: &str = "0.4";
+pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
+
 /// Configuration for the progressive override plugin
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub(crate) struct Conf {}
 
 pub(crate) struct ProgressiveOverridePlugin {
+    enabled: bool,
     schema: Schema,
     labels_from_schema: LabelsFromSchema,
     // We have to visit each operation to find out which labels from the schema
@@ -131,8 +133,9 @@ impl Plugin for ProgressiveOverridePlugin {
             "i guess unwrap is safe here because otherwise plugin init shouldn't be called?",
         );
         let labels_from_schema = collect_labels_from_schema(&schema);
-
+        let enabled = !labels_from_schema.0.is_empty() || !labels_from_schema.1.is_empty();
         Ok(ProgressiveOverridePlugin {
+            enabled,
             schema,
             labels_from_schema,
             // we have to visit each operation to find out which labels from the schema are relevant.
@@ -146,10 +149,10 @@ impl Plugin for ProgressiveOverridePlugin {
     // Add all arbitrary labels (non-percentage-based labels) from the schema to
     // the context so coprocessors can resolve their values
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let (_, arbitrary_labels) = self.labels_from_schema.clone();
-        if arbitrary_labels.is_empty() {
+        if !self.enabled {
             service
         } else {
+            let (_, arbitrary_labels) = self.labels_from_schema.clone();
             ServiceBuilder::new()
                 .map_request(move |request: router::Request| {
                     let _ = request
@@ -171,13 +174,14 @@ impl Plugin for ProgressiveOverridePlugin {
     // 4. Add the filtered, sorted set of labels to the context for use by the
     //    query planner
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        let labels_per_operation_cache: Arc<
-            DashMap<Arc<layers::query_analysis::ParsedDocumentInner>, Vec<Arc<String>>>,
-        > = self.labels_per_operation_cache.clone();
+        if !self.enabled {
+            service
+        } else {
+            let (percentage_labels, _) = self.labels_from_schema.clone();
+            let labels_per_operation_cache = self.labels_per_operation_cache.clone();
 
-        let schema = self.schema.clone();
-        let (percentage_labels, _) = self.labels_from_schema.clone();
-        ServiceBuilder::new()
+            let schema = self.schema.clone();
+            ServiceBuilder::new()
             .map_request(move |request: supergraph::Request| {
                 // evaluate each percentage-based label in the schema
                 let percentage_override_labels =
@@ -232,6 +236,7 @@ impl Plugin for ProgressiveOverridePlugin {
             })
             .service(service)
             .boxed()
+        }
     }
 }
 

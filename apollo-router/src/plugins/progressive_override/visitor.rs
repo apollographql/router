@@ -6,13 +6,12 @@ use apollo_compiler::ast;
 use apollo_compiler::schema;
 use tower::BoxError;
 
+use super::JOIN_FIELD_DIRECTIVE_NAME;
+use super::JOIN_SPEC_BASE_URL;
+use super::JOIN_SPEC_VERSION;
+use super::OVERRIDE_LABEL_ARG_NAME;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
-
-pub(crate) const JOIN_FIELD_DIRECTIVE_NAME: &str = "join__field";
-pub(crate) const JOIN_SPEC_BASE_URL: &str = "https://specs.apollo.dev/join";
-pub(crate) const JOIN_SPEC_VERSION: &str = "0.4";
-pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 impl<'a> OverrideLabelVisitor<'a> {
     pub(crate) fn new(schema: &'a schema::Schema) -> Option<Self> {
