@@ -27,6 +27,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
+use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::DynAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
@@ -39,6 +40,7 @@ use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
+use crate::router_factory::STARTING_SPAN_NAME;
 
 pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
 
@@ -84,13 +86,13 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
         FmtLayer::new(
-            FilteringFormatter::new(Text::default(), filter_metric_events),
+            FilteringFormatter::new(Text::default(), filter_metric_events, &RateLimit::default()),
             std::io::stdout,
         )
         .boxed()
     } else {
         FmtLayer::new(
-            FilteringFormatter::new(Json::default(), filter_metric_events),
+            FilteringFormatter::new(Json::default(), filter_metric_events, &RateLimit::default()),
             std::io::stdout,
         )
         .boxed()
@@ -131,6 +133,10 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
     }
+}
+
+pub(crate) fn apollo_opentelemetry_initialized() -> bool {
+    OPENTELEMETRY_TRACER_HANDLE.get().is_some()
 }
 
 pub(crate) struct SamplingFilter;
@@ -195,6 +201,11 @@ where
             .and_then(|id| cx.span(id))
         {
             return spanref.is_sampled();
+        }
+
+        // always sample the router loading trace
+        if meta.name() == STARTING_SPAN_NAME {
+            return true;
         }
 
         // we only make the sampling decision on the root span. If we reach here for any other span,

@@ -5,6 +5,7 @@ version: 2.1
 orbs:
   gh: circleci/github-cli@2.2.0
   slack: circleci/slack@4.12.5
+  secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -21,8 +22,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.2.3
-      - image: jaegertracing/all-in-one:1.51.0
+      - image: cimg/redis:7.2.4
+      - image: jaegertracing/all-in-one:1.53.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -1011,3 +1012,19 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
+  
+  security-scans:
+    when:
+      not: << pipeline.parameters.nightly >>
+    jobs:
+      - secops/gitleaks:
+          context:
+            - secops-oidc
+            - github-orb
+          git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+          git-revision: << pipeline.git.revision >>
+      - secops/semgrep:
+          context:
+            - secops-oidc
+            - github-orb
+          git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>

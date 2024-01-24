@@ -42,6 +42,25 @@ telemetry:
          format: text #highlight-line
 ```
 
+### `rate_limit`
+
+The rate at which log messages are produced can become too high, especially for request processing errors. To prevent the router from filling its logs with redundant messages, you can use the `rate_limit` option to set the logging rate limit.
+
+You can set the logging rate limit for each log location, where different log messages are rate limited independently, and log lines with the same message but different sets of attributes are limited under the same rate. This rate limiting only applies to logging to stdout and doesn't affect events sent to trace exporters like OTLP, which have their own sampling configuration.
+
+To enable rate limiting, set the `rate_limit` option:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: json
+        rate_limit: #highlight-line
+          capacity: 1  # number of allowed messages during the rate limiting interval
+          interval: 3s
+```
+
 For configuration options specific to each output format, see the [`text`](#text) and [`json`](#json) format references.
 
 ### Configuration reference
