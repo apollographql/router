@@ -193,7 +193,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         }
 
-        // for now we need the root span to be named request, otherwise the trace is not registered
         let router_span = tracing::info_span!(STARTING_SPAN_NAME);
         Self.inner_create(
             configuration,
