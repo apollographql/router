@@ -215,7 +215,7 @@ impl YamlRouterFactory {
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<RouterCreator, BoxError> {
-        let query_planner_span = tracing::info_span!("query planner creation");
+        let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
             None => {
@@ -309,7 +309,7 @@ impl YamlRouterFactory {
             )
             .await
         }
-        .instrument(tracing::info_span!("supergraph"))
+        .instrument(tracing::info_span!("supergraph_creation"))
         .await
     }
 }
