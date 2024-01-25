@@ -8068,6 +8068,13 @@ expression: "&schema"
                   "enum": [
                     "br"
                   ]
+                },
+                {
+                  "description": "identity",
+                  "type": "string",
+                  "enum": [
+                    "identity"
+                  ]
                 }
               ],
               "nullable": true
@@ -8236,6 +8243,13 @@ expression: "&schema"
                     "type": "string",
                     "enum": [
                       "br"
+                    ]
+                  },
+                  {
+                    "description": "identity",
+                    "type": "string",
+                    "enum": [
+                      "identity"
                     ]
                   }
                 ],
