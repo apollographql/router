@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use axum::extract::Extension;
@@ -418,7 +419,7 @@ where
     })?;
     let span_mode = span_mode(configuration);
 
-    let main_route = main_router::<RF>(configuration)
+    let mut main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(middleware::from_fn_with_state(
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
@@ -433,12 +434,36 @@ where
         )
         .layer(middleware::from_fn(metrics_handler));
 
+    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+        main_route = main_endpoint_layer(main_route);
+    }
+
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+        .fold(main_route, |acc, r| {
+            let mut router = r.into_router();
+            if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+                router = main_endpoint_layer(router);
+            }
+
+            acc.merge(router)
+        });
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+static ENDPOINT_CALLBACK: OnceLock<Arc<dyn Fn(Router) -> Router + Send + Sync>> = OnceLock::new();
+
+/// Set a callback that may wrap or mutate `axum::Router` as they are added to the main router.
+/// Although part of the public API, this is not intended for use by end users, and may change at any time.
+#[doc(hidden)]
+pub fn unsupported_set_axum_router_callback(
+    callback: impl Fn(Router) -> Router + Send + Sync + 'static,
+) -> Result<(), &'static str> {
+    ENDPOINT_CALLBACK
+        .set(Arc::new(callback))
+        .map_err(|_| "endpoint decorator was already set")
 }
 
 async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
