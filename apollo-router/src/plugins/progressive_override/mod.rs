@@ -57,9 +57,7 @@ fn collect_labels_from_schema(schema: &Arc<Schema>) -> LabelsFromSchema {
         JOIN_SPEC_VERSION_RANGE,
         JOIN_FIELD_DIRECTIVE_NAME,
     ) else {
-        tracing::debug!(
-            "No join spec >=v0.4 found in the schema. No labels will be overridden."
-        );
+        tracing::debug!("No join spec >=v0.4 found in the schema. No labels will be overridden.");
         return (HashMap::new(), HashSet::new());
     };
 
