@@ -95,17 +95,18 @@ impl Error {
     /// * `.build()`
     ///   Finishes the builder and returns a GraphQL [`Error`].
     #[builder(visibility = "pub")]
-    fn new<T: Into<String>>(
+    fn new(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
-        extension_code: T,
+        extension_code: Option<String>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         mut extensions: JsonMap<ByteString, Value>,
     ) -> Self {
-        extensions
-            .entry("code")
-            .or_insert_with(|| extension_code.into().into());
+        if let Some(code) = extension_code {
+            extensions.entry("code").or_insert_with(|| code.into());
+        }
+
         Self {
             message,
             locations,
@@ -114,7 +115,7 @@ impl Error {
         }
     }
 
-    pub(crate) fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
         let mut object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
@@ -176,7 +177,7 @@ where
 }
 
 /// Trait used to get extension type from an error
-pub(crate) trait ErrorExtension
+pub trait ErrorExtension
 where
     Self: Sized,
 {

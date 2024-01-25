@@ -79,6 +79,17 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+pub use error::set_into_graphql_errors;
+pub use error::set_to_graphql_error;
+pub use error::CacheResolverError;
+pub use error::FetchError;
+pub use error::PlannerErrors;
+pub use error::QueryPlannerError;
+pub use error::RouterError;
+pub use json_ext::Path;
+pub use spec::operation_limits::OperationLimits;
+
+pub use crate::axum_factory::set_add_extra_endpoints_layer;
 pub use crate::axum_factory::unsupported_set_axum_router_callback;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;

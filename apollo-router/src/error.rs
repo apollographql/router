@@ -1,6 +1,7 @@
 //! Router errors.
 use std::sync::Arc;
 
+use apollo_compiler::execution::GraphQLError;
 use displaydoc::Display;
 use lazy_static::__Deref;
 use router_bridge::introspect::IntrospectionError;
@@ -31,7 +32,7 @@ use crate::spec::SpecError;
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
-pub(crate) enum FetchError {
+pub enum FetchError {
     /// invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
         /// Name of the variable.
@@ -94,6 +95,16 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
+    /// subquery requires field '{field}' but it was not found in the current response
+    ExecutionFieldNotFound {
+        /// The field that is not found.
+        field: String,
+    },
+
+    #[cfg(test)]
+    /// invalid content: {reason}
+    ExecutionInvalidContent { reason: String },
+
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
     /// could not compress request: {reason}
@@ -105,53 +116,27 @@ pub(crate) enum FetchError {
     },
 }
 
+use std::sync::OnceLock;
+static mut TO_GRAPHQL_ERROR: OnceLock<Box<dyn Fn(&FetchError, Option<Path>) -> Error + 'static>> =
+    OnceLock::new();
+pub unsafe fn set_to_graphql_error(
+    to_graphql_error: impl Fn(&FetchError, Option<Path>) -> Error + 'static,
+) {
+    TO_GRAPHQL_ERROR
+        .set(Box::new(to_graphql_error))
+        .map_err(|_| "to_graphql_error was already set")
+        .unwrap();
+}
+
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
-        let mut value: Value = serde_json_bytes::to_value(self).unwrap_or_default();
-        if let Some(extensions) = value.as_object_mut() {
-            extensions
-                .entry("code")
-                .or_insert_with(|| self.extension_code().into());
-            // Following these specs https://www.apollographql.com/docs/apollo-server/data/errors/#including-custom-error-details
-            match self {
-                FetchError::SubrequestHttpError {
-                    service,
-                    status_code,
-                    ..
-                } => {
-                    extensions
-                        .entry("service")
-                        .or_insert_with(|| service.clone().into());
-                    extensions.remove("status_code");
-                    if let Some(status_code) = status_code {
-                        extensions
-                            .insert("http", serde_json_bytes::json!({ "status": status_code }));
-                    }
-                }
-                FetchError::SubrequestMalformedResponse { service, .. }
-                | FetchError::SubrequestUnexpectedPatchResponse { service }
-                | FetchError::SubrequestWsError { service, .. }
-                | FetchError::CompressionError { service, .. } => {
-                    extensions
-                        .entry("service")
-                        .or_insert_with(|| service.clone().into());
-                }
-                FetchError::ValidationInvalidTypeVariable { name } => {
-                    extensions
-                        .entry("name")
-                        .or_insert_with(|| name.clone().into());
-                }
-                _ => (),
-            }
-        }
-
-        Error {
-            message: self.to_string(),
-            locations: Default::default(),
-            path,
-            extensions: value.as_object().unwrap().to_owned(),
-        }
+        let callback = unsafe {
+            TO_GRAPHQL_ERROR
+                .get()
+                .expect("to_graphql_error was not set")
+        };
+        callback(self, path)
     }
 
     /// Convert the error to an appropriate response.
@@ -178,6 +163,8 @@ impl ErrorExtension for FetchError {
             FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
+            FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
+            FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
         }
         .to_string()
     }
@@ -193,7 +180,43 @@ impl From<QueryPlannerError> for FetchError {
 
 /// Error types for CacheResolver
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
-pub(crate) enum CacheResolverError {
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum RouterError {
+    /// {0}
+    CacheResolver(CacheResolverError),
+    /// {0}
+    QueryPlanner(QueryPlannerError),
+    /// {0}
+    Planner(PlannerErrors),
+}
+
+static mut INTO_GRAPHQL_ERRORS: OnceLock<
+    Box<dyn Fn(RouterError) -> Result<Vec<Error>, RouterError> + 'static>,
+> = OnceLock::new();
+pub unsafe fn set_into_graphql_errors(
+    into_graphql_errors: impl Fn(RouterError) -> Result<Vec<Error>, RouterError> + 'static,
+) {
+    INTO_GRAPHQL_ERRORS
+        .set(Box::new(into_graphql_errors))
+        .map_err(|_| "into_graphql_errors was already set")
+        .unwrap();
+}
+
+impl IntoGraphQLErrors for RouterError {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        let callback = unsafe {
+            INTO_GRAPHQL_ERRORS
+                .get()
+                .expect("into_graphql_errors was not set")
+        };
+        callback(self)
+    }
+}
+
+/// Error types for CacheResolver
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+pub enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
 }
@@ -245,7 +268,7 @@ impl From<router_bridge::error::Error> for ServiceBuildError {
 
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
-pub(crate) enum QueryPlannerError {
+pub enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
@@ -283,7 +306,7 @@ pub(crate) enum QueryPlannerError {
     Unauthorized(Vec<Path>),
 }
 
-impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
+impl IntoGraphQLErrors for Vec<GraphQLError> {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         Ok(self
             .into_iter()
@@ -389,7 +412,7 @@ impl IntoGraphQLErrors for QueryPlannerError {
 
 #[derive(Clone, Debug, Error, Serialize, Deserialize)]
 /// Container for planner setup errors
-pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
+pub struct PlannerErrors(pub Arc<Vec<PlannerError>>);
 
 impl IntoGraphQLErrors for PlannerErrors {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
@@ -480,12 +503,12 @@ impl From<QueryPlannerError> for Response {
 
 /// The payload if the plan_worker invocation failed
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PlanErrors {
+pub struct PlanErrors {
     /// The errors the plan_worker invocation failed with
-    pub(crate) errors: Arc<Vec<router_bridge::planner::PlanError>>,
+    pub errors: Arc<Vec<router_bridge::planner::PlanError>>,
     /// Usage reporting related data such as the
     /// operation signature and referenced fields
-    pub(crate) usage_reporting: UsageReporting,
+    pub usage_reporting: UsageReporting,
 }
 
 impl From<router_bridge::planner::PlanErrors> for PlanErrors {

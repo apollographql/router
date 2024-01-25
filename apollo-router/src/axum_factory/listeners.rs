@@ -86,14 +86,37 @@ pub(super) fn ensure_endpoints_consistency(
 pub(super) fn extra_endpoints(
     endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> MultiMap<ListenAddr, Router> {
-    let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
+    let mut mm: MultiMap<ListenAddr, Router> = Default::default();
     mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
         (
             listen_addr,
-            e.into_iter().map(|e| e.into_router()).collect::<Vec<_>>(),
+            e.into_iter()
+                .map(|e| {
+                    #[allow(unused_mut)]
+                    let mut router = e.into_router();
+                    if let Some(add_extra_endpoints_layer) = unsafe { EXTRA_ENDPOINTS_LAYER.get() }
+                    {
+                        router = add_extra_endpoints_layer(router);
+                    }
+                    router
+                })
+                .collect::<Vec<_>>(),
         )
     }));
     mm
+}
+
+use std::sync::OnceLock;
+
+static mut EXTRA_ENDPOINTS_LAYER: OnceLock<Box<dyn Fn(Router) -> Router>> = OnceLock::new();
+
+pub unsafe fn set_add_extra_endpoints_layer(
+    add_extra_endpoints_layer: impl Fn(Router) -> Router + 'static,
+) {
+    EXTRA_ENDPOINTS_LAYER
+        .set(Box::new(add_extra_endpoints_layer))
+        .map_err(|_| "extra_endpoints_layer was already set")
+        .unwrap();
 }
 
 /// Binding different listen addresses to the same port will "relax" the requirements, which
