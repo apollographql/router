@@ -11,6 +11,7 @@ mod test {
 
     use crate::assert_snapshot_subscriber;
     use crate::graphql;
+    use crate::notification::Notify;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugins::telemetry::Telemetry;
@@ -175,11 +176,13 @@ mod test {
             let supergraph_sdl = supergraph
                 .map(|s| Arc::new(s.to_string()))
                 .unwrap_or_default();
-            let plugin = T::new(PluginInit {
-                config: serde_yaml::from_value(config).expect("config was invalid"),
-                supergraph_sdl,
-                notify: Default::default(),
-            })
+            let plugin = T::new(
+                PluginInit::builder()
+                    .config(serde_yaml::from_value(config).expect("config was invalid"))
+                    .supergraph_sdl(supergraph_sdl)
+                    .notify(Notify::builder().build())
+                    .build(),
+            )
             .await
             .expect("failed to initialize plugin");
 
