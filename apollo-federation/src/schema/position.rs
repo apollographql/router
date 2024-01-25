@@ -12,7 +12,7 @@ use apollo_compiler::schema::{
     ExtendedType, FieldDefinition, InputObjectType, InputValueDefinition, InterfaceType, Name,
     ObjectType, ScalarType, SchemaDefinition, UnionType,
 };
-use apollo_compiler::{name, Node, Schema};
+use apollo_compiler::{ast, name, Node, Schema};
 use indexmap::{Equivalent, IndexSet};
 use lazy_static::lazy_static;
 use std::fmt::{Display, Formatter};
@@ -539,9 +539,7 @@ impl SchemaDefinitionPosition {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
         for root_kind in SchemaRootDefinitionKind::iter() {
-            let child = SchemaRootDefinitionPosition {
-                root_kind: root_kind.clone(),
-            };
+            let child = SchemaRootDefinitionPosition { root_kind };
             match root_kind {
                 SchemaRootDefinitionKind::Query => {
                     if let Some(root_type) = &schema_definition.query {
@@ -610,7 +608,9 @@ impl SchemaDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, strum_macros::Display, strum_macros::EnumIter)]
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, Hash, strum_macros::Display, strum_macros::EnumIter,
+)]
 pub(crate) enum SchemaRootDefinitionKind {
     #[strum(to_string = "query")]
     Query,
@@ -618,6 +618,16 @@ pub(crate) enum SchemaRootDefinitionKind {
     Mutation,
     #[strum(to_string = "subscription")]
     Subscription,
+}
+
+impl From<SchemaRootDefinitionKind> for ast::OperationType {
+    fn from(value: SchemaRootDefinitionKind) -> Self {
+        match value {
+            SchemaRootDefinitionKind::Query => ast::OperationType::Query,
+            SchemaRootDefinitionKind::Mutation => ast::OperationType::Mutation,
+            SchemaRootDefinitionKind::Subscription => ast::OperationType::Subscription,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

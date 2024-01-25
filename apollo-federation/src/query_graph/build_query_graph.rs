@@ -200,7 +200,7 @@ impl BaseQueryGraphBuilder {
         root_kind: SchemaRootDefinitionKind,
     ) -> Result<(), FederationError> {
         let node_weight = self.query_graph.node_weight_mut(node)?;
-        node_weight.root_kind = Some(root_kind.clone());
+        node_weight.root_kind = Some(root_kind);
         let root_kinds_to_nodes = self.query_graph.root_kinds_to_nodes_mut()?;
         root_kinds_to_nodes.insert(root_kind, node);
         Ok(())
@@ -249,9 +249,7 @@ impl SchemaQueryGraphBuilder {
         // PORT_NOTE: Note that most of the JS code's buildGraphInternal() logic was moved into this
         // build() method.
         for root_kind in SchemaRootDefinitionKind::iter() {
-            let pos = SchemaRootDefinitionPosition {
-                root_kind: root_kind.clone(),
-            };
+            let pos = SchemaRootDefinitionPosition { root_kind };
             if pos
                 .try_get(self.base.query_graph.schema()?.schema())
                 .is_some()
@@ -317,7 +315,7 @@ impl SchemaQueryGraphBuilder {
             }
         };
         let node = self.add_type_recursively(pos.into())?;
-        self.base.set_as_root(node, root.root_kind.clone())
+        self.base.set_as_root(node, root.root_kind)
     }
 
     /// Adds in a node for the provided type in the in-building query graph, and recursively adds
@@ -991,12 +989,11 @@ impl FederatedQueryGraphBuilder {
                 continue;
             }
             for root_kind in root_kinds_to_nodes.keys() {
-                root_kinds.insert(root_kind.clone());
+                root_kinds.insert(*root_kind);
             }
         }
         for root_kind in root_kinds {
-            self.base
-                .create_root_node(root_kind.clone().into(), root_kind)?;
+            self.base.create_root_node(root_kind.into(), root_kind)?;
         }
         Ok(())
     }
@@ -1056,7 +1053,7 @@ impl FederatedQueryGraphBuilder {
                             head: *root_node,
                             tail: *other_root_node,
                             transition: QueryGraphEdgeTransition::RootTypeResolution {
-                                root_kind: root_kind.clone(),
+                                root_kind: *root_kind,
                             },
                             conditions: None,
                         })

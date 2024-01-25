@@ -1,15 +1,16 @@
 use crate::error::FederationError;
 use crate::query_graph::graph_path::{ClosedBranch, OpenBranch, SimultaneousPaths};
 use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::QueryGraph;
-use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
-use crate::query_plan::fetch_dependency_graph_processor::{
-    FetchDependencyGraphToCostProcessor, FetchDependencyGraphToQueryPlanProcessor,
-};
+use crate::query_graph::{QueryGraph, QueryGraphNodeType};
+use crate::query_plan::fetch_dependency_graph::{compute_nodes_for_tree, FetchDependencyGraph};
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::operation::{NormalizedOperation, NormalizedSelection};
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::QueryPlanCost;
-use crate::schema::position::{AbstractTypeDefinitionPosition, SchemaRootDefinitionKind};
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::{AbstractTypeDefinitionPosition, OutputTypeDefinitionPosition};
 use crate::schema::ValidFederationSchema;
 use indexmap::IndexSet;
 use petgraph::graph::NodeIndex;
@@ -280,6 +281,99 @@ impl QueryPlanningTraversal {
             // | to_jump_over + 1 | <= first_branch_previous_len - 1 |
             // | …                | <= first_branch_previous_len - 1 |
         }
+    }
+
+    pub(crate) fn new_dependency_graph(&self) -> FetchDependencyGraph {
+        let root_type = if self.is_top_level && self.has_defers {
+            self.parameters
+                .supergraph_schema
+                .schema()
+                .root_operation(self.root_kind.into())
+                .cloned()
+                // A root operation type has to be an object type
+                .map(|type_name| ObjectTypeDefinitionPosition { type_name }.into())
+        } else {
+            None
+        };
+        FetchDependencyGraph::new(
+            self.parameters.supergraph_schema.clone(),
+            self.parameters.federated_query_graph.clone(),
+            root_type,
+            self.starting_id_generation,
+        )
+    }
+
+    fn updated_dependency_graph(
+        &self,
+        dependency_graph: &mut FetchDependencyGraph,
+        path_tree: &OpPathTree,
+    ) -> Result<(), FederationError> {
+        let is_root_path_tree = matches!(
+            path_tree.graph.node_weight(path_tree.node)?.type_,
+            QueryGraphNodeType::FederatedRootType(_)
+        );
+        if is_root_path_tree {
+            // The root of the pathTree is one of the "fake" root of the subgraphs graph,
+            // which belongs to no subgraph but points to each ones.
+            // So we "unpack" the first level of the tree to find out our top level groups
+            // (and initialize our stack).
+            // Note that we can safely ignore the triggers of that first level
+            // as it will all be free transition, and we know we cannot have conditions.
+            for child in &path_tree.childs {
+                let edge = child.edge.expect("The root edge should not be None");
+                let (_source_node, target_node) = path_tree.graph.edge_endpoints(edge)?;
+                let target_node = path_tree.graph.node_weight(target_node)?;
+                let subgraph_name = &target_node.source;
+                let root_type = match &target_node.type_ {
+                    QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(
+                        object,
+                    )) => object.clone().into(),
+                    ty => {
+                        return Err(FederationError::internal(format!(
+                            "expected an object type for the root of a subgraph, found {ty}"
+                        )))
+                    }
+                };
+                let fetch_dependency_node = dependency_graph.get_or_create_root_node(
+                    subgraph_name,
+                    self.root_kind,
+                    root_type,
+                )?;
+                compute_nodes_for_tree(
+                    dependency_graph,
+                    &child.tree,
+                    fetch_dependency_node,
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                );
+            }
+        } else {
+            let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
+            let subgraph_name = &query_graph_node.source;
+            let root_type = match &query_graph_node.type_ {
+                QueryGraphNodeType::SchemaType(position) => position.clone().try_into()?,
+                QueryGraphNodeType::FederatedRootType(_) => {
+                    return Err(FederationError::internal(
+                        "unexpected FederatedRootType not at the start of an OpPathTree",
+                    ))
+                }
+            };
+            let fetch_dependency_node = dependency_graph.get_or_create_root_node(
+                subgraph_name,
+                self.root_kind,
+                root_type,
+            )?;
+            compute_nodes_for_tree(
+                dependency_graph,
+                path_tree,
+                fetch_dependency_node,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            );
+        }
+        Ok(())
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::error::FederationError;
 use crate::error::SingleFederationError::Internal;
+use crate::query_plan::conditions::Conditions;
 use crate::query_plan::operation::normalized_field_selection::{
     NormalizedField, NormalizedFieldData, NormalizedFieldSelection,
 };
@@ -100,7 +101,7 @@ pub(crate) mod normalized_selection_map {
     /// API.
     ///
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
     pub(crate) struct NormalizedSelectionMap(IndexMap<NormalizedSelectionKey, NormalizedSelection>);
 
     impl Deref for NormalizedSelectionMap {
@@ -387,6 +388,32 @@ impl NormalizedSelection {
             }
         }
     }
+
+    pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
+        let self_conditions = Conditions::from_directives(self.directives())?;
+        if let Conditions::Boolean(false) = self_conditions {
+            // Never included, so there is no point recursing.
+            Ok(Conditions::Boolean(false))
+        } else {
+            match self {
+                NormalizedSelection::Field(_) => {
+                    // The sub-selections of this field don't affect whether we should query this
+                    // field, so we explicitly do not merge them in.
+                    //
+                    // PORT_NOTE: The JS codebase merges the sub-selections' conditions in with the
+                    // field's conditions when field's selections are non-boolean. This is arguably
+                    // a bug, so we've fixed it here.
+                    Ok(self_conditions)
+                }
+                NormalizedSelection::InlineFragment(inline) => {
+                    Ok(self_conditions.merge(inline.selection_set.conditions()?))
+                }
+                NormalizedSelection::FragmentSpread(_x) => Err(FederationError::internal(
+                    "Unexpected fragment spread in NormalizedSelection::conditions()",
+                )),
+            }
+        }
+    }
 }
 
 impl HasNormalizedSelectionKey for NormalizedSelection {
@@ -652,6 +679,17 @@ pub(crate) mod normalized_inline_fragment_selection {
 }
 
 impl NormalizedSelectionSet {
+    pub(crate) fn empty(
+        schema: ValidFederationSchema,
+        type_position: CompositeTypeDefinitionPosition,
+    ) -> Self {
+        Self {
+            schema,
+            type_position,
+            selections: Default::default(),
+        }
+    }
+
     /// Normalize this selection set (merging selections with the same keys), with the following
     /// additional transformations:
     /// - Expand fragment spreads into inline fragments.
@@ -1029,6 +1067,32 @@ impl NormalizedSelectionSet {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
+        // If the conditions of all the selections within the set are the same,
+        // then those are conditions of the whole set and we return it.
+        // Otherwise, we just return `true`
+        // (which essentially translate to "that selection always need to be queried").
+        // Note that for the case where the set has only 1 selection,
+        // then this just mean we return the condition of that one selection.
+        // Also note that in theory we could be a tad more precise,
+        // and when all the selections have variable conditions,
+        // we could return the intersection of all of them,
+        // but we don't bother for now as that has probably extremely rarely an impact in practice.
+        let mut selections = self.selections.values();
+        let Some(first_selection) = selections.next() else {
+            // we shouldn't really get here for well-formed selection, so whether we return true or false doesn't matter
+            // too much, but in principle, if there is no selection, we should be cool not including it.
+            return Ok(Conditions::Boolean(false));
+        };
+        let conditions = first_selection.conditions()?;
+        for selection in selections {
+            if selection.conditions()? != conditions {
+                return Ok(Conditions::Boolean(true));
+            }
+        }
+        Ok(conditions)
     }
 }
 

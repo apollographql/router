@@ -144,7 +144,7 @@ pub(crate) enum OpPathElement {
 
 /// Records, as we walk a path within a GraphQL operation, important directives encountered
 /// (currently `@include` and `@skip` with their conditions).
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Default)]
 pub(crate) struct OpGraphPathContext {
     /// A list of conditionals (e.g. `[{ kind: Include, value: true}, { kind: Skip, value: $foo }]`)
     /// in the reverse order in which they were applied (so the first element is the inner-most

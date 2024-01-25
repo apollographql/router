@@ -478,6 +478,15 @@ impl<T> From<WithErrors<T>> for FederationError {
     }
 }
 
+impl FederationError {
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
+        SingleFederationError::Internal {
+            message: message.into(),
+        }
+        .into()
+    }
+}
+
 // We didn't track errors addition precisely pre-2.0 and tracking it now has an unclear ROI, so we
 // just mark all the error code that predates 2.0 as 0.x.
 const FED1_CODE: &str = "0.x";

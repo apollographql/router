@@ -24,19 +24,19 @@ where
     TEdge: Copy + Into<Option<EdgeIndex>>,
 {
     /// The query graph of which this is a path tree.
-    graph: Arc<QueryGraph>,
+    pub(crate) graph: Arc<QueryGraph>,
     /// The query graph node at which the path tree starts.
-    node: NodeIndex,
+    pub(crate) node: NodeIndex,
     /// Note that `ClosedPath`s have an optimization which splits them into paths and a selection
     /// set representing a trailing query to a single subgraph at the final nodes of the paths. For
     /// such paths where this `PathTree`'s node corresponds to that final node, those selection sets
     /// are collected here. This is really an optimization to avoid unnecessary merging of selection
     /// sets when they query a single subgraph.
-    local_selection_sets: Vec<Arc<NormalizedSelectionSet>>,
+    pub(crate) local_selection_sets: Vec<Arc<NormalizedSelectionSet>>,
     /// The child `PathTree`s for this `PathTree` node. There is a child for every unique pair of
     /// edge and trigger present at this particular sub-path within the `GraphPath`s covered by this
     /// `PathTree` node.
-    childs: Vec<Arc<PathTreeChild<TTrigger, TEdge>>>,
+    pub(crate) childs: Vec<Arc<PathTreeChild<TTrigger, TEdge>>>,
 }
 
 #[derive(Debug)]
@@ -46,13 +46,13 @@ where
     TEdge: Copy + Into<Option<EdgeIndex>>,
 {
     /// The edge connecting this child to its parent.
-    edge: TEdge,
+    pub(crate) edge: TEdge,
     /// The trigger for the edge connecting this child to its parent.
-    trigger: Arc<TTrigger>,
+    pub(crate) trigger: Arc<TTrigger>,
     /// The conditions required to be fetched if this edge is taken.
-    conditions: Option<Arc<OpPathTree>>,
+    pub(crate) conditions: Option<Arc<OpPathTree>>,
     /// The child `PathTree` reached by taking the edge.
-    tree: Arc<PathTree<TTrigger, TEdge>>,
+    pub(crate) tree: Arc<PathTree<TTrigger, TEdge>>,
 }
 
 /// A `PathTree` whose triggers are operation elements (essentially meaning that the constituent
