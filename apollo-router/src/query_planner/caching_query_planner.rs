@@ -296,11 +296,6 @@ where
                 .unwrap_or_default(),
         };
 
-        tracing::info!(
-            "CachingQueryPlanner.plan: plan_options: {:?}",
-            &plan_options
-        );
-
         let caching_key = CachingQueryKey {
             schema_id,
             query: request.query.clone(),
@@ -314,7 +309,6 @@ where
                 .unwrap_or_default(),
             plan_options,
         };
-        tracing::info!("CachingQueryPlanner.plan: caching_key: {:?}", &caching_key);
 
         let context = request.context.clone();
         let entry = self.cache.get(&caching_key).await;

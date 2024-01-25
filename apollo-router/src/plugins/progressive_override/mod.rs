@@ -19,13 +19,6 @@ use crate::register_plugin;
 use crate::services::*;
 use crate::spec;
 use crate::spec::query::traverse;
-// TODO: telemetry & analytics??
-// tracing::info!(
-// monotonic_counter.apollo.router.operations.authorization = 1u64,
-// authorization.filtered = filtered,
-// authorization.needs_authenticated = needs_authenticated,
-// authorization.needs_requires_scopes = needs_requires_scopes,
-// );
 
 pub(crate) mod visitor;
 pub(crate) const UNRESOLVED_LABELS: &str = "apollo_override::unresolved_labels";

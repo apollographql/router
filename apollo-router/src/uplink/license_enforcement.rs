@@ -317,7 +317,7 @@ impl Display for LicenseEnforcementReport {
             let restricted_schema = self
                 .restricted_schema_in_use
                 .iter()
-                .map(|v| format!("{}", v))
+                .map(|v| v.to_string())
                 .join("\n\n");
 
             write!(f, "Schema features:\n{restricted_schema}")?
