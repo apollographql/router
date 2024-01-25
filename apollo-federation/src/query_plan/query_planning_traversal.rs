@@ -1,11 +1,18 @@
 use crate::error::FederationError;
-use crate::query_graph::graph_path::{ClosedBranch, OpenBranch, SimultaneousPaths};
+use crate::query_graph::condition_resolver::CachingConditionResolver;
+use crate::query_graph::graph_path::{
+    ClosedBranch, ClosedPath, OpPathElement, OpenBranch, SimultaneousPaths,
+    SimultaneousPathsWithLazyIndirectPaths,
+};
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::{QueryGraph, QueryGraphNodeType};
 use crate::query_plan::fetch_dependency_graph::{compute_nodes_for_tree, FetchDependencyGraph};
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
-use crate::query_plan::operation::{NormalizedOperation, NormalizedSelection};
+use crate::query_plan::fetch_dependency_graph_processor::{
+    FetchDependencyGraphToCostProcessor, FetchDependencyGraphToQueryPlanProcessor,
+};
+use crate::query_plan::operation::{
+    NormalizedOperation, NormalizedSelection, NormalizedSelectionSet,
+};
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -43,8 +50,6 @@ pub(crate) struct QueryPlanningParameters {
     // TODO: When `PlanningStatistics` is ported, add a field for it.
 }
 
-// PORT_NOTE: The JS codebase also had a field `conditionResolver`, but this was only ever used once
-// during construction, so we don't store it in the struct itself.
 pub(crate) struct QueryPlanningTraversal {
     /// The parameters given to query planning.
     parameters: QueryPlanningParameters,
@@ -60,6 +65,8 @@ pub(crate) struct QueryPlanningTraversal {
     /// True if this query planning is at top-level (note that query planning can recursively start
     /// further query planning).
     is_top_level: bool,
+    /// A query plan resolver for edge conditions that caches the outcome per edge.
+    condition_resolver: CachingConditionResolver,
     /// The stack of open branches left to plan, along with state indicating the next selection to
     /// plan for them.
     // PORT_NOTE: The `stack` in the JS codebase only contained one selection per stack entry, but
@@ -90,6 +97,223 @@ struct BestQueryPlanInfo {
 }
 
 impl QueryPlanningTraversal {
+    fn find_best_plan(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
+        while let Some(mut current_branch) = self.open_branches.pop() {
+            let Some(current_selection) = current_branch.selections.pop() else {
+                return Err(FederationError::internal(
+                    "Sub-stack unexpectedly empty during query plan traversal",
+                ));
+            };
+            let (terminate_planning, new_branch) =
+                self.handle_open_branch(&current_selection, &mut current_branch.open_branch.0)?;
+            if terminate_planning {
+                // We clear both open branches and closed ones as a means to terminate the plan
+                // computation with no plan.
+                self.open_branches = vec![];
+                self.closed_branches = vec![];
+                break;
+            }
+            if !current_branch.selections.is_empty() {
+                self.open_branches.push(current_branch);
+            }
+            if let Some(new_branch) = new_branch {
+                self.open_branches.push(new_branch);
+            }
+        }
+        self.compute_best_plan_from_closed_branches()?;
+        return Ok(self.best_plan.as_ref());
+    }
+
+    /// Returns whether to terminate planning immediately, and any new open branches to push onto
+    /// the stack.
+    fn handle_open_branch(
+        &mut self,
+        selection: &NormalizedSelection,
+        options: &mut Vec<SimultaneousPathsWithLazyIndirectPaths>,
+    ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
+        let operation_element = selection.element()?;
+        let mut new_options = vec![];
+        let mut no_followups: bool = false;
+        for option in options.iter_mut() {
+            let followups_for_option = option.advance_with_operation_element(
+                self.parameters.supergraph_schema.clone(),
+                &operation_element,
+                &mut self.condition_resolver,
+            )?;
+            let Some(followups_for_option) = followups_for_option else {
+                // There is no valid way to advance the current operation element from this option
+                // so this option is a dead branch that cannot produce a valid query plan. So we
+                // simply ignore it and rely on other options.
+                continue;
+            };
+            if followups_for_option.is_empty() {
+                // See the comment above where we check `no_followups` for more information.
+                no_followups = true;
+                break;
+            }
+            new_options.extend(followups_for_option);
+            if let Some(options_limit) = self.parameters.config.debug.paths_limit {
+                if new_options.len() > options_limit as usize {
+                    // TODO: Create a new error code for this error kind.
+                    return Err(FederationError::internal(format!(
+                        "Too many options generated for {}, reached the limit of {}.",
+                        selection, options_limit,
+                    )));
+                }
+            }
+        }
+
+        if no_followups {
+            // This operation element is valid from this option, but is guarantee to yield no result
+            // (e.g. it's a type condition with no intersection with a prior type condition). Given
+            // that all options return the same results (assuming the user does properly resolve all
+            // versions of a given field the same way from all subgraphs), we know that the
+            // operation element should return no result from all options (even if we can't provide
+            // it technically).
+            //
+            // More concretely, this usually means the current operation element is a type condition
+            // that has no intersection with the possible current runtime types at this point, and
+            // this means whatever fields the type condition sub-selection selects, they will never
+            // be part of the results. That said, we cannot completely ignore the
+            // type-condition/fragment or we'd end up with the wrong results. Consider this example
+            // where a sub-part of the query is:
+            //   {
+            //     foo {
+            //       ... on Bar {
+            //         field
+            //       }
+            //     }
+            //   }
+            // and suppose that `... on Bar` can never match a concrete runtime type at this point.
+            // Because that's the only sub-selection of `foo`, if we completely ignore it, we'll end
+            // up not querying this at all. Which means that, during execution, we'd either return
+            // (for that sub-part of the query) `{ foo: null }` if `foo` happens to be nullable, or
+            // just `null` for the whole sub-part otherwise. But what we *should* return (assuming
+            // foo doesn't actually return `null`) is `{ foo: {} }`. Meaning, we have queried `foo`
+            // and it returned something, but it's simply not a `Bar` and so nothing was included.
+            //
+            // Long story short, to avoid that situation, we replace the whole `... on Bar` section
+            // that can never match the runtime type by simply getting the `__typename` of `foo`.
+            // This ensure we do query `foo` but don't end up including conditions that may not even
+            // make sense to the subgraph we're querying. Do note that we'll only need that
+            // `__typename` if there is no other selections inside `foo`, and so we might include it
+            // unnecessarily in practice: it's a very minor inefficiency though.
+            if matches!(operation_element, OpPathElement::InlineFragment(_)) {
+                let mut closed_paths = vec![];
+                for option in options {
+                    let mut new_simultaneous_paths = vec![];
+                    for simultaneous_path in &option.paths.0 {
+                        new_simultaneous_paths.push(Arc::new(
+                            simultaneous_path.terminate_with_non_requested_typename_field()?,
+                        ));
+                    }
+                    closed_paths.push(Arc::new(ClosedPath {
+                        paths: SimultaneousPaths(new_simultaneous_paths),
+                        selection_set: None,
+                    }));
+                }
+                self.record_closed_branch(ClosedBranch(closed_paths))?;
+            }
+            return Ok((false, None));
+        }
+
+        if new_options.is_empty() {
+            // If we have no options, it means there is no way to build a plan for that branch, and
+            // that means the whole query planning process will generate no plan. This should never
+            // happen for a top-level query planning (unless the supergraph has *not* been
+            // validated), but can happen when computing sub-plans for a key condition.
+            return if self.is_top_level {
+                Err(FederationError::internal(format!(
+                    "Was not able to find any options for {}: This shouldn't have happened.",
+                    selection,
+                )))
+            } else {
+                // Indicate to the caller that query planning should terminate with no plan.
+                Ok((true, None))
+            };
+        }
+
+        if let Some(selection_set) = selection.selection_set()? {
+            let mut all_tail_nodes = IndexSet::new();
+            for option in &new_options {
+                for path in &option.paths.0 {
+                    all_tail_nodes.insert(path.tail);
+                }
+            }
+            if self.selection_set_is_fully_local_from_all_nodes(selection_set, &all_tail_nodes)?
+                && !selection.has_defer()?
+            {
+                // We known the rest of the selection is local to whichever subgraph the current
+                // options are in, and so we're going to keep that selection around and add it
+                // "as-is" to the `FetchDependencyGraphNode` when needed, saving a bunch of work
+                // (creating `GraphPath`, merging `PathTree`, ...). However, as we're skipping the
+                // "normal path" for that sub-selection, there are a few things that are handled in
+                // said "normal path" that we need to still handle.
+                //
+                // More precisely:
+                // - We have this "attachment" trick that removes requested `__typename`
+                //   temporarily, so we should add it back.
+                // - We still need to add the selection of `__typename` for abstract types. It is
+                //   not really necessary for the execution per-se, but if we don't do it, then we
+                //   will not be able to reuse named fragments as often as we should (we add
+                //   `__typename` for abstract types on the "normal path" and so we add them too to
+                //   named fragments; as such, we need them here too).
+                let new_selection_set = Arc::new(
+                    selection_set
+                        .add_back_typename_in_attachments()?
+                        .add_typename_field_for_abstract_types()?,
+                );
+                self.record_closed_branch(ClosedBranch(
+                    new_options
+                        .into_iter()
+                        .map(|option| {
+                            Arc::new(ClosedPath {
+                                paths: option.paths,
+                                selection_set: Some(new_selection_set.clone()),
+                            })
+                        })
+                        .collect(),
+                ))?;
+            } else {
+                return Ok((
+                    false,
+                    Some(OpenBranchAndSelections {
+                        open_branch: OpenBranch(new_options),
+                        selections: selection_set.selections.values().cloned().rev().collect(),
+                    }),
+                ));
+            }
+        } else {
+            self.record_closed_branch(ClosedBranch(
+                new_options
+                    .into_iter()
+                    .map(|option| {
+                        Arc::new(ClosedPath {
+                            paths: option.paths,
+                            selection_set: None,
+                        })
+                    })
+                    .collect(),
+            ))?;
+        }
+
+        Ok((false, None))
+    }
+
+    fn record_closed_branch(&mut self, closed_branch: ClosedBranch) -> Result<(), FederationError> {
+        let maybe_trimmed = closed_branch.maybe_eliminate_strictly_more_costly_paths()?;
+        self.closed_branches.push(maybe_trimmed);
+        Ok(())
+    }
+
+    fn selection_set_is_fully_local_from_all_nodes(
+        &self,
+        _selection: &NormalizedSelectionSet,
+        _nodes: &IndexSet<NodeIndex>,
+    ) -> Result<bool, FederationError> {
+        todo!()
+    }
+
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
         if self.closed_branches.is_empty() {
             return Ok(());

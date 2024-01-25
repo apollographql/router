@@ -99,7 +99,7 @@ pub struct QueryPlannerDebugConfig {
     /// path's options exceeds this limit, query planning will abort and the operation will fail.
     ///
     /// The default value is None, which specifies no limit.
-    paths_limit: Option<u32>,
+    pub(crate) paths_limit: Option<u32>,
 }
 
 impl Default for QueryPlannerDebugConfig {

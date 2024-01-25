@@ -6,6 +6,11 @@ use indexmap::map::Entry;
 use indexmap::IndexMap;
 use std::sync::Arc;
 
+/// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
+/// to be queried, based on the `@skip`/`@include` applications on the selections within.
+/// Accordingly, there is much logic around merging and short-circuiting; `OperationConditional` is
+/// the more appropriate struct when trying to record the original structure/intent of those
+/// `@skip`/`@include` applications.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Conditions {
     Variables(VariableConditions),

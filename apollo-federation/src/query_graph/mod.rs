@@ -1,19 +1,23 @@
 use crate::error::{FederationError, SingleFederationError};
+use crate::query_plan::operation::normalized_field_selection::NormalizedField;
 use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, OutputTypeDefinitionPosition,
-    SchemaRootDefinitionKind,
+    CompositeTypeDefinitionPosition, FieldDefinitionPosition, ObjectTypeDefinitionPosition,
+    OutputTypeDefinitionPosition, SchemaRootDefinitionKind,
 };
 use crate::schema::ValidFederationSchema;
 use apollo_compiler::schema::{Name, NamedType};
 use apollo_compiler::NodeStr;
 use indexmap::{IndexMap, IndexSet};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
+use petgraph::visit::EdgeRef;
+use petgraph::Direction;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
 
 pub mod build_query_graph;
+pub(crate) mod condition_resolver;
 pub(crate) mod extract_subgraphs_from_supergraph;
 mod field_set;
 pub(crate) mod graph_path;
@@ -387,5 +391,117 @@ impl QueryGraph {
 
     pub(crate) fn non_trivial_followup_edges(&self) -> &IndexMap<EdgeIndex, IndexSet<EdgeIndex>> {
         &self.non_trivial_followup_edges
+    }
+
+    pub(crate) fn edge_for_field(
+        &self,
+        node: NodeIndex,
+        field: &NormalizedField,
+    ) -> Option<EdgeIndex> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .find_map(|edge_ref| {
+                let edge_weight = edge_ref.weight();
+                let QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } = &edge_weight.transition
+                else {
+                    return None;
+                };
+                if field.data().field_position == *field_definition_position {
+                    Some(edge_ref.id())
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Given the possible runtime types at the head of the given edge, returns the possible runtime
+    /// types after traversing the edge.
+    // PORT_NOTE: Named `updateRuntimeTypes` in the JS codebase.
+    pub(crate) fn advance_possible_runtime_types(
+        &self,
+        possible_runtime_types: &IndexSet<ObjectTypeDefinitionPosition>,
+        edge: Option<EdgeIndex>,
+    ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
+        let Some(edge) = edge else {
+            return Ok(possible_runtime_types.clone());
+        };
+
+        let edge_weight = self.edge_weight(edge)?;
+        let (_, tail) = self.edge_endpoints(edge)?;
+        let tail_weight = self.node_weight(tail)?;
+        let QueryGraphNodeType::SchemaType(tail_type_pos) = &tail_weight.type_ else {
+            return Err(FederationError::internal(
+                "Unexpectedly encountered federation root node as tail node.",
+            ));
+        };
+        return match &edge_weight.transition {
+            QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } => {
+                let Ok(_): Result<CompositeTypeDefinitionPosition, _> =
+                    tail_type_pos.clone().try_into()
+                else {
+                    return Ok(IndexSet::new());
+                };
+                let schema = self.schema_by_source(source)?;
+                let mut new_possible_runtime_types = IndexSet::new();
+                for possible_runtime_type in possible_runtime_types {
+                    let field_pos =
+                        possible_runtime_type.field(field_definition_position.field_name().clone());
+                    let Some(field) = field_pos.try_get(schema.schema()) else {
+                        continue;
+                    };
+                    let field_type_pos: CompositeTypeDefinitionPosition = schema
+                        .get_type(field.ty.inner_named_type().clone())?
+                        .try_into()?;
+                    new_possible_runtime_types
+                        .extend(schema.possible_runtime_types(field_type_pos)?);
+                }
+                Ok(new_possible_runtime_types)
+            }
+            QueryGraphEdgeTransition::Downcast {
+                source,
+                to_type_position,
+                ..
+            } => Ok(self
+                .schema_by_source(source)?
+                .possible_runtime_types(to_type_position.clone())?
+                .intersection(possible_runtime_types)
+                .cloned()
+                .collect()),
+            QueryGraphEdgeTransition::KeyResolution => {
+                let tail_type_pos: CompositeTypeDefinitionPosition =
+                    tail_type_pos.clone().try_into()?;
+                Ok(self
+                    .schema_by_source(&tail_weight.source)?
+                    .possible_runtime_types(tail_type_pos)?)
+            }
+            QueryGraphEdgeTransition::RootTypeResolution { .. } => {
+                let OutputTypeDefinitionPosition::Object(tail_type_pos) = tail_type_pos.clone()
+                else {
+                    return Err(FederationError::internal(
+                        "Unexpectedly encountered non-object root operation type.",
+                    ));
+                };
+                Ok(IndexSet::from([tail_type_pos]))
+            }
+            QueryGraphEdgeTransition::SubgraphEnteringTransition => {
+                let OutputTypeDefinitionPosition::Object(tail_type_pos) = tail_type_pos.clone()
+                else {
+                    return Err(FederationError::internal(
+                        "Unexpectedly encountered non-object root operation type.",
+                    ));
+                };
+                Ok(IndexSet::from([tail_type_pos]))
+            }
+            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => {
+                Ok(possible_runtime_types.clone())
+            }
+        };
     }
 }

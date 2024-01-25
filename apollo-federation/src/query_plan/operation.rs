@@ -1,5 +1,6 @@
 use crate::error::FederationError;
 use crate::error::SingleFederationError::Internal;
+use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::operation::normalized_field_selection::{
     NormalizedField, NormalizedFieldData, NormalizedFieldSelection,
@@ -99,8 +100,6 @@ pub(crate) mod normalized_selection_map {
     /// `IndexSet` since key computation is expensive (it involves sorting). This type is in its own
     /// module to prevent code from accidentally mutating the underlying map outside the mutation
     /// API.
-    ///
-
     #[derive(Debug, Clone, PartialEq, Eq, Default)]
     pub(crate) struct NormalizedSelectionMap(IndexMap<NormalizedSelectionKey, NormalizedSelection>);
 
@@ -389,6 +388,36 @@ impl NormalizedSelection {
         }
     }
 
+    pub(crate) fn element(&self) -> Result<OpPathElement, FederationError> {
+        match self {
+            NormalizedSelection::Field(field_selection) => {
+                Ok(OpPathElement::Field(field_selection.field.clone()))
+            }
+            NormalizedSelection::FragmentSpread(_) => Err(Internal {
+                message: "Fragment spread does not have element".to_owned(),
+            }
+            .into()),
+            NormalizedSelection::InlineFragment(inline_fragment_selection) => Ok(
+                OpPathElement::InlineFragment(inline_fragment_selection.inline_fragment.clone()),
+            ),
+        }
+    }
+
+    pub(crate) fn selection_set(&self) -> Result<Option<&NormalizedSelectionSet>, FederationError> {
+        match self {
+            NormalizedSelection::Field(field_selection) => {
+                Ok(field_selection.selection_set.as_ref())
+            }
+            NormalizedSelection::FragmentSpread(_) => Err(Internal {
+                message: "Fragment spread does not directly have a selection set".to_owned(),
+            }
+            .into()),
+            NormalizedSelection::InlineFragment(inline_fragment_selection) => {
+                Ok(Some(&inline_fragment_selection.selection_set))
+            }
+        }
+    }
+
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         let self_conditions = Conditions::from_directives(self.directives())?;
         if let Conditions::Boolean(false) = self_conditions {
@@ -413,6 +442,10 @@ impl NormalizedSelection {
                 )),
             }
         }
+    }
+
+    pub(crate) fn has_defer(&self) -> Result<bool, FederationError> {
+        todo!()
     }
 }
 
@@ -444,11 +477,12 @@ pub(crate) struct NormalizedFragment {
 }
 
 pub(crate) mod normalized_field_selection {
+    use crate::error::FederationError;
     use crate::query_plan::operation::{
         directives_with_sorted_arguments, HasNormalizedSelectionKey, NormalizedSelectionKey,
         NormalizedSelectionSet,
     };
-    use crate::schema::position::FieldDefinitionPosition;
+    use crate::schema::position::{FieldDefinitionPosition, TypeDefinitionPosition};
     use crate::schema::ValidFederationSchema;
     use apollo_compiler::ast::{Argument, DirectiveList, Name};
     use apollo_compiler::Node;
@@ -519,6 +553,17 @@ pub(crate) mod normalized_field_selection {
 
         pub(crate) fn response_name(&self) -> Name {
             self.alias.clone().unwrap_or_else(|| self.name().clone())
+        }
+
+        pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
+            let definition = self.field_position.get(self.schema.schema())?;
+            let base_type_position = self
+                .schema
+                .get_type(definition.ty.inner_named_type().clone())?;
+            Ok(matches!(
+                base_type_position,
+                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
+            ))
         }
     }
 
@@ -687,6 +732,26 @@ impl NormalizedSelectionSet {
             schema,
             type_position,
             selections: Default::default(),
+        }
+    }
+
+    pub(crate) fn contains_top_level_field(
+        &self,
+        field: &NormalizedField,
+    ) -> Result<bool, FederationError> {
+        if let Some(selection) = self.selections.get(&field.key()) {
+            let NormalizedSelection::Field(field_selection) = selection else {
+                return Err(Internal {
+                    message: format!(
+                        "Field selection key for field \"{}\" references non-field selection",
+                        field.data().field_position,
+                    ),
+                }
+                .into());
+            };
+            Ok(field_selection.field == *field)
+        } else {
+            Ok(false)
         }
     }
 
@@ -1093,6 +1158,18 @@ impl NormalizedSelectionSet {
             }
         }
         Ok(conditions)
+    }
+
+    pub(crate) fn add_back_typename_in_attachments(
+        &self,
+    ) -> Result<NormalizedSelectionSet, FederationError> {
+        todo!()
+    }
+
+    pub(crate) fn add_typename_field_for_abstract_types(
+        &self,
+    ) -> Result<NormalizedSelectionSet, FederationError> {
+        todo!()
     }
 }
 
@@ -1538,6 +1615,36 @@ impl Display for NormalizedFragmentSpreadSelection {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let fragment_spread: FragmentSpread = self.into();
         fragment_spread.serialize().no_indent().fmt(f)
+    }
+}
+
+impl Display for NormalizedField {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // We create a selection with an empty selection set here, relying on `apollo-rs` to skip
+        // serializing it when empty. Note we're implicitly relying on the lack of type-checking
+        // in both `NormalizedFieldSelection` and `Field` display logic (specifically, we rely on
+        // them not checking whether it is valid for the selection set to be empty).
+        let selection = NormalizedFieldSelection {
+            field: self.clone(),
+            selection_set: None,
+            sibling_typename: None,
+        };
+        selection.fmt(f)
+    }
+}
+
+impl Display for NormalizedInlineFragment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // We can't use the same trick we did with `NormalizedField`'s display logic, since
+        // selection sets are non-optional for inline fragment selections.
+        let data = self.data();
+        if let Some(type_name) = &data.type_condition_position {
+            f.write_str("... on ")?;
+            f.write_str(type_name.type_name())?;
+        } else {
+            f.write_str("...")?;
+        }
+        data.directives.serialize().no_indent().fmt(f)
     }
 }
 

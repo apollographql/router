@@ -177,6 +177,20 @@ impl CompositeTypeDefinitionPosition {
             }
         }
     }
+
+    pub(crate) fn introspection_typename_field(&self) -> FieldDefinitionPosition {
+        match self {
+            CompositeTypeDefinitionPosition::Object(type_) => {
+                type_.introspection_typename_field().into()
+            }
+            CompositeTypeDefinitionPosition::Interface(type_) => {
+                type_.introspection_typename_field().into()
+            }
+            CompositeTypeDefinitionPosition::Union(type_) => {
+                type_.introspection_typename_field().into()
+            }
+        }
+    }
 }
 
 impl TryFrom<TypeDefinitionPosition> for CompositeTypeDefinitionPosition {
