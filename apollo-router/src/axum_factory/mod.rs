@@ -6,7 +6,7 @@ mod listeners;
 pub(crate) mod tests;
 pub(crate) mod utils;
 
-pub use axum_http_server_factory::set_axum_router_callback;
 pub(crate) use axum_http_server_factory::span_mode;
+pub use axum_http_server_factory::unsupported_set_axum_router_callback;
 pub(crate) use axum_http_server_factory::AxumHttpServerFactory;
 pub(crate) use listeners::ListenAddrAndRouter;

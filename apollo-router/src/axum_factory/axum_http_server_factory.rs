@@ -458,11 +458,12 @@ static ENDPOINT_CALLBACK: OnceLock<Arc<dyn Fn(Router) -> Router + Send + Sync>> 
 /// Set a callback that may wrap or mutate `axum::Router` as they are added to the main router.
 /// Although part of the public API, this is not intended for use by end users, and may change at any time.
 #[doc(hidden)]
-pub fn set_axum_router_callback(callback: impl Fn(Router) -> Router + Send + Sync + 'static) {
+pub fn unsupported_set_axum_router_callback(
+    callback: impl Fn(Router) -> Router + Send + Sync + 'static,
+) -> Result<(), &'static str> {
     ENDPOINT_CALLBACK
         .set(Arc::new(callback))
         .map_err(|_| "endpoint decorator was already set")
-        .unwrap();
 }
 
 async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
