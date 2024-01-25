@@ -10,7 +10,6 @@ pub(crate) mod subgraph;
 mod tests;
 mod upgrade;
 mod yaml;
-pub(crate) mod file_uploads;
 
 use std::fmt;
 use std::io;
@@ -28,7 +27,6 @@ use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
-pub(crate) use file_uploads::FileUploads;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
@@ -193,10 +191,6 @@ pub struct Configuration {
     /// Batching configuration.
     #[serde(default)]
     pub(crate) experimental_batching: Batching,
-
-    /// File uploads configuration.
-    #[serde(default)]
-    pub(crate) experimental_file_uploads: FileUploads,
 }
 
 impl PartialEq for Configuration {
@@ -262,7 +256,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_batching: Batching,
-            experimental_file_uploads: FileUploads,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -282,7 +275,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .experimental_batching(ad_hoc.experimental_batching)
-            .experimental_file_uploads(ad_hoc.experimental_file_uploads)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -321,7 +313,6 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_batching: Option<Batching>,
-        experimental_file_uploads: Option<FileUploads>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -358,7 +349,6 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             uplink,
             experimental_batching: experimental_batching.unwrap_or_default(),
-            experimental_file_uploads: experimental_file_uploads.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -398,7 +388,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
-        experimental_file_uploads: Option<FileUploads>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -425,7 +414,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
             experimental_batching: experimental_batching.unwrap_or_default(),
-            experimental_file_uploads: experimental_file_uploads.unwrap_or_default(),
         };
 
         configuration.validate()

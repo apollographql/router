@@ -28,6 +28,7 @@ use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use router_bridge::planner::Planner;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -49,7 +50,6 @@ use crate::router_factory::RouterFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
-use crate::services::layers::file_uploads;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
@@ -689,7 +689,6 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    content_negotiation: content_negotiation::RouterLayer,
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
@@ -697,7 +696,6 @@ pub(crate) struct RouterCreator {
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
     experimental_batching: Batching,
-    experimental_file_uploads_layer: file_uploads::ServiceLayer,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -731,10 +729,6 @@ impl RouterCreator {
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, BoxError> {
-        let experimental_file_uploads_layer = file_uploads::ServiceLayer::new(&configuration);
-        let content_negotiation = content_negotiation::RouterLayer::new(
-            experimental_file_uploads_layer.allow_http_multipart,
-        );
         let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
@@ -746,7 +740,6 @@ impl RouterCreator {
         };
 
         Ok(Self {
-            content_negotiation,
             supergraph_creator,
             static_page,
             apq_layer,
@@ -756,7 +749,6 @@ impl RouterCreator {
                 .experimental_http_max_request_bytes,
             persisted_query_layer,
             experimental_batching: configuration.experimental_batching.clone(),
-            experimental_file_uploads_layer,
         })
     }
 
@@ -768,17 +760,14 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = ServiceBuilder::new()
-            .layer(self.content_negotiation.clone())
-            .layer(self.experimental_file_uploads_layer.clone())
-            .service(RouterService::new(
-                self.supergraph_creator.clone(),
-                self.apq_layer.clone(),
-                self.persisted_query_layer.clone(),
-                self.query_analysis_layer.clone(),
-                self.experimental_http_max_request_bytes,
-                self.experimental_batching.clone(),
-            ));
+        let router_service = content_negotiation::RouterLayer::new(false).layer(RouterService::new(
+            self.supergraph_creator.clone(),
+            self.apq_layer.clone(),
+            self.persisted_query_layer.clone(),
+            self.query_analysis_layer.clone(),
+            self.experimental_http_max_request_bytes,
+            self.experimental_batching.clone(),
+        ));
 
         ServiceBuilder::new()
             .layer(self.static_page.clone())

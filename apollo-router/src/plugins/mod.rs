@@ -35,3 +35,4 @@ pub(crate) mod rhai;
 pub(crate) mod subscription;
 pub(crate) mod telemetry;
 pub(crate) mod traffic_shaping;
+pub(crate) mod file_uploads;

@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
+use multer::Multipart;
 
 use ::serde::Deserialize;
 use async_compression::tokio::write::BrotliEncoder;
@@ -72,6 +73,7 @@ use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
+use crate::plugins::file_uploads;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
@@ -84,7 +86,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
-type HTTPClientService =
+pub(crate) type HTTPClientService =
     Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
@@ -248,6 +250,7 @@ impl SubgraphService {
             .build(connector);
         Ok(Self {
             client: ServiceBuilder::new()
+                // .layer()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
             service: Arc::new(service.into()),
@@ -960,7 +963,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: HTTPClientService,
+    client: HTTPClientService,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
@@ -975,17 +978,18 @@ async fn do_fetch(
     FetchError,
 > {
     let _active_request_guard = context.enter_active_request();
-    let response = client
-        .call(request)
-        .map_err(|err| {
-            tracing::error!(fetch_error = ?err);
-            FetchError::SubrequestHttpError {
-                status_code: None,
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            }
-        })
-        .await?;
+    let response = file_uploads::wrap_http_client_call(
+        client, context, request,
+    )
+    .map_err(|err| {
+        tracing::error!(fetch_error = ?err);
+        FetchError::SubrequestHttpError {
+            status_code: None,
+            service: service_name.to_string(),
+            reason: err.to_string(),
+        }
+    })
+    .await?;
 
     let (parts, body) = response.into_parts();
     // Print out debug for the response
