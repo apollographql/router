@@ -8,7 +8,7 @@ use tower::BoxError;
 
 use super::JOIN_FIELD_DIRECTIVE_NAME;
 use super::JOIN_SPEC_BASE_URL;
-use super::JOIN_SPEC_VERSION;
+use super::JOIN_SPEC_VERSION_RANGE;
 use super::OVERRIDE_LABEL_ARG_NAME;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
@@ -21,7 +21,7 @@ impl<'a> OverrideLabelVisitor<'a> {
             join_field_directive_name: Schema::directive_name(
                 schema,
                 JOIN_SPEC_BASE_URL,
-                JOIN_SPEC_VERSION,
+                JOIN_SPEC_VERSION_RANGE,
                 JOIN_FIELD_DIRECTIVE_NAME,
             )?,
         })

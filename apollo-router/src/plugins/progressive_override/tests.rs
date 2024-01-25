@@ -9,8 +9,8 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::progressive_override::Config;
 use crate::plugins::progressive_override::ProgressiveOverridePlugin;
-use crate::plugins::progressive_override::LABELS_TO_OVERRIDE;
-use crate::plugins::progressive_override::UNRESOLVED_LABELS;
+use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::router;
@@ -131,7 +131,7 @@ async fn todo() {
     let context = Context::new();
     context
         .insert(
-            LABELS_TO_OVERRIDE,
+            LABELS_TO_OVERRIDE_KEY,
             ["percent(100)"]
                 .iter()
                 .map(|s| Arc::new(s.to_string()))
@@ -178,7 +178,7 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
     mock_service.expect_call().returning(move |request| {
         let labels_on_context = request
             .context
-            .get::<_, Vec<Arc<String>>>(UNRESOLVED_LABELS)
+            .get::<_, Vec<Arc<String>>>(UNRESOLVED_LABELS_KEY)
             .unwrap()
             .unwrap();
 
@@ -243,7 +243,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     mock_service.expect_call().returning(move |request| {
         let labels_to_override = request
             .context
-            .get::<_, Vec<Arc<String>>>(LABELS_TO_OVERRIDE)
+            .get::<_, Vec<Arc<String>>>(LABELS_TO_OVERRIDE_KEY)
             .unwrap()
             .unwrap();
 
@@ -279,7 +279,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
 
     context
         .insert(
-            LABELS_TO_OVERRIDE,
+            LABELS_TO_OVERRIDE_KEY,
             labels_from_coprocessors
                 .iter()
                 .map(|s| s.to_string())

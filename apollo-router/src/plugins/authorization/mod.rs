@@ -18,15 +18,15 @@ use tower::ServiceExt;
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
 use self::authenticated::AUTHENTICATED_SPEC_BASE_URL;
-use self::authenticated::AUTHENTICATED_SPEC_VERSION;
+use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
 use self::policy::POLICY_SPEC_BASE_URL;
-use self::policy::POLICY_SPEC_VERSION;
+use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
 use self::scopes::REQUIRES_SCOPES_SPEC_BASE_URL;
-use self::scopes::REQUIRES_SCOPES_SPEC_VERSION;
+use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -148,10 +148,14 @@ impl AuthorizationPlugin {
             .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
 
-        let has_authorization_directives = schema
-            .has_spec(AUTHENTICATED_SPEC_BASE_URL, AUTHENTICATED_SPEC_VERSION)
-            || schema.has_spec(REQUIRES_SCOPES_SPEC_BASE_URL, REQUIRES_SCOPES_SPEC_VERSION)
-            || schema.has_spec(POLICY_SPEC_BASE_URL, POLICY_SPEC_VERSION);
+        let has_authorization_directives = schema.has_spec(
+            AUTHENTICATED_SPEC_BASE_URL,
+            AUTHENTICATED_SPEC_VERSION_RANGE,
+        ) || schema.has_spec(
+            REQUIRES_SCOPES_SPEC_BASE_URL,
+            REQUIRES_SCOPES_SPEC_VERSION_RANGE,
+        ) || schema
+            .has_spec(POLICY_SPEC_BASE_URL, POLICY_SPEC_VERSION_RANGE);
 
         Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }

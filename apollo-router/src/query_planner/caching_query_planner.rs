@@ -23,7 +23,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::progressive_override::LABELS_TO_OVERRIDE;
+use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
@@ -291,7 +291,7 @@ where
         let plan_options = PlanOptions {
             override_conditions: request
                 .context
-                .get(LABELS_TO_OVERRIDE)
+                .get(LABELS_TO_OVERRIDE_KEY)
                 .unwrap_or_default()
                 .unwrap_or_default(),
         };

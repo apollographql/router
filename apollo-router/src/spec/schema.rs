@@ -12,6 +12,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use http::Uri;
 use semver::Version;
+use semver::VersionReq;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -238,7 +239,7 @@ impl Schema {
         self.diagnostics.is_some()
     }
 
-    pub(crate) fn has_spec(&self, base_url: &str, min_version: &str) -> bool {
+    pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
         self.definitions
             .schema_definition
             .directives
@@ -260,13 +261,11 @@ impl Schema {
                         return false;
                     };
 
-                    let Some(min_version) =
-                        Version::parse(format!("{}.0", min_version).as_str()).ok()
-                    else {
+                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
                         return false;
                     };
 
-                    base_url_in_link == base_url && version_in_url >= min_version
+                    base_url_in_link == base_url && version_range.matches(&version_in_url)
                 } else {
                     false
                 }
@@ -276,7 +275,7 @@ impl Schema {
     pub(crate) fn directive_name(
         schema: &apollo_compiler::schema::Schema,
         base_url: &str,
-        min_version: &str,
+        expected_version_range: &str,
         default: &str,
     ) -> Option<String> {
         schema
@@ -300,13 +299,11 @@ impl Schema {
                         return false;
                     };
 
-                    let Some(min_version) =
-                        Version::parse(format!("{}.0", min_version).as_str()).ok()
-                    else {
+                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
                         return false;
                     };
 
-                    base_url_in_link == base_url && version_in_url >= min_version
+                    base_url_in_link == base_url && version_range.matches(&version_in_url)
                 } else {
                     false
                 }

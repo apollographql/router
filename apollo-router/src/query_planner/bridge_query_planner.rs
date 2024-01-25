@@ -33,7 +33,7 @@ use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
-use crate::plugins::progressive_override::LABELS_TO_OVERRIDE;
+use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -558,7 +558,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
             let plan_options = PlanOptions {
                 override_conditions: context
-                    .get(LABELS_TO_OVERRIDE)
+                    .get(LABELS_TO_OVERRIDE_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default(),
             };

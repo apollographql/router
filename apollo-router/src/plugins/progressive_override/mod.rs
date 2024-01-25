@@ -21,12 +21,12 @@ use crate::spec;
 use crate::spec::query::traverse;
 
 pub(crate) mod visitor;
-pub(crate) const UNRESOLVED_LABELS: &str = "apollo_override::unresolved_labels";
-pub(crate) const LABELS_TO_OVERRIDE: &str = "apollo_override::labels_to_override";
+pub(crate) const UNRESOLVED_LABELS_KEY: &str = "apollo_override::unresolved_labels";
+pub(crate) const LABELS_TO_OVERRIDE_KEY: &str = "apollo_override::labels_to_override";
 
 pub(crate) const JOIN_FIELD_DIRECTIVE_NAME: &str = "join__field";
 pub(crate) const JOIN_SPEC_BASE_URL: &str = "https://specs.apollo.dev/join";
-pub(crate) const JOIN_SPEC_VERSION: &str = "0.4";
+pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4.0, <=0.4.0";
 pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 /// Configuration for the progressive override plugin
@@ -52,7 +52,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
     let Some(directive_name) = spec::Schema::directive_name(
         schema,
         JOIN_SPEC_BASE_URL,
-        JOIN_SPEC_VERSION,
+        JOIN_SPEC_VERSION_RANGE,
         JOIN_FIELD_DIRECTIVE_NAME,
     ) else {
         tracing::error!(
@@ -150,7 +150,7 @@ impl Plugin for ProgressiveOverridePlugin {
                 .map_request(move |request: router::Request| {
                     let _ = request
                         .context
-                        .insert(UNRESOLVED_LABELS, arbitrary_labels.clone());
+                        .insert(UNRESOLVED_LABELS_KEY, arbitrary_labels.clone());
                     request
                 })
                 .service(service)
@@ -183,7 +183,7 @@ impl Plugin for ProgressiveOverridePlugin {
                 // collect any externally-resolved labels from the context
                 let externally_overridden_labels = request
                     .context
-                    .get::<_, Vec<Arc<String>>>(LABELS_TO_OVERRIDE)
+                    .get::<_, Vec<Arc<String>>>(LABELS_TO_OVERRIDE_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default();
 
@@ -219,7 +219,7 @@ impl Plugin for ProgressiveOverridePlugin {
 
                     let _ = request
                         .context
-                        .insert(LABELS_TO_OVERRIDE, overridden_labels_for_operation);
+                        .insert(LABELS_TO_OVERRIDE_KEY, overridden_labels_for_operation);
 
                 } else {
                     tracing::error!("No parsed document found in the context. All override labels will be ignored.");
