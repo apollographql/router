@@ -7,6 +7,8 @@ use apollo_compiler::Schema;
 use dashmap::DashMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use sha2::Digest;
+use sha2::Sha256;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -43,7 +45,7 @@ pub(crate) struct ProgressiveOverridePlugin {
     // labels are a component of the query plan cache key, it's important we
     // don't "overprovide" any labels, since doing so can explode the number of
     // cache entries per operation.
-    labels_per_operation_cache: Arc<DashMap<ParsedDocument, Vec<Arc<String>>>>,
+    labels_per_operation_cache: Arc<DashMap<String, Vec<Arc<String>>>>,
 }
 
 type LabelsFromSchema = (HashMap<Arc<String>, Arc<f64>>, HashSet<Arc<String>>);
@@ -187,12 +189,16 @@ impl Plugin for ProgressiveOverridePlugin {
                     .unwrap_or_default()
                     .unwrap_or_default();
 
+                let operation = request.supergraph_request.body().query.clone();
+                let operation_name = request.supergraph_request.body().operation_name.clone();
+                let operation_hash = hash_operation(operation, operation_name);
+
                 if let Some(parsed_doc) = request.context.extensions().lock().get::<ParsedDocument>() {
                     // we have to visit the operation to find out which subset
                     // of labels are relevant unless we've already cached that
                     // work
                     let relevant_labels = labels_per_operation_cache
-                        .entry(Arc::clone(parsed_doc))
+                        .entry(operation_hash)
                         .or_insert_with(|| {
                             OverrideLabelVisitor::new(&schema)
                                 .map(|mut visitor| {
@@ -231,6 +237,17 @@ impl Plugin for ProgressiveOverridePlugin {
             .boxed()
         }
     }
+}
+
+fn hash_operation(operation: Option<String>, operation_name: Option<String>) -> String {
+    let mut digest = Sha256::new();
+    if let Some(operation) = operation {
+        digest.update(operation.as_bytes());
+    }
+    if let Some(operation_name) = operation_name {
+        digest.update(operation_name.as_bytes());
+    }
+    hex::encode(digest.finalize().as_slice())
 }
 
 register_plugin!("apollo", "progressive_override", ProgressiveOverridePlugin);
