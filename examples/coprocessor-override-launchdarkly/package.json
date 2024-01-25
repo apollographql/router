@@ -24,6 +24,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "@launchdarkly/node-server-sdk": "^9.0.6",
     "dotenv": "^16.3.2"
   },
   "volta": {
