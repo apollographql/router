@@ -102,7 +102,7 @@ where
 
                     return Ok(ControlFlow::Break(response.into()));
                 }
-                req.context.private_entries.lock().insert(content_type);
+                req.context.extensions().lock().insert(content_type);
 
                 let accepts = parse_accept(req.router_request.headers());
 
