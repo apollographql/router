@@ -160,7 +160,7 @@ impl QueryAnalysisLayer {
 
 pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: ExecutableDocument,

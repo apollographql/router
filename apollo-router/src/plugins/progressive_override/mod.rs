@@ -38,7 +38,7 @@ pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 /// Configuration for the progressive override plugin
 #[derive(Debug, Default, Deserialize, JsonSchema)]
-pub(crate) struct Conf {}
+pub(crate) struct Config {}
 
 pub(crate) struct ProgressiveOverridePlugin {
     enabled: bool,
@@ -126,7 +126,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
 
 #[async_trait::async_trait]
 impl Plugin for ProgressiveOverridePlugin {
-    type Config = Conf;
+    type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let schema = Schema::parse(&*init.supergraph_sdl, "schema.graphql").expect(
