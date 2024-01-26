@@ -28,7 +28,7 @@ use crate::Context;
 pub(crate) struct QueryAnalysisLayer {
     pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    cache: Arc<Mutex<LruCache<QueryAnalysisKey, (Context, ParsedDocument)>>>,
+    cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
 }
 
@@ -105,66 +105,80 @@ impl QueryAnalysisLayer {
             })
             .cloned();
 
-        let (context, doc) = match entry {
+        let res = match entry {
             None => {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-                let doc = match span.in_scope(|| self.parse_document(&query)) {
-                    Ok(doc) => doc,
+                match span.in_scope(|| self.parse_document(&query)) {
                     Err(errors) => {
-                        request.context.extensions().lock().insert(UsageReporting {
-                            stats_report_key: errors.get_error_key().to_string(),
-                            referenced_fields_by_type: HashMap::new(),
-                        });
-                        return Err(SupergraphResponse::builder()
-                            .errors(errors.into_graphql_errors().unwrap_or_default())
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(request.context)
-                            .build()
-                            .expect("response is valid"));
+                        (*self.cache.lock().await).put(
+                            QueryAnalysisKey {
+                                query,
+                                operation_name: op_name,
+                            },
+                            Err(errors.clone()),
+                        );
+                        Err(errors)
                     }
-                };
+                    Ok(doc) => {
+                        let context = Context::new();
 
-                let context = Context::new();
+                        let operation = doc.executable.get_operation(op_name.as_deref()).ok();
+                        let operation_name = operation.as_ref().and_then(|operation| {
+                            operation.name.as_ref().map(|s| s.as_str().to_owned())
+                        });
 
-                let operation = doc.executable.get_operation(op_name.as_deref()).ok();
-                let operation_name = operation
-                    .as_ref()
-                    .and_then(|operation| operation.name.as_ref().map(|s| s.as_str().to_owned()));
+                        context.insert(OPERATION_NAME, operation_name).unwrap();
+                        let operation_kind =
+                            operation.map(|op| OperationKind::from(op.operation_type));
+                        context
+                            .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
+                            .expect("cannot insert operation kind in the context; this is a bug");
 
-                context.insert(OPERATION_NAME, operation_name).unwrap();
-                let operation_kind = operation.map(|op| OperationKind::from(op.operation_type));
-                context
-                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
-                    .expect("cannot insert operation kind in the context; this is a bug");
+                        if self.enable_authorization_directives {
+                            AuthorizationPlugin::query_analysis(&doc, &self.schema, &context);
+                        }
 
-                if self.enable_authorization_directives {
-                    AuthorizationPlugin::query_analysis(&doc, &self.schema, &context);
+                        (*self.cache.lock().await).put(
+                            QueryAnalysisKey {
+                                query,
+                                operation_name: op_name,
+                            },
+                            Ok((context.clone(), doc.clone())),
+                        );
+
+                        Ok((context, doc))
+                    }
                 }
-
-                (*self.cache.lock().await).put(
-                    QueryAnalysisKey {
-                        query,
-                        operation_name: op_name,
-                    },
-                    (context.clone(), doc.clone()),
-                );
-
-                (context, doc)
             }
             Some(c) => c,
         };
 
-        request.context.extend(&context);
-        request
-            .context
-            .extensions()
-            .lock()
-            .insert::<ParsedDocument>(doc);
-
-        Ok(SupergraphRequest {
-            supergraph_request: request.supergraph_request,
-            context: request.context,
-        })
+        match res {
+            Ok((context, doc)) => {
+                request.context.extend(&context);
+                request
+                    .context
+                    .extensions()
+                    .lock()
+                    .insert::<ParsedDocument>(doc);
+                Ok(SupergraphRequest {
+                    supergraph_request: request.supergraph_request,
+                    context: request.context,
+                })
+            }
+            Err(errors) => {
+                request.context.extensions().lock().insert(UsageReporting {
+                    stats_report_key: errors.get_error_key().to_string(),
+                    referenced_fields_by_type: HashMap::new(),
+                });
+                Err(SupergraphResponse::builder()
+                    .errors(errors.into_graphql_errors().unwrap_or_default())
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .context(request.context)
+                    .build()
+                    .expect("response is valid"))
+            }
+        }
     }
 }
 
