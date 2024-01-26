@@ -56,6 +56,7 @@ experimental_entity_cache:
   redis:
     urls:
       - https://example.com
+  enabled: true
 
 telemetry:
   instrumentation:
