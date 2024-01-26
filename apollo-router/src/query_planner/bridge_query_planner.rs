@@ -476,7 +476,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         // Carry errors from previous ParsedDocument
                         // and assume transformation doesn’t introduce new errors.
                         // TODO: check the latter?
-                        parse_errors: doc.parse_errors.clone(),
                         validation_errors: doc.validation_errors.clone(),
                     });
                     context
@@ -588,7 +587,6 @@ impl BridgeQueryPlanner {
                 // Carry errors from previous ParsedDocument
                 // and assume transformation doesn’t introduce new errors.
                 // TODO: check the latter?
-                parse_errors: doc.parse_errors.clone(),
                 validation_errors: doc.validation_errors.clone(),
             });
             selections.unauthorized.paths = unauthorized_paths;

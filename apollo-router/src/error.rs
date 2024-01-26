@@ -557,6 +557,32 @@ impl std::fmt::Display for ParseErrors {
     }
 }
 
+impl IntoGraphQLErrors for ParseErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self
+            .errors
+            .iter()
+            .map(|diagnostic| {
+                Error::builder()
+                    .message(diagnostic.message().to_string())
+                    .locations(
+                        diagnostic
+                            .get_line_column()
+                            .map(|location| {
+                                vec![ErrorLocation {
+                                    line: location.line as u32,
+                                    column: location.column as u32,
+                                }]
+                            })
+                            .unwrap_or_default(),
+                    )
+                    .extension_code("GRAPHQL_PARSING_FAILED")
+                    .build()
+            })
+            .collect())
+    }
+}
+
 /// Collection of schema validation errors.
 #[derive(Debug)]
 pub(crate) struct ValidationErrors {

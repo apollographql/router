@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::graphql::Error;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -54,7 +55,7 @@ impl QueryAnalysisLayer {
         }
     }
 
-    pub(crate) fn parse_document(&self, query: &str) -> ParsedDocument {
+    pub(crate) fn parse_document(&self, query: &str) -> Result<ParsedDocument, Vec<Error>> {
         Query::parse_document(query, self.schema.api_schema(), &self.configuration)
     }
 
@@ -105,7 +106,17 @@ impl QueryAnalysisLayer {
         let (context, doc) = match entry {
             None => {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-                let doc = span.in_scope(|| self.parse_document(&query));
+                let doc = match span.in_scope(|| self.parse_document(&query)) {
+                    Ok(doc) => doc,
+                    Err(errors) => {
+                        return Err(SupergraphResponse::builder()
+                            .errors(errors)
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(request.context)
+                            .build()
+                            .expect("response is valid"));
+                    }
+                };
 
                 let context = Context::new();
 
@@ -122,7 +133,7 @@ impl QueryAnalysisLayer {
 
                 if self.enable_authorization_directives {
                     AuthorizationPlugin::query_analysis(
-                        &query,
+                        &doc,
                         &self.schema,
                         &self.configuration,
                         &context,
