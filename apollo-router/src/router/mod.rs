@@ -487,7 +487,7 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "parsing error: no field `name` in type `User`", response.errors[0].message,
+            "type `User` does not have a field `name`", response.errors[0].message,
             "{response:?}"
         );
         assert_eq!(

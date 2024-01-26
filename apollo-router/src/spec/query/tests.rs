@@ -1689,55 +1689,56 @@ fn variable_validation() {
 
     // https://spec.graphql.org/June2018/#sec-Input-Objects
     assert_validation!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({})
     );
     assert_validation!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation_error!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":1})
     );
     assert_validation_error!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":"str"})
     );
     assert_validation_error!(
-        "input Foo{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation!(
-        "input Foo{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{"x":1}})
     );
     assert_validation!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({"foo":1})
     );
     assert_validation_error!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({})
     );
     assert_validation!(
-        "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{"bar":{"x":1}}})
     );
+
     assert_validation!(
         "enum Availability{AVAILABLE} type Product{availability:Availability! name:String} type Query{products(availability: Availability!): [Product]!}",
         "query GetProductsByAvailability($availability: Availability!){products(availability: $availability) {name}}",
@@ -4027,7 +4028,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4054,7 +4055,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4083,7 +4084,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4111,7 +4112,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean = true) {
+            "query Example($shouldSkip: Boolean! = true) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4139,7 +4140,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean = true) {
+            "query Example($shouldSkip: Boolean! = true) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4539,7 +4540,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4566,7 +4567,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4595,7 +4596,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean = false) {
+            "query Example($shouldInclude: Boolean! = false) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4620,7 +4621,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean = false) {
+            "query Example($shouldInclude: Boolean! = false) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4648,7 +4649,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4680,7 +4681,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4707,7 +4708,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4737,7 +4738,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }

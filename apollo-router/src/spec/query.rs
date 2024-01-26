@@ -275,14 +275,14 @@ impl Query {
             .token_limit(configuration.limits.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
-            Err(WithErrors {errors, .. }) => {
+            Err(WithErrors { errors, .. }) => {
                 return Err(SpecError::ParsingError(errors.to_string_no_color()));
             }
         };
         let schema = &schema.api_schema().definitions;
         let executable = match ast.to_executable_validate(schema) {
             Ok(doc) => doc,
-            Err(WithErrors {  errors,.. }) => {
+            Err(WithErrors { errors, .. }) => {
                 return Err(SpecError::ValidationError(ValidationErrors {
                     errors: errors.iter().map(|e| e.to_json()).collect(),
                 }));

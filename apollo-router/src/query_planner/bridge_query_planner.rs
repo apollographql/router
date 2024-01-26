@@ -661,27 +661,6 @@ mod tests {
         }
     }
 
-    #[test(tokio::test)]
-    async fn test_plan_invalid_query() {
-        let err = plan(
-            EXAMPLE_SCHEMA,
-            "fragment UnusedTestFragment on User { id } query { me { id } }",
-            "fragment UnusedTestFragment on User { id } query { me { id } }",
-            None,
-        )
-        .await
-        .unwrap_err();
-
-        match err {
-            QueryPlannerError::PlanningErrors(errors) => {
-                insta::assert_debug_snapshot!("plan_invalid_query_errors", errors);
-            }
-            e => {
-                panic!("invalid query planning should have failed: {e:?}");
-            }
-        }
-    }
-
     #[test]
     fn empty_query_plan() {
         serde_json::from_value::<QueryPlan>(json!({ "plan": { "kind": "QueryPlan"} } )).expect(

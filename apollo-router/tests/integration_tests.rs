@@ -138,8 +138,7 @@ async fn validation_errors_from_rust() {
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            },
-            "experimental_graphql_validation_mode": "new",
+            }
         }),
     )
     .await;
@@ -827,8 +826,7 @@ async fn defer_path_with_disabled_config() {
             "apollo.include_subgraph_errors": {
                 "all": true
             }
-        },
-        "experimental_graphql_validation_mode": "both",
+        }
     });
     let request = supergraph::Request::fake_builder()
         .query(
@@ -1252,8 +1250,7 @@ async fn query_rust(
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            },
-            "experimental_graphql_validation_mode": "both",
+            }
         }),
     )
     .await
