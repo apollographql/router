@@ -166,12 +166,7 @@ impl AuthorizationPlugin {
             .unwrap_or_default()
     }
 
-    pub(crate) fn query_analysis(
-        doc: &ParsedDocumentInner,
-        schema: &Schema,
-        configuration: &Configuration,
-        context: &Context,
-    ) {
+    pub(crate) fn query_analysis(doc: &ParsedDocumentInner, schema: &Schema, context: &Context) {
         let CacheKeyMetadata {
             is_authenticated,
             scopes,

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use http::Uri;
@@ -18,15 +17,12 @@ use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
-use crate::Configuration;
 
 /// A GraphQL schema.
 #[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) definitions: Valid<apollo_compiler::Schema>,
-    /// Stored for comparison with the validation errors from query planning.
-    diagnostics: Option<DiagnosticList>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
     api_schema: Option<Box<Schema>>,
@@ -34,7 +30,7 @@ pub(crate) struct Schema {
 }
 
 #[cfg(test)]
-fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String, SchemaError> {
+fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
     use itertools::Itertools;
     use router_bridge::api_schema::api_schema;
     use router_bridge::api_schema::ApiSchemaOptions;
@@ -51,9 +47,9 @@ fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String
 
 impl Schema {
     #[cfg(test)]
-    pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let api_schema = Self::parse(&make_api_schema(s, configuration)?, configuration)?;
-        let schema = Self::parse(s, configuration)?.with_api_schema(api_schema);
+    pub(crate) fn parse_test(s: &str) -> Result<Self, SchemaError> {
+        let api_schema = Self::parse(&make_api_schema(s)?)?;
+        let schema = Self::parse(s)?.with_api_schema(api_schema);
         Ok(schema)
     }
 
@@ -72,13 +68,12 @@ impl Schema {
         })
     }
 
-    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+    pub(crate) fn parse(sdl: &str) -> Result<Self, SchemaError> {
         let start = Instant::now();
         let ast = Self::parse_ast(sdl)?;
-        // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
-        let (definitions, diagnostics) = match ast.to_schema_validate() {
-            Ok(schema) => (schema, None),
-            Err(WithErrors {  errors, .. }) => {
+        let definitions = match ast.to_schema_validate() {
+            Ok(schema) => schema,
+            Err(WithErrors { errors, .. }) => {
                 return Err(SchemaError::Validate(ValidationErrors {
                     errors: errors.iter().map(|e| e.to_json()).collect(),
                 }));
@@ -117,7 +112,6 @@ impl Schema {
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
             definitions,
-            diagnostics,
             subgraphs,
             implementers_map,
             api_schema: None,
@@ -216,10 +210,6 @@ impl Schema {
         }
     }
 
-    pub(crate) fn has_errors(&self) -> bool {
-        self.diagnostics.is_some()
-    }
-
     pub(crate) fn has_spec(&self, url: &str) -> bool {
         self.definitions
             .schema_definition
@@ -305,7 +295,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse_test(&schema, &Default::default()).unwrap()
+            Schema::parse_test(&schema).unwrap()
         }
 
         fn gen_schema_interfaces(schema: &str) -> Schema {
@@ -329,7 +319,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse_test(&schema, &Default::default()).unwrap()
+            Schema::parse_test(&schema).unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
         assert!(schema.is_subtype("UnionType", "Foo"));
@@ -385,7 +375,7 @@ mod tests {
             @join__graph(name: "products" url: "http://localhost:4003/graphql")
             REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
         }"#;
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let schema = Schema::parse_test(schema).unwrap();
 
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
@@ -434,7 +424,7 @@ mod tests {
     #[test]
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let schema = Schema::parse_test(schema).unwrap();
         let has_in_stock_field = |schema: &Schema| {
             schema
                 .definitions
@@ -452,7 +442,7 @@ mod tests {
         #[cfg(not(windows))]
         {
             let schema = include_str!("../testdata/starstuff@current.graphql");
-            let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+            let schema = Schema::parse_test(schema).unwrap();
 
             assert_eq!(
                 schema.schema_id,
@@ -474,7 +464,7 @@ mod tests {
     #[test]
     fn inaccessible_on_non_core() {
         let schema = include_str!("../testdata/inaccessible_on_non_core.graphql");
-        match Schema::parse_test(schema, &Default::default()) {
+        match Schema::parse_test(schema) {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
@@ -496,7 +486,7 @@ GraphQL request:42:1
     #[test]
     fn unclosed_brace_error_does_not_panic() {
         let schema = "schema {";
-        let result = Schema::parse_test(schema, &Default::default());
+        let result = Schema::parse_test(schema);
         assert!(result.is_err());
     }
 }

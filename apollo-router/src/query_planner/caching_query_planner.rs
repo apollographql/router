@@ -530,17 +530,14 @@ mod tests {
         });
 
         let configuration = Arc::new(crate::Configuration::default());
-        let schema = Arc::new(
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
-        );
+        let schema = Arc::new(Schema::parse(include_str!("testdata/schema.graphql")).unwrap());
 
         let mut planner =
             CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new()).await;
 
         let configuration = Configuration::default();
 
-        let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc1 =
             Query::parse_document("query Me { me { username } }", &schema, &configuration).unwrap();
@@ -613,8 +610,7 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc =
             Query::parse_document("query Me { me { username } }", &schema, &configuration).unwrap();

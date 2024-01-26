@@ -138,12 +138,7 @@ impl QueryAnalysisLayer {
                     .expect("cannot insert operation kind in the context; this is a bug");
 
                 if self.enable_authorization_directives {
-                    AuthorizationPlugin::query_analysis(
-                        &doc,
-                        &self.schema,
-                        &self.configuration,
-                        &context,
-                    );
+                    AuthorizationPlugin::query_analysis(&doc, &self.schema, &context);
                 }
 
                 (*self.cache.lock().await).put(

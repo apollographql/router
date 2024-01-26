@@ -43,13 +43,6 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
 
-// For reporting validation results with `experimental_graphql_validation_mode: both`.
-const VALIDATION_SOURCE_SCHEMA: &str = "schema";
-const VALIDATION_SOURCE_OPERATION: &str = "operation";
-const VALIDATION_FALSE_NEGATIVE: &str = "false_negative";
-const VALIDATION_FALSE_POSITIVE: &str = "false_positive";
-const VALIDATION_MATCH: &str = "match";
-
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
@@ -67,7 +60,7 @@ impl BridgeQueryPlanner {
         sdl: String,
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
-        let schema = Schema::parse(&sdl, &configuration)?;
+        let schema = Schema::parse(&sdl)?;
 
         let planner = Planner::new(
             sdl,
@@ -149,7 +142,7 @@ impl BridgeQueryPlanner {
                 api_schema.schema
             }
         };
-        let api_schema = Schema::parse(&api_schema_string, &configuration)?;
+        let api_schema = Schema::parse(&api_schema_string)?;
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
@@ -202,8 +195,8 @@ impl BridgeQueryPlanner {
         );
 
         let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
-        let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
+        let api_schema = Schema::parse(&api_schema.schema)?;
+        let schema = Arc::new(Schema::parse(&schema)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))
@@ -293,10 +286,6 @@ impl BridgeQueryPlanner {
         key: CacheKeyMetadata,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        fn is_validation_error(errors: &PlanErrors) -> bool {
-            errors.errors.iter().all(|err| err.validation_error)
-        }
-
         let planner_result = match self
             .planner
             .plan(
@@ -421,9 +410,8 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
-                    let executable = modified_query
-                        .to_executable_validate(schema)
-                        .map_err(|e| {
+                    let executable =
+                        modified_query.to_executable_validate(schema).map_err(|e| {
                             SpecError::ValidationError(ValidationErrors {
                                 errors: e.errors.iter().map(|e| e.to_json()).collect(),
                             })
@@ -704,7 +692,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let schema = Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap();
+        let schema = Schema::parse(EXAMPLE_SCHEMA).unwrap();
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
         let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())

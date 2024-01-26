@@ -122,8 +122,7 @@ impl FormatTest {
             FederationVersion::Fed2 => with_supergraph_boilerplate_fed2(schema, query_type_name),
         };
 
-        let schema =
-            Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+        let schema = Schema::parse_test(&schema).expect("could not parse schema");
 
         let api_schema = schema.api_schema();
         let query =
@@ -1394,8 +1393,7 @@ macro_rules! run_validation {
             Value::Object(object) => object,
             _ => unreachable!("variables must be an object"),
         };
-        let schema =
-            Schema::parse_test(&$schema, &Default::default()).expect("could not parse schema");
+        let schema = Schema::parse_test(&$schema).expect("could not parse schema");
         let request = Request::builder()
             .variables(variables)
             .query($query.to_string())
@@ -3456,7 +3454,7 @@ fn it_parses_default_floats() {
         "Query",
     );
 
-    let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+    let schema = Schema::parse_test(&schema).unwrap();
     let value = schema
         .definitions
         .get_input_object("WithAllKindsOfFloats")
@@ -3489,7 +3487,7 @@ fn it_statically_includes() {
     }",
         "Query",
     );
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema).expect("could not parse schema");
 
     let query = Query::parse(
         "query  {
@@ -3634,7 +3632,7 @@ fn it_statically_skips() {
     }",
         "Query",
     );
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema).expect("could not parse schema");
 
     let query = Query::parse(
         "query  {
@@ -3771,7 +3769,7 @@ fn it_should_fail_with_empty_selection_set() {
     }",
         "Query",
     );
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema).expect("could not parse schema");
 
     let _query_error = Query::parse(
         "query  {
@@ -5118,7 +5116,7 @@ fn fragment_on_interface_on_query() {
         }
     }";
 
-    let schema = Schema::parse_test(schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(schema).expect("could not parse schema");
     let api_schema = schema.api_schema();
     let query = Query::parse(query, &schema, &Default::default()).expect("could not parse query");
     let mut response = Response::builder()
@@ -5310,7 +5308,7 @@ fn parse_introspection_query() {
     }";
 
     let schema = with_supergraph_boilerplate(schema, "Query");
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema).expect("could not parse schema");
     let api_schema = schema.api_schema();
 
     let query = "{
@@ -5694,7 +5692,6 @@ fn test_error_path_works_across_inline_fragments() {
         myField: String!
     }
 "#,
-        &Default::default(),
     )
     .unwrap();
 
@@ -5757,7 +5754,6 @@ fn test_query_not_named_query() {
 
         type TheOneAndOnlyQuery { example: Boolean }
         "#,
-        &config,
     )
     .unwrap();
     let query = Query::parse("{ example }", &schema, &config).unwrap();
@@ -5803,7 +5799,6 @@ fn filtered_defer_fragment() {
             c: String!
         }
         "#,
-        &config,
     )
     .unwrap();
     let query = r#"{
