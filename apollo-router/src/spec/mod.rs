@@ -101,7 +101,7 @@ impl IntoGraphQLErrors for SpecError {
     fn into_graphql_errors(self) -> Result<Vec<crate::graphql::Error>, Self> {
         match self {
             SpecError::ValidationError(e) => {
-                return e.into_graphql_errors().map_err(SpecError::ValidationError);
+                e.into_graphql_errors().map_err(SpecError::ValidationError)
             }
             _ => {
                 let gql_err = match self.custom_extension_details() {
