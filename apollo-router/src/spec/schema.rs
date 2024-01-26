@@ -14,7 +14,6 @@ use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::error::ValidationErrors;
@@ -42,10 +41,7 @@ fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String
     let s = api_schema(
         schema,
         ApiSchemaOptions {
-            graphql_validation: matches!(
-                configuration.experimental_graphql_validation_mode,
-                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-            ),
+            graphql_validation: false,
         },
     )
     .map_err(|e| SchemaError::Api(e.to_string()))?
@@ -79,28 +75,13 @@ impl Schema {
     pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
         let ast = Self::parse_ast(sdl)?;
-        let validate =
-            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
         // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
-        let (definitions, diagnostics) = if validate {
-            match ast.to_schema_validate() {
-                Ok(schema) => (schema, None),
-                Err(WithErrors { partial, errors }) => (Valid::assume_valid(partial), Some(errors)),
-            }
-        } else {
-            match ast.to_schema() {
-                Ok(schema) => (Valid::assume_valid(schema), None),
-                Err(WithErrors { partial, .. }) => (Valid::assume_valid(partial), None),
-            }
-        };
-
-        // Only error out if new validation is used: with `Both`, we take the legacy
-        // validation as authoritative and only use the new result for comparison
-        if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
-            if let Some(errors) = diagnostics {
+        let (definitions, diagnostics) = match ast.to_schema_validate() {
+            Ok(schema) => (schema, None),
+            Err(WithErrors { partial, errors }) => {
                 return Err(SchemaError::Validate(ValidationErrors { errors }));
             }
-        }
+        };
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?

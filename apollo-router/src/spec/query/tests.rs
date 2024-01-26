@@ -5844,7 +5844,6 @@ fn filtered_defer_fragment() {
         defer_stats,
         is_original: true,
         unauthorized: UnauthorizedPaths::default(),
-        validation_error: None,
         schema_aware_hash,
     };
 
@@ -5872,7 +5871,6 @@ fn filtered_defer_fragment() {
         defer_stats,
         is_original: false,
         unauthorized: UnauthorizedPaths::default(),
-        validation_error: None,
         schema_aware_hash,
     };
 
