@@ -1648,7 +1648,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
                     .data(json!({
                         "name": "Ada"
                     }))
-                    .path(Path::default())
+                    .path(Path::from("me"))
                     .build()])
                 .has_next(true)
                 .build(),
@@ -1664,7 +1664,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { me { id ... @defer { name } }",
+      "query": "query { me { id ... @defer { name } } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let mut response = client
@@ -2080,7 +2080,7 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::GET,
-        r#"query=query { me { name } }"#,
+        r#"query=query%7Bme%7Bname%7D%7D"#,
     )
     .await;
 

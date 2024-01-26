@@ -491,7 +491,7 @@ mod tests {
             "{response:?}"
         );
         assert_eq!(
-            "PARSING_ERROR",
+            "GRAPHQL_VALIDATION_FAILED",
             response.errors[0].extensions.get("code").unwrap()
         );
 
