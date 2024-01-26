@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
@@ -5,11 +6,12 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use lru::LruCache;
+use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::graphql::Error;
+use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -109,8 +111,12 @@ impl QueryAnalysisLayer {
                 let doc = match span.in_scope(|| self.parse_document(&query)) {
                     Ok(doc) => doc,
                     Err(errors) => {
+                        request.context.extensions().lock().insert(UsageReporting {
+                            stats_report_key: errors.get_error_key().to_string(),
+                            referenced_fields_by_type: HashMap::new(),
+                        });
                         return Err(SupergraphResponse::builder()
-                            .errors(errors)
+                            .errors(errors.into_graphql_errors().unwrap_or_default())
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(request.context)
                             .build()

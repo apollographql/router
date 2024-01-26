@@ -296,51 +296,6 @@ impl BridgeQueryPlanner {
             errors.errors.iter().all(|err| err.validation_error)
         }
 
-        /// Compare errors from graphql-js and apollo-rs validation, and produce metrics on
-        /// whether they had the same result.
-        ///
-        /// The result isn't inspected deeply: it only checks validation success/failure.
-        fn compare_validation_errors(
-            js_validation_error: Option<&PlanErrors>,
-            rs_validation_error: Option<&crate::error::ValidationErrors>,
-        ) {
-            match (
-                js_validation_error.map_or(false, is_validation_error),
-                rs_validation_error,
-            ) {
-                (false, Some(validation_error)) => {
-                    tracing::warn!(
-                        monotonic_counter.apollo.router.operations.validation = 1u64,
-                        validation.source = VALIDATION_SOURCE_OPERATION,
-                        validation.result = VALIDATION_FALSE_POSITIVE,
-                        "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
-                    );
-                    tracing::warn!(
-                        "validation mismatch: Rust validation reported: {validation_error}"
-                    );
-                }
-                (true, None) => {
-                    tracing::warn!(
-                        monotonic_counter.apollo.router.operations.validation = 1u64,
-                        validation.source = VALIDATION_SOURCE_OPERATION,
-                        validation.result = VALIDATION_FALSE_NEGATIVE,
-                        "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
-                    );
-                    tracing::warn!(
-                        "validation mismatch: JS validation reported: {}",
-                        // Unwrapping is safe because `is_validation_error` is true
-                        js_validation_error.unwrap(),
-                    );
-                }
-                // if JS and Rust implementations agree, we return the JS result for now.
-                _ => tracing::info!(
-                    monotonic_counter.apollo.router.operations.validation = 1u64,
-                    validation.source = VALIDATION_SOURCE_OPERATION,
-                    validation.result = VALIDATION_MATCH,
-                ),
-            }
-        }
-
         let planner_result = match self
             .planner
             .plan(

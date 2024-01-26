@@ -318,22 +318,6 @@ impl Query {
         })
     }
 
-    /// Check for parse errors in a query in the compiler.
-    pub(crate) fn check_errors(document: &ParsedDocument) -> Result<(), SpecError> {
-        match document.parse_errors.clone() {
-            Some(errors) => Err(SpecError::ParsingError(errors.to_string_no_color())),
-            None => Ok(()),
-        }
-    }
-
-    /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(document: &ParsedDocument) -> Result<(), ValidationErrors> {
-        match document.validation_errors.clone() {
-            Some(errors) => Err(ValidationErrors { errors }),
-            None => Ok(()),
-        }
-    }
-
     /// Extract serializable data structures from the apollo-compiler HIR.
     pub(crate) fn extract_query_information(
         schema: &Schema,

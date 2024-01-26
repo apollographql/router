@@ -310,19 +310,7 @@ impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
             QueryPlannerError::SpecError(err) => {
-                let gql_err = match err.custom_extension_details() {
-                    Some(extension_details) => Error::builder()
-                        .message(err.to_string())
-                        .extension_code(err.extension_code())
-                        .extensions(extension_details)
-                        .build(),
-                    None => Error::builder()
-                        .message(err.to_string())
-                        .extension_code(err.extension_code())
-                        .build(),
-                };
-
-                Ok(vec![gql_err])
+                err.into_graphql_errors()
             }
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
@@ -584,7 +572,7 @@ impl IntoGraphQLErrors for ParseErrors {
 }
 
 /// Collection of schema validation errors.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub(crate) struct ValidationErrors {
     pub(crate) errors: apollo_compiler::validation::DiagnosticList,
 }

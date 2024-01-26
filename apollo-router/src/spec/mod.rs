@@ -22,6 +22,7 @@ use thiserror::Error;
 
 use crate::error::ValidationErrors;
 use crate::graphql::ErrorExtension;
+use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 
 pub(crate) const LINK_DIRECTIVE_NAME: &str = "link";
@@ -93,5 +94,30 @@ impl ErrorExtension for SpecError {
         }
 
         (!obj.is_empty()).then_some(obj)
+    }
+}
+
+impl IntoGraphQLErrors for SpecError {
+    fn into_graphql_errors(self) -> Result<Vec<crate::graphql::Error>, Self> {
+        match self {
+            SpecError::ValidationError(e) => {
+                return e.into_graphql_errors().map_err(SpecError::ValidationError);
+            }
+            _ => {
+                let gql_err = match self.custom_extension_details() {
+                    Some(extension_details) => crate::graphql::Error::builder()
+                        .message(self.to_string())
+                        .extension_code(self.extension_code())
+                        .extensions(extension_details)
+                        .build(),
+                    None => crate::graphql::Error::builder()
+                        .message(self.to_string())
+                        .extension_code(self.extension_code())
+                        .build(),
+                };
+
+                Ok(vec![gql_err])
+            }
+        }
     }
 }
