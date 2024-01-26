@@ -199,21 +199,6 @@ impl PartialEq for Configuration {
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum GraphQLValidationMode {
-    /// Use the new Rust-based implementation.
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
-    #[default]
-    Both,
-}
-
-/// GraphQL validation modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
 pub(crate) enum ApiSchemaMode {
     /// Use the new Rust-based implementation.
     New,

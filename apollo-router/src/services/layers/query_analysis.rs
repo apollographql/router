@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast;
 use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use lru::LruCache;
@@ -159,7 +160,7 @@ pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
-    pub(crate) executable: ExecutableDocument,
+    pub(crate) executable: Valid<ExecutableDocument>,
     pub(crate) parse_errors: Option<DiagnosticList>,
     pub(crate) validation_errors: Option<DiagnosticList>,
 }

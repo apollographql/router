@@ -579,9 +579,9 @@ impl BridgeQueryPlanner {
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
             let executable = new_doc
-                .to_executable(&self.schema.api_schema().definitions)
+                .to_executable_validate(&self.schema.api_schema().definitions)
                 // Assume transformation creates a valid document: ignore conversion errors
-                .unwrap_or_else(|invalid| invalid.partial);
+                .unwrap();
             doc = Arc::new(ParsedDocumentInner {
                 executable,
                 ast: new_doc,

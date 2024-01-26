@@ -23,7 +23,6 @@ use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
-use crate::configuration::GraphQLValidationMode;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
 use crate::graphql::Error;
@@ -279,19 +278,10 @@ impl Query {
             Err(WithErrors { partial, errors }) => (partial, Some(errors)),
         };
         let schema = &schema.api_schema().definitions;
-        let validate =
-            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
         // Stretch the meaning of "assume valid" to "we’ll check later"
-        let (executable, validation_errors) = if validate {
-            match ast.to_executable_validate(schema) {
-                Ok(doc) => (doc.into_inner(), None),
-                Err(WithErrors { partial, errors }) => (partial, Some(errors)),
-            }
-        } else {
-            match ast.to_executable(schema) {
-                Ok(doc) => (doc, None),
-                Err(WithErrors { partial, .. }) => (partial, None),
-            }
+        let (executable, validation_errors) = match ast.to_executable_validate(schema) {
+            Ok(doc) => (doc.into_inner(), None),
+            Err(WithErrors { partial, errors }) => (partial, Some(errors)),
         };
 
         // Trace log recursion limit data
