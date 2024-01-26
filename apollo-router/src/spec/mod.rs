@@ -20,6 +20,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::error::ValidationErrors;
 use crate::graphql::ErrorExtension;
 use crate::json_ext::Object;
 
@@ -40,8 +41,8 @@ pub(crate) enum SpecError {
     InvalidField(String, String),
     /// parsing error: {0}
     ParsingError(String),
-    /// validation error
-    ValidationError(Vec<apollo_compiler::execution::GraphQLError>),
+    /// validation error: {0}
+    ValidationError(ValidationErrors),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
     /// subscription operation is not supported

@@ -235,7 +235,6 @@ impl BridgeQueryPlanner {
         operation_name: Option<&str>,
         doc: &ParsedDocument,
     ) -> Result<Query, QueryPlannerError> {
-        Query::check_errors(doc)?;
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
             &self.configuration,
@@ -473,10 +472,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     doc = Arc::new(ParsedDocumentInner {
                         executable,
                         ast: modified_query,
-                        // Carry errors from previous ParsedDocument
-                        // and assume transformation doesn’t introduce new errors.
-                        // TODO: check the latter?
-                        validation_errors: doc.validation_errors.clone(),
                     });
                     context
                         .extensions()
@@ -584,10 +579,6 @@ impl BridgeQueryPlanner {
             doc = Arc::new(ParsedDocumentInner {
                 executable,
                 ast: new_doc,
-                // Carry errors from previous ParsedDocument
-                // and assume transformation doesn’t introduce new errors.
-                // TODO: check the latter?
-                validation_errors: doc.validation_errors.clone(),
             });
             selections.unauthorized.paths = unauthorized_paths;
         }

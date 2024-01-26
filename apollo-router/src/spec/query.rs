@@ -24,10 +24,8 @@ use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
 use crate::error::FetchError;
-use crate::error::ParseErrors;
 use crate::error::ValidationErrors;
 use crate::graphql::Error;
-use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -271,34 +269,29 @@ impl Query {
         query: &str,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> Result<ParsedDocument, Vec<Error>> {
+    ) -> Result<ParsedDocument, SpecError> {
         let parser = &mut apollo_compiler::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
             Err(WithErrors { partial, errors }) => {
-                return Err(ParseErrors { errors }
-                    .into_graphql_errors()
-                    .expect("this conversion cannot fail"))
+                return Err(SpecError::ParsingError(errors.to_string_no_color()));
             }
         };
         let schema = &schema.api_schema().definitions;
-        // Stretch the meaning of "assume valid" to "we’ll check later"
-        let (executable, validation_errors) = match ast.to_executable_validate(schema) {
-            Ok(doc) => (doc, None),
-            Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+        let executable = match ast.to_executable_validate(schema) {
+            Ok(doc) => doc,
+            Err(WithErrors { partial, errors }) => {
+                return Err(SpecError::ValidationError(ValidationErrors { errors }));
+            }
         };
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        Ok(Arc::new(ParsedDocumentInner {
-            ast,
-            executable,
-            validation_errors,
-        }))
+        Ok(Arc::new(ParsedDocumentInner { ast, executable }))
     }
 
     pub(crate) fn parse(
@@ -308,9 +301,7 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let query = query.into();
 
-        let doc = Self::parse_document(&query, schema, configuration)
-            .map_err(SpecError::ValidationError)?;
-        Self::check_errors(&doc)?;
+        let doc = Self::parse_document(&query, schema, configuration)?;
         let (fragments, operations, defer_stats, schema_aware_hash) =
             Self::extract_query_information(schema, &doc.executable, &doc.ast)?;
 

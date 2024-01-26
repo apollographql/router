@@ -249,8 +249,8 @@ pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
-    /// invalid query
-    OperationValidationErrors(Vec<apollo_compiler::execution::GraphQLError>),
+    /// invalid query: {0}
+    OperationValidationErrors(ValidationErrors),
 
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
@@ -584,7 +584,7 @@ impl IntoGraphQLErrors for ParseErrors {
 }
 
 /// Collection of schema validation errors.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct ValidationErrors {
     pub(crate) errors: apollo_compiler::validation::DiagnosticList,
 }

@@ -597,9 +597,8 @@ async fn plan_query(
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
     if !context.extensions().lock().contains_key::<ParsedDocument>() {
-        let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
-        Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
-        Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
+        let doc = Query::parse_document(&query_str, &schema, &Configuration::default())
+            .map_err(crate::error::QueryPlannerError::from)?;
         context.extensions().lock().insert::<ParsedDocument>(doc);
     }
 

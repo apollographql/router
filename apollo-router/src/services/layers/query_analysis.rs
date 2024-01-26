@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast;
-use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
@@ -17,6 +16,7 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
@@ -55,7 +55,7 @@ impl QueryAnalysisLayer {
         }
     }
 
-    pub(crate) fn parse_document(&self, query: &str) -> Result<ParsedDocument, Vec<Error>> {
+    pub(crate) fn parse_document(&self, query: &str) -> Result<ParsedDocument, SpecError> {
         Query::parse_document(query, self.schema.api_schema(), &self.configuration)
     }
 
@@ -172,6 +172,4 @@ pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: Valid<ExecutableDocument>,
-    pub(crate) parse_errors: Option<DiagnosticList>,
-    pub(crate) validation_errors: Option<DiagnosticList>,
 }
