@@ -21,7 +21,6 @@ use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
-use crate::configuration::GraphQLValidationMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
@@ -76,10 +75,7 @@ impl BridgeQueryPlanner {
                 incremental_delivery: Some(IncrementalDeliverySupport {
                     enable_defer: Some(configuration.supergraph.defer_support),
                 }),
-                graphql_validation: matches!(
-                    configuration.experimental_graphql_validation_mode,
-                    GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-                ),
+                graphql_validation: false,
                 debug: Some(QueryPlannerDebugConfig {
                     bypass_planner_for_single_subgraph: None,
                     max_evaluated_plans: configuration
@@ -94,46 +90,7 @@ impl BridgeQueryPlanner {
                 }),
             },
         )
-        .await;
-
-        let planner = match planner {
-            Ok(planner) => planner,
-            Err(err) => {
-                if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::Both
-                {
-                    let has_validation_errors = err.iter().any(|err| err.is_validation_error());
-
-                    if has_validation_errors && !schema.has_errors() {
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.operations.validation = 1u64,
-                            validation.source = VALIDATION_SOURCE_SCHEMA,
-                            validation.result = VALIDATION_FALSE_NEGATIVE,
-                            "validation mismatch: JS query planner reported a schema validation error, but apollo-rs did not"
-                        );
-                    }
-                }
-
-                return Err(err.into());
-            }
-        };
-
-        if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::Both {
-            if schema.has_errors() {
-                tracing::warn!(
-                    monotonic_counter.apollo.router.operations.validation = 1u64,
-                    validation.source = VALIDATION_SOURCE_SCHEMA,
-                    validation.result = VALIDATION_FALSE_POSITIVE,
-                    "validation mismatch: apollo-rs reported a schema validation error, but JS query planner did not"
-                );
-            } else {
-                // false_negative was an early return so we know it was correct here
-                tracing::info!(
-                    monotonic_counter.apollo.router.operations.validation = 1u64,
-                    validation.source = VALIDATION_SOURCE_SCHEMA,
-                    validation.result = VALIDATION_MATCH
-                );
-            }
-        }
+        .await?;
 
         let planner = Arc::new(planner);
 
@@ -224,10 +181,7 @@ impl BridgeQueryPlanner {
                         incremental_delivery: Some(IncrementalDeliverySupport {
                             enable_defer: Some(configuration.supergraph.defer_support),
                         }),
-                        graphql_validation: matches!(
-                            configuration.experimental_graphql_validation_mode,
-                            GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-                        ),
+                        graphql_validation: false,
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
                         debug: Some(QueryPlannerDebugConfig {
                             bypass_planner_for_single_subgraph: None,
@@ -289,14 +243,6 @@ impl BridgeQueryPlanner {
             executable,
             operation_name,
         )?;
-        let validation_error = match self.configuration.experimental_graphql_validation_mode {
-            GraphQLValidationMode::Legacy => None,
-            GraphQLValidationMode::New => {
-                Query::validate_query(doc)?;
-                None
-            }
-            GraphQLValidationMode::Both => Query::validate_query(doc).err(),
-        };
 
         let (fragments, operations, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, executable, &doc.ast)?;
@@ -319,7 +265,6 @@ impl BridgeQueryPlanner {
             subselections,
             defer_stats,
             is_original: true,
-            validation_error,
             schema_aware_hash,
         })
     }
@@ -419,25 +364,9 @@ impl BridgeQueryPlanner {
             }
             Err(err) => {
                 let plan_errors: PlanErrors = err.into();
-                if matches!(
-                    self.configuration.experimental_graphql_validation_mode,
-                    GraphQLValidationMode::Both
-                ) {
-                    compare_validation_errors(
-                        Some(&plan_errors),
-                        selections.validation_error.as_ref(),
-                    );
-                }
                 return Err(QueryPlannerError::from(plan_errors));
             }
         };
-
-        if matches!(
-            self.configuration.experimental_graphql_validation_mode,
-            GraphQLValidationMode::Both
-        ) {
-            compare_validation_errors(None, selections.validation_error.as_ref());
-        }
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if original_query != filtered_query {
@@ -1202,7 +1131,6 @@ mod tests {
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut configuration: Configuration = Default::default();
         configuration.supergraph.introspection = true;
-        configuration.experimental_graphql_validation_mode = GraphQLValidationMode::Both;
         let configuration = Arc::new(configuration);
 
         let planner = BridgeQueryPlanner::new(schema.to_string(), configuration.clone())

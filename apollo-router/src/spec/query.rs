@@ -71,14 +71,6 @@ pub(crate) struct Query {
     pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
-    /// Validation errors, used for comparison with the JS implementation.
-    ///
-    /// `ValidationErrors` is not serde-serializable. If this comes from cache,
-    /// the plan ought also to be cached, so we should not need this value anyways.
-    /// XXX(@goto-bus-stop): Remove when only Rust validation is used
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    #[serde(skip)]
-    pub(crate) validation_error: Option<ValidationErrors>,
 
     /// This is a hash that depends on:
     /// - the query itself
@@ -119,7 +111,6 @@ impl Query {
                 conditional_defer_variable_names: IndexSet::new(),
             },
             is_original: true,
-            validation_error: None,
             schema_aware_hash: vec![],
         }
     }
@@ -336,7 +327,6 @@ impl Query {
             filtered_query: None,
             defer_stats,
             is_original: true,
-            validation_error: None,
             schema_aware_hash,
         })
     }
