@@ -309,9 +309,9 @@ impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            QueryPlannerError::SpecError(err) => {
-                err.into_graphql_errors()
-            }
+            QueryPlannerError::SpecError(err) => err
+                .into_graphql_errors()
+                .map_err(QueryPlannerError::SpecError),
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
@@ -443,9 +443,7 @@ impl From<SpecError> for QueryPlannerError {
 
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
-        QueryPlannerError::OperationValidationErrors(
-            err.errors.iter().map(|e| e.to_json()).collect(),
-        )
+        QueryPlannerError::OperationValidationErrors(ValidationErrors { errors: err.errors })
     }
 }
 
@@ -572,9 +570,9 @@ impl IntoGraphQLErrors for ParseErrors {
 }
 
 /// Collection of schema validation errors.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ValidationErrors {
-    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
+    pub(crate) errors: Vec<apollo_compiler::execution::GraphQLError>,
 }
 
 impl IntoGraphQLErrors for ValidationErrors {
@@ -584,17 +582,16 @@ impl IntoGraphQLErrors for ValidationErrors {
             .iter()
             .map(|diagnostic| {
                 Error::builder()
-                    .message(diagnostic.message().to_string())
+                    .message(diagnostic.message.to_string())
                     .locations(
                         diagnostic
-                            .get_line_column()
-                            .map(|location| {
-                                vec![ErrorLocation {
-                                    line: location.line as u32,
-                                    column: location.column as u32,
-                                }]
+                            .locations
+                            .iter()
+                            .map(|loc| ErrorLocation {
+                                line: loc.line as u32,
+                                column: loc.column as u32,
                             })
-                            .unwrap_or_default(),
+                            .collect(),
                     )
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
@@ -609,16 +606,14 @@ impl std::fmt::Display for ValidationErrors {
             if index > 0 {
                 f.write_str("\n")?;
             }
-            if let Some(location) = error.get_line_column() {
+            if let Some(location) = error.locations.first() {
                 write!(
                     f,
                     "[{}:{}] {}",
-                    location.line,
-                    location.column,
-                    error.message()
+                    location.line, location.column, error.message
                 )?;
             } else {
-                write!(f, "{}", error.message())?;
+                write!(f, "{}", error.message)?;
             }
         }
         Ok(())

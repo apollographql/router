@@ -79,7 +79,9 @@ impl Schema {
         let (definitions, diagnostics) = match ast.to_schema_validate() {
             Ok(schema) => (schema, None),
             Err(WithErrors { partial, errors }) => {
-                return Err(SchemaError::Validate(ValidationErrors { errors }));
+                return Err(SchemaError::Validate(ValidationErrors {
+                    errors: errors.iter().map(|e| e.to_json()).collect(),
+                }));
             }
         };
 

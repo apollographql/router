@@ -283,7 +283,9 @@ impl Query {
         let executable = match ast.to_executable_validate(schema) {
             Ok(doc) => doc,
             Err(WithErrors { partial, errors }) => {
-                return Err(SpecError::ValidationError(ValidationErrors { errors }));
+                return Err(SpecError::ValidationError(ValidationErrors {
+                    errors: errors.iter().map(|e| e.to_json()).collect(),
+                }));
             }
         };
 
