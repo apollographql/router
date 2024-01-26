@@ -78,7 +78,7 @@ impl Schema {
         // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
         let (definitions, diagnostics) = match ast.to_schema_validate() {
             Ok(schema) => (schema, None),
-            Err(WithErrors { partial, errors }) => {
+            Err(WithErrors {  errors, .. }) => {
                 return Err(SchemaError::Validate(ValidationErrors {
                     errors: errors.iter().map(|e| e.to_json()).collect(),
                 }));

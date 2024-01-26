@@ -24,6 +24,7 @@ use super::QueryKey;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
+use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
@@ -421,9 +422,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 }
                 Ok(modified_query) => {
                     let executable = modified_query
-                        .to_executable(schema)
-                        // Assume transformation creates a valid document: ignore conversion errors
-                        .unwrap_or_else(|invalid| invalid.partial);
+                        .to_executable_validate(schema)
+                        .map_err(|e| {
+                            SpecError::ValidationError(ValidationErrors {
+                                errors: e.errors.iter().map(|e| e.to_json()).collect(),
+                            })
+                        })?;
                     doc = Arc::new(ParsedDocumentInner {
                         executable,
                         ast: modified_query,
@@ -707,7 +711,7 @@ mod tests {
             .await
             .unwrap();
 
-        let doc = Query::parse_document(query, &schema, &Configuration::default());
+        let doc = Query::parse_document(query, &schema, &Configuration::default()).unwrap();
 
         let selections = planner
             .parse_selections(query.to_string(), None, &doc)
@@ -1085,7 +1089,8 @@ mod tests {
             original_query,
             planner.schema().api_schema(),
             &configuration,
-        );
+        )
+        .unwrap();
 
         planner
             .get(
