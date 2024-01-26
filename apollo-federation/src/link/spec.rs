@@ -79,6 +79,13 @@ impl Identity {
             name: name!("join"),
         }
     }
+
+    pub fn inaccessible_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("inaccessible"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.

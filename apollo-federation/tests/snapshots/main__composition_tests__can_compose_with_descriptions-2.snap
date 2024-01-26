@@ -7,6 +7,9 @@ schema {
   query: Query
 }
 
+"""The foo directive description"""
+directive @foo(url: String) on FIELD
+
 """An enum"""
 enum E {
   """The A value"""
