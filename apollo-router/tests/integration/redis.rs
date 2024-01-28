@@ -54,10 +54,7 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s:String = client
-          .get(known_cache_key)
-          .await
-          .unwrap();
+        let s: String = client.get(known_cache_key).await.unwrap();
         let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
         // ignore the usage reporting field for which the order of elements in `referenced_fields_by_type` can change
         let query_plan = query_plan_res
