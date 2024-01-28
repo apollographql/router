@@ -18,6 +18,11 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() -> Result<(), BoxError> {
+        // If this test fails and the cache key format changed you'll need to update the key here.
+        // 1. Force this test to run locally by removing the cfg() line at the top of this file.
+        // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
+        // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
+        // 4. Run this test and yank the updated cache key from the redis logs.
         let known_cache_key = "plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112.4f918cb09d5956bea87fe8addb4db3bd16de2cdf935e899cf252cac5528090e4.f68a33e37534ac1e1f19e929f285ebacd55a8807eb076d955935bcc3aad58320";
 
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
