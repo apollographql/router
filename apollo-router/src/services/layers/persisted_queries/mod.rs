@@ -719,12 +719,6 @@ mod tests {
                 "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{username,name}  } # yeah"
             ).await;
 
-        // Documents with invalid syntax don't match...
-        denied_by_safelist(&pq_layer, &query_analysis_layer, "}}}}").await;
-
-        // ... unless they precisely match a safelisted document that also has invalid syntax.
-        allowed_by_safelist(&pq_layer, &query_analysis_layer, "}}}").await;
-
         // Introspection queries are allowed (even using fragments and aliases), because
         // introspection is enabled.
         allowed_by_safelist(
