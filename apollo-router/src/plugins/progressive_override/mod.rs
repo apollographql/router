@@ -131,10 +131,7 @@ impl Plugin for ProgressiveOverridePlugin {
             schema,
             labels_from_schema,
             // we have to visit each operation to find out which labels from the schema are relevant.
-            labels_per_operation_cache: Arc::new(
-                // TODO: size config?
-                DashMap::with_capacity(1000),
-            ),
+            labels_per_operation_cache: Arc::new(DashMap::new()),
         })
     }
 
