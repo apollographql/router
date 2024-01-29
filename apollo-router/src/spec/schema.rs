@@ -29,28 +29,16 @@ pub(crate) struct Schema {
     pub(crate) schema_id: Option<String>,
 }
 
-#[cfg(test)]
-fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
-    use itertools::Itertools;
-    use router_bridge::api_schema::api_schema;
-    use router_bridge::api_schema::ApiSchemaOptions;
-    let s = api_schema(
-        schema,
-        ApiSchemaOptions {
-            graphql_validation: false,
-        },
-    )
-    .map_err(|e| SchemaError::Api(e.to_string()))?
-    .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
-    Ok(format!("{s}\n"))
-}
-
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str) -> Result<Self, SchemaError> {
-        let api_schema = Self::parse(&make_api_schema(s)?)?;
-        let schema = Self::parse(s)?.with_api_schema(api_schema);
-        Ok(schema)
+        let schema = Self::parse(s)?;
+        let api_schema =
+            apollo_federation::Supergraph::from(schema.definitions.clone()).to_api_schema();
+        // API schema generation does not carry over directives yet
+        let api_schema_sdl = format!("{api_schema}\ndirective @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT");
+        let api_schema = Self::parse(&api_schema_sdl)?;
+        Ok(schema.with_api_schema(api_schema))
     }
 
     pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
