@@ -232,26 +232,18 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
 
     let mut mock_service = MockSupergraphService::new();
 
-    let expected_labels = expected_labels
-        .iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-    let absent_labels = absent_labels
-        .iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
     mock_service.expect_call().returning(move |request| {
         let labels_to_override = request
             .context
-            .get::<_, Vec<Arc<String>>>(LABELS_TO_OVERRIDE_KEY)
+            .get::<_, Vec<String>>(LABELS_TO_OVERRIDE_KEY)
             .unwrap()
             .unwrap();
 
-        for label in expected_labels.iter() {
-            assert!(labels_to_override.contains(&Arc::new(label.to_string())));
+        for label in &expected_labels {
+            assert!(labels_to_override.contains(&label.to_string()));
         }
-        for label in absent_labels.iter() {
-            assert!(!labels_to_override.contains(&Arc::new(label.to_string())));
+        for label in &absent_labels {
+            assert!(!labels_to_override.contains(&label.to_string()));
         }
         SupergraphResponse::fake_builder().build()
     });
@@ -318,6 +310,18 @@ async fn plugin_supergraph_service_trims_extraneous_labels() {
         // `bogus` is not in the schema at all, so we expect it to be trimmed
         absent_labels: vec!["percent(0)", "bogus", "baz"],
         labels_from_coprocessors: vec!["foo", "baz", "bogus"],
+    };
+    assert_expected_and_absent_labels_for_supergraph_service(label_assertions).await;
+}
+
+#[tokio::test]
+async fn plugin_supergraph_service_trims_0pc_label() {
+    let label_assertions = LabelAssertions {
+        query: "{ percent0 { foo } }",
+        expected_labels: vec!["foo"],
+        // the router will always resolve percent(0) to false
+        absent_labels: vec!["percent(0)"],
+        labels_from_coprocessors: vec!["foo"],
     };
     assert_expected_and_absent_labels_for_supergraph_service(label_assertions).await;
 }
