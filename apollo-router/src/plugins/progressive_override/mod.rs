@@ -185,9 +185,8 @@ impl Plugin for ProgressiveOverridePlugin {
                     .unwrap_or_default()
                     .unwrap_or_default();
 
-                let operation = request.supergraph_request.body().query.clone();
-                let operation_name = request.supergraph_request.body().operation_name.clone();
-                let operation_hash = hash_operation(operation, operation_name);
+                let crate::graphql::Request {query, operation_name, ..} = request.supergraph_request.body();
+                let operation_hash = hash_operation(query, operation_name);
 
                 let maybe_parsed_doc = request.context.extensions().lock().get::<ParsedDocument>().cloned();
                 if let Some(parsed_doc) = maybe_parsed_doc {
@@ -236,7 +235,7 @@ impl Plugin for ProgressiveOverridePlugin {
     }
 }
 
-fn hash_operation(operation: Option<String>, operation_name: Option<String>) -> String {
+fn hash_operation(operation: &Option<String>, operation_name: &Option<String>) -> String {
     let mut digest = Sha256::new();
     if let Some(operation) = operation {
         digest.update(operation.as_bytes());
