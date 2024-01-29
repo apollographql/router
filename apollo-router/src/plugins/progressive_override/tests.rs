@@ -23,93 +23,6 @@ use crate::TestHarness;
 const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
 const SCHEMA_NO_USAGES: &str = include_str!("testdata/supergraph_no_usages.graphql");
 
-async fn get_supergraph_service() -> supergraph::BoxCloneService {
-    TestHarness::builder()
-        .configuration_json(serde_json::json! {{
-            "plugins": {
-                "experimental.expose_query_plan": true
-            }
-        }})
-        .unwrap()
-        .schema(SCHEMA)
-        .build_supergraph()
-        .await
-        .unwrap()
-}
-
-#[tokio::test]
-async fn todo() {
-    let query = "{ percent0 { foo } }";
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
-        ..Default::default()
-    });
-
-    let context: Context = Context::new();
-    context
-        .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
-
-    let request = supergraph::Request::fake_builder()
-        .query(query)
-        .context(context)
-        .header("Apollo-Expose-Query-Plan", "true")
-        .build()
-        .unwrap();
-
-    let response = get_supergraph_service()
-        .await
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
-    insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
-
-    let context = Context::new();
-    context
-        .insert(
-            LABELS_TO_OVERRIDE_KEY,
-            ["percent(100)"]
-                .iter()
-                .map(|s| Arc::new(s.to_string()))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-
-    let query = "{ percent100 { foo } }";
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
-        ..Default::default()
-    });
-
-    context
-        .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
-
-    let overridden_request = supergraph::Request::fake_builder()
-        .query(query)
-        .header("Apollo-Expose-Query-Plan", "true")
-        .context(context)
-        .build()
-        .unwrap();
-
-    let overridden_response = get_supergraph_service()
-        .await
-        .oneshot(overridden_request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
-    insta::assert_json_snapshot!(serde_json::to_value(overridden_response).unwrap());
-}
-
 #[tokio::test]
 async fn plugin_disables_itself_with_no_progressive_override_usages() {
     let plugin = ProgressiveOverridePlugin::new(PluginInit::fake_new(
@@ -289,4 +202,60 @@ async fn plugin_supergraph_service_trims_0pc_label() {
         labels_from_coprocessors: vec!["foo"],
     };
     assert_expected_and_absent_labels_for_supergraph_service(label_assertions).await;
+}
+
+async fn assert_query_plan_snapshot(query: &str) {
+    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
+        ast: Document::parse(query, "query.graphql").unwrap(),
+        ..Default::default()
+    });
+
+    let context: Context = Context::new();
+    context
+        .extensions()
+        .lock()
+        .insert::<ParsedDocument>(parsed_doc);
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .header("Apollo-Expose-Query-Plan", "true")
+        .build()
+        .unwrap();
+
+    let supergraph_service = TestHarness::builder()
+        .configuration_json(serde_json::json! {{
+            "plugins": {
+                "experimental.expose_query_plan": true
+            }
+        }})
+        .unwrap()
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let response = supergraph_service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
+}
+
+#[tokio::test]
+async fn non_overridden_field_yields_expected_query_plan() {
+    // `percent0` and `foo` should both be resolved in `Subgraph2`
+    assert_query_plan_snapshot("{ percent0 { foo } }").await;
+}
+
+#[tokio::test]
+async fn overridden_field_yields_expected_query_plan() {
+    // `percent100` should be overridden to `Subgraph1` while `foo` is not, so
+    // we expect a query plan with 2 fetches: the first to `Subgraph1` and a
+    // serial fetch after to resolve `foo` in `Subgraph2`
+    assert_query_plan_snapshot("{ percent100 { foo } }").await;
 }
