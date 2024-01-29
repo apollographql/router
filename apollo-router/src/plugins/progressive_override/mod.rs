@@ -51,7 +51,7 @@ pub(crate) struct ProgressiveOverridePlugin {
 type LabelsFromSchema = (HashMap<Arc<String>, Arc<f64>>, HashSet<Arc<String>>);
 
 fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
-    let Some(directive_name) = spec::Schema::directive_name(
+    let Some(join_field_directive_name_in_schema) = spec::Schema::directive_name(
         schema,
         JOIN_SPEC_BASE_URL,
         JOIN_SPEC_VERSION_RANGE,
@@ -76,7 +76,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
             let join_field_directives = field
                 .directives
                 .iter()
-                .filter(|d| d.name.as_str() == directive_name)
+                .filter(|d| d.name.as_str() == join_field_directive_name_in_schema)
                 .collect::<Vec<_>>();
             if !join_field_directives.is_empty() {
                 Some(join_field_directives)
@@ -122,9 +122,8 @@ impl Plugin for ProgressiveOverridePlugin {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let schema = Schema::parse(&*init.supergraph_sdl, "schema.graphql").expect(
-            "i guess unwrap is safe here because otherwise plugin init shouldn't be called?",
-        );
+        let schema = Schema::parse(&*init.supergraph_sdl, "schema.graphql")
+            .expect("Unexpectedly failed to parse supergraph");
         let labels_from_schema = collect_labels_from_schema(&schema);
         let enabled = !labels_from_schema.0.is_empty() || !labels_from_schema.1.is_empty();
         Ok(ProgressiveOverridePlugin {

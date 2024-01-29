@@ -115,7 +115,9 @@ async fn plugin_disables_itself_with_no_progressive_override_usages() {
     let plugin = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
         Arc::new(SCHEMA_NO_USAGES.to_string()),
-    )).await.unwrap();
+    ))
+    .await
+    .unwrap();
 
     assert_eq!(plugin.enabled, false);
 }
@@ -125,7 +127,9 @@ async fn plugin_enables_itself_with_progressive_override_usages() {
     let plugin = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
         Arc::new(SCHEMA.to_string()),
-    )).await.unwrap();
+    ))
+    .await
+    .unwrap();
 
     assert_eq!(plugin.enabled, true);
 }
