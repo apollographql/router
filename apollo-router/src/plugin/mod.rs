@@ -25,7 +25,6 @@ use std::task::Poll;
 
 use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
-use apollo_compiler::Schema;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
@@ -67,8 +66,6 @@ pub struct PluginInit<T> {
     pub config: T,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
-    /// Parsed Supergraph Schema
-    pub supergraph_schema: Arc<Schema>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
 }
@@ -105,13 +102,9 @@ where
 
     #[cfg(test)]
     pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
-        let supergraph_schema = Arc::new(
-            Schema::parse(supergraph_sdl.to_string(), "schema.graphql").unwrap_or(Schema::new()),
-        );
         PluginInit {
             config,
             supergraph_sdl,
-            supergraph_schema,
             notify: Notify::for_tests(),
         }
     }
@@ -132,13 +125,9 @@ where
         supergraph_sdl: Arc<String>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
-        let supergraph_schema = Arc::new(
-            Schema::parse(supergraph_sdl.to_string(), "schema.graphql").unwrap_or(Schema::new()),
-        );
         PluginInit {
             config,
             supergraph_sdl,
-            supergraph_schema,
             notify,
         }
     }
@@ -154,13 +143,9 @@ where
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
-        let supergraph_schema = Arc::new(
-            Schema::parse(supergraph_sdl.to_string(), "schema.graphql").unwrap_or(Schema::new()),
-        );
         Ok(PluginInit {
             config,
             supergraph_sdl,
-            supergraph_schema,
             notify,
         })
     }
@@ -172,15 +157,9 @@ where
         supergraph_sdl: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
-        let supergraph_schema = if let Some(supergraph_sdl) = &supergraph_sdl {
-            Schema::parse(supergraph_sdl.to_string(), "schema.graphql").unwrap_or(Schema::new())
-        } else {
-            Schema::new()
-        };
         PluginInit {
             config,
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
-            supergraph_schema: Arc::new(supergraph_schema),
             notify: notify.unwrap_or_else(Notify::for_tests),
         }
     }
