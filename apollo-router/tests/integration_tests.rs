@@ -115,12 +115,12 @@ async fn api_schema_hides_field() {
 
     let message = &actual.errors[0].message;
     assert!(
-        message.contains("no field `inStock` in type `Product`"),
+        message.contains("type `Product` does not have a field `inStock`"),
         "{message}"
     );
     assert_eq!(
         actual.errors[0].extensions["code"].as_str(),
-        Some("PARSING_ERROR"),
+        Some("GRAPHQL_VALIDATION_FAILED"),
     );
 }
 
