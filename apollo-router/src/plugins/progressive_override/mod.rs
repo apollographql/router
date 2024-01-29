@@ -189,7 +189,8 @@ impl Plugin for ProgressiveOverridePlugin {
                 let operation_name = request.supergraph_request.body().operation_name.clone();
                 let operation_hash = hash_operation(operation, operation_name);
 
-                if let Some(parsed_doc) = request.context.extensions().lock().get::<ParsedDocument>() {
+                let maybe_parsed_doc = request.context.extensions().lock().get::<ParsedDocument>().map(|doc| doc.clone());
+                if let Some(parsed_doc) = maybe_parsed_doc {
                     // we have to visit the operation to find out which subset
                     // of labels are relevant unless we've already cached that
                     // work
