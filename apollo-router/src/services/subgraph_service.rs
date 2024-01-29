@@ -7,7 +7,6 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
-use multer::Multipart;
 
 use ::serde::Deserialize;
 use async_compression::tokio::write::BrotliEncoder;
@@ -250,7 +249,6 @@ impl SubgraphService {
             .build(connector);
         Ok(Self {
             client: ServiceBuilder::new()
-                // .layer()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
             service: Arc::new(service.into()),

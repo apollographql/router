@@ -760,7 +760,7 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = content_negotiation::RouterLayer::new(false).layer(RouterService::new(
+        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),

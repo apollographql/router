@@ -182,7 +182,6 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "rustls-native-certs",
     "json",
     "stream",
-    "multipart",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
 router-bridge = "=0.5.11+v2.6.2"
