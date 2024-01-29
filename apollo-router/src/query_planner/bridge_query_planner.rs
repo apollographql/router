@@ -142,14 +142,14 @@ impl BridgeQueryPlanner {
                 let api_schema = planner.api_schema().await?;
                 api_schema.schema
             }
-            crate::configuration::ApiSchemaMode::New => schema.create_api_schema()?,
+            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(&configuration)?,
 
             crate::configuration::ApiSchemaMode::Both => {
                 let api_schema = planner
                     .api_schema()
                     .await
                     .map(|api_schema| api_schema.schema);
-                let new_api_schema = schema.create_api_schema();
+                let new_api_schema = schema.create_api_schema(&configuration);
 
                 match (&api_schema, &new_api_schema) {
                     (Err(js_error), Ok(_)) => {
