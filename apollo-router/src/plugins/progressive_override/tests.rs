@@ -119,7 +119,7 @@ async fn plugin_disables_itself_with_no_progressive_override_usages() {
     .await
     .unwrap();
 
-    assert_eq!(plugin.enabled, false);
+    assert!(!plugin.enabled);
 }
 
 #[tokio::test]
@@ -131,7 +131,7 @@ async fn plugin_enables_itself_with_progressive_override_usages() {
     .await
     .unwrap();
 
-    assert_eq!(plugin.enabled, true);
+    assert!(plugin.enabled);
 }
 
 #[tokio::test]
