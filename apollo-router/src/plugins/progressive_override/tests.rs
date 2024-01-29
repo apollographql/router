@@ -20,67 +20,8 @@ use crate::services::SupergraphResponse;
 use crate::Context;
 use crate::TestHarness;
 
-const SCHEMA: &str = r#"
-  schema
-    @link(url: "https://specs.apollo.dev/link/v1.0")
-    @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
-  {
-    query: Query
-  }
-
-  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-
-  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-
-  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-
-  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-
-  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-  scalar join__FieldSet
-
-  enum join__Graph {
-    SUBGRAPH1 @join__graph(name: "Subgraph1", url: "https://Subgraph1")
-    SUBGRAPH2 @join__graph(name: "Subgraph2", url: "https://Subgraph2")
-  }
-
-  scalar link__Import
-
-  enum link__Purpose {
-    """
-    \`SECURITY\` features provide metadata necessary to securely resolve fields.
-    """
-    SECURITY
-
-    """
-    \`EXECUTION\` features provide metadata necessary for operation execution.
-    """
-    EXECUTION
-  }
-
-  type Query
-    @join__type(graph: SUBGRAPH1)
-    @join__type(graph: SUBGRAPH2)
-  {
-    percent100: T @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "percent(100)") @join__field(graph: SUBGRAPH2, overrideLabel: "percent(100)")
-    percent0: T @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "percent(0)") @join__field(graph: SUBGRAPH2, overrideLabel: "percent(0)")
-  }
-
-  type T
-    @join__type(graph: SUBGRAPH1, key: "id")
-    @join__type(graph: SUBGRAPH2, key: "id")
-  {
-    id: ID
-    foo: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
-    bar: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "bar") @join__field(graph: SUBGRAPH2, overrideLabel: "bar")
-    baz: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "baz") @join__field(graph: SUBGRAPH2, overrideLabel: "baz")
-  }
-"#;
+const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
+const SCHEMA_NO_USAGES: &str = include_str!("testdata/supergraph_no_usages.graphql");
 
 async fn get_supergraph_service() -> supergraph::BoxCloneService {
     TestHarness::builder()
@@ -167,6 +108,26 @@ async fn todo() {
         .unwrap();
 
     insta::assert_json_snapshot!(serde_json::to_value(overridden_response).unwrap());
+}
+
+#[tokio::test]
+async fn plugin_disables_itself_with_no_progressive_override_usages() {
+    let plugin = ProgressiveOverridePlugin::new(PluginInit::fake_new(
+        Config {},
+        Arc::new(SCHEMA_NO_USAGES.to_string()),
+    )).await.unwrap();
+
+    assert_eq!(plugin.enabled, false);
+}
+
+#[tokio::test]
+async fn plugin_enables_itself_with_progressive_override_usages() {
+    let plugin = ProgressiveOverridePlugin::new(PluginInit::fake_new(
+        Config {},
+        Arc::new(SCHEMA.to_string()),
+    )).await.unwrap();
+
+    assert_eq!(plugin.enabled, true);
 }
 
 #[tokio::test]
