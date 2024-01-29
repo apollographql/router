@@ -269,6 +269,8 @@ impl Plugin for Telemetry {
         let span_mode = config.instrumentation.spans.mode;
         let use_legacy_request_span =
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let metrics_sender = self.apollo_metrics_sender.clone();
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -352,6 +354,7 @@ impl Plugin for Telemetry {
                 move |custom_attributes: LinkedList<KeyValue>, fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
+                    let sender = metrics_sender.clone();
 
                     Self::plugin_metrics(&config);
 
@@ -394,6 +397,26 @@ impl Plugin for Telemetry {
                                         );
                                     }
                                 }
+                            }
+
+                            if response
+                                .context
+                                .extensions()
+                                .lock()
+                                .get::<UsageReporting>()
+                                .map(|u| u.stats_report_key == "## GraphQLValidationFailure\n")
+                                .unwrap_or(false)
+                            {
+                                Self::update_apollo_metrics(
+                                    &response.context,
+                                    field_level_instrumentation_ratio,
+                                    sender,
+                                    true,
+                                    start.elapsed(),
+                                    // the query is invalid, we did not parse the operation kind
+                                    OperationKind::Query,
+                                    None,
+                                );
                             }
 
                             if response.response.status() >= StatusCode::BAD_REQUEST {
