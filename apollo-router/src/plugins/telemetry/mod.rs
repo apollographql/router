@@ -410,7 +410,10 @@ impl Plugin for Telemetry {
                                 .extensions()
                                 .lock()
                                 .get::<UsageReporting>()
-                                .map(|u| u.stats_report_key == "## GraphQLValidationFailure\n")
+                                .map(|u| {
+                                    u.stats_report_key == "## GraphQLValidationFailure\n"
+                                        || u.stats_report_key == "## GraphQLParseFailure\n"
+                                })
                                 .unwrap_or(false)
                             {
                                 Self::update_apollo_metrics(
