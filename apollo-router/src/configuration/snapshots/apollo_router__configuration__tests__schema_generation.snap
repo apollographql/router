@@ -3202,6 +3202,173 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "tty_format": {
+                      "description": "The format to log to stdout when you're running on an interactive terminal. When configured it will automatically use this `tty_format`` instead of the original `format` when an interactive terminal is detected",
+                      "oneOf": [
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                          "type": "object",
+                          "required": [
+                            "json"
+                          ],
+                          "properties": {
+                            "json": {
+                              "type": "object",
+                              "properties": {
+                                "display_current_span": {
+                                  "description": "Include the current span in this log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_filename": {
+                                  "description": "Include the filename with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_level": {
+                                  "description": "Include the level with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_line_number": {
+                                  "description": "Include the line number with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_resource": {
+                                  "description": "Include the resource with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_span_list": {
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_target": {
+                                  "description": "Include the target with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_thread_id": {
+                                  "description": "Include the thread_id with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_name": {
+                                  "description": "Include the thread_name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_timestamp": {
+                                  "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                          "type": "string",
+                          "enum": [
+                            "json"
+                          ]
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                          "type": "object",
+                          "required": [
+                            "text"
+                          ],
+                          "properties": {
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "ansi_escape_codes": {
+                                  "description": "Process ansi escapes (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_current_span": {
+                                  "description": "Include the current span in this log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_filename": {
+                                  "description": "Include the filename with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_level": {
+                                  "description": "Include the level with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_line_number": {
+                                  "description": "Include the line number with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_resource": {
+                                  "description": "Include the resource with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_service_name": {
+                                  "description": "Include the service name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_service_namespace": {
+                                  "description": "Include the service namespace with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_span_list": {
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_target": {
+                                  "description": "Include the target with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_id": {
+                                  "description": "Include the thread_id with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_name": {
+                                  "description": "Include the thread_name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_timestamp": {
+                                  "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                          "type": "string",
+                          "enum": [
+                            "text"
+                          ]
+                        }
+                      ],
+                      "nullable": true
                     }
                   },
                   "additionalProperties": false
