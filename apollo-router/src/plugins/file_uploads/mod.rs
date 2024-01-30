@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::pin::Pin;
@@ -5,8 +6,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use bytes::Bytes;
-use tokio::sync::Mutex;
-use tokio::sync::OwnedMutexGuard;
 use futures::stream::StreamExt;
 use futures::FutureExt;
 use futures::Stream;
@@ -22,6 +21,8 @@ use mediatype::MediaType;
 use mediatype::ReadParams;
 use multer::Multipart;
 use rand::RngCore;
+use tokio::sync::Mutex;
+use tokio::sync::OwnedMutexGuard;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -163,11 +164,29 @@ async fn extract_map(req: supergraph::Request) -> supergraph::Request {
             "Missing multipart field ‘map’, please see GRAPHQL_MULTIPART_REQUEST_SPEC_URL.",
         );
         // FIXME: apply some limit on size of map field
+
         let map_field = map_field.bytes().await.unwrap();
         // FIXME: unwrap
         let map_field: MapField = serde_json::from_slice(&map_field).unwrap();
         // FIXME: check number of files
         // assert!(map_field.len());
+
+        let mut map_per_variable = HashMap::<String, HashMap<String, String>>::new();
+        for (file, paths) in map_field.iter() {
+            for path in paths.iter() {
+                let mut segments = path.splitn(3, ".");
+                assert!(segments.next() == Some("variables"));
+                // FIXME: validation error
+                let var_name = segments.next().unwrap();
+                let var_path = segments.next().unwrap_or("");
+
+                map_per_variable
+                    .entry(var_name.to_owned())
+                    .or_insert_with(|| HashMap::new())
+                    .insert(var_path.to_owned(), file.clone());
+            }
+        }
+        println!("{:?}", map_per_variable);
 
         req.context
             .private_entries
@@ -180,7 +199,7 @@ async fn extract_map(req: supergraph::Request) -> supergraph::Request {
     req
 }
 
-type MapField = HashMap<String, Vec<String>>;
+type MapField = IndexMap<String, Vec<String>>;
 
 #[derive(Clone)]
 struct SupergraphLayerResult {
@@ -250,7 +269,7 @@ pub(crate) async fn wrap_http_client_call(
 
         let request_body = hyper::Body::wrap_stream(new_body);
         let request = http::Request::from_parts(request_parts, request_body);
-        return client.call(request).await
+        return client.call(request).await;
     }
     client.call(request).await
 }
