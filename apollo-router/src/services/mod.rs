@@ -25,6 +25,7 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 
 pub mod execution;
 pub(crate) mod external;
+pub mod http;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;

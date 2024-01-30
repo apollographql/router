@@ -817,6 +817,7 @@ async fn call_http(
         .get::<SigningParamsConfig>()
         .cloned();
 
+    //FIXME: move this to a HTTP service plugin
     let request = if let Some(signing_params) = signing_params {
         signing_params.sign(request, service_name).await?
     } else {
