@@ -4,7 +4,7 @@ use apollo_router::_private::create_test_service_factory_from_yaml;
 async fn test_supergraph_validation_errors_are_passed_on() {
     create_test_service_factory_from_yaml(
         include_str!("../../src/testdata/invalid_supergraph.graphql"),
-        "",
+        "supergraph:\n  introspection: true\n",
     )
     .await;
 }
