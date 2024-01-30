@@ -55,6 +55,7 @@ use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
+use super::http::MakeHttpService;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::configuration::TlsClientAuth;
@@ -177,6 +178,7 @@ impl SubgraphService {
         tls_root_store: &Option<RootCertStore>,
         http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
+        http_service: crate::services::http::BoxService,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
         let tls_cert_store = configuration

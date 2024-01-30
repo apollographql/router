@@ -3,6 +3,7 @@ use std::io;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
+use futures::future::BoxFuture;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
@@ -356,6 +357,19 @@ pub(crate) async fn create_subgraph_services(
 
     let mut subgraph_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
+        let http_service = crate::services::http::HttpService::from_config(
+            name,
+            configuration,
+            &tls_root_store,
+            shaping.enable_subgraph_http2(name),
+        )?;
+        let http_service = plugins
+            .iter()
+            .rev()
+            .fold(http_service.boxed(), |acc, (_, e)| {
+                e.http_service(name, acc)
+            });
+
         let subgraph_service = shaping.subgraph_service_internal(
             name,
             SubgraphService::from_config(
@@ -364,6 +378,7 @@ pub(crate) async fn create_subgraph_services(
                 &tls_root_store,
                 shaping.enable_subgraph_http2(name),
                 subscription_plugin_conf.clone(),
+                http_service,
             )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
