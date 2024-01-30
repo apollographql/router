@@ -9,8 +9,8 @@ expression: results
       "## GraphQLValidationFailure\n": {
         "stats_with_context": {
           "context": {
-            "client_name": "",
-            "client_version": "",
+            "client_name": "test_client",
+            "client_version": "1.0-test",
             "operation_type": "query",
             "operation_subtype": ""
           },

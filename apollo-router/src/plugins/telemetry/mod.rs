@@ -318,18 +318,24 @@ impl Plugin for Telemetry {
                         );
                     }
 
-                    let client_name: &str = request
+                    let client_name = request
                         .router_request
                         .headers()
                         .get(&config_request.apollo.client_name_header)
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
+                        .and_then(|h| h.to_str().ok());
                     let client_version = request
                         .router_request
                         .headers()
                         .get(&config_request.apollo.client_version_header)
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
+                        .and_then(|h| h.to_str().ok());
+
+                    if let Some(name) = client_name {
+                        let _ = request.context.insert(CLIENT_NAME, name.to_owned());
+                    }
+
+                    if let Some(version) = client_version {
+                        let _ = request.context.insert(CLIENT_VERSION, version.to_owned());
+                    }
 
                     let mut custom_attributes = config_request
                         .instrumentation
@@ -338,8 +344,8 @@ impl Plugin for Telemetry {
                         .attributes
                         .on_request(request);
                     custom_attributes.extend([
-                        KeyValue::new(CLIENT_NAME_KEY, client_name.to_string()),
-                        KeyValue::new(CLIENT_VERSION_KEY, client_version.to_string()),
+                        KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or("").to_string()),
+                        KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or("").to_string()),
                         KeyValue::new(
                             Key::from_static_str("apollo_private.http.request_headers"),
                             filter_headers(
@@ -895,27 +901,9 @@ impl Telemetry {
         field_level_instrumentation_ratio: f64,
         req: &SupergraphRequest,
     ) {
-        let apollo_config = &config.apollo;
         let context = &req.context;
         let http_request = &req.supergraph_request;
         let headers = http_request.headers();
-        let client_name_header = &apollo_config.client_name_header;
-        let client_version_header = &apollo_config.client_version_header;
-        if let Some(name) = headers
-            .get(client_name_header)
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_owned())
-        {
-            let _ = context.insert(CLIENT_NAME, name);
-        }
-
-        if let Some(version) = headers
-            .get(client_version_header)
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_owned())
-        {
-            let _ = context.insert(CLIENT_VERSION, version);
-        }
 
         let (should_log_headers, should_log_body) = config.exporters.logging.should_log(req);
         if should_log_headers {
