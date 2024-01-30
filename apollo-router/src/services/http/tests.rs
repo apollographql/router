@@ -1,17 +1,35 @@
 use std::io;
 
+use axum::extract::ws::Message;
+use axum::extract::ConnectInfo;
+use axum::extract::WebSocketUpgrade;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+use axum::Server;
+use http::header::CONTENT_TYPE;
+use http::StatusCode;
+use http::Uri;
 use http::Version;
 use hyper::server::conn::AddrIncoming;
+use hyper::service::make_service_fn;
+use hyper::Body;
 use hyper_rustls::TlsAcceptor;
+use mime::APPLICATION_JSON;
 use rustls::server::AllowAnyAuthenticatedClient;
 use rustls::Certificate;
 use rustls::PrivateKey;
 use rustls::ServerConfig;
+use tower::service_fn;
+use tower::ServiceExt;
 
 use crate::configuration::load_certs;
 use crate::configuration::load_key;
 use crate::configuration::TlsClient;
 use crate::configuration::TlsClientAuth;
+use crate::plugins::traffic_shaping::Http2Config;
+use crate::services::http::HttpService;
+use crate::Configuration;
 
 async fn tls_server(
     listener: tokio::net::TcpListener,
@@ -76,7 +94,7 @@ async fn tls_self_signed() {
         },
     );
     let subgraph_service =
-        SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None).unwrap();
+        HttpService::from_config("test", &config, &None, Http2Config::Enable, None).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -121,7 +139,7 @@ async fn tls_custom_root() {
         },
     );
     let subgraph_service =
-        SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None).unwrap();
+        HttpService::from_config("test", &config, &None, Http2Config::Enable, None).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -219,7 +237,7 @@ async fn tls_client_auth() {
         },
     );
     let subgraph_service =
-        SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None).unwrap();
+        HttpService::from_config("test", &config,  Http2Config::Enable).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -268,18 +286,15 @@ async fn test_subgraph_h2c() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_h2c_server(listener));
-    let subgraph_service = SubgraphService::new(
+    let subgraph_service = HttpService::new(
         "test",
-        true,
         Http2Config::Http2Only,
-        None,
         rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_native_roots()
             .with_no_client_auth(),
-        Notify::default(),
     )
-    .expect("can create a SubgraphService");
+    .expect("can create a HttpService");
 
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
     let response = subgraph_service

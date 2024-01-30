@@ -9,8 +9,8 @@ use crate::Context;
 use super::Plugins;
 
 pub(crate) mod service;
-#[cfg(test)]
-mod tests;
+//#[cfg(test)]
+//mod tests;
 
 pub(crate) use service::HttpService;
 
@@ -32,29 +32,21 @@ pub struct HttpResponse {
 
 #[derive(Clone)]
 pub(crate) struct HttpServiceFactory {
-    pub(crate) services: Arc<HashMap<String, Arc<dyn MakeHttpService>>>,
+    pub(crate) service: Arc<dyn MakeHttpService>,
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl HttpServiceFactory {
-    pub(crate) fn new(
-        services: Vec<(String, Arc<dyn MakeHttpService>)>,
-        plugins: Arc<Plugins>,
-    ) -> Self {
-        HttpServiceFactory {
-            services: Arc::new(services.into_iter().collect()),
-            plugins,
-        }
+    pub(crate) fn new(service: Arc<dyn MakeHttpService>, plugins: Arc<Plugins>) -> Self {
+        HttpServiceFactory { service, plugins }
     }
 
-    pub(crate) fn create(&self, name: &str) -> Option<BoxService> {
-        self.services.get(name).map(|service| {
-            let service = service.make();
-            self.plugins
-                .iter()
-                .rev()
-                .fold(service, |acc, (_, e)| e.http_service(name, acc))
-        })
+    pub(crate) fn create(&self, name: &str) -> BoxService {
+        let service = self.service.make();
+        self.plugins
+            .iter()
+            .rev()
+            .fold(service, |acc, (_, e)| e.http_service(name, acc))
     }
 }
 

@@ -6,7 +6,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::Duration;
 
 use ::serde::Deserialize;
 use async_compression::tokio::write::BrotliEncoder;
@@ -27,10 +26,8 @@ use http::response::Parts;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
-use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
-use hyper_rustls::HttpsConnector;
 use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::MediaType;
@@ -47,15 +44,13 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower_http::decompression::Decompression;
-use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
-use super::http::MakeHttpService;
+use super::http::HttpRequest;
+use super::http::HttpServiceFactory;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::configuration::TlsClientAuth;
@@ -78,15 +73,11 @@ use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
 use crate::services::trust_dns_connector::new_async_http_connector;
-use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
-
-type HTTPClientService =
-    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
@@ -98,7 +89,6 @@ const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
 const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphql-response");
-const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -156,7 +146,7 @@ pub(crate) struct SubgraphService {
     // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
-    client: HTTPClientService,
+    pub(crate) client_factory: HttpServiceFactory,
     service: Arc<String>,
 
     /// Whether apq is enabled in the router for subgraph calls
@@ -178,7 +168,7 @@ impl SubgraphService {
         tls_root_store: &Option<RootCertStore>,
         http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
-        http_service: crate::services::http::BoxService,
+        client_factory: crate::services::http::HttpServiceFactory,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
         let tls_cert_store = configuration
@@ -220,6 +210,7 @@ impl SubgraphService {
             subscription_config,
             tls_client_config,
             configuration.notify.clone(),
+            client_factory,
         )
     }
 
@@ -230,6 +221,7 @@ impl SubgraphService {
         subscription_config: Option<SubscriptionConfig>,
         tls_config: ClientConfig,
         notify: Notify<String, graphql::Response>,
+        client_factory: crate::services::http::HttpServiceFactory,
     ) -> Result<Self, BoxError> {
         let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
@@ -241,20 +233,8 @@ impl SubgraphService {
             .https_or_http()
             .enable_http1();
 
-        let connector = if http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
-        };
-
-        let http_client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-            .http2_only(http2 == Http2Config::Http2Only)
-            .build(connector);
         Ok(Self {
-            client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(http_client),
+            client_factory,
             service: Arc::new(service.into()),
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
             subscription_config,
@@ -291,10 +271,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.client
-            .poll_ready(cx)
-            .map(|res| res.map_err(|e| Box::new(e) as BoxError))
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
@@ -333,8 +311,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
         let (_, mut body) = subgraph_request.into_parts();
 
-        let clone = self.client.clone();
-        let client = std::mem::replace(&mut self.client, clone);
+        let client_factory = self.client_factory.clone();
 
         let arc_apq_enabled = self.apq.clone();
 
@@ -463,6 +440,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 }
             }
 
+            let client = client_factory.create(&service_name);
+
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
@@ -501,7 +480,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 request.clone(),
                 apq_body.clone(),
                 context.clone(),
-                client.clone(),
+                client_factory.create(&service_name),
                 &service_name,
             )
             .await?;
@@ -722,7 +701,7 @@ async fn call_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
-    client: HTTPClientService,
+    client: crate::services::http::BoxService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let SubgraphRequest {
@@ -969,7 +948,8 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: HTTPClientService,
+    mut client: crate::services::http::BoxService,
+
     context: &Context,
     service_name: &str,
     request: Request<Body>,
@@ -985,7 +965,10 @@ async fn do_fetch(
 > {
     let _active_request_guard = context.enter_active_request();
     let response = client
-        .call(request)
+        .call(HttpRequest {
+            http_request: request,
+            context: context.clone(),
+        })
         .map_err(|err| {
             tracing::error!(fetch_error = ?err);
             FetchError::SubrequestHttpError {
@@ -996,7 +979,7 @@ async fn do_fetch(
         })
         .await?;
 
-    let (parts, body) = response.into_parts();
+    let (parts, body) = response.http_response.into_parts();
     // Print out debug for the response
     if display_headers {
         tracing::info!(
