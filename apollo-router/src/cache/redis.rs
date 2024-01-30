@@ -244,6 +244,7 @@ impl RedisCacheStorage {
         Ok(Self {
             inner: Arc::new(client),
             ttl: None,
+            namespace: None,
         })
     }
 

@@ -193,6 +193,7 @@ impl EntityCache {
             storage,
             enabled: Some(true),
             subgraphs: Arc::new(subgraphs),
+            metrics: Metrics::default(),
         })
     }
 }
