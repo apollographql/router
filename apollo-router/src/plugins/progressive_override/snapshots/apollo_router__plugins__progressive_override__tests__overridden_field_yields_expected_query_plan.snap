@@ -1,7 +1,7 @@
 ---
 source: apollo-router/src/plugins/progressive_override/tests.rs
-assertion_line: 246
-expression: "serde_json::to_value(response).unwrap()"
+assertion_line: 262
+expression: query_plan
 ---
 {
   "data": {

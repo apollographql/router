@@ -204,7 +204,7 @@ async fn plugin_supergraph_service_trims_0pc_label() {
     assert_expected_and_absent_labels_for_supergraph_service(label_assertions).await;
 }
 
-async fn assert_query_plan_snapshot(query: &str) {
+async fn get_json_query_plan(query: &str) -> serde_json::Value {
     let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
         ast: Document::parse(query, "query.graphql").unwrap(),
         ..Default::default()
@@ -243,13 +243,14 @@ async fn assert_query_plan_snapshot(query: &str) {
         .await
         .unwrap();
 
-    insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
+    serde_json::to_value(response).unwrap()
 }
 
 #[tokio::test]
 async fn non_overridden_field_yields_expected_query_plan() {
     // `percent0` and `foo` should both be resolved in `Subgraph2`
-    assert_query_plan_snapshot("{ percent0 { foo } }").await;
+    let query_plan = get_json_query_plan("{ percent0 { foo } }").await;
+    insta::assert_json_snapshot!(query_plan);
 }
 
 #[tokio::test]
