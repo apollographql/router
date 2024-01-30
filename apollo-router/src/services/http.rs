@@ -9,8 +9,8 @@ use crate::Context;
 use super::Plugins;
 
 pub(crate) mod service;
-//#[cfg(test)]
-//mod tests;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use service::HttpService;
 

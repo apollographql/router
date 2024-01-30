@@ -3,7 +3,6 @@ use std::io;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
-use futures::future::BoxFuture;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
