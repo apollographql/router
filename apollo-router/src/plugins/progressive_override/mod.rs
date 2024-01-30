@@ -174,7 +174,13 @@ impl Plugin for ProgressiveOverridePlugin {
             .map_request(move |request: supergraph::Request| {
                 // evaluate each percentage-based label in the schema
                 let percentage_override_labels =
-                    percentage_labels.iter().filter(|(_, percentage)| rand::random::<f64>() * 100.0 < ***percentage).map(|(label, _) | label.clone());
+                    percentage_labels.iter().filter_map(|(label, percentage)| {
+                        if rand::random::<f64>() * 100.0 >= **percentage {
+                            None
+                        } else {
+                            Some(label.clone())
+                        }
+                    });
 
                 // collect any externally-resolved labels from the context
                 let externally_overridden_labels = request
