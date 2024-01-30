@@ -1,4 +1,4 @@
-use std:: sync::Arc;
+use std::sync::Arc;
 
 use hyper::Body;
 use tower::{BoxError, ServiceExt};
@@ -14,20 +14,20 @@ pub(crate) mod service;
 
 pub(crate) use service::HttpService;
 
-pub type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
-pub type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
-pub type ServiceResult = Result<HttpResponse, BoxError>;
+pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
+pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
 #[non_exhaustive]
-pub struct HttpRequest {
-    pub http_request: http::Request<Body>,
-    pub context: Context,
+pub(crate) struct HttpRequest {
+    pub(crate) http_request: http::Request<Body>,
+    pub(crate) context: Context,
 }
 
 #[non_exhaustive]
-pub struct HttpResponse {
-    pub http_response: http::Response<Body>,
-    pub context: Context,
+pub(crate) struct HttpResponse {
+    pub(crate) http_response: http::Response<Body>,
+    pub(crate) context: Context,
 }
 
 #[derive(Clone)]
