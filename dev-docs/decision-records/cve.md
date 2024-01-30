@@ -37,5 +37,5 @@ Something that causes a performance issue on the router, or a denial of service 
 
 ## Consequences
 
-CVE will be created for issues that meet the criteria. We will review this decision record after further hardening has taken place and that we are confident that the attack vectors for denial of service have been removed.
+A CVE will be created for issues that meet the criteria. We will review this decision record after further hardening has taken place and we are confident that the attack vectors for denial of service have been removed.
 We will create a plan for when this will happen and share with our users by Feb 2024.
