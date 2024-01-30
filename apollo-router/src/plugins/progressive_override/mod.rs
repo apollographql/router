@@ -48,7 +48,10 @@ pub(crate) struct ProgressiveOverridePlugin {
     labels_per_operation_cache: Arc<DashMap<String, Vec<Arc<String>>>>,
 }
 
-type LabelsFromSchema = (HashMap<Arc<String>, Arc<f64>>, HashSet<Arc<String>>);
+type LabelsFromSchema = (
+    Arc<HashMap<Arc<String>, Arc<f64>>>,
+    Arc<HashSet<Arc<String>>>,
+);
 
 fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
     let Some(join_field_directive_name_in_schema) = spec::Schema::directive_name(
@@ -58,7 +61,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
         JOIN_FIELD_DIRECTIVE_NAME,
     ) else {
         tracing::debug!("No join spec >=v0.4 found in the schema. No labels will be overridden.");
-        return (HashMap::new(), HashSet::new());
+        return (Arc::new(HashMap::new()), Arc::new(HashSet::new()));
     };
 
     let all_override_labels = schema
@@ -102,7 +105,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
         .into_iter()
         .partition(|label| label.starts_with("percent("));
 
-    let static_percentages = percentages
+    let static_percentages =percentages
         .into_iter()
         .filter_map(|unparsed_label| {
             unparsed_label
@@ -114,7 +117,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
         .collect::<HashMap<_, _>>();
 
     tracing::debug!("static_percentages: {:?}", &static_percentages);
-    (static_percentages, other_labels)
+    (Arc::new(static_percentages), Arc::new(other_labels))
 }
 
 #[async_trait::async_trait]

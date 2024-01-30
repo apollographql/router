@@ -90,7 +90,6 @@ impl LicenseEnforcementReport {
         !self.restricted_config_in_use.is_empty() || !self.restricted_schema_in_use.is_empty()
     }
 
-    // TODO: trevor to add
     pub(crate) fn build(
         configuration: &Configuration,
         schema: &apollo_compiler::ast::Document,
