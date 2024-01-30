@@ -132,6 +132,7 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    Static(String),
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -236,6 +237,7 @@ pub(crate) enum SupergraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    Static(String),
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -403,6 +405,7 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    Static(String),
 }
 
 impl Selector for RouterSelector {
@@ -437,6 +440,7 @@ impl Selector for RouterSelector {
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::Static(val) => Some(val.clone().into()),
             // Related to Response
             _ => None,
         }
@@ -562,6 +566,7 @@ impl Selector for SupergraphSelector {
                 .ok()
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
             // For response
             _ => None,
         }
@@ -731,6 +736,7 @@ impl Selector for SubgraphSelector {
                 .ok()
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
 
             // For response
             _ => None,
@@ -823,6 +829,21 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
+
+    #[test]
+    fn router_static() {
+        let selector = RouterSelector::Static("test_static".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+    }
 
     #[test]
     fn router_request_header() {
@@ -947,6 +968,22 @@ mod test {
             None
         );
     }
+
+    #[test]
+    fn supergraph_static() {
+        let selector = SupergraphSelector::Static("test_static".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+    }
+
     #[test]
     fn supergraph_response_header() {
         let selector = SupergraphSelector::ResponseHeader {
@@ -985,6 +1022,25 @@ mod test {
                     .unwrap()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn subgraph_static() {
+        let selector = SubgraphSelector::Static("test_static".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .supergraph_request(Arc::new(
+                            http::Request::builder()
+                                .body(crate::request::Request::builder().build())
+                                .unwrap()
+                        ))
+                        .build()
+                )
+                .unwrap(),
+            "test_static".into()
         );
     }
 
