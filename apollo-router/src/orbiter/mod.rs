@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use clap::CommandFactory;
+use clap::Parser;
 use http::header::CONTENT_TYPE;
 use http::header::USER_AGENT;
 use jsonschema::output::BasicOutput;
@@ -110,7 +110,10 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
             )
             .await
             .map(|factory| {
-                if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
+                // TODO: We should have a way to access the original CLI args here so that we can just see what the
+                // value of `anonymous_telemetry_disabled` really is instead of parsing it twice.
+                let telemetry_disabled = Opt::parse().is_telemetry_disabled();
+                if !telemetry_disabled {
                     let schema = factory.supergraph_creator.schema();
 
                     tokio::task::spawn(async move {
@@ -162,7 +165,7 @@ fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> Usa
     // Check the command line options. This encapsulates both env and command line functionality
     // This won't work in tests so we have separate test code.
     #[cfg(not(test))]
-    visit_args(&mut usage, env::args().collect());
+    visit_args(&mut usage, std::env::args().collect());
 
     UsageReport {
         session_id: *SESSION_ID.get_or_init(Uuid::new_v4),
