@@ -268,7 +268,7 @@ mod test {
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(json!({
-                "experimental_entity_cache": {
+                "preview_entity_cache": {
                     "redis": {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"
@@ -372,7 +372,7 @@ mod test {
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(json!({
-                "experimental_entity_cache": {
+                "preview_entity_cache": {
                     "redis": {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"
@@ -566,7 +566,7 @@ mod test {
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(json!({
-                "experimental_entity_cache": {
+                "preview_entity_cache": {
                     "redis": {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"
