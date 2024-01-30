@@ -372,8 +372,6 @@ pub(crate) async fn create_subgraph_services(
             SubgraphService::from_config(
                 name,
                 configuration,
-                &tls_root_store,
-                shaping.enable_subgraph_http2(name),
                 subscription_plugin_conf.clone(),
                 http_service_factory,
             )?,

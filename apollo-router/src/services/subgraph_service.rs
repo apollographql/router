@@ -33,7 +33,6 @@ use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
-use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -67,12 +66,10 @@ use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
-use crate::plugins::traffic_shaping::Http2Config;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
-use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
@@ -165,21 +162,11 @@ impl SubgraphService {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &Configuration,
-        tls_root_store: &Option<RootCertStore>,
-        http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
         client_factory: crate::services::http::HttpServiceFactory,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
-        let tls_cert_store = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .or_else(|| tls_root_store.clone());
+
         let enable_apq = configuration
             .apq
             .subgraph
@@ -187,28 +174,11 @@ impl SubgraphService {
             .get(&name)
             .map(|apq| apq.enabled)
             .unwrap_or(configuration.apq.subgraph.all.enabled);
-        let client_cert_config = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|tls| tls.client_authentication.as_ref())
-            .or(configuration
-                .tls
-                .subgraph
-                .all
-                .client_authentication
-                .as_ref());
-
-        let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
 
         SubgraphService::new(
             name,
             enable_apq,
-            http2,
             subscription_config,
-            tls_client_config,
             configuration.notify.clone(),
             client_factory,
         )
@@ -217,22 +187,10 @@ impl SubgraphService {
     pub(crate) fn new(
         service: impl Into<String>,
         enable_apq: bool,
-        http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
-        tls_config: ClientConfig,
         notify: Notify<String, graphql::Response>,
         client_factory: crate::services::http::HttpServiceFactory,
     ) -> Result<Self, BoxError> {
-        let mut http_connector = new_async_http_connector()?;
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        let builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
-
         Ok(Self {
             client_factory,
             service: Arc::new(service.into()),
@@ -1236,6 +1194,7 @@ mod tests {
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
+    use crate::plugins::traffic_shaping::Http2Config;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
@@ -1911,13 +1870,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "testbis",
             true,
-            Http2Config::Disable,
             subscription_config().into(),
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::builder().build(),
+            HttpServiceFactory::from_config(
+                "testbis",
+                &Configuration::default(),
+                Http2Config::Disable,
+            ),
         )
         .expect("can create a SubgraphService");
         let (tx, _rx) = mpsc::channel(2);
@@ -1955,13 +1914,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -1989,13 +1944,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2023,13 +1974,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2062,13 +2009,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2105,13 +2048,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2146,13 +2085,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Disable,
             subscription_config().into(),
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::builder().build(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
         let (tx, rx) = mpsc::channel(2);
@@ -2199,13 +2134,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Disable,
             subscription_config().into(),
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::builder().build(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
         let (tx, _rx) = mpsc::channel(2);
@@ -2243,13 +2174,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2285,13 +2212,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2322,13 +2245,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             false,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2370,13 +2289,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2407,13 +2322,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2453,13 +2364,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2497,13 +2404,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2538,13 +2441,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2579,13 +2478,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 
@@ -2620,13 +2515,9 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             false,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
         )
         .expect("can create a SubgraphService");
 

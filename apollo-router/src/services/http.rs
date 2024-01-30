@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std:: sync::Arc;
 
 use hyper::Body;
 use tower::{BoxError, ServiceExt};
@@ -39,6 +39,22 @@ pub(crate) struct HttpServiceFactory {
 impl HttpServiceFactory {
     pub(crate) fn new(service: Arc<dyn MakeHttpService>, plugins: Arc<Plugins>) -> Self {
         HttpServiceFactory { service, plugins }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_config(
+        service: impl Into<String>,
+        configuration: &crate::Configuration,
+        http2: crate::plugins::traffic_shaping::Http2Config,
+    ) -> Self {
+        use indexmap::IndexMap;
+
+        let service = HttpService::from_config(service, configuration, &None, http2).unwrap();
+
+        HttpServiceFactory {
+            service: Arc::new(service),
+            plugins: Arc::new(IndexMap::new()),
+        }
     }
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
