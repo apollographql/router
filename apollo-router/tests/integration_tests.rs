@@ -1526,11 +1526,13 @@ async fn test_telemetry_doesnt_hang_with_invalid_schema() {
         include_str!("../src/testdata/invalid_supergraph.graphql"),
         r#"
     telemetry:
-      tracing:
-        common:
-          service_name: router
-        otlp:
-          endpoint: default
+      exporters:
+        tracing:
+          common:
+            service_name: router
+          otlp:
+            enabled: true
+            endpoint: default
 "#,
     )
     .await;
