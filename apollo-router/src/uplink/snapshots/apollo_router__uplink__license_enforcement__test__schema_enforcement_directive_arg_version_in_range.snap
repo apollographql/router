@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/uplink/license_enforcement.rs
-assertion_line: 660
+assertion_line: 741
 expression: report.to_string()
 ---
 Schema features:
