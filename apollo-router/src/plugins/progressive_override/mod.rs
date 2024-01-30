@@ -105,7 +105,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
         .into_iter()
         .partition(|label| label.starts_with("percent("));
 
-    let static_percentages =percentages
+    let static_percentages = percentages
         .into_iter()
         .filter_map(|unparsed_label| {
             unparsed_label
