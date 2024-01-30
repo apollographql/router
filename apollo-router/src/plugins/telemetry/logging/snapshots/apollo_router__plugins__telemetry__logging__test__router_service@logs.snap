@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/plugins/telemetry/logging/mod.rs
+expression: yaml
+---
+- fields: {}
+  level: INFO
+  message: response
+  span:
+    http.flavor: HTTP/1.1
+    http.method: GET
+    http.request.method: GET
+    http.route: "http://example.com/"
+    name: router
+    otel.kind: INTERNAL
+    trace_id: ""
+  spans:
+    - http.flavor: HTTP/1.1
+      http.method: GET
+      http.request.method: GET
+      http.route: "http://example.com/"
+      name: router
+      otel.kind: INTERNAL
+      trace_id: ""
+

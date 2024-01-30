@@ -14,6 +14,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
@@ -24,6 +25,7 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -43,6 +45,8 @@ use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
 use crate::spec::Schema;
 use crate::ListenAddr;
+
+pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
@@ -149,11 +153,79 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
+        // we have to create afirst telemetry plugin before creating everything else, to generate a trace
+        // of router and plugin creation
+        let plugin_registry = &*crate::plugin::PLUGINS;
+        let mut initial_telemetry_plugin = None;
+
+        if previous_router.is_none() && apollo_opentelemetry_initialized() {
+            if let Some(factory) = plugin_registry
+                .iter()
+                .find(|factory| factory.name == "apollo.telemetry")
+            {
+                let mut telemetry_config = configuration
+                    .apollo_plugins
+                    .plugins
+                    .get("telemetry")
+                    .cloned();
+                if let Some(plugin_config) = &mut telemetry_config {
+                    inject_schema_id(Some(&Schema::schema_id(&schema)), plugin_config);
+                    match factory
+                        .create_instance(
+                            plugin_config,
+                            Arc::new(schema.clone()),
+                            configuration.notify.clone(),
+                        )
+                        .await
+                    {
+                        Ok(mut plugin) => {
+                            if let Some(telemetry) = plugin
+                                .as_any_mut()
+                                .downcast_mut::<crate::plugins::telemetry::Telemetry>(
+                            ) {
+                                telemetry.activate();
+                            }
+                            initial_telemetry_plugin = Some(plugin);
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+
+        let router_span = tracing::info_span!(STARTING_SPAN_NAME);
+        Self.inner_create(
+            configuration,
+            schema,
+            previous_router,
+            initial_telemetry_plugin,
+            extra_plugins,
+        )
+        .instrument(router_span)
+        .await
+    }
+}
+
+impl YamlRouterFactory {
+    async fn inner_create<'a>(
+        &'a mut self,
+        configuration: Arc<Configuration>,
+        schema: String,
+        previous_router: Option<&'a RouterCreator>,
+        initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<RouterCreator, BoxError> {
+        let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
-            None => BridgeQueryPlanner::new(schema.clone(), configuration.clone()).await?,
+            None => {
+                BridgeQueryPlanner::new(schema.clone(), configuration.clone())
+                    .instrument(query_planner_span)
+                    .await?
+            }
             Some(planner) => {
                 BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                    .instrument(query_planner_span)
                     .await?
             }
         };
@@ -172,50 +244,73 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .broadcast_configuration(Arc::downgrade(&configuration));
         }
 
+        let schema_span = tracing::info_span!("schema");
+        let _guard = schema_span.enter();
+
         let schema = bridge_query_planner.schema();
         if schema_changed {
             configuration.notify.broadcast_schema(schema.clone());
         }
+        drop(_guard);
+        drop(schema_span);
+
+        let span = tracing::info_span!("plugins");
 
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
-
-        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
-        builder = builder.with_configuration(configuration.clone());
-        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
-        for (name, subgraph_service) in subgraph_services {
-            builder = builder.with_subgraph_service(&name, subgraph_service);
-        }
-        for (plugin_name, plugin) in plugins {
-            builder = builder.with_dyn_plugin(plugin_name, plugin);
-        }
-
-        // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-        let mut supergraph_creator = builder.build().await?;
-
-        // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis_layer =
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
-
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
-
-        if let Some(previous_router) = previous_router {
-            let cache_keys = previous_router
-                .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
-                .await;
-
-            supergraph_creator
-                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, cache_keys)
-                .await;
-        };
-
-        Ok(Self::RouterFactory::new(
-            query_analysis_layer,
-            persisted_query_layer,
-            Arc::new(supergraph_creator),
-            configuration,
+        let plugins = create_plugins(
+            &configuration,
+            &schema,
+            initial_telemetry_plugin,
+            extra_plugins,
         )
-        .await?)
+        .instrument(span)
+        .await?;
+
+        async {
+            let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+            builder = builder.with_configuration(configuration.clone());
+            let subgraph_services =
+                create_subgraph_services(&plugins, &schema, &configuration).await?;
+            for (name, subgraph_service) in subgraph_services {
+                builder = builder.with_subgraph_service(&name, subgraph_service);
+            }
+            for (plugin_name, plugin) in plugins {
+                builder = builder.with_dyn_plugin(plugin_name, plugin);
+            }
+
+            // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+            let mut supergraph_creator = builder.build().await?;
+
+            // Instantiate the parser here so we can use it to warm up the planner below
+            let query_analysis_layer =
+                QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration))
+                    .await;
+
+            let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
+
+            if let Some(previous_router) = previous_router {
+                let cache_keys = previous_router
+                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                    .await;
+
+                supergraph_creator
+                    .warm_up_query_planner(
+                        &query_analysis_layer,
+                        &persisted_query_layer,
+                        cache_keys,
+                    )
+                    .await;
+            };
+            RouterCreator::new(
+                query_analysis_layer,
+                persisted_query_layer,
+                Arc::new(supergraph_creator),
+                configuration,
+            )
+            .await
+        }
+        .instrument(tracing::info_span!("supergraph_creation"))
+        .await
     }
 }
 
@@ -297,7 +392,7 @@ impl YamlRouterFactory {
         let schema = bridge_query_planner.schema();
 
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+        let plugins = create_plugins(&configuration, &schema, None, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
@@ -385,15 +480,26 @@ caused by
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
+    initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
     let plugin_registry = &*crate::plugin::PLUGINS;
+    let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
     let mut apollo_plugin_factories: HashMap<&str, &PluginFactory> = plugin_registry
         .iter()
-        .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+        .filter(|factory| {
+            // the name starts with apollo
+            factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
+                && (
+                    // the plugin is mandatory
+                    apollo_telemetry_plugin_mandatory ||
+                    // the name isn't apollo.telemetry
+                    factory.name != "apollo.telemetry"
+                )
+        })
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
@@ -421,20 +527,29 @@ pub(crate) async fn create_plugins(
 
     macro_rules! add_apollo_plugin {
         ($name: literal, $opt_plugin_config: expr) => {{
-            let name = format!("{}{}", APOLLO_PLUGIN_PREFIX, $name);
-            let factory = apollo_plugin_factories
-                .remove(name.as_str())
-                .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
-            if let Some(mut plugin_config) = $opt_plugin_config {
-                if name == "apollo.telemetry" {
-                    // The apollo.telemetry" plugin isn't happy with empty config, so we
-                    // give it some. If any of the other mandatory plugins need special
-                    // treatment, then we'll have to perform it here.
-                    // This is *required* by the telemetry module or it will fail...
-                    inject_schema_id(schema, &mut plugin_config);
+            let name = concat!("apollo.", $name);
+            let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
+
+            async {
+                let factory = apollo_plugin_factories
+                    .remove(name)
+                    .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
+                if let Some(mut plugin_config) = $opt_plugin_config {
+                    if name == "apollo.telemetry" {
+                        // The apollo.telemetry" plugin isn't happy with empty config, so we
+                        // give it some. If any of the other mandatory plugins need special
+                        // treatment, then we'll have to perform it here.
+                        // This is *required* by the telemetry module or it will fail...
+                        inject_schema_id(
+                            Some(&Schema::schema_id(&schema.raw_sdl)),
+                            &mut plugin_config,
+                        );
+                    }
+                    add_plugin!(name.to_string(), factory, plugin_config);
                 }
-                add_plugin!(name, factory, plugin_config);
             }
+            .instrument(span)
+            .await;
         }};
     }
 
@@ -460,12 +575,21 @@ pub(crate) async fn create_plugins(
     macro_rules! add_user_plugins {
         () => {
             for (name, plugin_config) in user_plugins_config {
-                if let Some(factory) = plugin_registry.iter().find(|factory| factory.name == name) {
-                    add_plugin!(name, factory, plugin_config);
-                } else {
-                    errors.push(ConfigurationError::PluginUnknown(name))
+                let user_span = tracing::info_span!("user_plugin", "name" = &name);
+
+                async {
+                    if let Some(factory) =
+                        plugin_registry.iter().find(|factory| factory.name == name)
+                    {
+                        add_plugin!(name, factory, plugin_config);
+                    } else {
+                        errors.push(ConfigurationError::PluginUnknown(name))
+                    }
                 }
+                .instrument(user_span)
+                .await;
             }
+
             plugin_instances.extend(extra);
         };
     }
@@ -473,7 +597,18 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("include_subgraph_errors");
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("headers");
-    add_mandatory_apollo_plugin!("telemetry");
+    if apollo_telemetry_plugin_mandatory {
+        match initial_telemetry_plugin {
+            None => {
+                add_mandatory_apollo_plugin!("telemetry");
+            }
+            Some(plugin) => {
+                plugin_instances.push(("apollo.telemetry".to_string(), plugin));
+                apollo_plugins_config.remove("apollo.telemetry");
+                apollo_plugin_factories.remove("apollo.telemetry");
+            }
+        }
+    }
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -523,7 +658,7 @@ pub(crate) async fn create_plugins(
     }
 }
 
-fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
+fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
         // Warning: this must be done here, otherwise studio reporting will not work
         if apollo_key().is_some() && apollo_graph_reference().is_some() {
@@ -534,10 +669,7 @@ fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
             return;
         }
     }
-    if let (Some(schema_id), Some(apollo)) = (
-        &schema.api_schema().schema_id,
-        configuration.get_mut("apollo"),
-    ) {
+    if let (Some(schema_id), Some(apollo)) = (schema_id, configuration.get_mut("apollo")) {
         if let Some(apollo) = apollo.as_object_mut() {
             apollo.insert(
                 "schema_id".to_string(),
@@ -686,9 +818,9 @@ mod test {
     #[test]
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         let mut config = json!({ "apollo": {} });
-        inject_schema_id(&schema, &mut config);
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        inject_schema_id(schema.api_schema().schema_id.as_deref(), &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(

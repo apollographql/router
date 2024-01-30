@@ -124,6 +124,8 @@ pub(crate) enum Compression {
     Deflate,
     /// brotli
     Br,
+    /// identity
+    Identity,
 }
 
 impl Display for Compression {
@@ -132,6 +134,7 @@ impl Display for Compression {
             Compression::Gzip => write!(f, "gzip"),
             Compression::Deflate => write!(f, "deflate"),
             Compression::Br => write!(f, "br"),
+            Compression::Identity => write!(f, "identity"),
         }
     }
 }
@@ -380,7 +383,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                                 reason: "cannot get the callback stream".to_string(),
                             }
                         })?;
-                        stream_tx.send(handle.into_stream()).await?;
+                        stream_tx.send(Box::pin(handle.into_stream())).await?;
+
                         tracing::info!(
                             monotonic_counter.apollo.router.operations.subscriptions = 1u64,
                             subscriptions.mode = %"callback",
@@ -559,7 +563,9 @@ async fn call_websocket(
         subgraph.service.name = service_name,
     );
     if !created {
-        subscription_stream_tx.send(handle.into_stream()).await?;
+        subscription_stream_tx
+            .send(Box::pin(handle.into_stream()))
+            .await?;
         tracing::info!(
             monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
             mode = %"passthrough",
@@ -593,7 +599,7 @@ async fn call_websocket(
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let signing_params = context
-        .private_entries
+        .extensions()
         .lock()
         .get::<SigningParamsConfig>()
         .cloned();
@@ -701,7 +707,7 @@ async fn call_websocket(
         }
     });
 
-    subscription_stream_tx.send(handle_stream).await?;
+    subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
     Ok(SubgraphResponse::new_from_response(
         resp.map(|_| graphql::Response::default()),
@@ -806,7 +812,7 @@ async fn call_http(
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let signing_params = context
-        .private_entries
+        .extensions()
         .lock()
         .get::<SigningParamsConfig>()
         .cloned();

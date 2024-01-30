@@ -39,6 +39,8 @@ impl Plugin for SupergraphSDL {
         // These allow basic interception and transformation of request and response messages.
         ServiceBuilder::new()
             .map_request(move |req: supergraph::Request| {
+                tracing::info!(monotonic_counter.test_counter = 1u64);
+
                 // If we have a query
                 if let Some(query) = &req.supergraph_request.body().query {
                     // Parse our query against the schema

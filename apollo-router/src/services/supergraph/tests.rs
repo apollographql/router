@@ -101,6 +101,396 @@ async fn nullability_formatting() {
 }
 
 #[tokio::test]
+async fn root_selection_set_statically_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser @skip(if: true) { id name activeOrganization { id } } }")
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_set_with_fragment_statically_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query {
+  ...TestFragment
+}
+
+fragment TestFragment on Query {
+  currentUser @skip(if: true) {
+    id
+    name
+    activeOrganization {
+      id
+    }
+  }
+}"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_set_with_inline_fragment_statically_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query {
+  ... on Query {
+    currentUser @skip(if: true) {
+        id
+        name
+        activeOrganization {
+        id
+        }
+    }
+  }
+}"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_with_several_fields_statically_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query {
+  ...TestFragment
+  currentUser @skip(if: true) {
+    id
+    name
+    activeOrganization {
+      id
+    }
+  }
+}
+
+fragment TestFragment on Query {
+  currentUser @skip(if: true) {
+    id
+    name
+    activeOrganization {
+      id
+    }
+  }
+}"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_skipped_with_other_fields() {
+    const SCHEMA: &str = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+         {
+        query: Query
+        subscription: Subscription
+   }
+   directive @core(feature: String!) repeatable on SCHEMA
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   scalar join__FieldSet
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+   type Query {
+       currentUser: User @join__field(graph: USER)
+       otherUser: User @join__field(graph: USER)
+   }
+
+   type Subscription @join__type(graph: USER) {
+        userWasCreated: User
+   }
+
+   type User
+   @join__owner(graph: USER)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id"){
+       id: ID!
+       name: String
+       activeOrganization: Organization
+   }
+   type Organization
+   @join__owner(graph: ORGA)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id") {
+       id: ID
+       creatorUser: User
+       name: String
+       nonNullId: ID!
+       suborga: [Organization]
+   }"#;
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "user",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"query($skip:Boolean=false){currentUser@skip(if:$skip){id name activeOrganization{id}}otherUser{id name}}","variables":{"skip":true}}},
+                        serde_json::json! {{"data": {"otherUser": { "id": "2", "name": "test" }}}},
+                    )
+                    .build(),
+            ),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query ($skip: Boolean = false) { currentUser @skip(if: $skip) { id name activeOrganization { id } } otherUser { id name } }")
+        .variable("skip", true)
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query ($skip: Boolean = false) { currentUser @skip(if: $skip) { id name activeOrganization { id } } }")
+        .variable("skip", true)
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_not_skipped() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{currentUser{id name}}"}},
+                        serde_json::json! {{"data": {"currentUser": { "id": "2", "name": "test" }}}},
+                    )
+                    .build()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query ($skip: Boolean = false) { currentUser @skip(if: $skip) { id name } }")
+        .variable("skip", false)
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn root_selection_not_included() {
+    let subgraphs = MockedSubgraphs(
+        [
+            ("user", MockSubgraph::default()),
+            ("orga", MockSubgraph::default()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query ($include: Boolean = false) { currentUser @include(if: $include) { id name activeOrganization { id } } }")
+        .variable("include", false)
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
 async fn nullability_bubbling() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -1305,7 +1695,7 @@ async fn reconstruct_deferred_query_under_interface() {
 
 fn subscription_context() -> Context {
     let context = Context::new();
-    context.private_entries.lock().insert(ClientRequestAccepts {
+    context.extensions().lock().insert(ClientRequestAccepts {
         multipart_subscription: true,
         ..Default::default()
     });
@@ -1315,7 +1705,7 @@ fn subscription_context() -> Context {
 
 fn defer_context() -> Context {
     let context = Context::new();
-    context.private_entries.lock().insert(ClientRequestAccepts {
+    context.extensions().lock().insert(ClientRequestAccepts {
         multipart_defer: true,
         ..Default::default()
     });
