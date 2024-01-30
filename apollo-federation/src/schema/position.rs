@@ -828,7 +828,7 @@ impl SchemaRootDefinitionPosition {
         else {
             return Ok(());
         };
-        object_type_referencers.schema_roots.remove(self);
+        object_type_referencers.schema_roots.shift_remove(self);
         Ok(())
     }
 }
@@ -1040,12 +1040,12 @@ impl ScalarTypeDefinitionPosition {
             return Ok(None);
         };
         self.remove_references(type_, &mut schema.referencers);
-        schema.schema.types.remove(&self.type_name);
+        schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
                 .referencers
                 .scalar_types
-                .remove(&self.type_name)
+                .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
@@ -1154,7 +1154,7 @@ impl ScalarTypeDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.scalar_types.remove(self);
+        directive_referencers.scalar_types.shift_remove(self);
     }
 }
 
@@ -1372,12 +1372,12 @@ impl ObjectTypeDefinitionPosition {
             return Ok(None);
         };
         self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
-        schema.schema.types.remove(&self.type_name);
+        schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
                 .referencers
                 .object_types
-                .remove(&self.type_name)
+                .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
@@ -1582,7 +1582,7 @@ impl ObjectTypeDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.object_types.remove(self);
+        directive_referencers.object_types.shift_remove(self);
     }
 
     fn insert_implements_interface_references(
@@ -1611,7 +1611,7 @@ impl ObjectTypeDefinitionPosition {
         let Some(interface_type_referencers) = referencers.interface_types.get_mut(name) else {
             return;
         };
-        interface_type_referencers.object_types.remove(self);
+        interface_type_referencers.object_types.shift_remove(self);
     }
 
     fn insert_root_query_references(
@@ -1784,7 +1784,7 @@ impl ObjectFieldDefinitionPosition {
             .make_mut(&mut schema.schema)?
             .make_mut()
             .fields
-            .remove(&self.field_name);
+            .shift_remove(&self.field_name);
         Ok(())
     }
 
@@ -1943,7 +1943,7 @@ impl ObjectFieldDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.object_fields.remove(self);
+        directive_referencers.object_fields.shift_remove(self);
     }
 
     fn insert_type_references(
@@ -2045,7 +2045,7 @@ impl ObjectFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                scalar_type_referencers.object_fields.remove(self);
+                scalar_type_referencers.object_fields.shift_remove(self);
             }
             Some(ExtendedType::Object(_)) => {
                 let Some(object_type_referencers) =
@@ -2053,7 +2053,7 @@ impl ObjectFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                object_type_referencers.object_fields.remove(self);
+                object_type_referencers.object_fields.shift_remove(self);
             }
             Some(ExtendedType::Interface(_)) => {
                 let Some(interface_type_referencers) =
@@ -2061,7 +2061,7 @@ impl ObjectFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                interface_type_referencers.object_fields.remove(self);
+                interface_type_referencers.object_fields.shift_remove(self);
             }
             Some(ExtendedType::Union(_)) => {
                 let Some(union_type_referencers) =
@@ -2069,7 +2069,7 @@ impl ObjectFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                union_type_referencers.object_fields.remove(self);
+                union_type_referencers.object_fields.shift_remove(self);
             }
             Some(ExtendedType::Enum(_)) => {
                 let Some(enum_type_referencers) =
@@ -2077,7 +2077,7 @@ impl ObjectFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                enum_type_referencers.object_fields.remove(self);
+                enum_type_referencers.object_fields.shift_remove(self);
             }
             _ => {
                 return Err(
@@ -2350,7 +2350,9 @@ impl ObjectFieldArgumentDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.object_field_arguments.remove(self);
+        directive_referencers
+            .object_field_arguments
+            .shift_remove(self);
     }
 
     fn insert_type_references(
@@ -2432,7 +2434,9 @@ impl ObjectFieldArgumentDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                scalar_type_referencers.object_field_arguments.remove(self);
+                scalar_type_referencers
+                    .object_field_arguments
+                    .shift_remove(self);
             }
             Some(ExtendedType::Enum(_)) => {
                 let Some(enum_type_referencers) =
@@ -2440,7 +2444,9 @@ impl ObjectFieldArgumentDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                enum_type_referencers.object_field_arguments.remove(self);
+                enum_type_referencers
+                    .object_field_arguments
+                    .shift_remove(self);
             }
             Some(ExtendedType::InputObject(_)) => {
                 let Some(input_object_type_referencers) =
@@ -2450,7 +2456,7 @@ impl ObjectFieldArgumentDefinitionPosition {
                 };
                 input_object_type_referencers
                     .object_field_arguments
-                    .remove(self);
+                    .shift_remove(self);
             }
             _ => {
                 return Err(
@@ -2678,12 +2684,12 @@ impl InterfaceTypeDefinitionPosition {
             return Ok(None);
         };
         self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
-        schema.schema.types.remove(&self.type_name);
+        schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
                 .referencers
                 .interface_types
-                .remove(&self.type_name)
+                .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
@@ -2858,7 +2864,7 @@ impl InterfaceTypeDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.interface_types.remove(self);
+        directive_referencers.interface_types.shift_remove(self);
     }
 
     fn insert_implements_interface_references(
@@ -2889,7 +2895,9 @@ impl InterfaceTypeDefinitionPosition {
         let Some(interface_type_referencers) = referencers.interface_types.get_mut(name) else {
             return;
         };
-        interface_type_referencers.interface_types.remove(self);
+        interface_type_referencers
+            .interface_types
+            .shift_remove(self);
     }
 }
 
@@ -3024,7 +3032,7 @@ impl InterfaceFieldDefinitionPosition {
             .make_mut(&mut schema.schema)?
             .make_mut()
             .fields
-            .remove(&self.field_name);
+            .shift_remove(&self.field_name);
         Ok(())
     }
 
@@ -3183,7 +3191,7 @@ impl InterfaceFieldDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.interface_fields.remove(self);
+        directive_referencers.interface_fields.shift_remove(self);
     }
 
     fn insert_type_references(
@@ -3289,7 +3297,7 @@ impl InterfaceFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                scalar_type_referencers.interface_fields.remove(self);
+                scalar_type_referencers.interface_fields.shift_remove(self);
             }
             Some(ExtendedType::Object(_)) => {
                 let Some(object_type_referencers) =
@@ -3297,7 +3305,7 @@ impl InterfaceFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                object_type_referencers.interface_fields.remove(self);
+                object_type_referencers.interface_fields.shift_remove(self);
             }
             Some(ExtendedType::Interface(_)) => {
                 let Some(interface_type_referencers) =
@@ -3305,7 +3313,9 @@ impl InterfaceFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                interface_type_referencers.interface_fields.remove(self);
+                interface_type_referencers
+                    .interface_fields
+                    .shift_remove(self);
             }
             Some(ExtendedType::Union(_)) => {
                 let Some(union_type_referencers) =
@@ -3313,7 +3323,7 @@ impl InterfaceFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                union_type_referencers.interface_fields.remove(self);
+                union_type_referencers.interface_fields.shift_remove(self);
             }
             Some(ExtendedType::Enum(_)) => {
                 let Some(enum_type_referencers) =
@@ -3321,7 +3331,7 @@ impl InterfaceFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                enum_type_referencers.interface_fields.remove(self);
+                enum_type_referencers.interface_fields.shift_remove(self);
             }
             _ => {
                 return Err(
@@ -3601,7 +3611,9 @@ impl InterfaceFieldArgumentDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.interface_field_arguments.remove(self);
+        directive_referencers
+            .interface_field_arguments
+            .shift_remove(self);
     }
 
     fn insert_type_references(
@@ -3685,7 +3697,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 };
                 scalar_type_referencers
                     .interface_field_arguments
-                    .remove(self);
+                    .shift_remove(self);
             }
             Some(ExtendedType::Enum(_)) => {
                 let Some(enum_type_referencers) =
@@ -3693,7 +3705,9 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                enum_type_referencers.interface_field_arguments.remove(self);
+                enum_type_referencers
+                    .interface_field_arguments
+                    .shift_remove(self);
             }
             Some(ExtendedType::InputObject(_)) => {
                 let Some(input_object_type_referencers) =
@@ -3703,7 +3717,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 };
                 input_object_type_referencers
                     .interface_field_arguments
-                    .remove(self);
+                    .shift_remove(self);
             }
             _ => {
                 return Err(
@@ -3906,12 +3920,12 @@ impl UnionTypeDefinitionPosition {
             return Ok(None);
         };
         self.remove_references(type_, &mut schema.referencers)?;
-        schema.schema.types.remove(&self.type_name);
+        schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
                 .referencers
                 .union_types
-                .remove(&self.type_name)
+                .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
@@ -4073,7 +4087,7 @@ impl UnionTypeDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.union_types.remove(self);
+        directive_referencers.union_types.shift_remove(self);
     }
 
     fn insert_member_references(
@@ -4101,7 +4115,7 @@ impl UnionTypeDefinitionPosition {
         let Some(object_type_referencers) = referencers.object_types.get_mut(name) else {
             return;
         };
-        object_type_referencers.union_types.remove(self);
+        object_type_referencers.union_types.shift_remove(self);
     }
 }
 
@@ -4186,7 +4200,7 @@ impl UnionTypenameFieldDefinitionPosition {
         else {
             return Ok(());
         };
-        scalar_type_referencers.union_fields.remove(self);
+        scalar_type_referencers.union_fields.shift_remove(self);
         Ok(())
     }
 }
@@ -4394,12 +4408,12 @@ impl EnumTypeDefinitionPosition {
             return Ok(None);
         };
         self.remove_references(type_, &mut schema.referencers)?;
-        schema.schema.types.remove(&self.type_name);
+        schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
                 .referencers
                 .enum_types
-                .remove(&self.type_name)
+                .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
@@ -4521,7 +4535,7 @@ impl EnumTypeDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.enum_types.remove(self);
+        directive_referencers.enum_types.shift_remove(self);
     }
 }
 
@@ -4635,7 +4649,7 @@ impl EnumValueDefinitionPosition {
             .make_mut(&mut schema.schema)?
             .make_mut()
             .values
-            .remove(&self.value_name);
+            .shift_remove(&self.value_name);
         Ok(())
     }
 
@@ -4773,7 +4787,7 @@ impl EnumValueDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.enum_values.remove(self);
+        directive_referencers.enum_values.shift_remove(self);
     }
 }
 
@@ -4979,12 +4993,12 @@ impl InputObjectTypeDefinitionPosition {
             return Ok(None);
         };
         self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
-        schema.schema.types.remove(&self.type_name);
+        schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
                 .referencers
                 .input_object_types
-                .remove(&self.type_name)
+                .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
@@ -5110,7 +5124,7 @@ impl InputObjectTypeDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.input_object_types.remove(self);
+        directive_referencers.input_object_types.shift_remove(self);
     }
 }
 
@@ -5228,7 +5242,7 @@ impl InputObjectFieldDefinitionPosition {
             .make_mut(&mut schema.schema)?
             .make_mut()
             .fields
-            .remove(&self.field_name);
+            .shift_remove(&self.field_name);
         Ok(())
     }
 
@@ -5370,7 +5384,7 @@ impl InputObjectFieldDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.input_object_fields.remove(self);
+        directive_referencers.input_object_fields.shift_remove(self);
     }
 
     fn insert_type_references(
@@ -5452,7 +5466,9 @@ impl InputObjectFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                scalar_type_referencers.input_object_fields.remove(self);
+                scalar_type_referencers
+                    .input_object_fields
+                    .shift_remove(self);
             }
             Some(ExtendedType::Enum(_)) => {
                 let Some(enum_type_referencers) =
@@ -5460,7 +5476,7 @@ impl InputObjectFieldDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                enum_type_referencers.input_object_fields.remove(self);
+                enum_type_referencers.input_object_fields.shift_remove(self);
             }
             Some(ExtendedType::InputObject(_)) => {
                 let Some(input_object_type_referencers) =
@@ -5470,7 +5486,7 @@ impl InputObjectFieldDefinitionPosition {
                 };
                 input_object_type_referencers
                     .input_object_fields
-                    .remove(self);
+                    .shift_remove(self);
             }
             _ => {
                 return Err(
@@ -5684,12 +5700,12 @@ impl DirectiveDefinitionPosition {
         schema
             .schema
             .directive_definitions
-            .remove(&self.directive_name);
+            .shift_remove(&self.directive_name);
         Ok(Some(
             schema
                 .referencers
                 .directives
-                .remove(&self.directive_name)
+                .shift_remove(&self.directive_name)
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!("Schema missing referencers for directive \"{}\"", self),
                 })?,
@@ -5979,7 +5995,7 @@ impl DirectiveArgumentDefinitionPosition {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
-        directive_referencers.directive_arguments.remove(self);
+        directive_referencers.directive_arguments.shift_remove(self);
     }
 
     fn insert_type_references(
@@ -6061,7 +6077,9 @@ impl DirectiveArgumentDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                scalar_type_referencers.directive_arguments.remove(self);
+                scalar_type_referencers
+                    .directive_arguments
+                    .shift_remove(self);
             }
             Some(ExtendedType::Enum(_)) => {
                 let Some(enum_type_referencers) =
@@ -6069,7 +6087,7 @@ impl DirectiveArgumentDefinitionPosition {
                 else {
                     return Ok(());
                 };
-                enum_type_referencers.directive_arguments.remove(self);
+                enum_type_referencers.directive_arguments.shift_remove(self);
             }
             Some(ExtendedType::InputObject(_)) => {
                 let Some(input_object_type_referencers) =
@@ -6079,7 +6097,7 @@ impl DirectiveArgumentDefinitionPosition {
                 };
                 input_object_type_referencers
                     .directive_arguments
-                    .remove(self);
+                    .shift_remove(self);
             }
             _ => {
                 return Err(

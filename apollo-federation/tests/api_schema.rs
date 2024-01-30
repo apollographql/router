@@ -2248,17 +2248,6 @@ fn propagates_default_input_values() {
     .expect("should succeed");
 
     insta::assert_display_snapshot!(api_schema, @r###"
-    input Nested {
-      noDefault: String
-      one: Int! = 1
-      two: Int! = 2
-      default: String = "default"
-    }
-
-    input InputObject {
-      value: Int
-    }
-
     type Query {
       field(input: Input = {one: 0, nested: {one: 2, two: 2, default: "default"}, two: 2, three: 3, object: {value: 2}, nestedWithDefault: {one: 1, two: 2, default: "default"}}): Int
     }
@@ -2276,6 +2265,17 @@ fn propagates_default_input_values() {
         two: 2,
         default: "default",
       }
+    }
+
+    input InputObject {
+      value: Int
+    }
+
+    input Nested {
+      noDefault: String
+      one: Int! = 1
+      two: Int! = 2
+      default: String = "default"
     }
     "###);
 }
@@ -2327,20 +2327,20 @@ fn matches_graphql_js_default_value_propagation() {
     .expect("should succeed");
 
     insta::assert_display_snapshot!(api_schema, @r###"
-        input OneRequiredOneDefault {
-          notDefaulted: Int!
-          defaulted: Boolean = false
-        }
+    type Query {
+      defaultShouldBeRemoved(arg: OneRequiredOneDefault): Int
+      defaultShouldHavePropagatedValues(arg: OneOptionalOneDefault = {defaulted: false}): Int
+    }
 
-        input OneOptionalOneDefault {
-          notDefaulted: Int
-          defaulted: Boolean = false
-        }
+    input OneOptionalOneDefault {
+      notDefaulted: Int
+      defaulted: Boolean = false
+    }
 
-        type Query {
-          defaultShouldBeRemoved(arg: OneRequiredOneDefault): Int
-          defaultShouldHavePropagatedValues(arg: OneOptionalOneDefault = {defaulted: false}): Int
-        }
+    input OneRequiredOneDefault {
+      notDefaulted: Int!
+      defaulted: Boolean = false
+    }
     "###);
 }
 

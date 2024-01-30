@@ -1011,14 +1011,15 @@ impl NormalizedSelectionSet {
             for (key, self_selection) in Arc::make_mut(&mut self.selections).iter_mut() {
                 match self_selection {
                     NormalizedSelectionValue::Field(mut self_field_selection) => {
-                        if let Some(other_field_selections) = fields.remove(key) {
+                        if let Some(other_field_selections) = fields.shift_remove(key) {
                             self_field_selection.merge_into(other_field_selections.into_iter())?;
                         }
                     }
                     NormalizedSelectionValue::FragmentSpread(
                         mut self_fragment_spread_selection,
                     ) => {
-                        if let Some(other_fragment_spread_selections) = fragment_spreads.remove(key)
+                        if let Some(other_fragment_spread_selections) =
+                            fragment_spreads.shift_remove(key)
                         {
                             self_fragment_spread_selection
                                 .merge_into(other_fragment_spread_selections.into_iter())?;
@@ -1027,7 +1028,8 @@ impl NormalizedSelectionSet {
                     NormalizedSelectionValue::InlineFragment(
                         mut self_inline_fragment_selection,
                     ) => {
-                        if let Some(other_inline_fragment_selections) = inline_fragments.remove(key)
+                        if let Some(other_inline_fragment_selections) =
+                            inline_fragments.shift_remove(key)
                         {
                             self_inline_fragment_selection
                                 .merge_into(other_inline_fragment_selections.into_iter())?;
