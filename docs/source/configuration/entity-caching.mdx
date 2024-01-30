@@ -2,6 +2,7 @@
 title: Subgraph entity caching for the Apollo Router
 subtitle: Redis-backed caching for entities
 description: Subgraph entity caching for Apollo Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
+minVersion: 1.40.0
 ---
 
 <EnterpriseFeature />
@@ -71,7 +72,7 @@ To use entity caching in the Apollo Router, you must set up:
 
 ### Configure router for entity caching
 
-In `router.yaml`, configure `experimental_entity_cache`:
+In `router.yaml`, configure `preview_entity_cache`:
 - Enable entity caching globally.
 - Configure Redis using the same conventions described in [distributed caching](./distributed-caching).
 - Configure entity caching per subgraph, with overrides per subgraph for disabling entity caching and TTL.
@@ -80,7 +81,7 @@ For example:
 
 ```yaml title="router.yaml"
 # Enable entity caching globally
-experimental_entity_cache:
+preview_entity_cache:
   enabled: true
 
   # Configure Redis

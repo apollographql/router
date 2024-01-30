@@ -27,7 +27,8 @@
         "Entity caching": [
           "/configuration/entity-caching",
           [
-            "enterprise"
+            "enterprise",
+            "preview"
           ]
         ]
       },
