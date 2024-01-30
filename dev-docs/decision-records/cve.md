@@ -16,7 +16,7 @@ A CVE will result in the following being triggered:
 3. A retro to discuss how the CVE happened in the first place, and how it was handled.
 
 The Router is a critical piece of infrastructure for our customers, and we need to be careful about how we handle security issues.
-However, at this time we still need to be pragmatic about what we consider CVE worthy. In particular, while denial of service is a top priority, in practice not possible to prevent at this time.
+However, at this time we still need to be pragmatic about what we consider CVE worthy. In particular, while denial of service is a top priority, in practice it is not possible to prevent these right now.
 
 ## Decision
 
