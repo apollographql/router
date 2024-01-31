@@ -8,21 +8,15 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use ::serde::Deserialize;
-use async_compression::tokio::write::BrotliEncoder;
-use async_compression::tokio::write::GzipEncoder;
-use async_compression::tokio::write::ZlibEncoder;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::response::Parts;
-use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
 use hyper::Body;
@@ -34,7 +28,6 @@ use mime::APPLICATION_JSON;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use serde::Serialize;
-use tokio::io::AsyncWriteExt;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -84,9 +77,6 @@ const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
 const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphql-response");
 
-// interior mutability is not a concern here, the value is never modified
-#[allow(clippy::declare_interior_mutable_const)]
-static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 #[allow(clippy::declare_interior_mutable_const)]
 static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
     HeaderValue::from_static("application/json;callbackSpec=1.0");
@@ -668,22 +658,10 @@ async fn call_http(
         .operation_name
         .clone()
         .unwrap_or_default();
+
     let (parts, _) = subgraph_request.into_parts();
-
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
-    let compressed_body = compress(body, &parts.headers)
-        .instrument(tracing::debug_span!("body_compression"))
-        .await
-        .map_err(|err| {
-            tracing::error!(compress_error = format!("{err:?}").as_str());
-
-            FetchError::CompressionError {
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            }
-        })?;
-
-    let mut request = http::request::Request::from_parts(parts, compressed_body.into());
+    let mut request = http::Request::from_parts(parts, Body::from(body));
 
     request
         .headers_mut()
@@ -694,9 +672,6 @@ async fn call_http(
     request
         .headers_mut()
         .append(ACCEPT, APP_GRAPHQL_JSON.clone());
-    request
-        .headers_mut()
-        .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
 
     let schema_uri = request.uri();
     let host = schema_uri.host().unwrap_or_default();
@@ -1020,43 +995,6 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
     APQError::Other
 }
 
-pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
-    let content_encoding = headers.get(&CONTENT_ENCODING);
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str()? {
-            "br" => {
-                let mut br_encoder = BrotliEncoder::new(Vec::new());
-                br_encoder.write_all(body.as_bytes()).await?;
-                br_encoder.shutdown().await?;
-
-                Ok(br_encoder.into_inner())
-            }
-            "gzip" => {
-                let mut gzip_encoder = GzipEncoder::new(Vec::new());
-                gzip_encoder.write_all(body.as_bytes()).await?;
-                gzip_encoder.shutdown().await?;
-
-                Ok(gzip_encoder.into_inner())
-            }
-            "deflate" => {
-                let mut df_encoder = ZlibEncoder::new(Vec::new());
-                df_encoder.write_all(body.as_bytes()).await?;
-                df_encoder.shutdown().await?;
-
-                Ok(df_encoder.into_inner())
-            }
-            "identity" => Ok(body.into_bytes()),
-            unknown => {
-                tracing::error!("unknown content-encoding value '{:?}'", unknown);
-                Err(BoxError::from(format!(
-                    "unknown content-encoding value '{unknown:?}'",
-                )))
-            }
-        },
-        None => Ok(body.into_bytes()),
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
@@ -1280,53 +1218,6 @@ mod tests {
                 .header(CONTENT_TYPE, "text/html")
                 .status(StatusCode::OK)
                 .body(r#"TEST"#.into())
-                .unwrap())
-        }
-
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
-    }
-
-    // starts a local server emulating a subgraph returning compressed response
-    async fn emulate_subgraph_compressed_response(listener: TcpListener) {
-        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            // Check the compression of the body
-            let mut encoder = GzipEncoder::new(Vec::new());
-            encoder
-                .write_all(
-                    &serde_json::to_vec(&Request::builder().query("query".to_string()).build())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            encoder.shutdown().await.unwrap();
-            let compressed_body = encoder.into_inner();
-            assert_eq!(
-                compressed_body,
-                hyper::body::to_bytes(request.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
-            );
-
-            let original_body = Response {
-                data: Some(Value::String(ByteString::from("test"))),
-                ..Response::default()
-            };
-            let mut encoder = GzipEncoder::new(Vec::new());
-            encoder
-                .write_all(&serde_json::to_vec(&original_body).unwrap())
-                .await
-                .unwrap();
-            encoder.shutdown().await.unwrap();
-            let compressed_body = encoder.into_inner();
-
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .header(CONTENT_ENCODING, "gzip")
-                .status(StatusCode::OK)
-                .body(compressed_body.into())
                 .unwrap())
         }
 
@@ -2188,50 +2079,6 @@ mod tests {
             response.response.body().errors[0].message,
             "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql-response+json; found content-type: text/html)"
         );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_compressed_request_response_body() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(emulate_subgraph_compressed_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            false,
-            None,
-            Notify::default(),
-            HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
-        )
-        .expect("can create a SubgraphService");
-
-        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-        let resp = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .header(CONTENT_ENCODING, "gzip")
-                    .uri(url)
-                    .body(Request::builder().query("query".to_string()).build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subgraph_name: String::from("test").into(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-                query_hash: Default::default(),
-                authorization: Default::default(),
-            })
-            .await
-            .unwrap();
-        // Test the right decompression of the body
-        let resp_from_subgraph = Response {
-            data: Some(Value::String(ByteString::from("test"))),
-            ..Response::default()
-        };
-
-        assert_eq!(resp.response.body(), &resp_from_subgraph);
     }
 
     #[tokio::test(flavor = "multi_thread")]

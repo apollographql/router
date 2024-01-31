@@ -4,11 +4,18 @@ use std::task::Poll;
 use std::time::Duration;
 
 use ::serde::Deserialize;
+use async_compression::tokio::write::BrotliEncoder;
+use async_compression::tokio::write::GzipEncoder;
+use async_compression::tokio::write::ZlibEncoder;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::Stream;
 use futures::TryFutureExt;
 use global::get_text_map_propagator;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
@@ -19,6 +26,7 @@ use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
+use tokio::io::AsyncWriteExt;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -44,6 +52,9 @@ use crate::Context;
 type HTTPClientService =
     Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
+// interior mutability is not a concern here, the value is never modified
+#[allow(clippy::declare_interior_mutable_const)]
+static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
@@ -224,6 +235,32 @@ impl tower::Service<HttpRequest> for HttpService {
         let client = self.client.clone();
         let service_name = self.service.clone();
         Box::pin(async move {
+            let (parts, body) = http_request.into_parts();
+            let body = hyper::body::to_bytes(body).await.map_err(|err| {
+                tracing::error!(compress_error = format!("{err:?}").as_str());
+
+                FetchError::CompressionError {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                }
+            })?;
+            let compressed_body = compress(body, &parts.headers)
+                .instrument(tracing::debug_span!("body_compression"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(compress_error = format!("{err:?}").as_str());
+
+                    FetchError::CompressionError {
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    }
+                })?;
+            let mut http_request = http::Request::from_parts(parts, Body::from(compressed_body));
+
+            http_request
+                .headers_mut()
+                .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
+
             let signing_params = context
                 .extensions()
                 .lock()
@@ -287,6 +324,43 @@ async fn do_fetch(
         parts,
         Body::wrap_stream(BodyStream { inner: body }),
     ))
+}
+
+pub(crate) async fn compress(body: Bytes, headers: &HeaderMap) -> Result<Bytes, BoxError> {
+    let content_encoding = headers.get(&CONTENT_ENCODING);
+    match content_encoding {
+        Some(content_encoding) => match content_encoding.to_str()? {
+            "br" => {
+                let mut br_encoder = BrotliEncoder::new(Vec::new());
+                br_encoder.write_all(&body).await?;
+                br_encoder.shutdown().await?;
+
+                Ok(br_encoder.into_inner().into())
+            }
+            "gzip" => {
+                let mut gzip_encoder = GzipEncoder::new(Vec::new());
+                gzip_encoder.write_all(&body).await?;
+                gzip_encoder.shutdown().await?;
+
+                Ok(gzip_encoder.into_inner().into())
+            }
+            "deflate" => {
+                let mut df_encoder = ZlibEncoder::new(Vec::new());
+                df_encoder.write_all(&body).await?;
+                df_encoder.shutdown().await?;
+
+                Ok(df_encoder.into_inner().into())
+            }
+            "identity" => Ok(body),
+            unknown => {
+                tracing::error!("unknown content-encoding value '{:?}'", unknown);
+                Err(BoxError::from(format!(
+                    "unknown content-encoding value '{unknown:?}'",
+                )))
+            }
+        },
+        None => Ok(body),
+    }
 }
 
 pin_project! {
