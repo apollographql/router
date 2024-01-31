@@ -1,12 +1,13 @@
+#![allow(dead_code)]
 use std::sync::Arc;
 
 use hyper::Body;
-use tower::{BoxError, ServiceExt};
+use tower::BoxError;
+use tower::ServiceExt;
 use tower_service::Service;
 
-use crate::Context;
-
 use super::Plugins;
+use crate::Context;
 
 pub(crate) mod service;
 #[cfg(test)]
