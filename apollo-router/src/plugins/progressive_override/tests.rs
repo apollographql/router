@@ -258,5 +258,6 @@ async fn overridden_field_yields_expected_query_plan() {
     // `percent100` should be overridden to `Subgraph1` while `foo` is not, so
     // we expect a query plan with 2 fetches: the first to `Subgraph1` and a
     // serial fetch after to resolve `foo` in `Subgraph2`
-    assert_query_plan_snapshot("{ percent100 { foo } }").await;
+    let query_plan = get_json_query_plan("{ percent100 { foo } }").await;
+    insta::assert_json_snapshot!(query_plan);
 }
