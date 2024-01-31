@@ -28,6 +28,7 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
+use url::Url;
 
 use crate::spec::LINK_AS_ARGUMENT;
 use crate::spec::LINK_DIRECTIVE_NAME;
@@ -92,46 +93,39 @@ pub(crate) struct LicenseEnforcementReport {
 struct ParsedLinkSpec {
     spec_name: String,
     version: semver::Version,
-    base_url: String,
+    spec_url: String,
     imported_as: Option<String>,
     url: String,
 }
 
 impl ParsedLinkSpec {
-    fn from_link_directive(link_directive: &Node<Directive>) -> Option<ParsedLinkSpec> {
+    fn from_link_directive(
+        link_directive: &Node<Directive>,
+    ) -> Option<Result<ParsedLinkSpec, url::ParseError>> {
         link_directive
             .argument_by_name(LINK_URL_ARGUMENT)
             .and_then(|value| {
-                let Some(url) = value.as_str() else {
-                    return None;
-                };
-                // capture url + spec name, spec name, and version from a link spec url
-                let re = Regex::new(r"^(.*/([^/]+))/v(\d+\.\d+)$").unwrap();
-                let Some(captures) = re.captures(url) else {
-                    return None;
-                };
+                let url_string = value.as_str();
+                let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
 
-                let full_url = captures.get(0).unwrap().as_str().to_string();
-                let base_url = captures.get(1).unwrap().as_str().to_string();
-                let spec_name = captures.get(2).unwrap().as_str().to_string();
-                let version_string = captures.get(3).unwrap().as_str().to_string();
+                let mut segments = parsed_url.path_segments()?;
+                let spec_name = segments.next()?.to_string();
+                let spec_url = format!("{}://{}/{}", parsed_url.scheme(), parsed_url.host()?, spec_name);
+                let version_string = segments.next()?.strip_prefix('v')?;
+                let parsed_version =
+                    semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
 
-                let Ok(parsed_version) =
-                    semver::Version::parse(format!("{}.0", &version_string).as_str())
-                else {
-                    return None;
-                };
                 let imported_as = link_directive
                     .argument_by_name(LINK_AS_ARGUMENT)
                     .map(|as_arg| as_arg.as_str().unwrap_or_default().to_string());
 
-                Some(ParsedLinkSpec {
+                Some(Ok(ParsedLinkSpec {
                     spec_name,
-                    base_url,
+                    spec_url,
                     version: parsed_version,
                     imported_as,
-                    url: full_url,
-                })
+                    url: url_string?.to_string(),
+                }))
             })
     }
 
@@ -206,8 +200,9 @@ impl LicenseEnforcementReport {
             .filter_map(|def| def.as_schema_definition())
             .flat_map(|def| def.directives.get_all(LINK_DIRECTIVE_NAME))
             .filter_map(|link| {
-                ParsedLinkSpec::from_link_directive(link)
-                    .map(|spec| (spec.base_url.to_owned(), spec))
+                ParsedLinkSpec::from_link_directive(link).map(|maybe_spec| {
+                    maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
+                })?
             })
             .collect::<HashMap<_, _>>();
 
@@ -216,11 +211,11 @@ impl LicenseEnforcementReport {
         for restriction in schema_restrictions {
             match restriction {
                 SchemaRestriction::Spec {
-                    base_url,
+                    spec_url,
                     name,
                     version_req,
                 } => {
-                    if let Some(link_spec) = link_specs.get(base_url) {
+                    if let Some(link_spec) = link_specs.get(spec_url) {
                         if semver::VersionReq::parse(version_req)
                             .unwrap()
                             .matches(&link_spec.version)
@@ -233,13 +228,13 @@ impl LicenseEnforcementReport {
                     }
                 }
                 SchemaRestriction::DirectiveArgument {
-                    base_url,
+                    spec_url,
                     name,
                     version_req,
                     argument,
                     explanation,
                 } => {
-                    if let Some(link_spec) = link_specs.get(base_url) {
+                    if let Some(link_spec) = link_specs.get(spec_url) {
                         if semver::VersionReq::parse(version_req)
                             .unwrap()
                             .matches(&link_spec.version)
@@ -369,18 +364,18 @@ impl LicenseEnforcementReport {
         vec![
             SchemaRestriction::Spec {
                 name: "authenticated".to_string(),
-                base_url: "https://specs.apollo.dev/authenticated".to_string(),
+                spec_url: "https://specs.apollo.dev/authenticated".to_string(),
                 version_req: "=0.1.0".to_string(),
             },
             SchemaRestriction::Spec {
                 name: "requiresScopes".to_string(),
-                base_url: "https://specs.apollo.dev/requiresScopes".to_string(),
+                spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
                 version_req: "=0.1.0".to_string(),
             },
             SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
                 argument: "overrideLabel".to_string(),
-                base_url: "https://specs.apollo.dev/join".to_string(),
+                spec_url: "https://specs.apollo.dev/join".to_string(),
                 version_req: ">=0.4.0".to_string(),
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             },
@@ -506,7 +501,7 @@ pub(crate) struct ConfigurationRestriction {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) enum SchemaRestriction {
     Spec {
-        base_url: String,
+        spec_url: String,
         name: String,
         version_req: String,
     },
@@ -515,7 +510,7 @@ pub(crate) enum SchemaRestriction {
     // for where to update if this restriction is to be enforced on other
     // directives.
     DirectiveArgument {
-        base_url: String,
+        spec_url: String,
         name: String,
         version_req: String,
         argument: String,
