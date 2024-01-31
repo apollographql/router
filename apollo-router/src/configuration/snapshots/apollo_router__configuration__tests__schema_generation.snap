@@ -5169,9 +5169,11 @@ expression: "&schema"
                           }
                         },
                         {
+                          "description": "Configure custom buckets globally and for specific metrics",
                           "type": "object",
                           "properties": {
                             "custom": {
+                              "description": "Custom buckets for specified metrics",
                               "default": {},
                               "type": "object",
                               "additionalProperties": {
@@ -5183,6 +5185,7 @@ expression: "&schema"
                               }
                             },
                             "default": {
+                              "description": "Default buckets for all histograms",
                               "default": [
                                 0.001,
                                 0.005,
