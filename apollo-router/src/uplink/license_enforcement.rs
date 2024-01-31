@@ -110,7 +110,12 @@ impl ParsedLinkSpec {
 
                 let mut segments = parsed_url.path_segments()?;
                 let spec_name = segments.next()?.to_string();
-                let spec_url = format!("{}://{}/{}", parsed_url.scheme(), parsed_url.host()?, spec_name);
+                let spec_url = format!(
+                    "{}://{}/{}",
+                    parsed_url.scheme(),
+                    parsed_url.host()?,
+                    spec_name
+                );
                 let version_string = segments.next()?.strip_prefix('v')?;
                 let parsed_version =
                     semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
