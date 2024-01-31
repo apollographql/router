@@ -6683,6 +6683,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
@@ -7416,6 +7419,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
@@ -7881,6 +7887,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
