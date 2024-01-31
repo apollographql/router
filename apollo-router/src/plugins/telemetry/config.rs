@@ -97,7 +97,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: metrics::prometheus::Config,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
@@ -112,32 +112,46 @@ pub(crate) struct MetricsCommon {
     pub(crate) buckets: Buckets,
 }
 
-impl Default for MetricsCommon {
-    fn default() -> Self {
-        Self {
-            attributes: Default::default(),
-            service_name: None,
-            service_namespace: None,
-            resource: BTreeMap::new(),
-            buckets: Buckets::default(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct Buckets {
-    pub(crate) default: Vec<f64>,
-    pub(crate) custom: HashMap<String, Vec<f64>>,
+#[serde(deny_unknown_fields, untagged)]
+pub(crate) enum Buckets {
+    // Can't be achieved with a migration
+    Deprecated(Vec<f64>),
+    New {
+        #[serde(default = "default_buckets")]
+        default: Vec<f64>,
+        #[serde(default)]
+        custom: HashMap<String, Vec<f64>>,
+    },
 }
 
 impl Default for Buckets {
     fn default() -> Self {
-        Self {
-            default: vec![
-                0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-            ],
+        Self::New {
+            default: default_buckets(),
             custom: HashMap::with_capacity(0),
+        }
+    }
+}
+
+fn default_buckets() -> Vec<f64> {
+    vec![
+        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+    ]
+}
+
+impl Buckets {
+    pub(crate) fn get_global(&self) -> &[f64] {
+        match self {
+            Buckets::Deprecated(global) => global,
+            Buckets::New { default, .. } => default,
+        }
+    }
+
+    pub(crate) fn get_custom(&self) -> Option<&HashMap<String, Vec<f64>>> {
+        match self {
+            Buckets::Deprecated(_global) => None,
+            Buckets::New { custom, .. } => Some(custom),
         }
     }
 }

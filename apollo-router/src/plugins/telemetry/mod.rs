@@ -62,6 +62,7 @@ use self::config::SamplerOption;
 use self::config::TraceIdFormat;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
+use self::metrics::free_static_str;
 use self::metrics::AttributesForwardConf;
 use self::reload::reload_fmt;
 use self::reload::SamplingFilter;
@@ -234,22 +235,27 @@ impl Plugin for Telemetry {
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
-        let metrics_builder = Self::create_metrics_builder(&config)?;
+        let mut metrics_builder = Self::create_metrics_builder(&config)?;
 
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
+        let instrument_names_to_clean = std::mem::replace(
+            &mut metrics_builder.instrument_names_to_clean,
+            Vec::with_capacity(0),
+        );
+        let mut public_meter_provider =
+            FilterMeterProvider::public(metrics_builder.public_meter_provider_builder.build());
+        public_meter_provider.instrument_names_to_clean = instrument_names_to_clean;
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
-            public_meter_provider: Some(FilterMeterProvider::public(
-                metrics_builder.public_meter_provider_builder.build(),
-            )),
+            public_meter_provider: Some(public_meter_provider),
             private_meter_provider: Some(FilterMeterProvider::private(
                 metrics_builder.apollo_meter_provider_builder.build(),
             )),
@@ -1492,6 +1498,17 @@ impl Telemetry {
             Self::checked_spawn_task(Box::new(move || {
                 if let Err(e) = meter_provider.shutdown() {
                     ::tracing::error!(error = %e, "failed to shutdown meter provider")
+                } else {
+                    for instrument_name in meter_provider.instrument_names_to_clean {
+                        //  Don't edit or use it unless you know what you're doing
+                        //  It's basically the instrument names we're leaking when creating custom bucket for metrics
+                        //  As we're leaking them we keep a reference to them here to be able to clean it once the MeterProvider has been dropped
+                        //  SAFETY: we can free this leaked string because it's only used in meter provider to create an opentelemetry View and since the meter_provider is no longer used we can clean these values
+                        unsafe {
+                            ::tracing::info!("unsafe: cleaning instrument names leaked from custom buckets configuration");
+                            free_static_str(instrument_name);
+                        }
+                    }
                 }
             }));
         }

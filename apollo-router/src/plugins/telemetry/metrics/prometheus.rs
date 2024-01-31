@@ -21,6 +21,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::to_static_str;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -89,7 +90,7 @@ impl MetricsConfigurator for Config {
 
         let prometheus_config = PrometheusConfig {
             resource: builder.resource.clone(),
-            buckets: metrics_config.buckets.default.clone(),
+            buckets: metrics_config.buckets.get_global().to_vec(),
         };
 
         // Check the last registry to see if the resources are the same, if they are we can use it as is.
@@ -128,7 +129,7 @@ impl MetricsConfigurator for Config {
         let exporter = opentelemetry_prometheus::exporter()
             .with_aggregation_selector(
                 CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.default.clone())
+                    .boundaries(metrics_config.buckets.get_global().to_vec())
                     .record_min_max(true)
                     .build(),
             )
@@ -138,17 +139,20 @@ impl MetricsConfigurator for Config {
         let mut meter_provider_builder = MeterProvider::builder()
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
-        for (instrument_name, buckets) in &metrics_config.buckets.custom {
-            // TODO find a way to clean this...
-            let name: &'static str = Box::leak(instrument_name.clone().into_boxed_str());
-            let view = new_view(
-                Instrument::new().name(name),
-                Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
-                    boundaries: buckets.clone(),
-                    record_min_max: true,
-                }),
-            )?;
-            meter_provider_builder = meter_provider_builder.with_view(view);
+        if let Some(custom_buckets) = metrics_config.buckets.get_custom() {
+            for (instrument_name, buckets) in custom_buckets {
+                let name: &'static str = to_static_str(instrument_name);
+                // Add this here to be able to clean it once we reload the MeterProvider
+                builder.instrument_names_to_clean.push(name);
+                let view = new_view(
+                    Instrument::new().name(name),
+                    Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: buckets.clone(),
+                        record_min_max: true,
+                    }),
+                )?;
+                meter_provider_builder = meter_provider_builder.with_view(view);
+            }
         }
         let meter_provider = meter_provider_builder.build();
         builder.custom_endpoints.insert(
