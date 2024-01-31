@@ -221,10 +221,7 @@ impl LicenseEnforcementReport {
                     version_req,
                 } => {
                     if let Some(link_spec) = link_specs.get(spec_url) {
-                        if semver::VersionReq::parse(version_req)
-                            .unwrap()
-                            .matches(&link_spec.version)
-                        {
+                        if version_req.matches(&link_spec.version) {
                             schema_violations.push(SchemaViolation::Spec {
                                 url: link_spec.url.to_string(),
                                 name: name.to_string(),
@@ -240,10 +237,7 @@ impl LicenseEnforcementReport {
                     explanation,
                 } => {
                     if let Some(link_spec) = link_specs.get(spec_url) {
-                        if semver::VersionReq::parse(version_req)
-                            .unwrap()
-                            .matches(&link_spec.version)
-                        {
+                        if version_req.matches(&link_spec.version) {
                             let directive_name = link_spec.directive_name(name);
                             if schema
                                 .definitions
@@ -370,18 +364,42 @@ impl LicenseEnforcementReport {
             SchemaRestriction::Spec {
                 name: "authenticated".to_string(),
                 spec_url: "https://specs.apollo.dev/authenticated".to_string(),
-                version_req: "=0.1.0".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
             },
             SchemaRestriction::Spec {
                 name: "requiresScopes".to_string(),
                 spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
-                version_req: "=0.1.0".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
             },
             SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
                 argument: "overrideLabel".to_string(),
                 spec_url: "https://specs.apollo.dev/join".to_string(),
-                version_req: ">=0.4.0".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::GreaterEq,
+                        major: 0,
+                        minor: 4.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             },
         ]
@@ -503,12 +521,12 @@ pub(crate) struct ConfigurationRestriction {
 }
 
 /// An individual check for the supergraph schema
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) enum SchemaRestriction {
     Spec {
         spec_url: String,
         name: String,
-        version_req: String,
+        version_req: semver::VersionReq,
     },
     // Note: this restriction is currently only traverses directives belonging
     // to object types and their fields. See note in `schema_restrictions` loop
@@ -517,7 +535,7 @@ pub(crate) enum SchemaRestriction {
     DirectiveArgument {
         spec_url: String,
         name: String,
-        version_req: String,
+        version_req: semver::VersionReq,
         argument: String,
         explanation: String,
     },
