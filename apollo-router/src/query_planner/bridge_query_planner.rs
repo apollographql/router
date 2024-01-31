@@ -399,7 +399,11 @@ impl BridgeQueryPlanner {
 
         let planner_result = match self
             .planner
-            .plan(filtered_query.clone(), operation.clone())
+            .plan(
+                filtered_query.clone(),
+                operation.clone(),
+                Default::default(),
+            )
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
