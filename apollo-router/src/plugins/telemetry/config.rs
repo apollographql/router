@@ -117,9 +117,12 @@ pub(crate) struct MetricsCommon {
 pub(crate) enum Buckets {
     // Can't be achieved with a migration
     Deprecated(Vec<f64>),
+    /// Configure custom buckets globally and for specific metrics
     New {
+        /// Default buckets for all histograms
         #[serde(default = "default_buckets")]
         default: Vec<f64>,
+        /// Custom buckets for specified metrics
         #[serde(default)]
         custom: HashMap<String, Vec<f64>>,
     },
