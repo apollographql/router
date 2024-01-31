@@ -116,7 +116,9 @@ impl ParsedLinkSpec {
                 let spec_name = captures.get(2).unwrap().as_str().to_string();
                 let version_string = captures.get(3).unwrap().as_str().to_string();
 
-                let Ok(parsed_version) = semver::Version::parse(&version_string) else {
+                let Ok(parsed_version) =
+                    semver::Version::parse(format!("{}.0", &version_string).as_str())
+                else {
                     return None;
                 };
                 let imported_as = link_directive
