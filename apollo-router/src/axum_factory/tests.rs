@@ -386,7 +386,7 @@ async fn it_displays_sandbox() {
         "{}",
         response.text().await.unwrap()
     );
-    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+    assert_eq!(response.bytes().await.unwrap(), sandbox_page_content());
 }
 
 #[tokio::test]
@@ -432,7 +432,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
         "{}",
         response.text().await.unwrap()
     );
-    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+    assert_eq!(response.bytes().await.unwrap(), sandbox_page_content());
 }
 
 #[tokio::test]
@@ -1201,8 +1201,8 @@ async fn it_displays_homepage() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.text().await.unwrap(),
-        home_page_content(Homepage::fake_builder().enabled(false).build())
+        response.bytes().await.unwrap(),
+        home_page_content(&Homepage::fake_builder().enabled(false).build())
     );
     server.shutdown().await.unwrap();
 }
@@ -2308,7 +2308,7 @@ async fn test_supergraph_timeout() {
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
-    let plugins = create_plugins(&conf, &schema, None).await.unwrap();
+    let plugins = create_plugins(&conf, &schema, None, None).await.unwrap();
 
     let mut builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())

@@ -18,6 +18,7 @@ use tower_service::Service;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
+use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
@@ -44,16 +45,17 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
 register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
-struct EntityCache {
+pub(crate) struct EntityCache {
     storage: RedisCacheStorage,
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
+    metrics: Metrics,
 }
 
 /// Configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Config {
+pub(crate) struct Config {
     redis: RedisCache,
     /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
     #[serde(default)]
@@ -61,12 +63,16 @@ struct Config {
     /// Per subgraph configuration
     #[serde(default)]
     subgraphs: HashMap<String, Subgraph>,
+
+    /// Entity caching evaluation metrics
+    #[serde(default)]
+    metrics: Metrics,
 }
 
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Subgraph {
+pub(crate) struct Subgraph {
     /// expiration for all keys
     pub(crate) ttl: Option<Ttl>,
 
@@ -78,11 +84,25 @@ struct Subgraph {
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Ttl(
+pub(crate) struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
-    Duration,
+    pub(crate) Duration,
 );
+
+/// Per subgraph configuration for entity caching
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct Metrics {
+    /// enables metrics evaluating the benefits of entity caching
+    #[serde(default)]
+    pub(crate) enabled: bool,
+    /// Metrics counter TTL
+    pub(crate) ttl: Option<Ttl>,
+    /// Adds the entity type name to attributes. This can greatly increase the cardinality
+    #[serde(default)]
+    pub(crate) separate_per_type: bool,
+}
 
 #[async_trait::async_trait]
 impl Plugin for EntityCache {
@@ -98,6 +118,7 @@ impl Plugin for EntityCache {
             storage,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraphs),
+            metrics: init.config.metrics,
         })
     }
 
@@ -116,7 +137,11 @@ impl Plugin for EntityCache {
             .boxed()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        mut service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         let storage = self.storage.clone();
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
@@ -133,6 +158,15 @@ impl Plugin for EntityCache {
         };
         let name = name.to_string();
 
+        if self.metrics.enabled {
+            service = CacheMetricsService::create(
+                name.to_string(),
+                service,
+                self.metrics.ttl.as_ref(),
+                self.metrics.separate_per_type,
+            );
+        }
+
         if subgraph_enabled {
             tower::util::BoxService::new(CacheService(Some(InnerCacheService {
                 service,
@@ -143,6 +177,24 @@ impl Plugin for EntityCache {
         } else {
             service
         }
+    }
+}
+
+impl EntityCache {
+    #[cfg(test)]
+    pub(crate) async fn with_mocks(
+        storage: RedisCacheStorage,
+        subgraphs: HashMap<String, Subgraph>,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        Ok(Self {
+            storage,
+            enabled: Some(true),
+            subgraphs: Arc::new(subgraphs),
+            metrics: Metrics::default(),
+        })
     }
 }
 

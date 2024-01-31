@@ -124,6 +124,8 @@ pub(crate) enum Compression {
     Deflate,
     /// brotli
     Br,
+    /// identity
+    Identity,
 }
 
 impl Display for Compression {
@@ -132,6 +134,7 @@ impl Display for Compression {
             Compression::Gzip => write!(f, "gzip"),
             Compression::Deflate => write!(f, "deflate"),
             Compression::Br => write!(f, "br"),
+            Compression::Identity => write!(f, "identity"),
         }
     }
 }
