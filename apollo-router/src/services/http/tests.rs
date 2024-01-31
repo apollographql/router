@@ -3,7 +3,9 @@ use std::io;
 use std::net::TcpListener;
 use std::str::FromStr;
 
+use async_compression::tokio::write::GzipEncoder;
 use axum::Server;
+use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::StatusCode;
 use http::Uri;
@@ -19,7 +21,9 @@ use rustls::Certificate;
 use rustls::PrivateKey;
 use rustls::RootCertStore;
 use rustls::ServerConfig;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
+use tokio::io::AsyncWriteExt;
 use tower::service_fn;
 use tower::ServiceExt;
 
@@ -342,17 +346,14 @@ async fn test_subgraph_h2c() {
         r#"{"data":null}"#
     );
 }
-/*
+
 // starts a local server emulating a subgraph returning compressed response
 async fn emulate_subgraph_compressed_response(listener: TcpListener) {
     async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
         // Check the compression of the body
         let mut encoder = GzipEncoder::new(Vec::new());
         encoder
-            .write_all(
-                &serde_json::to_vec(&Request::builder().query("query".to_string()).build())
-                    .unwrap(),
-            )
+            .write_all(r#"{"query":"{ me { name username } }"#.as_bytes())
             .await
             .unwrap();
         encoder.shutdown().await.unwrap();
@@ -395,42 +396,37 @@ async fn test_compressed_request_response_body() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_subgraph_compressed_response(listener));
-    let subgraph_service = SubgraphService::new(
+    let subgraph_service = HttpService::new(
         "test",
-        false,
-        None,
-        Notify::default(),
-        HttpServiceFactory::from_config("test", &Configuration::default(), Http2Config::Enable),
+        Http2Config::Http2Only,
+        rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth(),
     )
-    .expect("can create a SubgraphService");
+    .expect("can create a HttpService");
 
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-    let resp = subgraph_service
-        .oneshot(SubgraphRequest {
-            supergraph_request: supergraph_request("query"),
-            subgraph_request: http::Request::builder()
-                .header(HOST, "rhost")
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header(CONTENT_ENCODING, "gzip")
-                .uri(url)
-                .body(Request::builder().query("query".to_string()).build())
-                .expect("expecting valid request"),
-            operation_kind: OperationKind::Query,
+                .body(r#"{"query":"{ me { name username } }"#.into())
+                .unwrap(),
             context: Context::new(),
-            subgraph_name: String::from("test").into(),
-            subscription_stream: None,
-            connection_closed_signal: None,
-            query_hash: Default::default(),
-            authorization: Default::default(),
         })
         .await
         .unwrap();
-    // Test the right decompression of the body
-    let resp_from_subgraph = Response {
-        data: Some(Value::String(ByteString::from("test"))),
-        ..Response::default()
-    };
 
-    assert_eq!(resp.response.body(), &resp_from_subgraph);
+    assert_eq!(
+        std::str::from_utf8(
+            &hyper::body::to_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"data":"test"}"#
+    );
 }
-*/
