@@ -253,7 +253,7 @@ impl tower::Service<HttpRequest> for HttpService {
 
             // Print out the debug for the response
             if display_headers {
-                tracing::info!(response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
+                tracing::info!(response.headers = ?http_response.headers(), apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
             }
 
             Ok(HttpResponse {
