@@ -1505,7 +1505,7 @@ impl Telemetry {
                         //  As we're leaking them we keep a reference to them here to be able to clean it once the MeterProvider has been dropped
                         //  SAFETY: we can free this leaked string because it's only used in meter provider to create an opentelemetry View and since the meter_provider is no longer used we can clean these values
                         unsafe {
-                            ::tracing::info!("unsafe: cleaning instrument names leaked from custom buckets configuration");
+                            ::tracing::trace!("unsafe: cleaning instrument names leaked from custom buckets configuration");
                             free_static_str(instrument_name);
                         }
                     }
