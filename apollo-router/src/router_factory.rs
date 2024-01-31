@@ -357,7 +357,7 @@ pub(crate) async fn create_subgraph_services(
 
     let mut subgraph_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
-        let http_service = crate::services::http::HttpService::from_config(
+        let http_service = crate::services::http::HttpClientService::from_config(
             name,
             configuration,
             &tls_root_store,

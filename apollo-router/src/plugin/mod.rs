@@ -530,7 +530,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     }
 
     /// This service handles HTTP communication
-    fn http_service(
+    fn http_client_service(
         &self,
         _subgraph_name: &str,
         service: crate::services::http::BoxService,
@@ -637,7 +637,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     ) -> subgraph::BoxService;
 
     /// This service handles HTTP communication
-    fn http_service(
+    fn http_client_service(
         &self,
         _subgraph_name: &str,
         service: crate::services::http::BoxService,
@@ -679,12 +679,12 @@ where
     }
 
     /// This service handles HTTP communication
-    fn http_service(
+    fn http_client_service(
         &self,
         name: &str,
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
-        self.http_service(name, service)
+        self.http_client_service(name, service)
     }
 
     fn name(&self) -> &'static str {

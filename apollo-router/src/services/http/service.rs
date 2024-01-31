@@ -49,7 +49,7 @@ use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::Configuration;
 use crate::Context;
 
-type HTTPClientService =
+type HTTPClient =
     Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 // interior mutability is not a concern here, the value is never modified
@@ -82,15 +82,15 @@ impl Display for Compression {
 }
 
 #[derive(Clone)]
-pub(crate) struct HttpService {
+pub(crate) struct HttpClientService {
     // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
-    client: HTTPClientService,
+    client: HTTPClient,
     service: Arc<String>,
 }
 
-impl HttpService {
+impl HttpClientService {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &Configuration,
@@ -123,7 +123,7 @@ impl HttpService {
 
         let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
 
-        HttpService::new(name, http2, tls_client_config)
+        HttpClientService::new(name, http2, tls_client_config)
     }
 
     pub(crate) fn new(
@@ -183,7 +183,7 @@ pub(crate) fn generate_tls_client_config(
     })
 }
 
-impl tower::Service<HttpRequest> for HttpService {
+impl tower::Service<HttpRequest> for HttpClientService {
     type Response = HttpResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -302,7 +302,7 @@ impl tower::Service<HttpRequest> for HttpService {
 }
 
 async fn do_fetch(
-    mut client: HTTPClientService,
+    mut client: HTTPClient,
     context: &Context,
     service_name: &str,
     request: Request<Body>,

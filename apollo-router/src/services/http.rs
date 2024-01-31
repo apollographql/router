@@ -13,7 +13,7 @@ pub(crate) mod service;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use service::HttpService;
+pub(crate) use service::HttpClientService;
 
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
@@ -50,7 +50,7 @@ impl HttpServiceFactory {
     ) -> Self {
         use indexmap::IndexMap;
 
-        let service = HttpService::from_config(service, configuration, &None, http2).unwrap();
+        let service = HttpClientService::from_config(service, configuration, &None, http2).unwrap();
 
         HttpServiceFactory {
             service: Arc::new(service),
@@ -63,7 +63,7 @@ impl HttpServiceFactory {
         self.plugins
             .iter()
             .rev()
-            .fold(service, |acc, (_, e)| e.http_service(name, acc))
+            .fold(service, |acc, (_, e)| e.http_client_service(name, acc))
     }
 }
 

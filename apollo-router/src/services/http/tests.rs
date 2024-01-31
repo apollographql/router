@@ -33,8 +33,8 @@ use crate::configuration::TlsClient;
 use crate::configuration::TlsClientAuth;
 use crate::graphql::Response;
 use crate::plugins::traffic_shaping::Http2Config;
+use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
-use crate::services::http::HttpService;
 use crate::Configuration;
 use crate::Context;
 
@@ -101,7 +101,7 @@ async fn tls_self_signed() {
         },
     );
     let subgraph_service =
-        HttpService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
+        HttpClientService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -153,7 +153,7 @@ async fn tls_custom_root() {
         },
     );
     let subgraph_service =
-        HttpService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
+        HttpClientService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -258,7 +258,7 @@ async fn tls_client_auth() {
         },
     );
     let subgraph_service =
-        HttpService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
+        HttpClientService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -314,7 +314,7 @@ async fn test_subgraph_h2c() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_h2c_server(listener));
-    let subgraph_service = HttpService::new(
+    let subgraph_service = HttpClientService::new(
         "test",
         Http2Config::Http2Only,
         rustls::ClientConfig::builder()
@@ -396,7 +396,7 @@ async fn test_compressed_request_response_body() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_subgraph_compressed_response(listener));
-    let subgraph_service = HttpService::new(
+    let subgraph_service = HttpClientService::new(
         "test",
         Http2Config::Http2Only,
         rustls::ClientConfig::builder()
