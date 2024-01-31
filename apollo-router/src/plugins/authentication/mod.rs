@@ -703,6 +703,9 @@ fn decode_jwt(
 
         let mut validation = Validation::new(algorithm);
         validation.validate_nbf = true;
+        // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
+        // we don't validate audience yet, so this is deactivated
+        validation.validate_aud = false;
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
             Ok(v) => return Ok((issuer, v)),
