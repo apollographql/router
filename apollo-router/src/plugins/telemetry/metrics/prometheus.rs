@@ -5,7 +5,11 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
+use opentelemetry::sdk::metrics::new_view;
+use opentelemetry::sdk::metrics::Aggregation;
+use opentelemetry::sdk::metrics::Instrument;
 use opentelemetry::sdk::metrics::MeterProvider;
+use opentelemetry::sdk::metrics::Stream;
 use opentelemetry::sdk::Resource;
 use prometheus::Encoder;
 use prometheus::Registry;
@@ -85,7 +89,7 @@ impl MetricsConfigurator for Config {
 
         let prometheus_config = PrometheusConfig {
             resource: builder.resource.clone(),
-            buckets: metrics_config.buckets.clone(),
+            buckets: metrics_config.buckets.default.clone(),
         };
 
         // Check the last registry to see if the resources are the same, if they are we can use it as is.
@@ -124,17 +128,29 @@ impl MetricsConfigurator for Config {
         let exporter = opentelemetry_prometheus::exporter()
             .with_aggregation_selector(
                 CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.clone())
+                    .boundaries(metrics_config.buckets.default.clone())
                     .record_min_max(true)
                     .build(),
             )
             .with_registry(registry.clone())
             .build()?;
 
-        let meter_provider = MeterProvider::builder()
+        let mut meter_provider_builder = MeterProvider::builder()
             .with_reader(exporter)
-            .with_resource(builder.resource.clone())
-            .build();
+            .with_resource(builder.resource.clone());
+        for (instrument_name, buckets) in &metrics_config.buckets.custom {
+            // TODO find a way to clean this...
+            let name: &'static str = Box::leak(instrument_name.clone().into_boxed_str());
+            let view = new_view(
+                Instrument::new().name(name),
+                Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
+                    boundaries: buckets.clone(),
+                    record_min_max: true,
+                }),
+            )?;
+            meter_provider_builder = meter_provider_builder.with_view(view);
+        }
+        let meter_provider = meter_provider_builder.build();
         builder.custom_endpoints.insert(
             self.listen.clone(),
             Endpoint::from_router_service(

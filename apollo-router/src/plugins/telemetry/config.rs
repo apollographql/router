@@ -109,7 +109,7 @@ pub(crate) struct MetricsCommon {
     /// The Open Telemetry resource
     pub(crate) resource: BTreeMap<String, AttributeValue>,
     /// Custom buckets for histograms
-    pub(crate) buckets: Vec<f64>,
+    pub(crate) buckets: Buckets,
 }
 
 impl Default for MetricsCommon {
@@ -119,9 +119,25 @@ impl Default for MetricsCommon {
             service_name: None,
             service_namespace: None,
             resource: BTreeMap::new(),
-            buckets: vec![
+            buckets: Buckets::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Buckets {
+    pub(crate) default: Vec<f64>,
+    pub(crate) custom: HashMap<String, Vec<f64>>,
+}
+
+impl Default for Buckets {
+    fn default() -> Self {
+        Self {
+            default: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
+            custom: HashMap::with_capacity(0),
         }
     }
 }

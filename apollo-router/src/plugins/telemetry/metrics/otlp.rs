@@ -1,5 +1,9 @@
 use opentelemetry::runtime;
+use opentelemetry::sdk::metrics::new_view;
+use opentelemetry::sdk::metrics::Aggregation;
+use opentelemetry::sdk::metrics::Instrument;
 use opentelemetry::sdk::metrics::PeriodicReader;
+use opentelemetry::sdk::metrics::Stream;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
@@ -51,7 +55,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
                     (&self.temporality).into(),
                     Box::new(
                         CustomAggregationSelector::builder()
-                            .boundaries(metrics_config.buckets.clone())
+                            .boundaries(metrics_config.buckets.default.clone())
                             .build(),
                     ),
                 )?;
@@ -63,6 +67,19 @@ impl MetricsConfigurator for super::super::otlp::Config {
                             .with_timeout(self.batch_processor.max_export_timeout)
                             .build(),
                     );
+                for (instrument_name, buckets) in &metrics_config.buckets.custom {
+                    // TODO find a way to clean this...
+                    let name: &'static str = Box::leak(instrument_name.clone().into_boxed_str());
+                    let view = new_view(
+                        Instrument::new().name(name),
+                        Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: buckets.clone(),
+                            record_min_max: true,
+                        }),
+                    )?;
+                    builder.public_meter_provider_builder =
+                        builder.public_meter_provider_builder.with_view(view);
+                }
                 Ok(builder)
             }
             None => Err("otlp metric export does not support http yet".into()),

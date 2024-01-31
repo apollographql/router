@@ -5160,25 +5160,42 @@ expression: "&schema"
                     },
                     "buckets": {
                       "description": "Custom buckets for histograms",
-                      "default": [
-                        0.001,
-                        0.005,
-                        0.015,
-                        0.05,
-                        0.1,
-                        0.2,
-                        0.3,
-                        0.4,
-                        0.5,
-                        1.0,
-                        5.0,
-                        10.0
-                      ],
-                      "type": "array",
-                      "items": {
-                        "type": "number",
-                        "format": "double"
-                      }
+                      "type": "object",
+                      "properties": {
+                        "custom": {
+                          "default": {},
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "array",
+                            "items": {
+                              "type": "number",
+                              "format": "double"
+                            }
+                          }
+                        },
+                        "default": {
+                          "default": [
+                            0.001,
+                            0.005,
+                            0.015,
+                            0.05,
+                            0.1,
+                            0.2,
+                            0.3,
+                            0.4,
+                            0.5,
+                            1.0,
+                            5.0,
+                            10.0
+                          ],
+                          "type": "array",
+                          "items": {
+                            "type": "number",
+                            "format": "double"
+                          }
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "resource": {
                       "description": "The Open Telemetry resource",
