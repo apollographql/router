@@ -16,7 +16,6 @@ use futures::future::BoxFuture;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::TryFutureExt;
-use global::get_text_map_propagator;
 use http::header::ACCEPT;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
@@ -32,7 +31,6 @@ use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
-use opentelemetry::global;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -45,7 +43,6 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
 use tracing::Instrument;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 use super::http::HttpRequest;
@@ -726,12 +723,6 @@ async fn call_http(
         "apollo.subgraph.name" = %service_name,
         "graphql.operation.name" = %operation_name,
     );
-    get_text_map_propagator(|propagator| {
-        propagator.inject_context(
-            &subgraph_req_span.context(),
-            &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-        );
-    });
 
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
     //
@@ -747,46 +738,14 @@ async fn call_http(
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
-    let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
-    let signing_params = context
-        .extensions()
-        .lock()
-        .get::<SigningParamsConfig>()
-        .cloned();
-
-    //FIXME: move this to a HTTP service plugin
-    let request = if let Some(signing_params) = signing_params {
-        signing_params.sign(request, service_name).await?
-    } else {
-        request
-    };
-
-    // Print out the debug for the request
-    if display_headers {
-        tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
-    }
-    if display_body {
-        tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
-    }
-
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
-    let (parts, content_type, body) = do_fetch(
-        client,
-        &context,
-        service_name,
-        request,
-        display_headers,
-        display_body,
-    )
-    .instrument(subgraph_req_span)
-    .await?;
+    let (parts, content_type, body) =
+        do_fetch(client, &context, service_name, request, display_body)
+            .instrument(subgraph_req_span)
+            .await?;
 
-    // Print out the debug for the response
-    if display_headers {
-        tracing::info!(response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
-    }
     if display_body {
         if let Some(Ok(b)) = &body {
             tracing::info!(
@@ -911,7 +870,6 @@ async fn do_fetch(
     context: &Context,
     service_name: &str,
     request: Request<Body>,
-    display_headers: bool,
     display_body: bool,
 ) -> Result<
     (
@@ -938,12 +896,7 @@ async fn do_fetch(
         .await?;
 
     let (parts, body) = response.http_response.into_parts();
-    // Print out debug for the response
-    if display_headers {
-        tracing::info!(
-            http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-        );
-    }
+
     let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {

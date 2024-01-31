@@ -32,6 +32,9 @@ use super::HttpRequest;
 use super::HttpResponse;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
+use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;
@@ -221,9 +224,38 @@ impl tower::Service<HttpRequest> for HttpService {
         let client = self.client.clone();
         let service_name = self.service.clone();
         Box::pin(async move {
+            let signing_params = context
+                .extensions()
+                .lock()
+                .get::<SigningParamsConfig>()
+                .cloned();
+
+            let http_request = if let Some(signing_params) = signing_params {
+                signing_params.sign(http_request, &service_name).await?
+            } else {
+                http_request
+            };
+
+            let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
+            let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+            // Print out the debug for the request
+            if display_headers {
+                tracing::info!(http.request.headers = ?http_request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
+            }
+            if display_body {
+                tracing::info!(http.request.body = ?http_request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
+            }
+
             let http_response = do_fetch(client, &context, &service_name, http_request)
                 .instrument(http_req_span)
                 .await?;
+
+            // Print out the debug for the response
+            if display_headers {
+                tracing::info!(response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
+            }
+
             Ok(HttpResponse {
                 http_response,
                 context,
