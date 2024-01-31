@@ -31,7 +31,7 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
-use crate::services::http::HttpServiceFactory;
+use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
@@ -365,7 +365,7 @@ pub(crate) async fn create_subgraph_services(
         )?;
 
         let http_service_factory =
-            HttpServiceFactory::new(Arc::new(http_service), Arc::new(IndexMap::new()));
+            HttpClientServiceFactory::new(Arc::new(http_service), Arc::new(IndexMap::new()));
 
         let subgraph_service = shaping.subgraph_service_internal(
             name,

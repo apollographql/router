@@ -32,14 +32,14 @@ pub(crate) struct HttpResponse {
 }
 
 #[derive(Clone)]
-pub(crate) struct HttpServiceFactory {
+pub(crate) struct HttpClientServiceFactory {
     pub(crate) service: Arc<dyn MakeHttpService>,
     pub(crate) plugins: Arc<Plugins>,
 }
 
-impl HttpServiceFactory {
+impl HttpClientServiceFactory {
     pub(crate) fn new(service: Arc<dyn MakeHttpService>, plugins: Arc<Plugins>) -> Self {
-        HttpServiceFactory { service, plugins }
+        HttpClientServiceFactory { service, plugins }
     }
 
     #[cfg(test)]
@@ -52,7 +52,7 @@ impl HttpServiceFactory {
 
         let service = HttpClientService::from_config(service, configuration, &None, http2).unwrap();
 
-        HttpServiceFactory {
+        HttpClientServiceFactory {
             service: Arc::new(service),
             plugins: Arc::new(IndexMap::new()),
         }
