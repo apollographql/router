@@ -1,11 +1,8 @@
+use std::convert::Infallible;
 use std::io;
+use std::net::TcpListener;
+use std::str::FromStr;
 
-use axum::extract::ws::Message;
-use axum::extract::ConnectInfo;
-use axum::extract::WebSocketUpgrade;
-use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::Router;
 use axum::Server;
 use http::header::CONTENT_TYPE;
 use http::StatusCode;
@@ -14,12 +11,15 @@ use http::Version;
 use hyper::server::conn::AddrIncoming;
 use hyper::service::make_service_fn;
 use hyper::Body;
+use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::TlsAcceptor;
 use mime::APPLICATION_JSON;
 use rustls::server::AllowAnyAuthenticatedClient;
 use rustls::Certificate;
 use rustls::PrivateKey;
+use rustls::RootCertStore;
 use rustls::ServerConfig;
+use serde_json_bytes::Value;
 use tower::service_fn;
 use tower::ServiceExt;
 
@@ -27,9 +27,12 @@ use crate::configuration::load_certs;
 use crate::configuration::load_key;
 use crate::configuration::TlsClient;
 use crate::configuration::TlsClientAuth;
+use crate::graphql::Response;
 use crate::plugins::traffic_shaping::Http2Config;
+use crate::services::http::HttpRequest;
 use crate::services::http::HttpService;
 use crate::Configuration;
+use crate::Context;
 
 async fn tls_server(
     listener: tokio::net::TcpListener,
@@ -94,23 +97,30 @@ async fn tls_self_signed() {
         },
     );
     let subgraph_service =
-        HttpService::from_config("test", &config, &None, Http2Config::Enable, None).unwrap();
+        HttpService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
-        .oneshot(
-            SubgraphRequest::builder()
-                .supergraph_request(supergraph_request("query"))
-                .subgraph_request(subgraph_http_request(url, "query"))
-                .operation_kind(OperationKind::Query)
-                .subgraph_name(String::from("test"))
-                .context(Context::new())
-                .build(),
-        )
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(r#"{"query":"{ me { name username } }"#.into())
+                .unwrap(),
+            context: Context::new(),
+        })
         .await
         .unwrap();
 
-    assert_eq!(response.response.body().data, Some(Value::Null));
+    assert_eq!(
+        std::str::from_utf8(
+            &hyper::body::to_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"data": null}"#
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -139,22 +149,29 @@ async fn tls_custom_root() {
         },
     );
     let subgraph_service =
-        HttpService::from_config("test", &config, &None, Http2Config::Enable, None).unwrap();
+        HttpService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
-        .oneshot(
-            SubgraphRequest::builder()
-                .supergraph_request(supergraph_request("query"))
-                .subgraph_request(subgraph_http_request(url, "query"))
-                .operation_kind(OperationKind::Query)
-                .subgraph_name(String::from("test"))
-                .context(Context::new())
-                .build(),
-        )
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(r#"{"query":"{ me { name username } }"#.into())
+                .unwrap(),
+            context: Context::new(),
+        })
         .await
         .unwrap();
-    assert_eq!(response.response.body().data, Some(Value::Null));
+    assert_eq!(
+        std::str::from_utf8(
+            &hyper::body::to_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"data": null}"#
+    );
 }
 
 async fn tls_server_with_client_auth(
@@ -237,22 +254,29 @@ async fn tls_client_auth() {
         },
     );
     let subgraph_service =
-        HttpService::from_config("test", &config,  Http2Config::Enable).unwrap();
+        HttpService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
-        .oneshot(
-            SubgraphRequest::builder()
-                .supergraph_request(supergraph_request("query"))
-                .subgraph_request(subgraph_http_request(url, "query"))
-                .operation_kind(OperationKind::Query)
-                .subgraph_name(String::from("test"))
-                .context(Context::new())
-                .build(),
-        )
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(r#"{"query":"{ me { name username } }"#.into())
+                .unwrap(),
+            context: Context::new(),
+        })
         .await
         .unwrap();
-    assert_eq!(response.response.body().data, Some(Value::Null));
+    assert_eq!(
+        std::str::from_utf8(
+            &hyper::body::to_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"data": null}"#
+    );
 }
 
 // starts a local server emulating a subgraph returning status code 401
@@ -298,16 +322,23 @@ async fn test_subgraph_h2c() {
 
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
     let response = subgraph_service
-        .oneshot(
-            SubgraphRequest::builder()
-                .supergraph_request(supergraph_request("query"))
-                .subgraph_request(subgraph_http_request(url, "query"))
-                .operation_kind(OperationKind::Query)
-                .subgraph_name(String::from("test"))
-                .context(Context::new())
-                .build(),
-        )
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(r#"{"query":"{ me { name username } }"#.into())
+                .unwrap(),
+            context: Context::new(),
+        })
         .await
         .unwrap();
-    assert!(response.response.body().errors.is_empty());
+    assert_eq!(
+        std::str::from_utf8(
+            &hyper::body::to_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"data":null}"#
+    );
 }
