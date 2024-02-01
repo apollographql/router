@@ -18,7 +18,7 @@ listenForFlagUpdates((name, value) => {
 const app = express();
 app.use(express.json());
 app.post("/", async (req, res) => {
-  const { context, body, ...rest } = req.body;
+  const { context, ...rest } = req.body;
   const unresolvedLabels: string[] =
     context.entries[UNRESOLVED_LABELS_CONTEXT_KEY] || [];
 

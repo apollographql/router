@@ -4,7 +4,6 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
@@ -12,6 +11,9 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_compiler::ast::Definition;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::Node;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
@@ -26,7 +28,9 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
+use url::Url;
 
+use crate::spec::LINK_AS_ARGUMENT;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::LINK_URL_ARGUMENT;
 use crate::Configuration;
@@ -82,7 +86,67 @@ where
 #[derive(Debug)]
 pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
-    restricted_schema_in_use: Vec<SchemaRestriction>,
+    restricted_schema_in_use: Vec<SchemaViolation>,
+}
+
+#[derive(Debug)]
+struct ParsedLinkSpec {
+    spec_name: String,
+    version: semver::Version,
+    spec_url: String,
+    imported_as: Option<String>,
+    url: String,
+}
+
+impl ParsedLinkSpec {
+    fn from_link_directive(
+        link_directive: &Node<Directive>,
+    ) -> Option<Result<ParsedLinkSpec, url::ParseError>> {
+        link_directive
+            .argument_by_name(LINK_URL_ARGUMENT)
+            .and_then(|value| {
+                let url_string = value.as_str();
+                let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
+
+                let mut segments = parsed_url.path_segments()?;
+                let spec_name = segments.next()?.to_string();
+                let spec_url = format!(
+                    "{}://{}/{}",
+                    parsed_url.scheme(),
+                    parsed_url.host()?,
+                    spec_name
+                );
+                let version_string = segments.next()?.strip_prefix('v')?;
+                let parsed_version =
+                    semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
+
+                let imported_as = link_directive
+                    .argument_by_name(LINK_AS_ARGUMENT)
+                    .map(|as_arg| as_arg.as_str().unwrap_or_default().to_string());
+
+                Some(Ok(ParsedLinkSpec {
+                    spec_name,
+                    spec_url,
+                    version: parsed_version,
+                    imported_as,
+                    url: url_string?.to_string(),
+                }))
+            })
+    }
+
+    // Implements directive name construction logic for link directives.
+    // 1. If the link directive has an `as` argument, use that as the prefix.
+    // 2. If the link directive's spec name is the same as the default name, use the default name with no prefix.
+    // 3. Otherwise, use the spec name as the prefix.
+    fn directive_name(&self, default_name: &str) -> String {
+        if let Some(imported_as) = &self.imported_as {
+            format!("{}__{}", imported_as, default_name)
+        } else if self.spec_name == default_name {
+            default_name.to_string()
+        } else {
+            format!("{}__{}", self.spec_name, default_name)
+        }
+    }
 }
 
 impl LicenseEnforcementReport {
@@ -134,60 +198,77 @@ impl LicenseEnforcementReport {
     fn validate_schema(
         schema: &apollo_compiler::ast::Document,
         schema_restrictions: &Vec<SchemaRestriction>,
-    ) -> Vec<SchemaRestriction> {
-        let feature_urls = schema
+    ) -> Vec<SchemaViolation> {
+        let link_specs = schema
             .definitions
             .iter()
             .filter_map(|def| def.as_schema_definition())
             .flat_map(|def| def.directives.get_all(LINK_DIRECTIVE_NAME))
             .filter_map(|link| {
-                link.argument_by_name(LINK_URL_ARGUMENT)
-                    .and_then(|value| value.as_str().map(|s| s.to_string()))
+                ParsedLinkSpec::from_link_directive(link).map(|maybe_spec| {
+                    maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
+                })?
             })
-            .collect::<HashSet<_>>();
-
-        // collect directive definitions and their argument names
-        let directive_to_arg_names_map = schema
-            .definitions
-            .iter()
-            .filter_map(|def| def.as_directive_definition())
-            .map(|directive_def| {
-                let arg_names = directive_def
-                    .arguments
-                    .iter()
-                    .map(|arg| arg.name.to_string())
-                    .collect::<Vec<String>>();
-                (directive_def.name.to_string(), arg_names)
-            })
-            .collect::<HashMap<String, Vec<String>>>();
+            .collect::<HashMap<_, _>>();
 
         let mut schema_violations = Vec::new();
 
         for restriction in schema_restrictions {
             match restriction {
-                SchemaRestriction::Directive { url, name } => {
-                    if feature_urls.contains(url) {
-                        schema_violations.push(SchemaRestriction::Directive {
-                            url: url.to_string(),
-                            name: name.to_string(),
-                        });
+                SchemaRestriction::Spec {
+                    spec_url,
+                    name,
+                    version_req,
+                } => {
+                    if let Some(link_spec) = link_specs.get(spec_url) {
+                        if version_req.matches(&link_spec.version) {
+                            schema_violations.push(SchemaViolation::Spec {
+                                url: link_spec.url.to_string(),
+                                name: name.to_string(),
+                            });
+                        }
                     }
                 }
                 SchemaRestriction::DirectiveArgument {
-                    url,
+                    spec_url,
                     name,
+                    version_req,
                     argument,
+                    explanation,
                 } => {
-                    if directive_to_arg_names_map
-                        .get(name.strip_prefix('@').unwrap_or_default())
-                        .map(|args| args.contains(argument))
-                        .unwrap_or_default()
-                    {
-                        schema_violations.push(SchemaRestriction::DirectiveArgument {
-                            url: url.to_string(),
-                            name: name.to_string(),
-                            argument: argument.to_string(),
-                        });
+                    if let Some(link_spec) = link_specs.get(spec_url) {
+                        if version_req.matches(&link_spec.version) {
+                            let directive_name = link_spec.directive_name(name);
+                            if schema
+                                .definitions
+                                .iter()
+                                .flat_map(|def| match def {
+                                    // To traverse additional directive locations, add match arms for the respective definition types required.
+                                    // As of writing this, this is only implemented for finding usages of progressive override on object type fields, but it can be extended to other directive locations trivially.
+                                    Definition::ObjectTypeDefinition(object_type_def) => {
+                                        let directives_on_object =
+                                            object_type_def.directives.get_all(&directive_name);
+                                        let directives_on_fields =
+                                            object_type_def.fields.iter().flat_map(|field| {
+                                                field.directives.get_all(&directive_name)
+                                            });
+
+                                        directives_on_object
+                                            .chain(directives_on_fields)
+                                            .collect::<Vec<_>>()
+                                    }
+                                    _ => vec![],
+                                })
+                                .any(|directive| directive.argument_by_name(argument).is_some())
+                            {
+                                schema_violations.push(SchemaViolation::DirectiveArgument {
+                                    url: link_spec.url.to_string(),
+                                    name: directive_name.to_string(),
+                                    argument: argument.to_string(),
+                                    explanation: explanation.to_string(),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -280,18 +361,46 @@ impl LicenseEnforcementReport {
 
     fn schema_restrictions() -> Vec<SchemaRestriction> {
         vec![
-            SchemaRestriction::Directive {
-                name: "@authenticated".to_string(),
-                url: "https://specs.apollo.dev/authenticated/v0.1".to_string(),
+            SchemaRestriction::Spec {
+                name: "authenticated".to_string(),
+                spec_url: "https://specs.apollo.dev/authenticated".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
             },
-            SchemaRestriction::Directive {
-                name: "@requiresScopes".to_string(),
-                url: "https://specs.apollo.dev/requiresScopes/v0.1".to_string(),
+            SchemaRestriction::Spec {
+                name: "requiresScopes".to_string(),
+                spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
             },
             SchemaRestriction::DirectiveArgument {
-                name: "@join__field".to_string(),
+                name: "field".to_string(),
                 argument: "overrideLabel".to_string(),
-                url: "".to_string(),
+                spec_url: "https://specs.apollo.dev/join".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::GreaterEq,
+                        major: 0,
+                        minor: 4.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+                explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             },
         ]
     }
@@ -419,31 +528,53 @@ pub(crate) struct ConfigurationRestriction {
 // }
 
 /// An individual check for the supergraph schema
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) enum SchemaRestriction {
-    Directive {
+    Spec {
+        spec_url: String,
         name: String,
-        url: String,
+        version_req: semver::VersionReq,
     },
+    // Note: this restriction is currently only traverses directives belonging
+    // to object types and their fields. See note in `schema_restrictions` loop
+    // for where to update if this restriction is to be enforced on other
+    // directives.
     DirectiveArgument {
+        spec_url: String,
         name: String,
-        url: String,
+        version_req: semver::VersionReq,
         argument: String,
+        explanation: String,
     },
 }
 
-impl Display for SchemaRestriction {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum SchemaViolation {
+    Spec {
+        url: String,
+        name: String,
+    },
+    DirectiveArgument {
+        url: String,
+        name: String,
+        argument: String,
+        explanation: String,
+    },
+}
+
+impl Display for SchemaViolation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            SchemaRestriction::Directive { name, url } => {
-                write!(f, "* {}\n  {}", name, url)
+            SchemaViolation::Spec { name, url } => {
+                write!(f, "* @{}\n  {}", name, url)
             }
-            SchemaRestriction::DirectiveArgument {
+            SchemaViolation::DirectiveArgument {
                 name,
                 url,
                 argument,
+                explanation,
             } => {
-                write!(f, "* {}.{}\n  {}", name, argument, url)
+                write!(f, "* @{}.{}\n  {}\n\n{}", name, argument, url, explanation)
             }
         }
     }
@@ -601,5 +732,73 @@ mod test {
             "should have found restricted features"
         );
         assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn progressive_override_with_renamed_join_spec() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/progressive_override_renamed_join.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn schema_enforcement_spec_version_in_range() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_spec_version_in_range.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn schema_enforcement_spec_version_out_of_range() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_spec_version_out_of_range.graphql"),
+        );
+
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
+        );
+    }
+
+    #[test]
+    fn schema_enforcement_directive_arg_version_in_range() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn schema_enforcement_directive_arg_version_out_of_range() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_directive_arg_version_out_of_range.graphql"),
+        );
+
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
+        );
     }
 }

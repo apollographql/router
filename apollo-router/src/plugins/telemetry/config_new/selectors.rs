@@ -558,6 +558,7 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
+
             SupergraphSelector::Env { env, default, .. } => std::env::var(env)
                 .ok()
                 .or_else(|| default.clone())
@@ -727,6 +728,7 @@ impl Selector for SubgraphSelector {
                 default,
                 ..
             } => get_baggage(baggage_name).or_else(|| default.maybe_to_otel_value()),
+
             SubgraphSelector::Env { env, default, .. } => std::env::var(env)
                 .ok()
                 .or_else(|| default.clone())
