@@ -1,8 +1,10 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task;
 use std::task::Poll;
 
 use bytes::Bytes;
@@ -148,7 +150,7 @@ struct ServiceLayerResult {
     multipart: Multipart<'static>,
 }
 
-async fn extract_map(req: supergraph::Request) -> supergraph::Request {
+async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
     let service_layer_result = req
         .context
         .private_entries
@@ -171,44 +173,136 @@ async fn extract_map(req: supergraph::Request) -> supergraph::Request {
         // FIXME: check number of files
         // assert!(map_field.len());
 
-        let mut map_per_variable = HashMap::<String, HashMap<String, String>>::new();
+        let variables = &mut req.supergraph_request.body_mut().variables;
+        let mut map_per_variable: MapPerVariable = HashMap::new();
         for (file, paths) in map_field.iter() {
             for path in paths.iter() {
-                let mut segments = path.splitn(3, ".");
-                assert!(segments.next() == Some("variables"));
+                let mut segments = path.split('.');
+                let first_segment = segments.next();
+                if first_segment != Some("variables") {
+                    if first_segment
+                        .and_then(|str| str.parse::<usize>().ok())
+                        .is_some()
+                    {
+                        assert!(false, "batch requests are not supported");
+                    }
+                    assert!(false, "invalid path inside 'map' field, it should start with 'variables.'.");
+                }
                 // FIXME: validation error
-                let var_name = segments.next().unwrap();
-                let var_path = segments.next().unwrap_or("");
+                let variable_name = segments.next().unwrap();
+                let variable_path: Vec<String> = segments.map(|str| str.to_owned()).collect();
+
+                // patch variables to pass validation
+                let json_value = variables
+                    .get_mut(variable_name)
+                    .and_then(|root| try_path(root, &variable_path));
+                // FIXME: validation error
+                let json_value = json_value.unwrap();
+                drop(core::mem::replace(
+                    json_value,
+                    serde_json_bytes::Value::String(
+                        format!("<Placeholder for file '{}'>", file).into(),
+                    ),
+                ));
 
                 map_per_variable
-                    .entry(var_name.to_owned())
+                    .entry(variable_name.to_owned())
                     .or_insert_with(|| HashMap::new())
-                    .insert(var_path.to_owned(), file.clone());
+                    .entry(file.clone())
+                    .or_insert_with(|| Vec::new())
+                    .push(variable_path);
             }
         }
-        println!("{:?}", map_per_variable);
 
         req.context
             .private_entries
             .lock()
             .insert(SupergraphLayerResult {
                 multipart: Arc::new(Mutex::new(multipart)),
-                map_field,
+                map_per_variable,
             });
     }
     req
 }
 
+fn try_path<'a>(
+    root: &'a mut serde_json_bytes::Value,
+    path: &'a Vec<String>,
+) -> Option<&'a mut serde_json_bytes::Value> {
+    path.iter().try_fold(root, |parent, segment| match parent {
+        serde_json_bytes::Value::Object(map) => map.get_mut(segment.as_str()),
+        serde_json_bytes::Value::Array(list) => segment
+            .parse::<usize>()
+            .ok()
+            .and_then(move |x| list.get_mut(x)),
+        _ => None,
+    })
+}
+
 type MapField = IndexMap<String, Vec<String>>;
+type MapPerVariable = HashMap<String, HashMap<String, Vec<Vec<String>>>>;
 
 #[derive(Clone)]
 struct SupergraphLayerResult {
     multipart: Arc<Mutex<Multipart<'static>>>,
-    map_field: MapField,
+    map_per_variable: MapPerVariable,
 }
 
-async fn call_subgraph(req: subgraph::Request) -> subgraph::Request {
+async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
+    let supergraph_result = req
+        .context
+        .private_entries
+        .lock()
+        .get::<SupergraphLayerResult>()
+        .cloned();
+    if let Some(supergraph_result) = supergraph_result {
+        let SupergraphLayerResult {
+            multipart,
+            map_per_variable,
+        } = supergraph_result;
+
+        let variables = &mut req.subgraph_request.body_mut().variables;
+        let mut map_field: MapField = IndexMap::new();
+        for (variable_name, variable_value) in variables.iter_mut() {
+            let variable_name = variable_name.as_str();
+            if let Some(variable_map) = map_per_variable.get(variable_name) {
+                for (file, paths) in variable_map.iter() {
+                    map_field.insert(
+                        file.clone(),
+                        paths
+                            .iter()
+                            .map(|path| {
+                                if path.is_empty() {
+                                    format!("variables.{}", variable_name)
+                                } else {
+                                    format!("variables.{}.{}", variable_name, path.join("."))
+                                }
+                            })
+                            .collect(),
+                    );
+                    for path in paths {
+                        if let Some(json_value) = try_path(variable_value, path) {
+                            json_value.take();
+                        }
+                    }
+                }
+            }
+        }
+        if !map_field.is_empty() {
+            req.subgraph_request
+                .extensions_mut()
+                .insert(SubgraphHttpRequestExtensions {
+                    multipart,
+                    map_field,
+                });
+        }
+    }
     req
+}
+
+struct SubgraphHttpRequestExtensions {
+    multipart: Arc<Mutex<Multipart<'static>>>,
+    map_field: MapField,
 }
 
 use tower::Service;
@@ -222,16 +316,11 @@ const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
 pub(crate) async fn wrap_http_client_call(
     mut client: HTTPClientService,
-    context: &crate::Context,
-    request: http::Request<hyper::Body>,
+    mut request: http::Request<hyper::Body>,
 ) -> Result<http::Response<DecompressionBody<hyper::Body>>, hyper::Error> {
-    let supergraph_result = context
-        .private_entries
-        .lock()
-        .get::<SupergraphLayerResult>()
-        .cloned();
+    let supergraph_result = request.extensions_mut().remove();
     if let Some(supergraph_result) = supergraph_result {
-        let SupergraphLayerResult {
+        let SubgraphHttpRequestExtensions {
             multipart,
             map_field,
         } = supergraph_result;
@@ -250,7 +339,12 @@ pub(crate) async fn wrap_http_client_call(
         )));
 
         let multipart = multipart.lock_owned().await;
-        let files = (MultipartFileStream { multipart }).map(move |field| {
+        let file_names = map_field.into_keys().collect();
+        let files = (MultipartFileStream {
+            multipart,
+            file_names,
+        })
+        .map(move |field| {
             // FIXME
             let file = field.unwrap();
             (file.headers().clone(), hyper::Body::wrap_stream(file))
@@ -275,21 +369,31 @@ pub(crate) async fn wrap_http_client_call(
 }
 
 struct MultipartFileStream {
+    file_names: HashSet<String>,
     multipart: OwnedMutexGuard<multer::Multipart<'static>>,
 }
 
 impl Stream for MultipartFileStream {
     type Item = multer::Result<multer::Field<'static>>;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        match self.multipart.poll_next_field(cx) {
-            Poll::Ready(Ok(None)) => Poll::Ready(None),
-            Poll::Ready(Ok(Some(field))) => Poll::Ready(Some(Ok(field))),
-            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
-            Poll::Pending => Poll::Pending,
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            match self.multipart.poll_next_field(cx) {
+                Poll::Ready(Ok(None)) => {
+                    // FIXME: validation error
+                    assert!(self.file_names.is_empty());
+                    return Poll::Ready(None);
+                }
+                Poll::Ready(Ok(Some(field))) => {
+                    if let Some(name) = field.name() {
+                        if self.file_names.remove(name) {
+                            return Poll::Ready(Some(Ok(field)));
+                        }
+                    }
+                }
+                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 }

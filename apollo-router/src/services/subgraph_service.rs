@@ -62,6 +62,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::HeartbeatInterval;
@@ -72,7 +73,6 @@ use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
-use crate::plugins::file_uploads;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
@@ -976,18 +976,16 @@ async fn do_fetch(
     FetchError,
 > {
     let _active_request_guard = context.enter_active_request();
-    let response = file_uploads::wrap_http_client_call(
-        client, context, request,
-    )
-    .map_err(|err| {
-        tracing::error!(fetch_error = ?err);
-        FetchError::SubrequestHttpError {
-            status_code: None,
-            service: service_name.to_string(),
-            reason: err.to_string(),
-        }
-    })
-    .await?;
+    let response = file_uploads::wrap_http_client_call(client, request)
+        .map_err(|err| {
+            tracing::error!(fetch_error = ?err);
+            FetchError::SubrequestHttpError {
+                status_code: None,
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            }
+        })
+        .await?;
 
     let (parts, body) = response.into_parts();
     // Print out debug for the response
