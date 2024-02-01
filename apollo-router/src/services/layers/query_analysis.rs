@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
@@ -184,7 +187,28 @@ impl QueryAnalysisLayer {
 
 pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 
+#[derive(Debug)]
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: Valid<ExecutableDocument>,
 }
+
+impl Display for ParsedDocumentInner {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Hash for ParsedDocumentInner {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.ast.hash(state);
+    }
+}
+
+impl PartialEq for ParsedDocumentInner {
+    fn eq(&self, other: &Self) -> bool {
+        self.ast == other.ast
+    }
+}
+
+impl Eq for ParsedDocumentInner {}
