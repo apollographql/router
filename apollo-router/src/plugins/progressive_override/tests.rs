@@ -314,7 +314,7 @@ async fn query_with_overridden_labels_metrics() {
     async {
         query_with_labels("{ percent100 { foo } }", vec![]).await;
         assert_counter!(
-            "apollo.router.usage.override.query",
+            "apollo.router.schema.override.query",
             1,
             query.label_count = 2
         );
@@ -328,11 +328,11 @@ async fn query_with_externally_resolved_labels_metrics() {
     async {
         query_with_labels("{ percent100 { foo } }", vec!["foo"]).await;
         assert_counter!(
-            "apollo.router.usage.override.query",
+            "apollo.router.schema.override.query",
             1,
             query.label_count = 2
         );
-        assert_counter!("apollo.router.usage.override.external", 1);
+        assert_counter!("apollo.router.schema.override.external", 1);
     }
     .with_metrics()
     .await;
