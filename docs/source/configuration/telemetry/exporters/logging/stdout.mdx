@@ -42,6 +42,27 @@ telemetry:
          format: text #highlight-line
 ```
 
+### `tty_format`
+
+You can configure the log format when you're running on an interactive shell. This is useful during development.
+
+If both `format` and `tty_format` are configured then the output depends on the environment where the Router is run:
+
+* In an interactive shell, `tty_format` will take precedence.
+* In a non-interactive shell, `format` will take precedence.
+
+You can explicitly set the format in [`router.yaml`](../../../overview#yaml-config-file) with `telemetry.exporters.logging.stdout.tty_format`:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     logging:
+       stdout:
+         enabled: true
+         format: json
+         tty_format: text #highlight-line
+```
+
 ### `rate_limit`
 
 The rate at which log messages are produced can become too high, especially for request processing errors. To prevent the router from filling its logs with redundant messages, you can use the `rate_limit` option to set the logging rate limit.
@@ -69,6 +90,7 @@ For configuration options specific to each output format, see the [`text`](#text
 |-----------------------|----------------------------|-----------------|------------------------------------------------------|
 | `enabled`             | `true`\|`false`            | `false`         | Enable or disable stdout logging.                    |
 | `format`              |                            | `text`\|`json`  | See the [format documentation](#format) for details. |
+| `tty_format`          |                            | `text`\|`json`  | See the [format documentation](#format) for details. |
 
 
 ## Logging output format

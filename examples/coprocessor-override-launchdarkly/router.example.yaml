@@ -1,0 +1,5 @@
+coprocessor:
+  url: http://localhost:3000 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
+  supergraph: # Hook into the supergraph service
+    request:
+      context: true

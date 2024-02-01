@@ -1,0 +1,33 @@
+---
+source: apollo-router/src/plugins/progressive_override/tests.rs
+assertion_line: 253
+expression: query_plan
+---
+{
+  "data": null,
+  "extensions": {
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Fetch",
+          "serviceName": "Subgraph2",
+          "variableUsages": [],
+          "operation": "{percent0{foo}}",
+          "operationName": null,
+          "operationKind": "query",
+          "id": null,
+          "inputRewrites": null,
+          "outputRewrites": null,
+          "schemaAwareHash": "098137301a64979dbc957ad4134e40a6c4bcf3be50a08e984661e576c78d4a1b",
+          "authorization": {
+            "is_authenticated": false,
+            "scopes": [],
+            "policies": []
+          }
+        }
+      },
+      "text": "QueryPlan {\n  Fetch(service: \"Subgraph2\") {\n    {\n      percent0 {\n        foo\n      }\n    }\n  },\n}"
+    }
+  }
+}

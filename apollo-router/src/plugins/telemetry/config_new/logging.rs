@@ -105,6 +105,8 @@ pub(crate) struct StdOut {
     pub(crate) enabled: bool,
     /// The format to log to stdout.
     pub(crate) format: Format,
+    /// The format to log to stdout when you're running on an interactive terminal. When configured it will automatically use this `tty_format`` instead of the original `format` when an interactive terminal is detected
+    pub(crate) tty_format: Option<Format>,
     /// Log rate limiting. The limit is set per type of log message
     pub(crate) rate_limit: RateLimit,
 }
@@ -114,6 +116,7 @@ impl Default for StdOut {
         StdOut {
             enabled: true,
             format: Format::default(),
+            tty_format: None,
             rate_limit: RateLimit::default(),
         }
     }
