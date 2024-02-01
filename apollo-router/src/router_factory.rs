@@ -616,6 +616,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
     add_optional_apollo_plugin!("preview_entity_cache");
+    add_mandatory_apollo_plugin!("progressive_override");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
