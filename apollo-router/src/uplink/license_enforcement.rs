@@ -524,6 +524,13 @@ pub(crate) struct ConfigurationRestriction {
     value: Option<Value>,
 }
 
+// An individual check for the supergraph schema
+// #[derive(Builder, Clone, Debug, Serialize, Deserialize)]
+// pub(crate) struct SchemaRestriction {
+//     name: String,
+//     url: String,
+// }
+
 /// An individual check for the supergraph schema
 #[derive(Clone, Debug)]
 pub(crate) enum SchemaRestriction {
