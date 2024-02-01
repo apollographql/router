@@ -1,14 +1,21 @@
+use std::ops::Deref;
+
 use access_json::JSONQuery;
+use derivative::Derivative;
+use jsonpath_rust::JsonPathFinder;
+use jsonpath_rust::JsonPathInst;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[cfg(test)]
 use serde::Serialize;
+use serde_json::Value;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
+use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::trace_id;
@@ -240,8 +247,9 @@ pub(crate) enum SupergraphSelector {
     Static(String),
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Derivative)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[derivative(Debug)]
 pub(crate) enum SubgraphSelector {
     SubgraphOperationName {
         /// The operation name from the subgraph query.
@@ -281,11 +289,38 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    /// Deprecated, use SubgraphResponseData and SubgraphResponseError instead
     SubgraphResponseBody {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_json_query")]
         subgraph_response_body: JSONQuery,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    SubgraphResponseData {
+        /// The subgraph response body json path.
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        subgraph_response_data: JsonPathInst,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    SubgraphResponseErrors {
+        /// The subgraph response body json path.
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        subgraph_response_errors: JsonPathInst,
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
@@ -781,6 +816,49 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::SubgraphResponseData {
+                subgraph_response_data,
+                default,
+                ..
+            } => if let Some(data) = &response.response.body().data {
+                let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
+                let mut val =
+                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_data.clone()))
+                        .find();
+                if let serde_json::Value::Array(array) = &mut val {
+                    if array.len() == 1 {
+                        val = array
+                            .pop()
+                            .expect("already checked the array had a length of 1; qed");
+                    }
+                }
+
+                val.maybe_to_otel_value()
+            } else {
+                None
+            }
+            .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::SubgraphResponseErrors {
+                subgraph_response_errors: subgraph_response_error,
+                default,
+                ..
+            } => {
+                let errors = response.response.body().errors.clone();
+                let data: serde_json::Value = serde_json::to_value(errors).ok()?;
+                let mut val =
+                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_error.clone()))
+                        .find();
+                if let serde_json::Value::Array(array) = &mut val {
+                    if array.len() == 1 {
+                        val = array
+                            .pop()
+                            .expect("already checked the array had a length of 1; qed");
+                    }
+                }
+
+                val.maybe_to_otel_value()
+            }
+            .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::ResponseContext {
                 response_context,
                 default,
@@ -801,9 +879,11 @@ impl Selector for SubgraphSelector {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use http::StatusCode;
+    use jsonpath_rust::JsonPathInst;
     use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
@@ -813,6 +893,7 @@ mod test {
     use opentelemetry::trace::TraceState;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
+    use opentelemetry_api::StringValue;
     use serde_json::json;
     use tracing::span;
     use tracing::subscriber;
@@ -1953,6 +2034,92 @@ mod test {
                 )
                 .unwrap(),
             opentelemetry::Value::I64(204)
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_response_data() {
+        let selector = SubgraphSelector::SubgraphResponseData {
+            subgraph_response_data: JsonPathInst::from_str("$.hello").unwrap(),
+            redact: None,
+            default: None,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .data(serde_json_bytes::json!({
+                            "hello": "bonjour"
+                        }))
+                        .build()
+                )
+                .unwrap(),
+            opentelemetry::Value::String("bonjour".into())
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .data(serde_json_bytes::json!({
+                            "hello": ["bonjour", "hello", "ciao"]
+                        }))
+                        .build()
+                )
+                .unwrap(),
+            opentelemetry::Value::Array(
+                vec![
+                    StringValue::from("bonjour"),
+                    StringValue::from("hello"),
+                    StringValue::from("ciao")
+                ]
+                .into()
+            )
+        );
+
+        assert!(selector
+            .on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .data(serde_json_bytes::json!({
+                        "hi": ["bonjour", "hello", "ciao"]
+                    }))
+                    .build()
+            )
+            .is_none());
+
+        let selector = SubgraphSelector::SubgraphResponseData {
+            subgraph_response_data: JsonPathInst::from_str("$.hello.*.greeting").unwrap(),
+            redact: None,
+            default: None,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .data(serde_json_bytes::json!({
+                            "hello": {
+                                "french": {
+                                    "greeting": "bonjour"
+                                },
+                                "english": {
+                                    "greeting": "hello"
+                                },
+                                "italian": {
+                                    "greeting": "ciao"
+                                }
+                            }
+                        }))
+                        .build()
+                )
+                .unwrap(),
+            opentelemetry::Value::Array(
+                vec![
+                    StringValue::from("bonjour"),
+                    StringValue::from("hello"),
+                    StringValue::from("ciao")
+                ]
+                .into()
+            )
         );
     }
 
