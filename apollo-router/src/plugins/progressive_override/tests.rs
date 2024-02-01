@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::ast::Document;
 use tower::ServiceExt;
 
+use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockRouterService;
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::Plugin;
@@ -260,4 +261,79 @@ async fn overridden_field_yields_expected_query_plan() {
     // serial fetch after to resolve `foo` in `Subgraph2`
     let query_plan = get_json_query_plan("{ percent100 { foo } }").await;
     insta::assert_json_snapshot!(query_plan);
+}
+
+async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_call()
+        .returning(|_| SupergraphResponse::fake_builder().build());
+
+    let service_stack = ProgressiveOverridePlugin::new(PluginInit::fake_new(
+        Config {},
+        Arc::new(SCHEMA.to_string()),
+    ))
+    .await
+    .unwrap()
+    .supergraph_service(mock_service.boxed());
+
+    // plugin depends on the parsed document being in the context so we'll add
+    // it ourselves for testing purposes
+    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
+        ast: Document::parse(query, "query.graphql").unwrap(),
+        ..Default::default()
+    });
+
+    let context = Context::new();
+    context
+        .extensions()
+        .lock()
+        .insert::<ParsedDocument>(parsed_doc);
+
+    context
+        .insert(
+            LABELS_TO_OVERRIDE_KEY,
+            labels_from_coprocessors
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(context)
+        .query(query)
+        .build()
+        .unwrap();
+
+    let _ = service_stack.oneshot(request).await;
+}
+
+#[tokio::test]
+async fn query_with_overridden_labels_metrics() {
+    async {
+        query_with_labels("{ percent100 { foo } }", vec![]).await;
+        assert_counter!(
+            "apollo.router.schema.override.query",
+            1,
+            query.label_count = 2
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn query_with_externally_resolved_labels_metrics() {
+    async {
+        query_with_labels("{ percent100 { foo } }", vec!["foo"]).await;
+        assert_counter!(
+            "apollo.router.schema.override.query",
+            1,
+            query.label_count = 2
+        );
+        assert_counter!("apollo.router.schema.override.external", 1);
+    }
+    .with_metrics()
+    .await;
 }

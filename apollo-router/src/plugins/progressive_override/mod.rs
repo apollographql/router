@@ -212,6 +212,23 @@ impl Plugin for ProgressiveOverridePlugin {
                         })
                         .clone();
 
+                    if !relevant_labels.is_empty() {
+                        u64_counter!(
+                            "apollo.router.schema.override.query",
+                            "query with overridden fields",
+                            1,
+                            query.label_count = relevant_labels.len() as i64
+                        );
+                    }
+
+                    if !externally_overridden_labels.is_empty() {
+                        u64_counter!(
+                            "apollo.router.schema.override.external",
+                            "override label(s) resolved by coprocessor/rhai",
+                            1
+                        );
+                    }
+
                     // the intersection of all provided labels (percentage and
                     // external) and the labels relevant to this operation is
                     // the set of labels we'll send to the query planner
