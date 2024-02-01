@@ -30,9 +30,9 @@ If the format is not specified, then the trace ID will continue to be in hexadec
 
 By [@nicholascioli](https://github.com/nicholascioli) in https://github.com/apollographql/router/pull/4530
 
-### Introduce support for progressive @override ([PR #4521](https://github.com/apollographql/router/pull/4521))
+### Introduce support for progressive `@override` ([PR #4521](https://github.com/apollographql/router/pull/4521))
 
-The change brings support for progressive @override, which allows dynamically overriding root fields and entity fields in the schema. This feature is enterprise only and requires a license key to be used.
+The change brings support for progressive `@override`, which allows dynamically overriding root fields and entity fields in the schema. This feature is enterprise only and requires a license key to be used.
 
 A new `label` argument is added to the `@override` directive in order to indicate the field is dynamically overridden. Labels can come in two forms:
 1) String matching the form `percent(x)`: The router resolves these labels based on the `x` value. For example, `percent(50)` will route 50% of requests to the overridden field and 50% of requests to the original field.
