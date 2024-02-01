@@ -51,6 +51,7 @@ use crate::services::trust_dns_connector::AsyncHyperResolver;
 #[cfg(test)]
 mod test;
 
+mod execution;
 mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
@@ -103,6 +104,13 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         service: services::supergraph::BoxService,
     ) -> services::supergraph::BoxService {
         self.supergraph_service(service)
+    }
+
+    fn execution_service(
+        &self,
+        service: services::execution::BoxService,
+    ) -> services::execution::BoxService {
+        self.execution_service(service)
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
@@ -173,6 +181,18 @@ where
         service: services::supergraph::BoxService,
     ) -> services::supergraph::BoxService {
         self.configuration.supergraph.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            self.sdl.clone(),
+        )
+    }
+
+    fn execution_service(
+        &self,
+        service: services::execution::BoxService,
+    ) -> services::execution::BoxService {
+        self.configuration.execution.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -273,6 +293,9 @@ struct Conf {
     /// The supergraph stage request/response configuration
     #[serde(default)]
     supergraph: supergraph::SupergraphStage,
+    /// The execution stage request/response configuration
+    #[serde(default)]
+    execution: execution::ExecutionStage,
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,

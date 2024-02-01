@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -663,6 +664,113 @@ expression: "&schema"
         "url"
       ],
       "properties": {
+        "execution": {
+          "description": "The execution stage request/response configuration",
+          "default": {
+            "request": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "method": false,
+              "query_plan": false
+            },
+            "response": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "status_code": false
+            }
+          },
+          "type": "object",
+          "properties": {
+            "request": {
+              "description": "The request configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "method": false,
+                "query_plan": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "method": {
+                  "description": "Send the method",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "query_plan": {
+                  "description": "Send the query plan",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "response": {
+              "description": "What information is passed to a router request/response stage",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "status_code": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "status_code": {
+                  "description": "Send the HTTP status",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
         "router": {
           "description": "The router stage request/response configuration",
           "default": {
@@ -1214,6 +1322,28 @@ expression: "&schema"
           "default": null,
           "type": "boolean",
           "nullable": true
+        },
+        "metrics": {
+          "description": "Entity caching evaluation metrics",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "enables metrics evaluating the benefits of entity caching",
+              "default": false,
+              "type": "boolean"
+            },
+            "separate_per_type": {
+              "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
+              "default": false,
+              "type": "boolean"
+            },
+            "ttl": {
+              "description": "Metrics counter TTL",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
         },
         "redis": {
           "description": "Redis cache configuration",
@@ -2034,6 +2164,10 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
+    },
+    "progressive_override": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
     },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
@@ -3046,6 +3180,200 @@ expression: "&schema"
                           ]
                         }
                       ]
+                    },
+                    "rate_limit": {
+                      "description": "Log rate limiting. The limit is set per type of log message",
+                      "type": "object",
+                      "properties": {
+                        "capacity": {
+                          "description": "Number of log lines allowed in interval per message",
+                          "default": 1,
+                          "type": "integer",
+                          "format": "uint32",
+                          "minimum": 0.0
+                        },
+                        "enabled": {
+                          "description": "Set to true to limit the rate of log messages",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "interval": {
+                          "description": "Interval for rate limiting",
+                          "default": {
+                            "secs": 1,
+                            "nanos": 0
+                          },
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "tty_format": {
+                      "description": "The format to log to stdout when you're running on an interactive terminal. When configured it will automatically use this `tty_format`` instead of the original `format` when an interactive terminal is detected",
+                      "oneOf": [
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                          "type": "object",
+                          "required": [
+                            "json"
+                          ],
+                          "properties": {
+                            "json": {
+                              "type": "object",
+                              "properties": {
+                                "display_current_span": {
+                                  "description": "Include the current span in this log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_filename": {
+                                  "description": "Include the filename with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_level": {
+                                  "description": "Include the level with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_line_number": {
+                                  "description": "Include the line number with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_resource": {
+                                  "description": "Include the resource with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_span_list": {
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_target": {
+                                  "description": "Include the target with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_thread_id": {
+                                  "description": "Include the thread_id with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_name": {
+                                  "description": "Include the thread_name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_timestamp": {
+                                  "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                          "type": "string",
+                          "enum": [
+                            "json"
+                          ]
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                          "type": "object",
+                          "required": [
+                            "text"
+                          ],
+                          "properties": {
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "ansi_escape_codes": {
+                                  "description": "Process ansi escapes (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_current_span": {
+                                  "description": "Include the current span in this log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_filename": {
+                                  "description": "Include the filename with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_level": {
+                                  "description": "Include the level with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_line_number": {
+                                  "description": "Include the line number with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_resource": {
+                                  "description": "Include the resource with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_service_name": {
+                                  "description": "Include the service name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_service_namespace": {
+                                  "description": "Include the service namespace with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_span_list": {
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_target": {
+                                  "description": "Include the target with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_id": {
+                                  "description": "Include the thread_id with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_name": {
+                                  "description": "Include the thread_name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_timestamp": {
+                                  "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                          "type": "string",
+                          "enum": [
+                            "text"
+                          ]
+                        }
+                      ],
+                      "nullable": true
                     }
                   },
                   "additionalProperties": false
@@ -5024,23 +5352,6 @@ expression: "&schema"
                         "format": "double"
                       }
                     },
-                    "experimental_cache_metrics": {
-                      "description": "Experimental metrics to know more about caching strategies",
-                      "type": "object",
-                      "properties": {
-                        "enabled": {
-                          "description": "Enable experimental metrics",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "ttl": {
-                          "description": "Potential TTL for a cache if we had one (default: 5secs)",
-                          "default": "5s",
-                          "type": "string"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
                     "resource": {
                       "description": "The Open Telemetry resource",
                       "default": {},
@@ -5532,6 +5843,25 @@ expression: "&schema"
                       "default": false,
                       "type": "boolean"
                     },
+                    "format": {
+                      "description": "Format of the trace ID in response headers",
+                      "oneOf": [
+                        {
+                          "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
+                          "type": "string",
+                          "enum": [
+                            "hexadecimal"
+                          ]
+                        },
+                        {
+                          "description": "Format the Trace ID as a decimal number\n\n(e.g. Trace ID 16 -> 16)",
+                          "type": "string",
+                          "enum": [
+                            "decimal"
+                          ]
+                        }
+                      ]
+                    },
                     "header_name": {
                       "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
                       "type": "string",
@@ -6022,6 +6352,12 @@ expression: "&schema"
                       "description": "Custom attributes that are attached to the router span.",
                       "type": "object",
                       "properties": {
+                        "baggage": {
+                          "description": "All key values from trace baggage.",
+                          "default": null,
+                          "type": "boolean",
+                          "nullable": true
+                        },
                         "dd.trace_id": {
                           "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
                           "default": null,
@@ -6525,6 +6861,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
@@ -7258,6 +7597,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
@@ -7723,6 +8065,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
@@ -7910,6 +8255,13 @@ expression: "&schema"
                   "enum": [
                     "br"
                   ]
+                },
+                {
+                  "description": "identity",
+                  "type": "string",
+                  "enum": [
+                    "identity"
+                  ]
                 }
               ],
               "nullable": true
@@ -8078,6 +8430,13 @@ expression: "&schema"
                     "type": "string",
                     "enum": [
                       "br"
+                    ]
+                  },
+                  {
+                    "description": "identity",
+                    "type": "string",
+                    "enum": [
+                      "identity"
                     ]
                   }
                 ],

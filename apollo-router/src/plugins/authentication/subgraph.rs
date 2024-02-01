@@ -4,14 +4,14 @@ use std::time::SystemTime;
 
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::Credentials;
-use aws_sigv4::http_request;
 use aws_sigv4::http_request::sign;
 use aws_sigv4::http_request::PayloadChecksumKind;
 use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
-use aws_sigv4::signing_params;
+use aws_smithy_runtime_api::client::identity::Identity;
 use aws_types::region::Region;
+use http::HeaderMap;
 use http::Request;
 use hyper::Body;
 use schemars::JsonSchema;
@@ -121,7 +121,7 @@ impl AWSSigV4Config {
 
                 let chain = aws_config.build().await;
                 if let Some(assume_role_provider) = role_provider_builder {
-                    Arc::new(assume_role_provider.build(chain))
+                    Arc::new(assume_role_provider.build_from_provider(chain).await)
                 } else {
                     Arc::new(chain)
                 }
@@ -132,7 +132,7 @@ impl AWSSigV4Config {
                         .build()
                         .await;
                 if let Some(assume_role_provider) = role_provider_builder {
-                    Arc::new(assume_role_provider.build(chain))
+                    Arc::new(assume_role_provider.build_from_provider(chain).await)
                 } else {
                     Arc::new(config.clone())
                 }
@@ -206,24 +206,24 @@ impl SigningParamsConfig {
         let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, body) = req.into_parts();
-        // Depending on the servicve, AWS refuses sigv4 payloads that contain specific headers.
+        // Depending on the service, AWS refuses sigv4 payloads that contain specific headers.
         // We'll go with default signed headers
-        let headers = Default::default();
+        let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
         let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
-            &parts.method,
-            &parts.uri,
-            &headers,
+            parts.method.as_str(),
+            parts.uri.to_string(),
+            headers.iter().map(|(name, value)| (name.as_str(), *value)),
             match self.service_name.as_str() {
                 "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
                 _ => SignableBody::Bytes(body_bytes.as_slice()),
             },
-        );
+        )?;
 
         let signing_params = builder.build().expect("all required fields set");
 
-        let (signing_instructions, _signature) = sign(signable_request, &signing_params)
+        let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
                 let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
@@ -232,7 +232,7 @@ impl SigningParamsConfig {
             })?
             .into_parts();
         req = Request::<Body>::from_parts(parts, body_bytes.into());
-        signing_instructions.apply_to_request(&mut req);
+        signing_instructions.apply_to_request_http0x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -245,23 +245,23 @@ impl SigningParamsConfig {
         let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, _) = req.into_parts();
-        // Depending on the servicve, AWS refuses sigv4 payloads that contain specific headers.
+        // Depending on the service, AWS refuses sigv4 payloads that contain specific headers.
         // We'll go with default signed headers
-        let headers = Default::default();
+        let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
         let signable_request = SignableRequest::new(
-            &parts.method,
-            &parts.uri,
-            &headers,
+            parts.method.as_str(),
+            parts.uri.to_string(),
+            headers.iter().map(|(name, value)| (name.as_str(), *value)),
             match self.service_name.as_str() {
                 "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
                 _ => SignableBody::Bytes(&[]),
             },
-        );
+        )?;
 
         let signing_params = builder.build().expect("all required fields set");
 
-        let (signing_instructions, _signature) = sign(signable_request, &signing_params)
+        let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
                 let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
@@ -270,28 +270,26 @@ impl SigningParamsConfig {
             })?
             .into_parts();
         req = Request::<()>::from_parts(parts, ());
-        signing_instructions.apply_to_request(&mut req);
+        signing_instructions.apply_to_request_http0x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
 
     async fn signing_params_builder<'s>(
         &'s self,
-        credentials: &'s Credentials,
-    ) -> Result<signing_params::Builder<'s, SigningSettings>, BoxError> {
+        identity: &'s Identity,
+    ) -> Result<aws_sigv4::sign::v4::signing_params::Builder<'s, SigningSettings>, BoxError> {
         let settings = get_signing_settings(self);
-        let mut builder = http_request::SigningParams::builder()
-            .access_key(credentials.access_key_id())
-            .secret_key(credentials.secret_access_key())
+        let builder = aws_sigv4::sign::v4::SigningParams::builder()
+            .identity(identity)
             .region(self.region.as_ref())
-            .service_name(&self.service_name)
+            .name(&self.service_name)
             .time(SystemTime::now())
             .settings(settings);
-        builder.set_security_token(credentials.session_token());
         Ok(builder)
     }
 
-    async fn credentials(&self) -> Result<Credentials, BoxError> {
+    async fn credentials(&self) -> Result<Identity, BoxError> {
         self.credentials_provider
             .provide_credentials()
             .await
@@ -301,6 +299,7 @@ impl SigningParamsConfig {
                 tracing::error!("{}", error);
                 error.into()
             })
+            .map(Into::into)
     }
 }
 
@@ -374,7 +373,7 @@ impl SubgraphAuth {
             ServiceBuilder::new()
                 .map_request(move |req: SubgraphRequest| {
                     let signing_params = signing_params.clone();
-                    req.context.private_entries.lock().insert(signing_params);
+                    req.context.extensions().lock().insert(signing_params);
                     req
                 })
                 .service(service)
@@ -643,7 +642,7 @@ mod test {
         service_name: String,
     ) -> hyper::Request<hyper::Body> {
         let signing_params = {
-            let ctx = request.context.private_entries.lock();
+            let ctx = request.context.extensions().lock();
             let sp = ctx.get::<SigningParamsConfig>();
             sp.cloned().unwrap()
         };
