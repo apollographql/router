@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::Duration;
 
 use http::header::ACCEPT;
@@ -21,6 +22,7 @@ use tower::BoxError;
 use tower::Service;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::query_planner::QueryPlan;
 use crate::Context;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
@@ -38,6 +40,12 @@ pub(crate) enum PipelineStep {
     ExecutionResponse,
     SubgraphRequest,
     SubgraphResponse,
+}
+
+impl From<PipelineStep> for opentelemetry::Value {
+    fn from(val: PipelineStep) -> Self {
+        val.to_string().into()
+    }
 }
 
 #[derive(Clone, Debug, Default, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -90,6 +98,8 @@ pub(crate) struct Externalizable<T> {
     pub(crate) status_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) has_next: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_plan: Option<Arc<QueryPlan>>,
 }
 
 #[buildstructor::buildstructor]
@@ -132,6 +142,7 @@ where
             method,
             service_name: None,
             has_next: None,
+            query_plan: None,
         }
     }
 
@@ -170,6 +181,47 @@ where
             method,
             service_name: None,
             has_next,
+            query_plan: None,
+        }
+    }
+
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing an Execution
+    /// `Externalizable`.
+    ///
+    fn execution_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        sdl: Option<String>,
+        has_next: Option<bool>,
+        query_plan: Option<Arc<QueryPlan>>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::ExecutionRequest | PipelineStep::ExecutionResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl,
+            uri: None,
+            path: None,
+            method,
+            service_name: None,
+            has_next,
+            query_plan,
         }
     }
 
@@ -208,6 +260,7 @@ where
             method,
             service_name,
             has_next: None,
+            query_plan: None,
         }
     }
 

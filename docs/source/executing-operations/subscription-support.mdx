@@ -185,7 +185,7 @@ Callback mode requires your subgraph library to support the router's [HTTP callb
 
 <Note>
 
-Currently, [Apollo Server 4.9](https://github.com/apollographql/apollo-server/releases/tag/%40apollo%2Fserver%404.9.0) supports a *preview* of this protocol. If you're implementing support in a subgraph library, please [create a GitHub discussion](https://github.com/apollographql/router/discussions/).
+Currently, [Apollo Server 4.10](https://github.com/apollographql/apollo-server/releases/tag/%40apollo%2Fserver%404.10.0) and [Spring GraphQL 4.3.0](https://github.com/apollographql/federation-jvm/tree/main/spring-subscription-callback#usage) support this protocol. If you're implementing support in a subgraph library, please [create a GitHub discussion](https://github.com/apollographql/router/discussions/).
 
 </Note>
 
@@ -339,7 +339,7 @@ To quickly try out the Apollo Router's HTTP-based subscriptions _without_ settin
 
 ```bash
  curl 'http://localhost:4000/' -v \
-  -H 'accept: multipart/mixed; boundary="graphql"; subscriptionSpec=1.0, application/json' \
+  -H 'accept: multipart/mixed;subscriptionSpec=1.0, application/json' \
   -H 'content-type: application/json' \
   --data-raw '{"query":"subscription OnProductPriceChanged { productPriceChanged { name price reviews { score } } }","operationName":"OnProductPriceChanged"}'
 ```

@@ -766,7 +766,7 @@ pub(crate) struct Limits {
 
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
-    pub(crate) experimental_http_max_request_bytes: usize,
+    pub(crate) http_max_request_bytes: usize,
 }
 
 impl Default for Limits {
@@ -778,7 +778,7 @@ impl Default for Limits {
             max_root_fields: None,
             max_aliases: None,
             warn_only: false,
-            experimental_http_max_request_bytes: 2_000_000,
+            http_max_request_bytes: 2_000_000,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
@@ -913,6 +913,11 @@ pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
 
+    /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
+    pub(crate) username: Option<String>,
+    /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
+    pub(crate) password: Option<String>,
+
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
@@ -922,6 +927,9 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// TTL for entries
     pub(crate) ttl: Option<Duration>,
+
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
 
     #[serde(default)]
     /// TLS client configuration

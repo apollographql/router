@@ -172,9 +172,9 @@ fn router_service(service) {
     }
 
     if roles.len() > 2 {
-      for role in roles[1..] {
+      for i in 1..roles.len() {
         scope += ' ';
-        scope += role;
+        scope += roles[i];
       }
     }
 
@@ -912,3 +912,7 @@ authorization:
     enabled: true
     dry_run: true # default: false
 ```
+
+## Related topics
+
+* [Authenticating requests with the Apollo Router](/technotes/TN0004-router-authentication/)

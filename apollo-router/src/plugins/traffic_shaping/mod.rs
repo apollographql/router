@@ -534,6 +534,7 @@ mod test {
         for (name, plugin) in create_plugins(
             &config,
             &schema,
+            None,
             Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
         )
         .await
