@@ -1,0 +1,6 @@
+description: log warning because span selector `subgraph_response_body` is deprecated
+actions:
+  - type: log
+    level: warn
+    path: telemetry.instrumentation.spans.subgraph.attributes.*.subgraph_response_body
+    log: "'subgraph_response_body' span selector is deprecated, please use 'subgraph_response_data' or subgraph_response_error' instead.\n\n List of available selectors https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
