@@ -76,7 +76,7 @@ where
     ) -> CachingQueryPlanner<T> {
         let cache = Arc::new(
             DeduplicatingCache::from_configuration(
-                &configuration.supergraph.query_planning.cache,
+                &configuration.supergraph.query_planning.cache.clone().into(),
                 "query planner",
             )
             .await,
