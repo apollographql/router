@@ -76,7 +76,7 @@ where
     ) -> CachingQueryPlanner<T> {
         let cache = Arc::new(
             DeduplicatingCache::from_configuration(
-                &configuration.supergraph.query_planning.experimental_cache,
+                &configuration.supergraph.query_planning.cache,
                 "query planner",
             )
             .await,
@@ -494,8 +494,7 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan:{}:{}:{}:{}:{}
-            ",
+            "plan:{}:{}:{}:{}:{}",
             FEDERATION_VERSION,
             self.schema_id.as_deref().unwrap_or("-"),
             query,
