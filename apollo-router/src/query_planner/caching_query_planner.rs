@@ -473,7 +473,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) plan_options: PlanOptions,
 }
 
-const FEDERATION_VERSION: &'static str = std::env!("FEDERATION_VERSION");
+const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
