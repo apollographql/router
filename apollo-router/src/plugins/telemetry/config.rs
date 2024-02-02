@@ -1,10 +1,18 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 use axum::headers::HeaderName;
+use opentelemetry::sdk::metrics::new_view;
+use opentelemetry::sdk::metrics::Aggregation;
+use opentelemetry::sdk::metrics::Instrument;
+use opentelemetry::sdk::metrics::Stream;
+use opentelemetry::sdk::metrics::View;
 use opentelemetry::sdk::trace::SpanLimits;
 use opentelemetry::Array;
 use opentelemetry::Value;
+use opentelemetry_api::metrics::MetricsError;
+use opentelemetry_api::metrics::Unit;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -97,7 +105,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: metrics::prometheus::Config,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
@@ -108,55 +116,78 @@ pub(crate) struct MetricsCommon {
     pub(crate) service_namespace: Option<String>,
     /// The Open Telemetry resource
     pub(crate) resource: BTreeMap<String, AttributeValue>,
-    /// Custom buckets for histograms
-    pub(crate) buckets: Buckets,
+    /// Custom buckets for all histograms
+    pub(crate) buckets: Vec<f64>,
+    /// Views applied on metrics
+    pub(crate) views: Vec<MetricView>,
+}
+
+impl Default for MetricsCommon {
+    fn default() -> Self {
+        Self {
+            attributes: Default::default(),
+            service_name: None,
+            service_namespace: None,
+            resource: BTreeMap::new(),
+            views: Vec::with_capacity(0),
+            buckets: vec![
+                0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+            ],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, untagged)]
-pub(crate) enum Buckets {
-    // Can't be achieved with a migration
-    Deprecated(Vec<f64>),
-    /// Configure custom buckets globally and for specific metrics
-    New {
-        /// Default buckets for all histograms
-        #[serde(default = "default_buckets")]
-        default: Vec<f64>,
-        /// Custom buckets for specified metrics
-        #[serde(default)]
-        custom: HashMap<String, Vec<f64>>,
-    },
+#[serde(deny_unknown_fields)]
+pub(crate) struct MetricView {
+    /// The instrument name you're targeting
+    pub(crate) instrument_name: String,
+    /// New description to set to the instrument
+    pub(crate) description: Option<String>,
+    /// New unit to set to the instrument
+    pub(crate) unit: Option<String>,
+    /// New aggregation settings to set
+    pub(crate) aggregation: MetricAggregation,
+    /// An allow-list of attribute keys that will be preserved for the instrument.
+    ///
+    /// Any attribute recorded for the instrument with a key not in this set will be
+    /// dropped. If the set is empty, all attributes will be dropped, if `None` all
+    /// attributes will be kept.
+    pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
 }
 
-impl Default for Buckets {
-    fn default() -> Self {
-        Self::New {
-            default: default_buckets(),
-            custom: HashMap::with_capacity(0),
+impl TryInto<Box<dyn View>> for MetricView {
+    type Error = MetricsError;
+
+    fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
+        let aggregation = match self.aggregation {
+            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
+                boundaries: buckets,
+                record_min_max: true,
+            },
+        };
+        let mut instrument = Instrument::new().name(self.instrument_name);
+        if let Some(desc) = self.description {
+            instrument = instrument.description(desc);
         }
+        if let Some(unit) = self.unit {
+            instrument = instrument.unit(Unit::new(unit));
+        }
+        let mut mask = Stream::new().aggregation(aggregation);
+        if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
+            mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
+        }
+
+        new_view(instrument, mask)
     }
 }
 
-fn default_buckets() -> Vec<f64> {
-    vec![
-        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-    ]
-}
-
-impl Buckets {
-    pub(crate) fn get_global(&self) -> &[f64] {
-        match self {
-            Buckets::Deprecated(global) => global,
-            Buckets::New { default, .. } => default,
-        }
-    }
-
-    pub(crate) fn get_custom(&self) -> Option<&HashMap<String, Vec<f64>>> {
-        match self {
-            Buckets::Deprecated(_global) => None,
-            Buckets::New { custom, .. } => Some(custom),
-        }
-    }
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum MetricAggregation {
+    /// An aggregation that summarizes a set of measurements as an histogram with
+    /// explicitly defined buckets.
+    Histogram { buckets: Vec<f64> },
 }
 
 /// Tracing configuration

@@ -5,11 +5,8 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
-use opentelemetry::sdk::metrics::new_view;
-use opentelemetry::sdk::metrics::Aggregation;
-use opentelemetry::sdk::metrics::Instrument;
 use opentelemetry::sdk::metrics::MeterProvider;
-use opentelemetry::sdk::metrics::Stream;
+use opentelemetry::sdk::metrics::View;
 use opentelemetry::sdk::Resource;
 use prometheus::Encoder;
 use prometheus::Registry;
@@ -89,7 +86,7 @@ impl MetricsConfigurator for Config {
 
         let prometheus_config = PrometheusConfig {
             resource: builder.resource.clone(),
-            buckets: metrics_config.buckets.get_global().to_vec(),
+            buckets: metrics_config.buckets.clone(),
         };
 
         // Check the last registry to see if the resources are the same, if they are we can use it as is.
@@ -128,7 +125,7 @@ impl MetricsConfigurator for Config {
         let exporter = opentelemetry_prometheus::exporter()
             .with_aggregation_selector(
                 CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.get_global().to_vec())
+                    .boundaries(metrics_config.buckets.clone())
                     .record_min_max(true)
                     .build(),
             )
@@ -138,17 +135,9 @@ impl MetricsConfigurator for Config {
         let mut meter_provider_builder = MeterProvider::builder()
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
-        if let Some(custom_buckets) = metrics_config.buckets.get_custom() {
-            for (instrument_name, buckets) in custom_buckets {
-                let view = new_view(
-                    Instrument::new().name(instrument_name.clone()),
-                    Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: buckets.clone(),
-                        record_min_max: true,
-                    }),
-                )?;
-                meter_provider_builder = meter_provider_builder.with_view(view);
-            }
+        for metric_view in metrics_config.views.clone() {
+            let view: Box<dyn View> = metric_view.try_into()?;
+            meter_provider_builder = meter_provider_builder.with_view(view);
         }
         let meter_provider = meter_provider_builder.build();
         builder.custom_endpoints.insert(

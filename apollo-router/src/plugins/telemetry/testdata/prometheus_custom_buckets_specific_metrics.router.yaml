@@ -6,13 +6,15 @@ telemetry:
     metrics:
       common:
         service_name: apollo-router
-        buckets:
-          custom:
-            apollo_router_http_request_duration_seconds:
-            - 1
-            - 2
-            - 3
-            - 4
-            - 5
+        views:
+          - instrument_name: apollo_router_http_request_duration_seconds
+            aggregation:
+              histogram:
+                buckets:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
       prometheus:
         enabled: true

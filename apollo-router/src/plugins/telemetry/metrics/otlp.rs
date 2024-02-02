@@ -1,9 +1,6 @@
 use opentelemetry::runtime;
-use opentelemetry::sdk::metrics::new_view;
-use opentelemetry::sdk::metrics::Aggregation;
-use opentelemetry::sdk::metrics::Instrument;
 use opentelemetry::sdk::metrics::PeriodicReader;
-use opentelemetry::sdk::metrics::Stream;
+use opentelemetry::sdk::metrics::View;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
@@ -55,7 +52,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
                     (&self.temporality).into(),
                     Box::new(
                         CustomAggregationSelector::builder()
-                            .boundaries(metrics_config.buckets.get_global().to_vec())
+                            .boundaries(metrics_config.buckets.clone())
                             .build(),
                     ),
                 )?;
@@ -67,18 +64,10 @@ impl MetricsConfigurator for super::super::otlp::Config {
                             .with_timeout(self.batch_processor.max_export_timeout)
                             .build(),
                     );
-                if let Some(custom_buckets) = metrics_config.buckets.get_custom() {
-                    for (instrument_name, buckets) in custom_buckets {
-                        let view = new_view(
-                            Instrument::new().name(instrument_name.clone()),
-                            Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
-                                boundaries: buckets.clone(),
-                                record_min_max: true,
-                            }),
-                        )?;
-                        builder.public_meter_provider_builder =
-                            builder.public_meter_provider_builder.with_view(view);
-                    }
+                for metric_view in metrics_config.views.clone() {
+                    let view: Box<dyn View> = metric_view.try_into()?;
+                    builder.public_meter_provider_builder =
+                        builder.public_meter_provider_builder.with_view(view);
                 }
                 Ok(builder)
             }

@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -5331,57 +5330,26 @@ expression: "&schema"
                       "additionalProperties": false
                     },
                     "buckets": {
-                      "description": "Custom buckets for histograms",
-                      "anyOf": [
-                        {
-                          "type": "array",
-                          "items": {
-                            "type": "number",
-                            "format": "double"
-                          }
-                        },
-                        {
-                          "description": "Configure custom buckets globally and for specific metrics",
-                          "type": "object",
-                          "properties": {
-                            "custom": {
-                              "description": "Custom buckets for specified metrics",
-                              "default": {},
-                              "type": "object",
-                              "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                  "type": "number",
-                                  "format": "double"
-                                }
-                              }
-                            },
-                            "default": {
-                              "description": "Default buckets for all histograms",
-                              "default": [
-                                0.001,
-                                0.005,
-                                0.015,
-                                0.05,
-                                0.1,
-                                0.2,
-                                0.3,
-                                0.4,
-                                0.5,
-                                1.0,
-                                5.0,
-                                10.0
-                              ],
-                              "type": "array",
-                              "items": {
-                                "type": "number",
-                                "format": "double"
-                              }
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ]
+                      "description": "Custom buckets for all histograms",
+                      "default": [
+                        0.001,
+                        0.005,
+                        0.015,
+                        0.05,
+                        0.1,
+                        0.2,
+                        0.3,
+                        0.4,
+                        0.5,
+                        1.0,
+                        5.0,
+                        10.0
+                      ],
+                      "type": "array",
+                      "items": {
+                        "type": "number",
+                        "format": "double"
+                      }
                     },
                     "resource": {
                       "description": "The Open Telemetry resource",
@@ -5456,6 +5424,74 @@ expression: "&schema"
                       "default": null,
                       "type": "string",
                       "nullable": true
+                    },
+                    "views": {
+                      "description": "Views applied on metrics",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "aggregation",
+                          "instrument_name"
+                        ],
+                        "properties": {
+                          "aggregation": {
+                            "description": "New aggregation settings to set",
+                            "oneOf": [
+                              {
+                                "description": "An aggregation that summarizes a set of measurements as an histogram with explicitly defined buckets.",
+                                "type": "object",
+                                "required": [
+                                  "histogram"
+                                ],
+                                "properties": {
+                                  "histogram": {
+                                    "type": "object",
+                                    "required": [
+                                      "buckets"
+                                    ],
+                                    "properties": {
+                                      "buckets": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "allowed_attribute_keys": {
+                            "description": "An allow-list of attribute keys that will be preserved for the instrument.\n\nAny attribute recorded for the instrument with a key not in this set will be dropped. If the set is empty, all attributes will be dropped, if `None` all attributes will be kept.",
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "uniqueItems": true,
+                            "nullable": true
+                          },
+                          "description": {
+                            "description": "New description to set to the instrument",
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "instrument_name": {
+                            "description": "The instrument name you're targeting",
+                            "type": "string"
+                          },
+                          "unit": {
+                            "description": "New unit to set to the instrument",
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "additionalProperties": false
