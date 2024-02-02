@@ -1896,7 +1896,7 @@ async fn parallel_failure() {
     let response = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
 
-    let query = "query { id test { s1 s2 s3 } }";
+    let query = "query { test { id s1 s2 s3 } }";
 
     let subgraphs = MockedSubgraphs(
         [
