@@ -370,7 +370,6 @@ pin_project! {
     }
 }
 
-//struct BodyStream<B: hyper::body::HttpBody>(DecompressionBody<B>);
 
 impl<B> Stream for BodyStream<B>
 where
