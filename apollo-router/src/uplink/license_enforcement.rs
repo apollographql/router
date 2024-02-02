@@ -234,6 +234,10 @@ impl LicenseEnforcementReport {
                 .path("$.telemetry..instruments")
                 .name("Advanced telemetry")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.experimental_file_uploads")
+                .name("File uploads plugin")
+                .build(),
         ]
     }
 
