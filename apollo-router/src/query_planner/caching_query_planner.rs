@@ -471,22 +471,18 @@ impl std::fmt::Display for CachingQueryKey {
 
         let mut hasher = Sha256::new();
         hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
-        let metadata = hex::encode(hasher.finalize());
-
-        let mut hasher = Sha256::new();
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
-        let plan_options = hex::encode(hasher.finalize());
+        let metadata = hex::encode(hasher.finalize());
 
         write!(
             f,
-            "plan:{}:{}:{}:{}:{}",
+            "plan:{}:{}:{}:{}",
             self.schema_id.as_deref().unwrap_or("-"),
             query,
             operation,
             metadata,
-            plan_options,
         )
     }
 }
