@@ -224,7 +224,7 @@ impl<'de> serde::de::Visitor<'de> for JSONPathVisitor {
     type Value = JsonPathInst;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        write!(formatter, "a string that begins with '$'")
+        write!(formatter, "a JSON path")
     }
 
     fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
