@@ -1,4 +1,4 @@
-### Graduate query plan cache from experimental ([Issue #3768](https://github.com/apollographql/router/issues/3768)), ([Issue #4575](https://github.com/apollographql/router/issues/4575))
+### Graduate query plan cache from experimental ([Issue #4575](https://github.com/apollographql/router/issues/4575))
 
 The query planner's distributed cache, one of the Router's Enterprise features, has been in use for a long time in production deployments, so it will no longer be marked as experimental.
 
