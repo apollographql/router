@@ -4,9 +4,7 @@
 
 use std::cmp::min;
 use std::fmt;
-use std::str::FromStr;
 
-use jsonpath_rust::JsonPathInst;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;

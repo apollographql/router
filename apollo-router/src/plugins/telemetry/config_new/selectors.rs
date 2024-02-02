@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use access_json::JSONQuery;
 use derivative::Derivative;
 use jsonpath_rust::JsonPathFinder;
@@ -8,7 +6,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 #[cfg(test)]
 use serde::Serialize;
-use serde_json::Value;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
