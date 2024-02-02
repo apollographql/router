@@ -1904,7 +1904,7 @@ async fn parallel_failure() {
                 "S1",
                 MockSubgraph::builder()
                     .with_json(
-                        serde_json::json! {{"query":"{test{id s1}}",}},
+                        serde_json::json! {{"query":"{test{s1 id}}",}},
                         serde_json::json! {{"data":  null }},
                     )
                     .build(),
@@ -1922,6 +1922,70 @@ async fn parallel_failure() {
                     )
                     .build(),
             ),
+            (
+                "S3",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{test{s3}}",}},
+                        serde_json::json! {{"data": {
+                            "test": {
+                                "s3": "s3",
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
+
+    let query = "query { test { id s1 s2 s3 } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "S1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{test{s1 id}}",}},
+                        serde_json::json! {{"data":  {
+                            "test": {
+                                "s1": "s1",
+                                "id": "0"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            /*(
+                "S2",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{test{s2}}",}},
+                        serde_json::json! {{"data": null}},
+                    )
+                    .build(),
+            ),*/
             (
                 "S3",
                 MockSubgraph::builder()

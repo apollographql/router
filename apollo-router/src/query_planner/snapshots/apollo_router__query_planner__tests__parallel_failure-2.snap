@@ -4,14 +4,6 @@ expression: "serde_json::to_value(&response).unwrap()"
 ---
 {
   "data": null,
-  "errors": [
-    {
-      "message": "couldn't find mock for query {\"query\":\"{test{s1 id}}\"}",
-      "extensions": {
-        "code": "FETCH_ERROR"
-      }
-    }
-  ],
   "extensions": {
     "valueCompletion": [
       {

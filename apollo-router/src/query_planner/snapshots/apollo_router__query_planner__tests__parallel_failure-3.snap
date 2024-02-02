@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/query_planner/tests.rs
+expression: "serde_json::to_value(&response).unwrap()"
+---
+{
+  "data": {
+    "test": {
+      "id": "0",
+      "s1": "s1",
+      "s2": null,
+      "s3": "s3"
+    }
+  }
+}
