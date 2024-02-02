@@ -16,5 +16,7 @@ telemetry:
                 - 3
                 - 4
                 - 5
+            allowed_attribute_keys:
+            - otel_scope_name
       prometheus:
         enabled: true
