@@ -100,7 +100,7 @@ preview_entity_cache:
 
 ### Configure time to live (TTL)
 
-Besides configuring a global TTL for all the entries in Redis, the Apollo Router also honors the `Cache-Control` header returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
+Besides configuring a global TTL for all the entries in Redis, the Apollo Router also honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
 
 ### Customize Redis cache key
 
