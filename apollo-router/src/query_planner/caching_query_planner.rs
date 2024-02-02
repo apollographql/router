@@ -182,7 +182,9 @@ where
                 let err_res = Query::check_errors(&doc);
                 if let Err(error) = err_res {
                     let e = Arc::new(QueryPlannerError::SpecError(error));
-                    entry.insert(Err(e)).await;
+                    tokio::spawn(async move {
+                        entry.insert(Err(e)).await;
+                    });
                     continue;
                 }
 
@@ -208,15 +210,19 @@ where
 
                 match res {
                     Ok(QueryPlannerResponse { content, .. }) => {
-                        if let Some(content) = &content {
+                        if let Some(content) = content.clone() {
                             count += 1;
-                            entry.insert(Ok(content.clone())).await;
+                            tokio::spawn(async move {
+                                entry.insert(Ok(content.clone())).await;
+                            });
                         }
                     }
                     Err(error) => {
                         count += 1;
                         let e = Arc::new(error);
-                        entry.insert(Err(e.clone())).await;
+                        tokio::spawn(async move {
+                            entry.insert(Err(e)).await;
+                        });
                     }
                 }
             }
@@ -355,7 +361,10 @@ where
                             referenced_fields_by_type: HashMap::new(),
                         });
                         let e = Arc::new(QueryPlannerError::SpecError(error));
-                        entry.insert(Err(e.clone())).await;
+                        let err = e.clone();
+                        tokio::spawn(async move {
+                            entry.insert(Err(err)).await;
+                        });
                         return Err(CacheResolverError::RetrievalError(e));
                     }
 
@@ -367,8 +376,10 @@ where
                             context,
                             errors,
                         }) => {
-                            if let Some(content) = &content {
-                                entry.insert(Ok(content.clone())).await;
+                            if let Some(content) = content.clone() {
+                                tokio::spawn(async move {
+                                    entry.insert(Ok(content)).await;
+                                });
                             }
 
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
@@ -385,7 +396,10 @@ where
                         }
                         Err(error) => {
                             let e = Arc::new(error);
-                            entry.insert(Err(e.clone())).await;
+                            let err = e.clone();
+                            tokio::spawn(async move {
+                                entry.insert(Err(err)).await;
+                            });
                             Err(CacheResolverError::RetrievalError(e))
                         }
                     }
