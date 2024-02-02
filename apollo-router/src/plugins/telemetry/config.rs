@@ -147,7 +147,7 @@ pub(crate) struct MetricView {
     /// New unit to set to the instrument
     pub(crate) unit: Option<String>,
     /// New aggregation settings to set
-    pub(crate) aggregation: MetricAggregation,
+    pub(crate) aggregation: Option<MetricAggregation>,
     /// An allow-list of attribute keys that will be preserved for the instrument.
     ///
     /// Any attribute recorded for the instrument with a key not in this set will be
@@ -161,10 +161,13 @@ impl TryInto<Box<dyn View>> for MetricView {
 
     fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
         let aggregation = match self.aggregation {
-            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
-                boundaries: buckets,
-                record_min_max: true,
-            },
+            Some(MetricAggregation::Histogram { buckets }) => {
+                Some(Aggregation::ExplicitBucketHistogram {
+                    boundaries: buckets,
+                    record_min_max: true,
+                })
+            }
+            None => None,
         };
         let mut instrument = Instrument::new().name(self.instrument_name);
         if let Some(desc) = self.description {
@@ -173,7 +176,10 @@ impl TryInto<Box<dyn View>> for MetricView {
         if let Some(unit) = self.unit {
             instrument = instrument.unit(Unit::new(unit));
         }
-        let mut mask = Stream::new().aggregation(aggregation);
+        let mut mask = Stream::new();
+        if let Some(aggregation) = aggregation {
+            mask = mask.aggregation(aggregation);
+        }
         if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
             mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
         }

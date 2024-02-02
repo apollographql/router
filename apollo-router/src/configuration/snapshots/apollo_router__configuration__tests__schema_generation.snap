@@ -5431,7 +5431,6 @@ expression: "&schema"
                       "items": {
                         "type": "object",
                         "required": [
-                          "aggregation",
                           "instrument_name"
                         ],
                         "properties": {
@@ -5464,7 +5463,8 @@ expression: "&schema"
                                 },
                                 "additionalProperties": false
                               }
-                            ]
+                            ],
+                            "nullable": true
                           },
                           "allowed_attribute_keys": {
                             "description": "An allow-list of attribute keys that will be preserved for the instrument.\n\nAny attribute recorded for the instrument with a key not in this set will be dropped. If the set is empty, all attributes will be dropped, if `None` all attributes will be kept.",
