@@ -37,7 +37,7 @@ mod test {
             .configuration_json(json!({
                 "supergraph": {
                     "query_planning": {
-                        "experimental_cache": {
+                        "cache": {
                             "in_memory": {
                                 "limit": 2
                             },
