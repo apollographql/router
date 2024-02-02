@@ -191,6 +191,7 @@ rustls-pemfile = "1.0.4"
 schemars = { version = "0.8.16", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.8"
+semver = "1.0.21"
 serde = { version = "1.0.195", features = ["derive", "rc"] }
 serde_derive_default = "0.1"
 serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
