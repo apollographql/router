@@ -76,10 +76,6 @@ pub(crate) struct FilterMeterProvider {
     delegate: MeterProvider,
     deny: Option<Regex>,
     allow: Option<Regex>,
-    /// Don't edit or use it unless you know what you're doing
-    /// It's basically the instrument names we're leaking when creating custom bucket for metrics
-    /// As we're leaking them we keep a reference to them here to be able to clean it once the MeterProvider has been dropped
-    pub(crate) instrument_names_to_clean: Vec<&'static str>,
 }
 
 #[buildstructor]
@@ -90,7 +86,6 @@ impl FilterMeterProvider {
             delegate: delegate.into(),
             deny,
             allow,
-            instrument_names_to_clean: Vec::with_capacity(0),
         }
     }
 

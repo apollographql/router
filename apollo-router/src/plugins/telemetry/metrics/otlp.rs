@@ -69,12 +69,8 @@ impl MetricsConfigurator for super::super::otlp::Config {
                     );
                 if let Some(custom_buckets) = metrics_config.buckets.get_custom() {
                     for (instrument_name, buckets) in custom_buckets {
-                        let name: &'static str =
-                            Box::leak(instrument_name.clone().into_boxed_str());
-                        // Add this here to be able to clean it once we reload the MeterProvider
-                        builder.instrument_names_to_clean.push(name);
                         let view = new_view(
-                            Instrument::new().name(name),
+                            Instrument::new().name(instrument_name.clone()),
                             Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
                                 boundaries: buckets.clone(),
                                 record_min_max: true,

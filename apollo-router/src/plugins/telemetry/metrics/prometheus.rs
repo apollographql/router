@@ -21,7 +21,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::to_static_str;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -141,11 +140,8 @@ impl MetricsConfigurator for Config {
             .with_resource(builder.resource.clone());
         if let Some(custom_buckets) = metrics_config.buckets.get_custom() {
             for (instrument_name, buckets) in custom_buckets {
-                let name: &'static str = to_static_str(instrument_name);
-                // Add this here to be able to clean it once we reload the MeterProvider
-                builder.instrument_names_to_clean.push(name);
                 let view = new_view(
-                    Instrument::new().name(name),
+                    Instrument::new().name(instrument_name.clone()),
                     Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
                         boundaries: buckets.clone(),
                         record_min_max: true,

@@ -436,10 +436,6 @@ pub(crate) struct MetricsBuilder {
     pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     pub(crate) apollo_metrics_sender: Sender,
     pub(crate) resource: Resource,
-    /// Don't edit or use it unless you know what you're doing
-    /// It's basically the instrument names we're leaking when creating custom bucket for metrics
-    /// As we're leaking them we keep a reference to them here to be able to clean it once the MeterProvider has been dropped
-    pub(crate) instrument_names_to_clean: Vec<&'static str>,
 }
 
 struct ConfigResourceDetector(MetricsCommon);
@@ -488,7 +484,6 @@ impl MetricsBuilder {
             prometheus_meter_provider: None,
             custom_endpoints: MultiMap::new(),
             apollo_metrics_sender: Sender::default(),
-            instrument_names_to_clean: Vec::with_capacity(0),
         }
     }
 }
@@ -537,20 +532,4 @@ impl AggregationSelector for CustomAggregationSelector {
             },
         }
     }
-}
-
-pub(super) fn to_static_str<S: AsRef<str>>(str: S) -> &'static str {
-    let boxed = str.as_ref().to_owned().into_boxed_str();
-
-    // Use Box::into_raw we can reclaim ownership with from_raw
-    unsafe { &*Box::into_raw(boxed) }
-}
-
-pub(crate) unsafe fn free_static_str(str: &'static str) {
-    // Take back ownership using unsafe code
-    let boxed = Box::from_raw(str as *const str as *mut str);
-
-    // Not necessary since it would get dropped anyway at the end of the function,
-    // but it makes the intent more explicit
-    std::mem::drop(boxed);
 }
