@@ -76,6 +76,8 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Allow adding static attributes on specific spans in telemetry settings ([Issue #4561](https://github.com/apollographql/router/issues/4561))
 
+It is now possible to add static attributes to spans, defined in the configuration file.
+
 Example of configuration:
 
 ```yaml
