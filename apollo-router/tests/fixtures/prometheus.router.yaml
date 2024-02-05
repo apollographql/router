@@ -9,7 +9,7 @@ telemetry:
         path: /metrics
       common:
         views:
-        - instrument_name: apollo_router_http_request_duration_seconds
+        - name: apollo_router_http_request_duration_seconds
           aggregation:
             histogram:
               buckets:
