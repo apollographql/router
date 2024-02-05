@@ -6,6 +6,6 @@
     "experimental_batching": "https://github.com/apollographql/router/discussions/3840"
   },
   "preview": {
-    "preview_entity_cache": "TBD"
+    "preview_entity_cache": "https://github.com/apollographql/router/discussions/4592"
   }
 }
