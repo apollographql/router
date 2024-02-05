@@ -948,6 +948,9 @@ workflows:
           # contact Apollo's Security team to adjust what violates the 
           # Wiz policy used in this scan.
           fail-on-findings: true
+          # Configure scan job to use a policy specific to apollo-router.
+          # This allows us to tailor the policy applied during the scans to router.
+          wiz-policies: Apollo-Router-Vulnerabilities-Policy
 
 
   release:
