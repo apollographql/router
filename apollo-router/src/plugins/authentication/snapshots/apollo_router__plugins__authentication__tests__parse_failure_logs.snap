@@ -7,7 +7,7 @@ keys:
     alg: HS256
     kid: key1
     kty: oct
-    k: c2VjcmV0Cg==
+    k: c2VjcmV0Cg
   - use: sig
     key_ops:
       - verify

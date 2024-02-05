@@ -39,8 +39,8 @@ use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::http::service::Compression;
 use crate::services::subgraph;
-use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
 use crate::services::SubgraphRequest;
 

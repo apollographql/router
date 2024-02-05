@@ -119,11 +119,11 @@ impl Plugin for Csrf {
                             ))
                             .extension_code("CSRF_ERROR")
                             .build();
-                        let res = SupergraphResponse::builder()
+                        let res = SupergraphResponse::infallible_builder()
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
-                            .build()?;
+                            .build();
                         Ok(ControlFlow::Break(res))
                     }
                 })
