@@ -8,6 +8,22 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
+### Introduce support for progressive `@override` ([PR #4521](https://github.com/apollographql/router/pull/4521))
+
+> ⚠️ This is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+>
+> If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
+
+The change brings support for progressive `@override`, which allows dynamically overriding root fields and entity fields in the schema. This feature is enterprise only and requires a license key to be used.
+
+A new `label` argument is added to the `@override` directive in order to indicate the field is dynamically overridden. Labels can come in two forms:
+1) String matching the form `percent(x)`: The router resolves these labels based on the `x` value. For example, `percent(50)` will route 50% of requests to the overridden field and 50% of requests to the original field.
+2) Arbitrary string matching the regex `^[a-zA-Z][a-zA-Z0-9_-:./]*$`: These labels are expected to be resolved externally via coprocessor. A supergraph request hook can inspect and modify the context of a request in order to inform the router which labels to use during query planning.
+
+Please consult the docs for more information on how to use this feature and how to implement a coprocessor for label resolution.
+
+By [@TrevorScheer](https://github.com/TrevorScheer) in https://github.com/apollographql/router/pull/4521
+
 ### Specify trace ID formatting ([PR #4530](https://github.com/apollographql/router/pull/4530))
 
 You can specify the format of the trace ID in the response headers of the supergraph service.
@@ -29,18 +45,6 @@ telemetry:
 If the format is not specified, then the trace ID will continue to be in hexadecimal format.
 
 By [@nicholascioli](https://github.com/nicholascioli) in https://github.com/apollographql/router/pull/4530
-
-### Introduce support for progressive `@override` ([PR #4521](https://github.com/apollographql/router/pull/4521))
-
-The change brings support for progressive `@override`, which allows dynamically overriding root fields and entity fields in the schema. This feature is enterprise only and requires a license key to be used.
-
-A new `label` argument is added to the `@override` directive in order to indicate the field is dynamically overridden. Labels can come in two forms:
-1) String matching the form `percent(x)`: The router resolves these labels based on the `x` value. For example, `percent(50)` will route 50% of requests to the overridden field and 50% of requests to the original field.
-2) Arbitrary string matching the regex `^[a-zA-Z][a-zA-Z0-9_-:./]*$`: These labels are expected to be resolved externally via coprocessor. A supergraph request hook can inspect and modify the context of a request in order to inform the router which labels to use during query planning.
-
-Please consult the docs for more information on how to use this feature and how to implement a coprocessor for label resolution.
-
-By [@TrevorScheer](https://github.com/TrevorScheer) in https://github.com/apollographql/router/pull/4521
 
 ### Add selector to get all baggage key values in span attributes ([Issue #4425](https://github.com/apollographql/router/issues/4425))
 
