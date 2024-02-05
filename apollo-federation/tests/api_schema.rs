@@ -3,6 +3,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use apollo_federation::error::FederationError;
+use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 
 const INACCESSIBLE_V02_HEADER: &str = r#"
@@ -28,7 +29,7 @@ const INACCESSIBLE_V02_HEADER: &str = r#"
 fn inaccessible_to_api_schema(input: &str) -> Result<Valid<Schema>, FederationError> {
     let sdl = format!("{INACCESSIBLE_V02_HEADER}{input}");
     let graph = Supergraph::new(&sdl)?;
-    graph.to_api_schema()
+    graph.to_api_schema(Default::default())
 }
 
 #[test]
@@ -2181,7 +2182,7 @@ fn inaccessible_on_imported_elements() {
     .unwrap();
 
     let errors = graph
-        .to_api_schema()
+        .to_api_schema(Default::default())
         .expect_err("should return validation errors");
 
     insta::assert_display_snapshot!(errors, @r###"
@@ -2379,4 +2380,48 @@ fn remove_referencing_directive_argument() {
       a: Int
     }
     "###);
+}
+
+#[test]
+fn include_supergraph_directives() -> Result<(), FederationError> {
+    let sdl = format!(
+        "
+      {INACCESSIBLE_V02_HEADER}
+      type Query {{
+        a: Int
+      }}
+    "
+    );
+    let graph = Supergraph::new(&sdl)?;
+    let api_schema = graph.to_api_schema(ApiSchemaOptions {
+        include_defer: true,
+        include_stream: true,
+    })?;
+
+    insta::assert_display_snapshot!(api_schema, @r###"
+    """
+    The `@defer` directive may be provided for fragment spreads and inline fragments
+    to inform the executor to delay the execution of the current fragment to
+    indicate deprioritization of the current fragment. A query with `@defer`
+    directive will cause the request to potentially return multiple responses, where
+    non-deferred data is delivered in the initial response and data deferred is
+    delivered in a subsequent response. `@include` and `@skip` take precedence over
+    `@defer`.
+    """
+    directive @defer(label: String, if: Boolean! = true) on FIELD
+
+    """
+    The `@stream` directive may be provided for a field of `List` type so that the
+    backend can leverage technology such as asynchronous iterators to provide a
+    partial list in the initial response, and additional list items in subsequent
+    responses. `@include` and `@skip` take precedence over `@stream`.
+    """
+    directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
+
+    type Query {
+      a: Int
+    }
+    "###);
+
+    Ok(())
 }

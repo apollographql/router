@@ -19,6 +19,8 @@ pub mod query_plan;
 pub mod schema;
 pub mod subgraph;
 
+pub use api_schema::ApiSchemaOptions;
+
 pub struct Supergraph {
     pub schema: Valid<Schema>,
 }
@@ -37,9 +39,12 @@ impl Supergraph {
 
     /// Generates an API Schema from this supergraph schema. The API Schema represents the combined
     /// API of the supergraph that's visible to end users.
-    pub fn to_api_schema(&self) -> Result<Valid<Schema>, FederationError> {
+    pub fn to_api_schema(
+        &self,
+        options: ApiSchemaOptions,
+    ) -> Result<Valid<Schema>, FederationError> {
         let api_schema = FederationSchema::new(self.schema.clone().into_inner())?;
-        api_schema::to_api_schema(api_schema)
+        api_schema::to_api_schema(api_schema, options)
     }
 }
 
