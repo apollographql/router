@@ -101,8 +101,8 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Order HPA targets to resolve OutOfSync states ([Issue #4435](https://github.com/apollographql/router/issues/4435))
 
-This update addresses an OutOfSync issue in ArgoCD applications when Horizontal Pod Autoscaler (HPA) is configured with both memory and CPU limits.
-Previously, the live and desired manifests within Kubernetes were not consistently sorted, leading to persistent OutOfSync states in ArgoCD.
+This update addresses an `OutOfSync` issue in ArgoCD applications when Horizontal Pod Autoscaler (HPA) is configured with both memory and CPU limits.
+Previously, the live and desired manifests within Kubernetes were not consistently sorted, leading to persistent `OutOfSync` states in ArgoCD.
 This change implements a sorting mechanism for HPA targets within the Helm chart, ensuring alignment with Kubernetes' expected order.
 This fix proactively resolves the sync discrepancies while using HPA, circumventing the need to wait for Kubernetes' issue resolution (kubernetes/kubernetes#74099).
 
