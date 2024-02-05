@@ -119,7 +119,7 @@ impl PersistedQueryLayer {
                 // safelist check later.
                 request
                     .context
-                    .private_entries
+                    .extensions()
                     .lock()
                     .insert(UsedQueryIdFromManifest);
                 tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64);
@@ -162,7 +162,7 @@ impl PersistedQueryLayer {
         };
 
         let doc = {
-            let context_guard = request.context.private_entries.lock();
+            let context_guard = request.context.extensions().lock();
 
             if context_guard.get::<UsedQueryIdFromManifest>().is_some() {
                 // We got this operation from the manifest, so there's no

@@ -42,6 +42,7 @@ use super::listeners::ListenersAndRouters;
 use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
+use super::ENDPOINT_CALLBACK;
 use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
@@ -418,7 +419,7 @@ where
     })?;
     let span_mode = span_mode(configuration);
 
-    let main_route = main_router::<RF>(configuration)
+    let mut main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(middleware::from_fn_with_state(
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
@@ -433,9 +434,20 @@ where
         )
         .layer(middleware::from_fn(metrics_handler));
 
+    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+        main_route = main_endpoint_layer(main_route);
+    }
+
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+        .fold(main_route, |acc, r| {
+            let mut router = r.into_router();
+            if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+                router = main_endpoint_layer(router);
+            }
+
+            acc.merge(router)
+        });
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))

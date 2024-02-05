@@ -107,7 +107,8 @@ static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
     HeaderValue::from_static("application/json;callbackSpec=1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
-static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
+static ACCEPT_GRAPHQL_JSON: HeaderValue =
+    HeaderValue::from_static("application/json, application/graphql-response+json");
 
 enum APQError {
     PersistedQueryNotSupported,
@@ -124,6 +125,8 @@ pub(crate) enum Compression {
     Deflate,
     /// brotli
     Br,
+    /// identity
+    Identity,
 }
 
 impl Display for Compression {
@@ -132,6 +135,7 @@ impl Display for Compression {
             Compression::Gzip => write!(f, "gzip"),
             Compression::Deflate => write!(f, "deflate"),
             Compression::Br => write!(f, "br"),
+            Compression::Identity => write!(f, "identity"),
         }
     }
 }
@@ -596,7 +600,7 @@ async fn call_websocket(
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let signing_params = context
-        .private_entries
+        .extensions()
         .lock()
         .get::<SigningParamsConfig>()
         .cloned();
@@ -751,10 +755,7 @@ async fn call_http(
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .append(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
-    request
-        .headers_mut()
-        .append(ACCEPT, APP_GRAPHQL_JSON.clone());
+        .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
     request
         .headers_mut()
         .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
@@ -809,7 +810,7 @@ async fn call_http(
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let signing_params = context
-        .private_entries
+        .extensions()
         .lock()
         .get::<SigningParamsConfig>()
         .cloned();
