@@ -63,21 +63,22 @@ The supergraph service is executed after query parsing but before query executio
 
 The subgraph service executes multiple times during query execution, with each execution representing a call to a single subgraph. It is GraphQL centric and deals with GraphQL queries and responses.
 
-| Selector                    | Defaultable | Values                              | Description                                  |
-|-----------------------------|-------------|-------------------------------------|----------------------------------------------|
-| `subgraph_operation_name`   | Yes         |                                     | The operation name from the subgraph query   |
-| `subgraph_operation_kind`   | No          | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query   |
-| `subgraph_query`            | Yes         |                                     | The graphql query to the subgraph            |
-| `subgraph_query_variable`   | Yes         |                                     | The name of a subgraph query variable        |
-| `subgraph_response_body`    | Yes         |                                     | Json Path into the subgraph response body    |
-| `subgraph_request_header`   | Yes         |                                     | The name of a subgraph request header        |
-| `subgraph_response_header`  | Yes         |                                     | The name of a subgraph response header       |
-| `subgraph_response_status`  | Yes         |                                     | The name of a subgraph response header       |
-| `supergraph_operation_name` | Yes         |                                     | The operation name from the supergraph query |
-| `supergraph_operation_kind` | Yes         | `query`\|`mutation`\|`subscription` | The operation kind from the supergraph query |
-| `supergraph_query`          | Yes         |                                     | The graphql query to the supergraph          |
-| `supergraph_query_variable` | Yes         |                                     | The name of a supergraph query variable      |
-| `request_context`           | Yes         |                                     | The name of a request context key            |
-| `response_context`          | Yes         |                                     | The name of a response context key           |
-| `baggage`                   | Yes         |                                     | The name of a baggage item                   |
-| `env`                       | Yes         |                                     | The name of an environment variable          |
+| Selector                    | Defaultable | Values                              | Description                                                                     |
+|-----------------------------|-------------|-------------------------------------|---------------------------------------------------------------------------------|
+| `subgraph_operation_name`   | Yes         |                                     | The operation name from the subgraph query                                      |
+| `subgraph_operation_kind`   | No          | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query                                      |
+| `subgraph_query`            | Yes         |                                     | The graphql query to the subgraph                                               |
+| `subgraph_query_variable`   | Yes         |                                     | The name of a subgraph query variable                                           |
+| `subgraph_response_data`    | Yes         |                                     | Json Path into the subgraph response body data (it might impact performances)   |
+| `subgraph_response_errors`  | Yes         |                                     | Json Path into the subgraph response body errors (it might impact performances) |
+| `subgraph_request_header`   | Yes         |                                     | The name of a subgraph request header                                           |
+| `subgraph_response_header`  | Yes         |                                     | The name of a subgraph response header                                          |
+| `subgraph_response_status`  | Yes         |                                     | The name of a subgraph response header                                          |
+| `supergraph_operation_name` | Yes         |                                     | The operation name from the supergraph query                                    |
+| `supergraph_operation_kind` | Yes         | `query`\|`mutation`\|`subscription` | The operation kind from the supergraph query                                    |
+| `supergraph_query`          | Yes         |                                     | The graphql query to the supergraph                                             |
+| `supergraph_query_variable` | Yes         |                                     | The name of a supergraph query variable                                         |
+| `request_context`           | Yes         |                                     | The name of a request context key                                               |
+| `response_context`          | Yes         |                                     | The name of a response context key                                              |
+| `baggage`                   | Yes         |                                     | The name of a baggage item                                                      |
+| `env`                       | Yes         |                                     | The name of an environment variable                                             |

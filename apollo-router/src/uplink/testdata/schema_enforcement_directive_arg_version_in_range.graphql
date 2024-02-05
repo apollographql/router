@@ -1,0 +1,19 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  t: T @join__field(graph: SUBGRAPH1)
+}
+
+type T
+  @join__type(graph: SUBGRAPH1, key: "k")
+  @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  a: Int
+    @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo")
+    @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
+  b: Int @join__field(graph: SUBGRAPH2)
+}

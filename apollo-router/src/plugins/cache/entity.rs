@@ -43,9 +43,9 @@ pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
-register_plugin!("apollo", "experimental_entity_cache", EntityCache);
+register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
-struct EntityCache {
+pub(crate) struct EntityCache {
     storage: RedisCacheStorage,
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
@@ -55,7 +55,7 @@ struct EntityCache {
 /// Configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Config {
+pub(crate) struct Config {
     redis: RedisCache,
     /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
     #[serde(default)]
@@ -72,7 +72,7 @@ struct Config {
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Subgraph {
+pub(crate) struct Subgraph {
     /// expiration for all keys
     pub(crate) ttl: Option<Ttl>,
 
@@ -177,6 +177,24 @@ impl Plugin for EntityCache {
         } else {
             service
         }
+    }
+}
+
+impl EntityCache {
+    #[cfg(test)]
+    pub(crate) async fn with_mocks(
+        storage: RedisCacheStorage,
+        subgraphs: HashMap<String, Subgraph>,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        Ok(Self {
+            storage,
+            enabled: Some(true),
+            subgraphs: Arc::new(subgraphs),
+            metrics: Metrics::default(),
+        })
     }
 }
 

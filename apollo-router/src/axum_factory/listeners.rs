@@ -23,6 +23,7 @@ use tower_service::Service;
 
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
+use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
@@ -92,11 +93,9 @@ pub(super) fn extra_endpoints(
             listen_addr,
             e.into_iter()
                 .map(|e| {
-                    #[allow(unused_mut)]
                     let mut router = e.into_router();
-                    if let Some(add_extra_endpoints_layer) = unsafe { EXTRA_ENDPOINTS_LAYER.get() }
-                    {
-                        router = add_extra_endpoints_layer(router);
+                    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+                        router = main_endpoint_layer(router);
                     }
                     router
                 })

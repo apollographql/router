@@ -19,7 +19,6 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
-use crate::json_ext::Value;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
 
@@ -164,7 +163,6 @@ impl ErrorExtension for FetchError {
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
             FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
-            FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
         }
         .to_string()
     }
@@ -284,7 +282,7 @@ pub enum QueryPlannerError {
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
-    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    /// empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
     EmptyPlan(UsageReporting), // usage_reporting_signature
 
     /// unhandled planner result
