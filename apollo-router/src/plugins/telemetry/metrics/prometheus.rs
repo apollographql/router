@@ -17,6 +17,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
@@ -59,6 +60,7 @@ static NEW_PROMETHEUS: Lazy<Mutex<Option<(PrometheusConfig, Registry)>>> =
 struct PrometheusConfig {
     resource: Resource,
     buckets: Vec<f64>,
+    views: Vec<MetricView>,
 }
 
 pub(crate) fn commit_prometheus() {
@@ -87,6 +89,7 @@ impl MetricsConfigurator for Config {
         let prometheus_config = PrometheusConfig {
             resource: builder.resource.clone(),
             buckets: metrics_config.buckets.clone(),
+            views: metrics_config.views.clone(),
         };
 
         // Check the last registry to see if the resources are the same, if they are we can use it as is.

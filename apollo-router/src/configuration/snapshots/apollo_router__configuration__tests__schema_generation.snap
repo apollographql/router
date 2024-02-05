@@ -5431,7 +5431,7 @@ expression: "&schema"
                       "items": {
                         "type": "object",
                         "required": [
-                          "instrument_name"
+                          "name"
                         ],
                         "properties": {
                           "aggregation": {
@@ -5480,7 +5480,7 @@ expression: "&schema"
                             "type": "string",
                             "nullable": true
                           },
-                          "instrument_name": {
+                          "name": {
                             "description": "The instrument name you're targeting",
                             "type": "string"
                           },

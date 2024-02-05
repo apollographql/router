@@ -137,11 +137,11 @@ impl Default for MetricsCommon {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MetricView {
     /// The instrument name you're targeting
-    pub(crate) instrument_name: String,
+    pub(crate) name: String,
     /// New description to set to the instrument
     pub(crate) description: Option<String>,
     /// New unit to set to the instrument
@@ -160,16 +160,15 @@ impl TryInto<Box<dyn View>> for MetricView {
     type Error = MetricsError;
 
     fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
-        let aggregation = match self.aggregation {
-            Some(MetricAggregation::Histogram { buckets }) => {
-                Some(Aggregation::ExplicitBucketHistogram {
+        let aggregation = self
+            .aggregation
+            .map(
+                |MetricAggregation::Histogram { buckets }| Aggregation::ExplicitBucketHistogram {
                     boundaries: buckets,
                     record_min_max: true,
-                })
-            }
-            None => None,
-        };
-        let mut instrument = Instrument::new().name(self.instrument_name);
+                },
+            );
+        let mut instrument = Instrument::new().name(self.name);
         if let Some(desc) = self.description {
             instrument = instrument.description(desc);
         }
@@ -188,7 +187,7 @@ impl TryInto<Box<dyn View>> for MetricView {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum MetricAggregation {
     /// An aggregation that summarizes a set of measurements as an histogram with
