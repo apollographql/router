@@ -528,8 +528,11 @@ impl BridgeQueryPlanner {
             key.filtered_query = new_doc.to_string();
             let executable = new_doc
                 .to_executable_validate(&self.schema.api_schema().definitions)
-                // Assume transformation creates a valid document: ignore conversion errors
-                .unwrap();
+                .map_err(|e| {
+                    SpecError::ValidationError(ValidationErrors {
+                        errors: e.errors.iter().map(|e| e.to_json()).collect(),
+                    })
+                })?;
             doc = Arc::new(ParsedDocumentInner {
                 executable,
                 ast: new_doc,
