@@ -1,5 +1,5 @@
 use crate::error::FederationError;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::{FragmentSpreadNormalizationOption, NormalizedSelectionSet};
 use crate::schema::ValidFederationSchema;
 use apollo_compiler::executable::{FieldSet, SelectionSet};
 use apollo_compiler::schema::NamedType;
@@ -26,6 +26,7 @@ pub(super) fn parse_field_set(
         &field_set.selection_set,
         &IndexMap::new(),
         schema,
+        FragmentSpreadNormalizationOption::InlineFragmentSpread,
     )
 }
 

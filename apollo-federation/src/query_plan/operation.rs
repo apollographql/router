@@ -5,7 +5,9 @@ use crate::query_plan::conditions::Conditions;
 use crate::query_plan::operation::normalized_field_selection::{
     NormalizedField, NormalizedFieldData, NormalizedFieldSelection,
 };
-use crate::query_plan::operation::normalized_fragment_spread_selection::NormalizedFragmentSpreadSelection;
+use crate::query_plan::operation::normalized_fragment_spread_selection::{
+    NormalizedFragmentSpreadData, NormalizedFragmentSpreadSelection,
+};
 use crate::query_plan::operation::normalized_inline_fragment_selection::{
     NormalizedInlineFragment, NormalizedInlineFragmentData, NormalizedInlineFragmentSelection,
 };
@@ -17,7 +19,7 @@ use crate::schema::position::{
     CompositeTypeDefinitionPosition, InterfaceTypeDefinitionPosition, SchemaRootDefinitionKind,
 };
 use crate::schema::ValidFederationSchema;
-use apollo_compiler::ast::{DirectiveList, Name};
+use apollo_compiler::ast::{DirectiveList, Name, OperationType};
 use apollo_compiler::executable::{
     Field, Fragment, FragmentSpread, InlineFragment, Operation, Selection, SelectionSet,
     VariableDefinition,
@@ -58,7 +60,7 @@ pub struct NormalizedOperation {
     pub(crate) variables: Arc<Vec<Node<VariableDefinition>>>,
     pub(crate) directives: Arc<DirectiveList>,
     pub(crate) selection_set: NormalizedSelectionSet,
-    pub(crate) fragments: Arc<IndexMap<Name, Node<Fragment>>>,
+    pub(crate) fragments: Arc<IndexMap<Name, Node<NormalizedFragment>>>,
 }
 
 /// An analogue of the apollo-compiler type `SelectionSet` with these changes:
@@ -476,6 +478,28 @@ pub(crate) struct NormalizedFragment {
     pub(crate) selection_set: NormalizedSelectionSet,
 }
 
+impl NormalizedFragment {
+    fn normalize(
+        fragment: &Fragment,
+        schema: &ValidFederationSchema,
+    ) -> Result<Self, FederationError> {
+        Ok(Self {
+            schema: schema.clone(),
+            name: fragment.name.clone(),
+            type_condition_position: schema
+                .get_type(fragment.type_condition().clone())?
+                .try_into()?,
+            directives: Arc::new(fragment.directives.clone()),
+            selection_set: NormalizedSelectionSet::normalize_and_expand_fragments(
+                &fragment.selection_set,
+                &IndexMap::new(),
+                schema,
+                FragmentSpreadNormalizationOption::PreserveFragmentSpread,
+            )?,
+        })
+    }
+}
+
 pub(crate) mod normalized_field_selection {
     use crate::error::FederationError;
     use crate::query_plan::operation::{
@@ -723,6 +747,13 @@ pub(crate) mod normalized_inline_fragment_selection {
     }
 }
 
+/// Available fragment spread normalization options
+#[derive(Copy, Clone)]
+pub(crate) enum FragmentSpreadNormalizationOption {
+    InlineFragmentSpread,
+    PreserveFragmentSpread,
+}
+
 impl NormalizedSelectionSet {
     pub(crate) fn empty(
         schema: ValidFederationSchema,
@@ -770,6 +801,7 @@ impl NormalizedSelectionSet {
         selection_set: &SelectionSet,
         fragments: &IndexMap<Name, Node<Fragment>>,
         schema: &ValidFederationSchema,
+        normalize_fragment_spread_option: FragmentSpreadNormalizationOption,
     ) -> Result<NormalizedSelectionSet, FederationError> {
         let type_position: CompositeTypeDefinitionPosition =
             schema.get_type(selection_set.ty.clone())?.try_into()?;
@@ -780,6 +812,7 @@ impl NormalizedSelectionSet {
             &mut normalized_selections,
             fragments,
             schema,
+            normalize_fragment_spread_option,
         )?;
         let mut merged = NormalizedSelectionSet {
             schema: schema.clone(),
@@ -797,6 +830,7 @@ impl NormalizedSelectionSet {
         destination: &mut Vec<NormalizedSelection>,
         fragments: &IndexMap<Name, Node<Fragment>>,
         schema: &ValidFederationSchema,
+        normalize_fragment_spread_option: FragmentSpreadNormalizationOption,
     ) -> Result<(), FederationError> {
         for selection in selections {
             match selection {
@@ -807,6 +841,7 @@ impl NormalizedSelectionSet {
                             parent_type_position,
                             fragments,
                             schema,
+                            normalize_fragment_spread_option,
                         )?
                     else {
                         continue;
@@ -826,28 +861,44 @@ impl NormalizedSelectionSet {
                         }
                         .into());
                     };
-                    // We can hoist/collapse named fragments if their type condition is on the
-                    // parent type and they don't have any directives.
-                    if fragment.type_condition() == parent_type_position.type_name()
-                        && fragment_spread_selection.directives.is_empty()
+                    if let FragmentSpreadNormalizationOption::InlineFragmentSpread =
+                        normalize_fragment_spread_option
                     {
-                        NormalizedSelectionSet::normalize_selections(
-                            &fragment.selection_set.selections,
-                            parent_type_position,
-                            destination,
-                            fragments,
-                            schema,
-                        )?;
-                    } else {
-                        let normalized_inline_fragment_selection =
-                            NormalizedFragmentSpreadSelection::normalize_and_expand_fragments(
-                                fragment_spread_selection,
+                        // We can hoist/collapse named fragments if their type condition is on the
+                        // parent type and they don't have any directives.
+                        if fragment.type_condition() == parent_type_position.type_name()
+                            && fragment_spread_selection.directives.is_empty()
+                        {
+                            NormalizedSelectionSet::normalize_selections(
+                                &fragment.selection_set.selections,
                                 parent_type_position,
+                                destination,
                                 fragments,
                                 schema,
+                                normalize_fragment_spread_option,
                             )?;
-                        destination.push(NormalizedSelection::InlineFragment(Arc::new(
-                            normalized_inline_fragment_selection,
+                        } else {
+                            let normalized_inline_fragment_selection =
+                                NormalizedFragmentSpreadSelection::normalize_and_expand_fragments(
+                                    fragment_spread_selection,
+                                    parent_type_position,
+                                    fragments,
+                                    schema,
+                                    normalize_fragment_spread_option,
+                                )?;
+                            destination.push(NormalizedSelection::InlineFragment(Arc::new(
+                                normalized_inline_fragment_selection,
+                            )));
+                        }
+                    } else {
+                        // if we don't expand fragments, we just convert FragmentSpread to NormalizedFragmentSpreadSelection
+                        let normalized_fragment_spread =
+                            NormalizedFragmentSpreadSelection::normalize(
+                                fragment_spread_selection,
+                                schema,
+                            );
+                        destination.push(NormalizedSelection::FragmentSpread(Arc::new(
+                            normalized_fragment_spread,
                         )));
                     }
                 }
@@ -874,6 +925,7 @@ impl NormalizedSelectionSet {
                             destination,
                             fragments,
                             schema,
+                            normalize_fragment_spread_option,
                         )?;
                     } else {
                         let normalized_inline_fragment_selection =
@@ -882,6 +934,7 @@ impl NormalizedSelectionSet {
                                 parent_type_position,
                                 fragments,
                                 schema,
+                                normalize_fragment_spread_option,
                             )?;
                         destination.push(NormalizedSelection::InlineFragment(Arc::new(
                             normalized_inline_fragment_selection,
@@ -1188,6 +1241,7 @@ impl NormalizedFieldSelection {
         parent_type_position: &CompositeTypeDefinitionPosition,
         fragments: &IndexMap<Name, Node<Fragment>>,
         schema: &ValidFederationSchema,
+        normalize_fragment_spread_option: FragmentSpreadNormalizationOption,
     ) -> Result<Option<NormalizedFieldSelection>, FederationError> {
         // Skip __schema/__type introspection fields as router takes care of those, and they do not
         // need to be query planned.
@@ -1216,6 +1270,7 @@ impl NormalizedFieldSelection {
                     &field.selection_set,
                     fragments,
                     schema,
+                    normalize_fragment_spread_option,
                 )?)
             } else {
                 None
@@ -1289,6 +1344,23 @@ impl NormalizedFragmentSpreadSelection {
         Self::new(data)
     }
 
+    /// Normalize this fragment spread into a "normalized" spread representation with following
+    /// modifications
+    /// - Stores the schema (may be useful for directives).
+    /// - Encloses list of directives in `Arc`s to facilitate cheaper cloning.
+    /// - Stores unique selection ID (used for deferred fragments)
+    pub(crate) fn normalize(
+        fragment_spread: &FragmentSpread,
+        schema: &ValidFederationSchema,
+    ) -> NormalizedFragmentSpreadSelection {
+        NormalizedFragmentSpreadSelection::new(NormalizedFragmentSpreadData {
+            schema: schema.clone(),
+            fragment_name: fragment_spread.fragment_name.clone(),
+            directives: Arc::new(fragment_spread.directives.clone()),
+            selection_id: SelectionId::new(),
+        })
+    }
+
     /// Normalize this fragment spread (merging selections with the same keys), with the following
     /// additional transformations:
     /// - Expand fragment spreads into inline fragments.
@@ -1301,6 +1373,7 @@ impl NormalizedFragmentSpreadSelection {
         parent_type_position: &CompositeTypeDefinitionPosition,
         fragments: &IndexMap<Name, Node<Fragment>>,
         schema: &ValidFederationSchema,
+        normalize_fragment_spread_option: FragmentSpreadNormalizationOption,
     ) -> Result<NormalizedInlineFragmentSelection, FederationError> {
         let Some(fragment) = fragments.get(&fragment_spread.fragment_name) else {
             return Err(Internal {
@@ -1331,6 +1404,7 @@ impl NormalizedFragmentSpreadSelection {
                 &fragment.selection_set,
                 fragments,
                 schema,
+                normalize_fragment_spread_option,
             )?,
         })
     }
@@ -1385,6 +1459,7 @@ impl NormalizedInlineFragmentSelection {
         parent_type_position: &CompositeTypeDefinitionPosition,
         fragments: &IndexMap<Name, Node<Fragment>>,
         schema: &ValidFederationSchema,
+        normalize_fragment_spread_option: FragmentSpreadNormalizationOption,
     ) -> Result<NormalizedInlineFragmentSelection, FederationError> {
         let type_condition_position: Option<CompositeTypeDefinitionPosition> =
             if let Some(type_condition) = &inline_fragment.type_condition {
@@ -1404,6 +1479,7 @@ impl NormalizedInlineFragmentSelection {
                 &inline_fragment.selection_set,
                 fragments,
                 schema,
+                normalize_fragment_spread_option,
             )?,
         })
     }
@@ -1473,6 +1549,21 @@ pub(crate) fn equal_selection_sets(
     // representation instead of repeatedly inter-converting between its representation and the
     // apollo-rs one, but we'll cross that bridge if we come to it.
     todo!();
+}
+
+impl TryFrom<&NormalizedOperation> for Operation {
+    type Error = FederationError;
+
+    fn try_from(normalized_operation: &NormalizedOperation) -> Result<Self, Self::Error> {
+        let operation_type: OperationType = normalized_operation.root_kind.into();
+        Ok(Self {
+            operation_type,
+            name: normalized_operation.name.clone(),
+            variables: normalized_operation.variables.deref().clone(),
+            directives: normalized_operation.directives.deref().clone(),
+            selection_set: (&normalized_operation.selection_set).try_into()?,
+        })
+    }
 }
 
 impl TryFrom<&NormalizedSelectionSet> for SelectionSet {
@@ -1570,6 +1661,16 @@ impl From<&NormalizedFragmentSpreadSelection> for FragmentSpread {
             fragment_name: val.data().fragment_name.to_owned(),
             directives: val.data().directives.deref().to_owned(),
         }
+    }
+}
+
+impl Display for NormalizedOperation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let operation: Operation = match self.try_into() {
+            Ok(operation) => operation,
+            Err(_) => return Err(std::fmt::Error),
+        };
+        operation.serialize().fmt(f)
     }
 }
 
@@ -1675,21 +1776,44 @@ fn is_deferred_selection(directives: &DirectiveList) -> bool {
 /// - Hoist fragment spreads/inline fragments into their parents if they have no directives and
 ///   their parent type matches.
 pub(crate) fn normalize_operation(
-    operation: &mut Operation,
+    operation: &Operation,
     fragments: &IndexMap<Name, Node<Fragment>>,
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
-) -> Result<(), FederationError> {
+) -> Result<NormalizedOperation, FederationError> {
     let mut normalized_selection_set = NormalizedSelectionSet::normalize_and_expand_fragments(
         &operation.selection_set,
         fragments,
         schema,
+        FragmentSpreadNormalizationOption::InlineFragmentSpread,
     )?;
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
 
-    // Flatten it back into a `SelectionSet`.
-    operation.selection_set = (&normalized_selection_set).try_into()?;
-    Ok(())
+    let normalized_fragments: IndexMap<Name, Node<NormalizedFragment>> = fragments
+        .iter()
+        .map(|(name, fragment)| {
+            (
+                name.clone(),
+                Node::new(NormalizedFragment::normalize(fragment, schema).unwrap()),
+            )
+        })
+        .collect();
+
+    let schema_definition_root_kind = match operation.operation_type {
+        OperationType::Query => SchemaRootDefinitionKind::Query,
+        OperationType::Mutation => SchemaRootDefinitionKind::Mutation,
+        OperationType::Subscription => SchemaRootDefinitionKind::Subscription,
+    };
+    let normalized_operation = NormalizedOperation {
+        schema: schema.clone(),
+        root_kind: schema_definition_root_kind,
+        name: operation.name.clone(),
+        variables: Arc::new(operation.variables.clone()),
+        directives: Arc::new(operation.directives.clone()),
+        selection_set: normalized_selection_set,
+        fragments: Arc::new(normalized_fragments),
+    };
+    Ok(normalized_operation)
 }
 
 #[cfg(test)]
@@ -1742,8 +1866,7 @@ type Foo {
             .named_operations
             .get_mut("NamedFragmentQuery")
         {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -1758,7 +1881,7 @@ type Foo {
     baz
   }
 }"#;
-            let actual = operation.to_string();
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         }
     }
@@ -1797,8 +1920,7 @@ type Foo {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_with_named_fragment);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -1813,7 +1935,7 @@ type Foo {
     baz
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         }
     }
@@ -1839,8 +1961,7 @@ type Query {
             .named_operations
             .get_mut("TestIntrospectionQuery")
         {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -1848,7 +1969,7 @@ type Query {
             )
             .unwrap();
 
-            assert!(operation.selection_set.selections.is_empty());
+            assert!(normalized_operation.selection_set.selections.is_empty());
         }
     }
 
@@ -1875,8 +1996,7 @@ type T {
 "#;
         let (schema, mut executable_document) = parse_schema_and_operation(operation_string);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -1889,7 +2009,7 @@ type T {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -1920,8 +2040,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_with_directives);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -1934,7 +2053,7 @@ type T {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -1967,8 +2086,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_with_directives_different_arg_order);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -1981,7 +2099,7 @@ type T {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2012,8 +2130,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_one_field_with_directives);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2028,7 +2145,7 @@ type T {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2059,8 +2176,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_different_directives);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2075,7 +2191,7 @@ type T {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2107,8 +2223,7 @@ type T {
 "#;
         let (schema, mut executable_document) = parse_schema_and_operation(operation_defer_fields);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2123,7 +2238,7 @@ type T {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2168,8 +2283,7 @@ type V {
 "#;
         let (schema, mut executable_document) = parse_schema_and_operation(nested_operation);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2188,7 +2302,7 @@ type V {
     }
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2225,8 +2339,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_with_fragments);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2239,7 +2352,7 @@ type T {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2272,8 +2385,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_fragments_with_directives);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2288,7 +2400,7 @@ type T {
     }
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2323,8 +2435,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_fragments_with_directives_args_order);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2339,7 +2450,7 @@ type T {
     }
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2372,8 +2483,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_one_fragment_with_directive);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2388,7 +2498,7 @@ type T {
     }
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2421,8 +2531,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_fragments_with_different_directive);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2439,7 +2548,7 @@ type T {
     }
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2474,8 +2583,7 @@ type T {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_fragments_with_defer);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2492,7 +2600,7 @@ type T {
     }
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2546,8 +2654,7 @@ type V {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_nested_fragments);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2566,7 +2673,7 @@ type V {
     }
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         } else {
             panic!("unable to parse document")
@@ -2595,8 +2702,7 @@ type Foo {
 "#;
         let (schema, mut executable_document) = parse_schema_and_operation(operation_with_typename);
         if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2609,7 +2715,7 @@ type Foo {
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         }
     }
@@ -2635,8 +2741,7 @@ type Foo {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_with_single_typename);
         if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2648,7 +2753,7 @@ type Foo {
     __typename
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         }
     }
@@ -2686,8 +2791,7 @@ scalar FieldSet
                 type_name: name!("Foo"),
             });
 
-            let operation = operation.make_mut();
-            normalize_operation(
+            let normalized_operation = normalize_operation(
                 operation,
                 &executable_document.fragments,
                 &schema,
@@ -2701,7 +2805,7 @@ scalar FieldSet
     v2
   }
 }"#;
-            let actual = format!("{}", operation);
+            let actual = normalized_operation.to_string();
             assert_eq!(expected, actual);
         }
     }
