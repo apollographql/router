@@ -306,7 +306,7 @@ impl LicenseEnforcementReport {
                 .name("APQ caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.experimental_entity_cache.enabled")
+                .path("$.preview_entity_cache.enabled")
                 .value(true)
                 .name("Subgraph entity caching")
                 .build(),

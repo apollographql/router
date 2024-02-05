@@ -43,7 +43,7 @@ pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
-register_plugin!("apollo", "experimental_entity_cache", EntityCache);
+register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
 pub(crate) struct EntityCache {
     storage: RedisCacheStorage,
