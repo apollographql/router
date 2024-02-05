@@ -130,7 +130,7 @@ impl QueryAnalysisLayer {
                             operation.name.as_ref().map(|s| s.as_str().to_owned())
                         });
 
-                        context.insert(OPERATION_NAME, operation_name).unwrap();
+                        context.insert(OPERATION_NAME, operation_name).expect("cannot insert operation name into context; this is a bug");
                         let operation_kind =
                             operation.map(|op| OperationKind::from(op.operation_type));
                         context
