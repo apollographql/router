@@ -2372,7 +2372,7 @@ expression: "&schema"
         "experimental_reuse_query_fragments": null,
         "defer_support": true,
         "query_planning": {
-          "experimental_cache": {
+          "cache": {
             "in_memory": {
               "limit": 512
             },
@@ -2423,7 +2423,7 @@ expression: "&schema"
         "query_planning": {
           "description": "Query planning options",
           "default": {
-            "experimental_cache": {
+            "cache": {
               "in_memory": {
                 "limit": 512
               },
@@ -2435,7 +2435,7 @@ expression: "&schema"
           },
           "type": "object",
           "properties": {
-            "experimental_cache": {
+            "cache": {
               "description": "Cache configuration",
               "default": {
                 "in_memory": {
