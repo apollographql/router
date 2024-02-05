@@ -195,7 +195,7 @@ telemetry:
       common:
         service_name: apollo-router
         views:
-          - instrument_name: apollo_router_http_request_duration_seconds # Metric name you want to edit
+          - name: apollo_router_http_request_duration_seconds # Instrument name you want to edit. default: *
             unit: "ms" # (Optional) override the unit
             description: "my new description of this metric" # (Optional) override the description
             aggregation: # (Optional)
