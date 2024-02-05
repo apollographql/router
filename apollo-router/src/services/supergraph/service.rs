@@ -64,6 +64,7 @@ use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
+use crate::services::SubgraphService;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -484,8 +485,14 @@ async fn subscription_task(
                             break;
                         },
                     };
+
                     let plugins = Arc::new(IndexMap::from_iter(plugins));
-                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+                    execution_service_factory = ExecutionServiceFactory {
+                        schema: execution_service_factory.schema.clone(),
+                        plugins: plugins.clone(),
+                        subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())),
+
+                    };
                 }
             }
             Some(new_schema) = schema_updated_rx.next() => {
@@ -646,7 +653,7 @@ fn clone_supergraph_request(
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Plugins,
-    subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+    subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
     planner: BridgeQueryPlanner,
 }
@@ -679,7 +686,7 @@ impl PluggableSupergraphServiceBuilder {
         S: MakeSubgraphService,
     {
         self.subgraph_services
-            .push((name.to_string(), Arc::new(service_maker)));
+            .push((name.to_string(), Box::new(service_maker)));
         self
     }
 
@@ -691,7 +698,9 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
+    pub(crate) async fn build(
+        mut self,
+    ) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
         let schema = self.planner.schema();
@@ -713,9 +722,19 @@ impl PluggableSupergraphServiceBuilder {
         }
 
         let plugins = Arc::new(plugins);
+        for (_, service) in self.subgraph_services.iter_mut() {
+            if let Some(subgraph) =
+                (service as &mut dyn std::any::Any).downcast_mut::<SubgraphService>()
+            {
+                subgraph.client_factory.plugins = plugins.clone();
+            }
+        }
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
-            self.subgraph_services,
+            self.subgraph_services
+                .into_iter()
+                .map(|(name, service)| (name, service.into()))
+                .collect(),
             plugins.clone(),
         ));
 
