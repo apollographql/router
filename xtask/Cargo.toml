@@ -21,7 +21,7 @@ console = "0.15.8"
 dialoguer = "0.11.0"
 flate2 = "1"
 graphql_client = { version = "0.13.0", features = ["reqwest-rustls"] }
-itertools = "0.12.0"
+itertools = "0.12.1"
 libc = "0.2"
 memorable-wordlist = "0.1.7"
 nu-ansi-term = "0.49"
