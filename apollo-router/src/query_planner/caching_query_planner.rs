@@ -76,7 +76,7 @@ where
     ) -> CachingQueryPlanner<T> {
         let cache = Arc::new(
             DeduplicatingCache::from_configuration(
-                &configuration.supergraph.query_planning.experimental_cache,
+                &configuration.supergraph.query_planning.cache,
                 "query planner",
             )
             .await,
@@ -182,7 +182,9 @@ where
                 let err_res = Query::check_errors(&doc);
                 if let Err(error) = err_res {
                     let e = Arc::new(QueryPlannerError::SpecError(error));
-                    entry.insert(Err(e)).await;
+                    tokio::spawn(async move {
+                        entry.insert(Err(e)).await;
+                    });
                     continue;
                 }
 
@@ -208,15 +210,19 @@ where
 
                 match res {
                     Ok(QueryPlannerResponse { content, .. }) => {
-                        if let Some(content) = &content {
+                        if let Some(content) = content.clone() {
                             count += 1;
-                            entry.insert(Ok(content.clone())).await;
+                            tokio::spawn(async move {
+                                entry.insert(Ok(content.clone())).await;
+                            });
                         }
                     }
                     Err(error) => {
                         count += 1;
                         let e = Arc::new(error);
-                        entry.insert(Err(e.clone())).await;
+                        tokio::spawn(async move {
+                            entry.insert(Err(e)).await;
+                        });
                     }
                 }
             }
@@ -355,7 +361,10 @@ where
                             referenced_fields_by_type: HashMap::new(),
                         });
                         let e = Arc::new(QueryPlannerError::SpecError(error));
-                        entry.insert(Err(e.clone())).await;
+                        let err = e.clone();
+                        tokio::spawn(async move {
+                            entry.insert(Err(err)).await;
+                        });
                         return Err(CacheResolverError::RetrievalError(e));
                     }
 
@@ -367,8 +376,10 @@ where
                             context,
                             errors,
                         }) => {
-                            if let Some(content) = &content {
-                                entry.insert(Ok(content.clone())).await;
+                            if let Some(content) = content.clone() {
+                                tokio::spawn(async move {
+                                    entry.insert(Ok(content)).await;
+                                });
                             }
 
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
@@ -385,7 +396,10 @@ where
                         }
                         Err(error) => {
                             let e = Arc::new(error);
-                            entry.insert(Err(e.clone())).await;
+                            let err = e.clone();
+                            tokio::spawn(async move {
+                                entry.insert(Err(err)).await;
+                            });
                             Err(CacheResolverError::RetrievalError(e))
                         }
                     }
@@ -459,6 +473,8 @@ pub(crate) struct CachingQueryKey {
     pub(crate) plan_options: PlanOptions,
 }
 
+const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
+
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut hasher = Sha256::new();
@@ -471,22 +487,19 @@ impl std::fmt::Display for CachingQueryKey {
 
         let mut hasher = Sha256::new();
         hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
-        let metadata = hex::encode(hasher.finalize());
-
-        let mut hasher = Sha256::new();
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
-        let plan_options = hex::encode(hasher.finalize());
+        let metadata = hex::encode(hasher.finalize());
 
         write!(
             f,
-            "plan.{}.{}.{}.{}.{}",
+            "plan:{}:{}:{}:{}:{}",
+            FEDERATION_VERSION,
             self.schema_id.as_deref().unwrap_or("-"),
             query,
             operation,
             metadata,
-            plan_options,
         )
     }
 }
