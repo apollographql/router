@@ -370,7 +370,6 @@ pin_project! {
     }
 }
 
-
 impl<B> Stream for BodyStream<B>
 where
     B: hyper::body::HttpBody,
