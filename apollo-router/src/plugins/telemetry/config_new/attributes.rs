@@ -9,6 +9,7 @@ use http::StatusCode;
 use http::Uri;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry_api::baggage::BaggageExt;
 use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
 use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
@@ -34,6 +35,8 @@ use serde::Deserialize;
 #[cfg(test)]
 use serde::Serialize;
 use tower::BoxError;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
@@ -86,6 +89,9 @@ pub(crate) struct RouterAttributes {
     /// This can be output in logs.
     #[serde(rename = "trace_id")]
     trace_id: Option<bool>,
+
+    /// All key values from trace baggage.
+    baggage: Option<bool>,
 
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
@@ -545,6 +551,13 @@ impl Selectors for RouterAttributes {
                 ));
             }
         }
+        if let Some(true) = &self.baggage {
+            let context = Span::current().context();
+            let baggage = context.baggage();
+            for (key, (value, _)) in baggage {
+                attrs.push_back(KeyValue::new(key.clone(), value.clone()));
+            }
+        }
 
         attrs
     }
@@ -970,6 +983,8 @@ mod test {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use opentelemetry::Context;
+    use opentelemetry_api::baggage::BaggageExt;
+    use opentelemetry_api::KeyValue;
     use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
     use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
     use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
@@ -1030,6 +1045,10 @@ mod test {
             );
             let _context = Context::current()
                 .with_remote_span_context(span_context)
+                .with_baggage(vec![
+                    KeyValue::new("baggage_key", "baggage_value"),
+                    KeyValue::new("baggage_key_bis", "baggage_value_bis"),
+                ])
                 .attach();
             let span = span!(tracing::Level::INFO, "test");
             let _guard = span.enter();
@@ -1037,11 +1056,13 @@ mod test {
             let attributes = RouterAttributes {
                 datadog_trace_id: Some(true),
                 trace_id: Some(true),
+                baggage: Some(true),
                 common: Default::default(),
                 server: Default::default(),
             };
             let attributes =
                 attributes.on_request(&router::Request::fake_builder().build().unwrap());
+
             assert_eq!(
                 attributes
                     .iter()
@@ -1057,6 +1078,23 @@ mod test {
                     )
                     .map(|key_val| &key_val.value),
                 Some(&"42".into())
+            );
+            assert_eq!(
+                attributes
+                    .iter()
+                    .find(
+                        |key_val| key_val.key == opentelemetry::Key::from_static_str("baggage_key")
+                    )
+                    .map(|key_val| &key_val.value),
+                Some(&"baggage_value".into())
+            );
+            assert_eq!(
+                attributes
+                    .iter()
+                    .find(|key_val| key_val.key
+                        == opentelemetry::Key::from_static_str("baggage_key_bis"))
+                    .map(|key_val| &key_val.value),
+                Some(&"baggage_value_bis".into())
             );
         });
     }

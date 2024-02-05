@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,6 +23,7 @@ pub(crate) struct QueryKey {
     pub(crate) original_query: String,
     pub(crate) operation_name: Option<String>,
     pub(crate) metadata: CacheKeyMetadata,
+    pub(crate) plan_options: PlanOptions,
 }
 
 /// A plan for a given GraphQL query
