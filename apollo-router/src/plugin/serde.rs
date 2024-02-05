@@ -6,6 +6,7 @@ use std::str::FromStr;
 use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::HeaderValue;
+use jsonpath_rust::JsonPathInst;
 use regex::Regex;
 use serde::de;
 use serde::de::Error;
@@ -208,4 +209,28 @@ where
         }
     }
     deserializer.deserialize_str(RegexVisitor)
+}
+
+pub(crate) fn deserialize_jsonpath<'de, D>(deserializer: D) -> Result<JsonPathInst, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserializer.deserialize_str(JSONPathVisitor)
+}
+
+struct JSONPathVisitor;
+
+impl<'de> serde::de::Visitor<'de> for JSONPathVisitor {
+    type Value = JsonPathInst;
+
+    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        write!(formatter, "a JSON path")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        JsonPathInst::from_str(s).map_err(serde::de::Error::custom)
+    }
 }

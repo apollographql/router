@@ -8,6 +8,7 @@ use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
@@ -22,6 +23,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
@@ -100,6 +102,7 @@ where
                 query: key.query,
                 operation: key.operation,
                 metadata: key.metadata,
+                plan_options: key.plan_options,
             })
             .collect()
     }
@@ -149,6 +152,7 @@ where
                     query,
                     operation: None,
                     metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
                 });
             }
         }
@@ -160,6 +164,7 @@ where
             mut query,
             operation,
             metadata,
+            plan_options,
         } in all_cache_keys
         {
             let caching_key = CachingQueryKey {
@@ -167,6 +172,7 @@ where
                 query: query.clone(),
                 operation: operation.clone(),
                 metadata,
+                plan_options,
             };
             let context = Context::new();
 
@@ -282,6 +288,14 @@ where
             AuthorizationPlugin::update_cache_key(&request.context);
         }
 
+        let plan_options = PlanOptions {
+            override_conditions: request
+                .context
+                .get(LABELS_TO_OVERRIDE_KEY)
+                .unwrap_or_default()
+                .unwrap_or_default(),
+        };
+
         let caching_key = CachingQueryKey {
             schema_id,
             query: request.query.clone(),
@@ -293,6 +307,7 @@ where
                 .get::<CacheKeyMetadata>()
                 .cloned()
                 .unwrap_or_default(),
+            plan_options,
         };
 
         let context = request.context.clone();
@@ -441,6 +456,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
     pub(crate) metadata: CacheKeyMetadata,
+    pub(crate) plan_options: PlanOptions,
 }
 
 impl std::fmt::Display for CachingQueryKey {
@@ -457,13 +473,20 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
         let metadata = hex::encode(hasher.finalize());
 
+        let mut hasher = Sha256::new();
+        hasher.update(
+            &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
+        );
+        let plan_options = hex::encode(hasher.finalize());
+
         write!(
             f,
-            "plan.{}.{}.{}.{}",
+            "plan.{}.{}.{}.{}.{}",
             self.schema_id.as_deref().unwrap_or("-"),
             query,
             operation,
             metadata,
+            plan_options,
         )
     }
 }
@@ -473,6 +496,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
     pub(crate) metadata: CacheKeyMetadata,
+    pub(crate) plan_options: PlanOptions,
 }
 
 #[cfg(test)]

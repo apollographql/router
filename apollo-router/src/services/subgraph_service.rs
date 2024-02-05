@@ -79,7 +79,8 @@ static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
     HeaderValue::from_static("application/json;callbackSpec=1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
-static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
+static ACCEPT_GRAPHQL_JSON: HeaderValue =
+    HeaderValue::from_static("application/json, application/graphql-response+json");
 
 enum APQError {
     PersistedQueryNotSupported,
@@ -640,10 +641,7 @@ async fn call_http(
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .append(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
-    request
-        .headers_mut()
-        .append(ACCEPT, APP_GRAPHQL_JSON.clone());
+        .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
 
     let schema_uri = request.uri();
     let host = schema_uri.host().unwrap_or_default();

@@ -2164,6 +2164,10 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "progressive_override": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
+    },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
       "type": "object",
@@ -3202,6 +3206,173 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "tty_format": {
+                      "description": "The format to log to stdout when you're running on an interactive terminal. When configured it will automatically use this `tty_format`` instead of the original `format` when an interactive terminal is detected",
+                      "oneOf": [
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                          "type": "object",
+                          "required": [
+                            "json"
+                          ],
+                          "properties": {
+                            "json": {
+                              "type": "object",
+                              "properties": {
+                                "display_current_span": {
+                                  "description": "Include the current span in this log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_filename": {
+                                  "description": "Include the filename with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_level": {
+                                  "description": "Include the level with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_line_number": {
+                                  "description": "Include the line number with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_resource": {
+                                  "description": "Include the resource with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_span_list": {
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_target": {
+                                  "description": "Include the target with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_thread_id": {
+                                  "description": "Include the thread_id with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_name": {
+                                  "description": "Include the thread_name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_timestamp": {
+                                  "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                          "type": "string",
+                          "enum": [
+                            "json"
+                          ]
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                          "type": "object",
+                          "required": [
+                            "text"
+                          ],
+                          "properties": {
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "ansi_escape_codes": {
+                                  "description": "Process ansi escapes (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_current_span": {
+                                  "description": "Include the current span in this log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_filename": {
+                                  "description": "Include the filename with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_level": {
+                                  "description": "Include the level with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_line_number": {
+                                  "description": "Include the line number with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_resource": {
+                                  "description": "Include the resource with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_service_name": {
+                                  "description": "Include the service name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_service_namespace": {
+                                  "description": "Include the service namespace with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_span_list": {
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_target": {
+                                  "description": "Include the target with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_id": {
+                                  "description": "Include the thread_id with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_thread_name": {
+                                  "description": "Include the thread_name with the log event.",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
+                                "display_timestamp": {
+                                  "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                          "type": "string",
+                          "enum": [
+                            "text"
+                          ]
+                        }
+                      ],
+                      "nullable": true
                     }
                   },
                   "additionalProperties": false
@@ -6180,6 +6351,12 @@ expression: "&schema"
                       "description": "Custom attributes that are attached to the router span.",
                       "type": "object",
                       "properties": {
+                        "baggage": {
+                          "description": "All key values from trace baggage.",
+                          "default": null,
+                          "type": "boolean",
+                          "nullable": true
+                        },
                         "dd.trace_id": {
                           "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
                           "default": null,
@@ -6683,6 +6860,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
@@ -6878,6 +7058,7 @@ expression: "&schema"
                             "additionalProperties": false
                           },
                           {
+                            "description": "Deprecated, use SubgraphResponseData and SubgraphResponseError instead",
                             "type": "object",
                             "required": [
                               "subgraph_response_body"
@@ -6943,6 +7124,150 @@ expression: "&schema"
                                 "nullable": true
                               },
                               "subgraph_response_body": {
+                                "description": "The subgraph response body json path.",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "subgraph_response_data"
+                            ],
+                            "properties": {
+                              "default": {
+                                "description": "Optional default value.",
+                                "anyOf": [
+                                  {
+                                    "description": "bool values",
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "description": "i64 values",
+                                    "type": "integer",
+                                    "format": "int64"
+                                  },
+                                  {
+                                    "description": "f64 values",
+                                    "type": "number",
+                                    "format": "double"
+                                  },
+                                  {
+                                    "description": "String values",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "description": "Array of homogeneous values",
+                                    "anyOf": [
+                                      {
+                                        "description": "Array of bools",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of integers",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "integer",
+                                          "format": "int64"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of floats",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of strings",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ],
+                                "nullable": true
+                              },
+                              "subgraph_response_data": {
+                                "description": "The subgraph response body json path.",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "subgraph_response_errors"
+                            ],
+                            "properties": {
+                              "default": {
+                                "description": "Optional default value.",
+                                "anyOf": [
+                                  {
+                                    "description": "bool values",
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "description": "i64 values",
+                                    "type": "integer",
+                                    "format": "int64"
+                                  },
+                                  {
+                                    "description": "f64 values",
+                                    "type": "number",
+                                    "format": "double"
+                                  },
+                                  {
+                                    "description": "String values",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "description": "Array of homogeneous values",
+                                    "anyOf": [
+                                      {
+                                        "description": "Array of bools",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of integers",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "integer",
+                                          "format": "int64"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of floats",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of strings",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ],
+                                "nullable": true
+                              },
+                              "subgraph_response_errors": {
                                 "description": "The subgraph response body json path.",
                                 "type": "string"
                               }
@@ -7416,6 +7741,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
@@ -7881,6 +8209,9 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "string"
                           }
                         ]
                       }
