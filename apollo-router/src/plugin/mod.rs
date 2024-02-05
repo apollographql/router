@@ -529,6 +529,15 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles HTTP communication
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -627,6 +636,13 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: subgraph::BoxService,
     ) -> subgraph::BoxService;
 
+    /// This service handles HTTP communication
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -660,6 +676,15 @@ where
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         self.subgraph_service(name, service)
+    }
+
+    /// This service handles HTTP communication
+    fn http_client_service(
+        &self,
+        name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        self.http_client_service(name, service)
     }
 
     fn name(&self) -> &'static str {

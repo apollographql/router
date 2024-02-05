@@ -104,13 +104,13 @@ impl Service<ExecutionRequest> for ExecutionService {
         let clone = self.clone();
         let mut this = std::mem::replace(self, clone);
 
-        let fut = async move { this.call_inner(req).await }.in_current_span();
+        let fut = async move { Ok(this.call_inner(req).await) }.in_current_span();
         Box::pin(fut)
     }
 }
 
 impl ExecutionService {
-    async fn call_inner(&mut self, req: ExecutionRequest) -> Result<ExecutionResponse, BoxError> {
+    async fn call_inner(&mut self, req: ExecutionRequest) -> ExecutionResponse {
         let context = req.context;
         let ctx = context.clone();
         let variables = req.supergraph_request.body().variables.clone();
@@ -123,7 +123,7 @@ impl ExecutionService {
         let is_subscription = req.query_plan.is_subscription(operation_name.as_deref());
         let mut claims = None;
         if is_deferred {
-            claims = context.get(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
+            claims = context.get(APOLLO_AUTHENTICATION_JWT_CLAIMS).ok().flatten()
         }
         let (tx_close_signal, subscription_handle) = if is_subscription {
             let (tx_close_signal, rx_close_signal) = broadcast::channel(1);
@@ -173,10 +173,7 @@ impl ExecutionService {
         };
 
         if has_initial_data {
-            return Ok(ExecutionResponse::new_from_response(
-                http::Response::new(stream as _),
-                ctx,
-            ));
+            return ExecutionResponse::new_from_response(http::Response::new(stream as _), ctx);
         }
 
         let schema = self.schema.clone();
@@ -239,10 +236,7 @@ impl ExecutionService {
             })
             .boxed();
 
-        Ok(ExecutionResponse::new_from_response(
-            http::Response::new(stream as _),
-            ctx,
-        ))
+        ExecutionResponse::new_from_response(http::Response::new(stream as _), ctx)
     }
 
     fn process_graphql_response(

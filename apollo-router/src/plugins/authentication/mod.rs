@@ -15,6 +15,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use jsonwebtoken::jwk::AlgorithmParameters;
 use jsonwebtoken::jwk::EllipticCurve;
 use jsonwebtoken::jwk::Jwk;
+use jsonwebtoken::jwk::KeyAlgorithm;
 use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use jsonwebtoken::Algorithm;
@@ -57,7 +58,7 @@ pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication
 const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
-enum AuthenticationError<'a> {
+pub(crate) enum AuthenticationError<'a> {
     /// Configured header is not convertible to a string
     CannotConvertToString,
 
@@ -90,6 +91,9 @@ enum AuthenticationError<'a> {
 
     /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from '{expected}'
     InvalidIssuer { expected: String, token: String },
+
+    /// Unsupported key algorithm: {0}
+    UnsupportedKeyAlgorithm(KeyAlgorithm),
 }
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
@@ -235,9 +239,9 @@ fn search_jwks(
 
             // Furthermore, we would like our algorithms to match, or at least the kty
             // If we have an algorithm that matches, boost the score
-            match key.common.algorithm {
+            match key.common.key_algorithm {
                 Some(algorithm) => {
-                    if algorithm != criteria.alg {
+                    if convert_key_algorithm(algorithm) != Some(criteria.alg) {
                         continue;
                     }
                     key_score += 1;
@@ -256,7 +260,7 @@ fn search_jwks(
                         Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512,
                         AlgorithmParameters::OctetKey(_),
                     ) => {
-                        key.common.algorithm = Some(criteria.alg);
+                        key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                     }
                     (
                         Algorithm::RS256
@@ -267,21 +271,21 @@ fn search_jwks(
                         | Algorithm::PS512,
                         AlgorithmParameters::RSA(_),
                     ) => {
-                        key.common.algorithm = Some(criteria.alg);
+                        key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                     }
                     (Algorithm::ES256, AlgorithmParameters::EllipticCurve(params)) => {
                         if params.curve == EllipticCurve::P256 {
-                            key.common.algorithm = Some(criteria.alg);
+                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
                     }
                     (Algorithm::ES384, AlgorithmParameters::EllipticCurve(params)) => {
                         if params.curve == EllipticCurve::P384 {
-                            key.common.algorithm = Some(criteria.alg);
+                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
                     }
                     (Algorithm::EdDSA, AlgorithmParameters::EllipticCurve(params)) => {
                         if params.curve == EllipticCurve::Ed25519 {
-                            key.common.algorithm = Some(criteria.alg);
+                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
                     }
                     _ => {
@@ -317,9 +321,9 @@ fn search_jwks(
             .map(|(score, (_, candidate))| (
                 score,
                 &candidate.common.key_id,
-                candidate.common.algorithm
+                candidate.common.key_algorithm
             ))
-            .collect::<Vec<(&usize, &Option<String>, Option<Algorithm>)>>()
+            .collect::<Vec<(&usize, &Option<String>, Option<KeyAlgorithm>)>>()
     );
 
     if candidates.is_empty() {
@@ -438,7 +442,7 @@ impl Plugin for AuthenticationPlugin {
             ServiceBuilder::new()
                 .instrument(authentication_service_span())
                 .checkpoint(move |request: router::Request| {
-                    authenticate(&configuration, &jwks_manager, request)
+                    Ok(authenticate(&configuration, &jwks_manager, request))
                 })
                 .service(service)
                 .boxed()
@@ -464,7 +468,7 @@ fn authenticate(
     config: &JWTConf,
     jwks_manager: &JwksManager,
     request: router::Request,
-) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+) -> ControlFlow<router::Response, router::Request> {
     const AUTHENTICATION_KIND: &str = "JWT";
 
     // We are going to do a lot of similar checking so let's define a local function
@@ -473,7 +477,7 @@ fn authenticate(
         context: Context,
         error: AuthenticationError,
         status: StatusCode,
-    ) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+    ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
         tracing::info!(
             monotonic_counter.apollo_authentication_failure_count = 1u64,
@@ -489,7 +493,7 @@ fn authenticate(
             authentication.jwt.failed = true
         );
         tracing::info!(message = %error, "jwt authentication failure");
-        let response = router::Response::error_builder()
+        let response = router::Response::infallible_builder()
             .error(
                 graphql::Error::builder()
                     .message(error.to_string())
@@ -498,8 +502,8 @@ fn authenticate(
             )
             .status_code(status)
             .context(context)
-            .build()?;
-        Ok(ControlFlow::Break(response))
+            .build();
+        ControlFlow::Break(response)
     }
 
     // The http_request is stored in a `Router::Request` context.
@@ -507,7 +511,7 @@ fn authenticate(
     let jwt_value_result = match request.router_request.headers().get(&config.header_name) {
         Some(value) => value.to_str(),
         None => {
-            return Ok(ControlFlow::Continue(request));
+            return ControlFlow::Continue(request);
         }
     };
 
@@ -638,7 +642,7 @@ fn authenticate(
             kind = %AUTHENTICATION_KIND
         );
         tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1u64);
-        return Ok(ControlFlow::Continue(request));
+        return ControlFlow::Continue(request);
     }
 
     // We can't find a key to process this JWT.
@@ -675,7 +679,7 @@ fn decode_jwt(
             }
         };
 
-        let algorithm = match jwk.common.algorithm {
+        let key_algorithm = match jwk.common.key_algorithm {
             Some(a) => a,
             None => {
                 error = Some((
@@ -686,8 +690,22 @@ fn decode_jwt(
             }
         };
 
+        let algorithm = match convert_key_algorithm(key_algorithm) {
+            Some(a) => a,
+            None => {
+                error = Some((
+                    AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+                continue;
+            }
+        };
+
         let mut validation = Validation::new(algorithm);
         validation.validate_nbf = true;
+        // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
+        // we don't validate audience yet, so this is deactivated
+        validation.validate_aud = false;
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
             Ok(v) => return Ok((issuer, v)),
@@ -751,6 +769,45 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
             }
         }
         None => Duration::MAX,
+    }
+}
+
+//Apparently the jsonwebtoken crate now has 2 different enums for algorithms
+pub(crate) fn convert_key_algorithm(algorithm: KeyAlgorithm) -> Option<Algorithm> {
+    Some(match algorithm {
+        jsonwebtoken::jwk::KeyAlgorithm::HS256 => jsonwebtoken::Algorithm::HS256,
+        jsonwebtoken::jwk::KeyAlgorithm::HS384 => jsonwebtoken::Algorithm::HS384,
+        jsonwebtoken::jwk::KeyAlgorithm::HS512 => jsonwebtoken::Algorithm::HS512,
+        jsonwebtoken::jwk::KeyAlgorithm::ES256 => jsonwebtoken::Algorithm::ES256,
+        jsonwebtoken::jwk::KeyAlgorithm::ES384 => jsonwebtoken::Algorithm::ES384,
+        jsonwebtoken::jwk::KeyAlgorithm::RS256 => jsonwebtoken::Algorithm::RS256,
+        jsonwebtoken::jwk::KeyAlgorithm::RS384 => jsonwebtoken::Algorithm::RS384,
+        jsonwebtoken::jwk::KeyAlgorithm::RS512 => jsonwebtoken::Algorithm::RS512,
+        jsonwebtoken::jwk::KeyAlgorithm::PS256 => jsonwebtoken::Algorithm::PS256,
+        jsonwebtoken::jwk::KeyAlgorithm::PS384 => jsonwebtoken::Algorithm::PS384,
+        jsonwebtoken::jwk::KeyAlgorithm::PS512 => jsonwebtoken::Algorithm::PS512,
+        jsonwebtoken::jwk::KeyAlgorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
+        // we do not use the encryption algorithms
+        jsonwebtoken::jwk::KeyAlgorithm::RSA1_5
+        | jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP
+        | jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP_256 => return None,
+    })
+}
+
+pub(crate) fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
+    match algorithm {
+        jsonwebtoken::Algorithm::HS256 => jsonwebtoken::jwk::KeyAlgorithm::HS256,
+        jsonwebtoken::Algorithm::HS384 => jsonwebtoken::jwk::KeyAlgorithm::HS384,
+        jsonwebtoken::Algorithm::HS512 => jsonwebtoken::jwk::KeyAlgorithm::HS512,
+        jsonwebtoken::Algorithm::ES256 => jsonwebtoken::jwk::KeyAlgorithm::ES256,
+        jsonwebtoken::Algorithm::ES384 => jsonwebtoken::jwk::KeyAlgorithm::ES384,
+        jsonwebtoken::Algorithm::RS256 => jsonwebtoken::jwk::KeyAlgorithm::RS256,
+        jsonwebtoken::Algorithm::RS384 => jsonwebtoken::jwk::KeyAlgorithm::RS384,
+        jsonwebtoken::Algorithm::RS512 => jsonwebtoken::jwk::KeyAlgorithm::RS512,
+        jsonwebtoken::Algorithm::PS256 => jsonwebtoken::jwk::KeyAlgorithm::PS256,
+        jsonwebtoken::Algorithm::PS384 => jsonwebtoken::jwk::KeyAlgorithm::PS384,
+        jsonwebtoken::Algorithm::PS512 => jsonwebtoken::jwk::KeyAlgorithm::PS512,
+        jsonwebtoken::Algorithm::EdDSA => jsonwebtoken::jwk::KeyAlgorithm::EdDSA,
     }
 }
 
