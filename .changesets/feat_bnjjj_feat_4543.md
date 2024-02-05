@@ -6,25 +6,24 @@ Example of configuration:
 
 ```yaml
 telemetry:
-  apollo:
-    client_name_header: name_header
-    client_version_header: version_header
   exporters:
     metrics:
       common:
         service_name: apollo-router
         views:
-          - instrument_name: apollo_router_http_request_duration_seconds
-            aggregation:
+          - name: apollo_router_http_request_duration_seconds # Instrument name you want to edit. You can use wildcard in names. If you want to target all instruments just use '*'
+            unit: "ms" # (Optional) override the unit
+            description: "my new description of this metric" # (Optional) override the description
+            aggregation: # (Optional)
               histogram:
-                buckets:
+                buckets: # Override default buckets configured for this histogram
                 - 1
                 - 2
                 - 3
                 - 4
                 - 5
-      prometheus:
-        enabled: true
+            allowed_attribute_keys: # (Optional) Keep only listed attributes on the metric
+            - status
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4572
