@@ -8,11 +8,11 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Specify Trace ID Formatting ([PR #4530](https://github.com/apollographql/router/pull/4530))
+### Specify trace ID formatting ([PR #4530](https://github.com/apollographql/router/pull/4530))
 
-This adds the ability to specify the format of the trace ID in the response headers of the supergraph service.
+You can specify the format of the trace ID in the response headers of the supergraph service.
 
-An example configuration making use of this feature is shown below:
+An example configuration using this feature:
 ```yaml
 telemetry:
   apollo:
@@ -36,17 +36,21 @@ The change brings support for progressive @override, which allows dynamically ov
 
 A new `label` argument is added to the `@override` directive in order to indicate the field is dynamically overridden. Labels can come in two forms:
 1) String matching the form `percent(x)`: The router resolves these labels based on the `x` value. For example, `percent(50)` will route 50% of requests to the overridden field and 50% of requests to the original field.
-2) Arbitrary string matching the regex `^[a-zA-Z][a-zA-Z0-9_-:./]*$`: These labels are expected to be resolved externally via coprocessor. A coprocessor a supergraph request hook can inspect and modify the context of a request in order to inform the router which labels to use during query planning.
+2) Arbitrary string matching the regex `^[a-zA-Z][a-zA-Z0-9_-:./]*$`: These labels are expected to be resolved externally via coprocessor. A supergraph request hook can inspect and modify the context of a request in order to inform the router which labels to use during query planning.
 
 Please consult the docs for more information on how to use this feature and how to implement a coprocessor for label resolution.
 
 By [@TrevorScheer](https://github.com/TrevorScheer) in https://github.com/apollographql/router/pull/4521
 
-### Add a new selector to get all baggage key values in span attributes ([Issue #4425](https://github.com/apollographql/router/issues/4425))
+### Add selector to get all baggage key values in span attributes ([Issue #4425](https://github.com/apollographql/router/issues/4425))
 
-If you have several baggage items and would like to add all of them directly as span attributes, for example `baggage: my_item=test, my_second_item=bar` will add 2 span attributes `my_item=test` and `my_second_item=bar`.
+Previously, baggage items were configured as standard attributes in `router.yaml`, and adding a new baggage item required a configuration update and router rerelease. 
 
-Example of configuration:
+This release supports a new configuration that enables baggage items to be added automatically as span attributes. 
+
+If you have several baggage items and would like to add all of them directly as span attributes (for example, `baggage: my_item=test, my_second_item=bar`), setting `baggage: true` will add automatically add two span attributes, `my_item=test` and `my_second_item=bar`.
+
+An example configuration:
 
 ```yaml
 telemetry:
@@ -85,11 +89,11 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Create a trace during router creation and plugin initialization ([Issue #4472](https://github.com/apollographql/router/issues/4472))
 
-When the router starts or reload, it will now generate a trace with spans for query planner creation, schema parsing, plugin initialization and request pipeline creation. This will help in debugging any issue during startup, especially in plugins creation
+When the router starts or reloads, it will now generate a trace with spans for query planner creation, schema parsing, plugin initialisation and request pipeline creation. This will help debugging any issue during startup, especially during plugins creation.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4480
 
-### Add static attribute on specific span in telemetry settings ([Issue #4561](https://github.com/apollographql/router/issues/4561))
+### Allow to add static attributes on specific spans in telemetry settings ([Issue #4561](https://github.com/apollographql/router/issues/4561))
 
 Example of configuration:
 
@@ -112,7 +116,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
-### Order HPA target so that kubernetes does not rewrite ([Issue #4435](https://github.com/apollographql/router/issues/4435))
+### Order HPA targets to resolve OutOfSync states ([Issue #4435](https://github.com/apollographql/router/issues/4435))
 
 This update addresses an OutOfSync issue in ArgoCD applications when Horizontal Pod Autoscaler (HPA) is configured with both memory and CPU limits.
 Previously, the live and desired manifests within Kubernetes were not consistently sorted, leading to persistent OutOfSync states in ArgoCD.
@@ -148,7 +152,7 @@ This fixes two header propagation issues:
 * if a client request header has already been added to a subgraph request due to another header propagation rule, then it is only added once
 * `Accept`, `Accept-Encoding` and `Content-Encoding` were not in the list of reserved headers that cannot be propagated. They are now in that list because those headers are set explicitely by the Router in its subgraph requests
 
-There is a potential regression: if a router deployment was accidentally relying on header propagation to compress subgraph requests, then it will not work anymore because `Content-Encoding` is not propagated anymore. Instead it should be set up from the `traffic_shaping` section of the Router configuration:
+There is a potential change in behavior: if a router deployment was accidentally relying on header propagation to compress subgraph requests, then it will not work anymore because `Content-Encoding` is not propagated anymore. Instead it should be set up from the `traffic_shaping` section of the Router configuration:
 
 ```yaml
 traffic_shaping:
@@ -165,12 +169,14 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Move cacheability metrics to the entity cache plugin ([Issue #4253](https://github.com/apollographql/router/issues/4253))
 
-The metric was generated in the telemetry plugin before, but it was not very convenient to keep it there. This adds more configuration:
-- enable or disable the metrics
-- set the metrics storage TTL (default is 60s)
-- the metric's typename attribute is disabled by default. Activating it can greatly increase the cardinality
+Cacheability metrics have been moved from the telemetry plugin to the entity cache plugin.
 
-This also includes some cleanup and performance improvements
+New configuration has been added:
+- Enabling or disabling the metrics
+- Setting the metrics storage TTL (default is 60s)
+- Disabling the metric's typename attribute by default. (Activating it can greatly increase the cardinality.)
+
+Cleanup and performance improvements have also been implemented.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4469
 
