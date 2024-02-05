@@ -767,7 +767,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             panic!("unexpected response: {res:?}");
         }
@@ -800,7 +800,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -840,7 +840,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -875,7 +875,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())

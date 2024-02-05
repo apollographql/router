@@ -143,12 +143,11 @@ impl Service<SupergraphRequest> for SupergraphService {
                 ..Default::default()
             }];
 
-            Ok(SupergraphResponse::builder()
+            Ok(SupergraphResponse::infallible_builder()
                 .errors(errors)
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context_cloned)
-                .build()
-                .expect("building a response like this should not fail"))
+                .build())
         });
 
         Box::pin(fut)
@@ -186,24 +185,22 @@ async fn service_call(
         Ok(resp) => resp,
         Err(err) => match err.into_graphql_errors() {
             Ok(gql_errors) => {
-                return Ok(SupergraphResponse::builder()
+                return Ok(SupergraphResponse::infallible_builder()
                     .context(context)
                     .errors(gql_errors)
                     .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-                    .build()
-                    .expect("this response build must not fail"));
+                    .build());
             }
             Err(err) => return Err(err.into()),
         },
     };
 
     if !errors.is_empty() {
-        return Ok(SupergraphResponse::builder()
+        return Ok(SupergraphResponse::infallible_builder()
             .context(context)
             .errors(errors)
             .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-            .build()
-            .expect("this response build must not fail"));
+            .build());
     }
 
     match content {
@@ -293,7 +290,7 @@ async fn service_call(
                     let query_plan = plan.clone();
                     let execution_service_factory_cloned = execution_service_factory.clone();
                     let cloned_supergraph_req =
-                        clone_supergraph_request(&req.supergraph_request, context.clone())?;
+                        clone_supergraph_request(&req.supergraph_request, context.clone());
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
@@ -529,8 +526,7 @@ async fn dispatch_event(
             let cloned_supergraph_req = clone_supergraph_request(
                 &supergraph_req.supergraph_request,
                 supergraph_req.context.clone(),
-            )
-            .expect("it's a clone of the original one; qed");
+            );
             let execution_request = ExecutionRequest::internal_builder()
                 .supergraph_request(cloned_supergraph_req.supergraph_request)
                 .query_plan(query_plan.clone())
@@ -621,7 +617,7 @@ async fn plan_query(
 fn clone_supergraph_request(
     req: &http::Request<graphql::Request>,
     context: Context,
-) -> Result<SupergraphRequest, BoxError> {
+) -> SupergraphRequest {
     let mut cloned_supergraph_req = SupergraphRequest::builder()
         .extensions(req.body().extensions.clone())
         .and_query(req.body().query.clone())
@@ -637,7 +633,9 @@ fn clone_supergraph_request(
         }
     }
 
-    cloned_supergraph_req.build()
+    cloned_supergraph_req
+        .build()
+        .expect("cloning an existing supergraph response should not fail")
 }
 
 /// Builder which generates a plugin pipeline.
