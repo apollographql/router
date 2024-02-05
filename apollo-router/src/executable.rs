@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use clap::builder::FalseyValueParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::CommandFactory;
@@ -234,7 +235,7 @@ pub struct Opt {
     apollo_uplink_poll_interval: Duration,
 
     /// Disable sending anonymous usage information to Apollo.
-    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED")]
+    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
@@ -291,6 +292,10 @@ impl Opt {
             poll_interval: self.apollo_uplink_poll_interval,
             timeout: self.apollo_uplink_timeout,
         })
+    }
+
+    pub(crate) fn is_telemetry_disabled(&self) -> bool {
+        self.anonymous_telemetry_disabled
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {

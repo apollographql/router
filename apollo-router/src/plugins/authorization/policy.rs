@@ -31,7 +31,8 @@ pub(crate) struct PolicyExtractionVisitor<'a> {
 }
 
 pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
-pub(crate) const POLICY_SPEC_URL: &str = "https://specs.apollo.dev/policy/v0.1";
+pub(crate) const POLICY_SPEC_BASE_URL: &str = "https://specs.apollo.dev/policy";
+pub(crate) const POLICY_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
@@ -47,7 +48,8 @@ impl<'a> PolicyExtractionVisitor<'a> {
             extracted_policies: HashSet::new(),
             policy_directive_name: Schema::directive_name(
                 schema,
-                POLICY_SPEC_URL,
+                POLICY_SPEC_BASE_URL,
+                POLICY_SPEC_VERSION_RANGE,
                 POLICY_DIRECTIVE_NAME,
             )?,
         })
@@ -239,7 +241,8 @@ impl<'a> PolicyFilteringVisitor<'a> {
             current_path: Path::default(),
             policy_directive_name: Schema::directive_name(
                 schema,
-                POLICY_SPEC_URL,
+                POLICY_SPEC_BASE_URL,
+                POLICY_SPEC_VERSION_RANGE,
                 POLICY_DIRECTIVE_NAME,
             )?,
         })

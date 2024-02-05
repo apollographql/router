@@ -31,7 +31,8 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
 }
 
 pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
-pub(crate) const REQUIRES_SCOPES_SPEC_URL: &str = "https://specs.apollo.dev/requiresScopes/v0.1";
+pub(crate) const REQUIRES_SCOPES_SPEC_BASE_URL: &str = "https://specs.apollo.dev/requiresScopes";
+pub(crate) const REQUIRES_SCOPES_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 impl<'a> ScopeExtractionVisitor<'a> {
     #[allow(dead_code)]
@@ -47,7 +48,8 @@ impl<'a> ScopeExtractionVisitor<'a> {
             extracted_scopes: HashSet::new(),
             requires_scopes_directive_name: Schema::directive_name(
                 schema,
-                REQUIRES_SCOPES_SPEC_URL,
+                REQUIRES_SCOPES_SPEC_BASE_URL,
+                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
                 REQUIRES_SCOPES_DIRECTIVE_NAME,
             )?,
         })
@@ -237,7 +239,8 @@ impl<'a> ScopeFilteringVisitor<'a> {
             current_path: Path::default(),
             requires_scopes_directive_name: Schema::directive_name(
                 schema,
-                REQUIRES_SCOPES_SPEC_URL,
+                REQUIRES_SCOPES_SPEC_BASE_URL,
+                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
                 REQUIRES_SCOPES_DIRECTIVE_NAME,
             )?,
         })

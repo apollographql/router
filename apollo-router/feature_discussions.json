@@ -5,5 +5,7 @@
     "experimental_when_header": "https://github.com/apollographql/router/discussions/1961",
     "experimental_batching": "https://github.com/apollographql/router/discussions/3840"
   },
-  "preview": {}
+  "preview": {
+    "preview_entity_cache": "https://github.com/apollographql/router/discussions/4592"
+  }
 }

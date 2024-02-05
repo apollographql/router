@@ -16,7 +16,8 @@ use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
-pub(crate) const AUTHENTICATED_SPEC_URL: &str = "https://specs.apollo.dev/authenticated/v0.1";
+pub(crate) const AUTHENTICATED_SPEC_BASE_URL: &str = "https://specs.apollo.dev/authenticated";
+pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
     schema: &'a schema::Schema,
@@ -39,7 +40,8 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
             found: false,
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_URL,
+                AUTHENTICATED_SPEC_BASE_URL,
+                AUTHENTICATED_SPEC_VERSION_RANGE,
                 AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
@@ -205,7 +207,8 @@ impl<'a> AuthenticatedVisitor<'a> {
             current_path: Path::default(),
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_URL,
+                AUTHENTICATED_SPEC_BASE_URL,
+                AUTHENTICATED_SPEC_VERSION_RANGE,
                 AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })

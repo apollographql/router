@@ -9,6 +9,7 @@ use std::time::Instant;
 use apollo_compiler::ast;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
+use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
@@ -32,6 +33,7 @@ use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
+use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -373,6 +375,7 @@ impl BridgeQueryPlanner {
         operation: Option<String>,
         key: CacheKeyMetadata,
         selections: Query,
+        plan_options: PlanOptions,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         fn is_validation_error(errors: &PlanErrors) -> bool {
             errors.errors.iter().all(|err| err.validation_error)
@@ -425,7 +428,7 @@ impl BridgeQueryPlanner {
 
         let planner_result = match self
             .planner
-            .plan(filtered_query.clone(), operation.clone())
+            .plan(filtered_query.clone(), operation.clone(), plan_options)
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
@@ -579,6 +582,13 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 }
             }
 
+            let plan_options = PlanOptions {
+                override_conditions: context
+                    .get(LABELS_TO_OVERRIDE_KEY)
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            };
+
             let res = this
                 .get(
                     QueryKey {
@@ -586,6 +596,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         filtered_query: doc.ast.to_string(),
                         operation_name: operation_name.to_owned(),
                         metadata,
+                        plan_options,
                     },
                     doc,
                 )
@@ -743,6 +754,7 @@ impl BridgeQueryPlanner {
             key.operation_name,
             key.metadata,
             selections,
+            key.plan_options,
         )
         .await
     }
@@ -804,6 +816,7 @@ mod tests {
             include_str!("testdata/query.graphql"),
             include_str!("testdata/query.graphql"),
             None,
+            PlanOptions::default(),
         )
         .await
         .unwrap();
@@ -825,6 +838,7 @@ mod tests {
             "fragment UnusedTestFragment on User { id } query { me { id } }",
             "fragment UnusedTestFragment on User { id } query { me { id } }",
             None,
+            PlanOptions::default(),
         )
         .await
         .unwrap_err();
@@ -873,6 +887,7 @@ mod tests {
                 None,
                 CacheKeyMetadata::default(),
                 selections,
+                PlanOptions::default(),
             )
             .await
             .unwrap_err();
@@ -891,7 +906,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let result = plan(EXAMPLE_SCHEMA, "", "", None).await;
+        let result = plan(EXAMPLE_SCHEMA, "", "", None, PlanOptions::default()).await;
 
         assert_eq!(
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
@@ -906,6 +921,7 @@ mod tests {
             "{ x: __typename }",
             "{ x: __typename }",
             None,
+            PlanOptions::default(),
         )
         .await
         .unwrap();
@@ -926,6 +942,7 @@ mod tests {
             "{ x: __typename __typename }",
             "{ x: __typename __typename }",
             None,
+            PlanOptions::default(),
         )
         .await
         .unwrap();
@@ -1196,7 +1213,9 @@ mod tests {
             }
         }
 
-        let result = plan(EXAMPLE_SCHEMA, query, query, None).await.unwrap();
+        let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default())
+            .await
+            .unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
             check_query_plan_coverage(&plan.root, &Path::empty(), None, &plan.query.subselections);
 
@@ -1221,6 +1240,7 @@ mod tests {
         original_query: &str,
         filtered_query: &str,
         operation_name: Option<String>,
+        plan_options: PlanOptions,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut configuration: Configuration = Default::default();
         configuration.supergraph.introspection = true;
@@ -1244,6 +1264,7 @@ mod tests {
                     filtered_query: filtered_query.to_string(),
                     operation_name,
                     metadata: CacheKeyMetadata::default(),
+                    plan_options,
                 },
                 doc,
             )
