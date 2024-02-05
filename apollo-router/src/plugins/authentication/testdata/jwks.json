@@ -4,7 +4,7 @@
       "kty": "oct",
       "kid": "key1",
       "alg": "HS256",
-      "k": "c2VjcmV0Cg==",
+      "k": "c2VjcmV0Cg",
       "use": "sig"
     },
     {

@@ -4,7 +4,7 @@ expression: yaml
 ---
 - fields:
     alg: UnknownAlg
-    err: "unknown variant `UnknownAlg`, expected one of `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`"
+    err: "unknown variant `UnknownAlg`, expected one of `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`, `RSA1_5`, `RSA-OAEP`, `RSA-OAEP-256`"
     index: 2
   level: WARN
   message: "ignoring a key since it is not valid, enable debug logs to full content"
