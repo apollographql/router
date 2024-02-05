@@ -57,9 +57,9 @@ curl --request GET \
   https://rover.apollo.dev/quickstart/products/graphql?query=query%20GetBestSellers%28%24category%3AProductCategory%29%7BbestSellers%28category%3A%20%24category%29%7Btitle%7D%7D&operationName=GetBestSellers&variables=%7B%22category%22%3A%22BOOKS%22%7D
 ```
 
-## Persisted Queries protocol
+## Persisted queries protocol
 
-If you are using the Automatic Persisted Queries or Persisted Queries/Safelisting features of Apollo Router they use a separate protocol to send the operation document infomation in the `extensions`. This protocal can also use HTTP POST or GET. See the Apollo Client docs on the [APQ protocol](https://www.apollographql.com/docs/react/api/link/persisted-queries/#protocol) for details.
+The Automatic Persisted Queries (APQ) and Persisted Query List (PQL) features of the Apollo Router use a separate protocol to send the operation document information in the `extensions`. This protocal can also use HTTP POST or GET. See the Apollo Client docs on the [APQ protocol](/react/api/link/persisted-queries/#protocol) for details.
 
 
 ## Related topics
