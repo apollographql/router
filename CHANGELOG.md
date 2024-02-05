@@ -74,7 +74,7 @@ When the router starts or reloads, it will now generate a trace with spans for q
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4480
 
-### Allow to add static attributes on specific spans in telemetry settings ([Issue #4561](https://github.com/apollographql/router/issues/4561))
+### Allow adding static attributes on specific spans in telemetry settings ([Issue #4561](https://github.com/apollographql/router/issues/4561))
 
 Example of configuration:
 
