@@ -158,14 +158,26 @@ impl QueryAnalysisLayer {
     }
 }
 
-pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
+/// The parsed request document that can be used by plugins to inspect what is being executed.
+/// This is populated in context once query analysis has taken place.
+/// It can be retrieved by calling `context.extensions().get::<ParsedDocument>()`.
+/// Note that although this is a public API apollo-rs is not 1.0, and therefore we cannot guarantee API stability for `ExecutableDocument`.
+pub type ParsedDocument = Arc<ParsedDocumentInner>;
 
 #[derive(Debug, Default)]
-pub(crate) struct ParsedDocumentInner {
+pub struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: ExecutableDocument,
     pub(crate) parse_errors: Option<DiagnosticList>,
     pub(crate) validation_errors: Option<DiagnosticList>,
+}
+
+impl ParsedDocumentInner {
+    /// Get a reference to the executable document.
+    /// Note that although this is a public API apollo-rs is not 1.0, and therefore we cannot guarantee API stability for `ExecutableDocument`.
+    pub fn executable_document(&self) -> &ExecutableDocument {
+        &self.executable
+    }
 }
 
 impl Display for ParsedDocumentInner {
