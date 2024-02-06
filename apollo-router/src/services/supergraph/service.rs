@@ -64,6 +64,7 @@ use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
+use crate::services::SubgraphService;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -143,12 +144,11 @@ impl Service<SupergraphRequest> for SupergraphService {
                 ..Default::default()
             }];
 
-            Ok(SupergraphResponse::builder()
+            Ok(SupergraphResponse::infallible_builder()
                 .errors(errors)
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context_cloned)
-                .build()
-                .expect("building a response like this should not fail"))
+                .build())
         });
 
         Box::pin(fut)
@@ -186,28 +186,26 @@ async fn service_call(
         Ok(resp) => resp,
         Err(err) => match err.into_graphql_errors() {
             Ok(gql_errors) => {
-                return Ok(SupergraphResponse::builder()
+                return Ok(SupergraphResponse::infallible_builder()
                     .context(context)
                     .errors(gql_errors)
                     .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-                    .build()
-                    .expect("this response build must not fail"));
+                    .build());
             }
             Err(err) => return Err(err.into()),
         },
     };
 
     if !errors.is_empty() {
-        return Ok(SupergraphResponse::builder()
+        return Ok(SupergraphResponse::infallible_builder()
             .context(context)
             .errors(errors)
             .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-            .build()
-            .expect("this response build must not fail"));
+            .build());
     }
 
     match content {
-        Some(QueryPlannerContent::Introspection { response }) => Ok(
+        Some(QueryPlannerContent::Response { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
@@ -229,7 +227,7 @@ async fn service_call(
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
 
-            if let Some(batching) = context.private_entries.lock().get::<Batching>() {
+            if let Some(batching) = context.extensions().lock().get::<Batching>() {
                 if batching.enabled && (is_deferred || is_subscription) {
                     let message = if is_deferred {
                         "BATCHING_DEFER_UNSUPPORTED"
@@ -257,7 +255,7 @@ async fn service_call(
                 multipart_subscription: accepts_multipart_subscription,
                 ..
             } = context
-                .private_entries
+                .extensions()
                 .lock()
                 .get()
                 .cloned()
@@ -293,7 +291,7 @@ async fn service_call(
                     let query_plan = plan.clone();
                     let execution_service_factory_cloned = execution_service_factory.clone();
                     let cloned_supergraph_req =
-                        clone_supergraph_request(&req.supergraph_request, context.clone())?;
+                        clone_supergraph_request(&req.supergraph_request, context.clone());
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
@@ -395,7 +393,7 @@ async fn subscription_task(
     let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
     let mut subscription_handle = subscription_handle.clone();
     let operation_signature = context
-        .private_entries
+        .extensions()
         .lock()
         .get::<UsageReporting>()
         .map(|usage_reporting| usage_reporting.stats_report_key.clone())
@@ -473,7 +471,7 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None).await {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None, None).await {
                         Ok(plugins) => plugins,
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
@@ -487,8 +485,14 @@ async fn subscription_task(
                             break;
                         },
                     };
+
                     let plugins = Arc::new(IndexMap::from_iter(plugins));
-                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+                    execution_service_factory = ExecutionServiceFactory {
+                        schema: execution_service_factory.schema.clone(),
+                        plugins: plugins.clone(),
+                        subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())),
+
+                    };
                 }
             }
             Some(new_schema) = schema_updated_rx.next() => {
@@ -529,8 +533,7 @@ async fn dispatch_event(
             let cloned_supergraph_req = clone_supergraph_request(
                 &supergraph_req.supergraph_request,
                 supergraph_req.context.clone(),
-            )
-            .expect("it's a clone of the original one; qed");
+            );
             let execution_request = ExecutionRequest::internal_builder()
                 .supergraph_request(cloned_supergraph_req.supergraph_request)
                 .query_plan(query_plan.clone())
@@ -593,16 +596,14 @@ async fn plan_query(
     // none of those tests create an executable document to put it in the context, and the document cannot be created
     // from inside the supergraph request fake builder, because it needs a schema matching the query.
     // So while we are updating the tests to create a document manually, this here will make sure current
-    // tests will pass
-    {
-        let mut entries = context.private_entries.lock();
-        if !entries.contains_key::<ParsedDocument>() {
-            let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
-            Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
-            Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
-            entries.insert::<ParsedDocument>(doc);
-        }
-        drop(entries);
+    // tests will pass.
+    // During a regular request, `ParsedDocument` is already populated during query analysis.
+    // Some tests do populate the document, so we only do it if it's not already there.
+    if !context.extensions().lock().contains_key::<ParsedDocument>() {
+        let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
+        Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
+        Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
+        context.extensions().lock().insert::<ParsedDocument>(doc);
     }
 
     planning
@@ -623,7 +624,7 @@ async fn plan_query(
 fn clone_supergraph_request(
     req: &http::Request<graphql::Request>,
     context: Context,
-) -> Result<SupergraphRequest, BoxError> {
+) -> SupergraphRequest {
     let mut cloned_supergraph_req = SupergraphRequest::builder()
         .extensions(req.body().extensions.clone())
         .and_query(req.body().query.clone())
@@ -639,7 +640,9 @@ fn clone_supergraph_request(
         }
     }
 
-    cloned_supergraph_req.build()
+    cloned_supergraph_req
+        .build()
+        .expect("cloning an existing supergraph response should not fail")
 }
 
 /// Builder which generates a plugin pipeline.
@@ -650,7 +653,7 @@ fn clone_supergraph_request(
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Plugins,
-    subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+    subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
     planner: BridgeQueryPlanner,
 }
@@ -683,7 +686,7 @@ impl PluggableSupergraphServiceBuilder {
         S: MakeSubgraphService,
     {
         self.subgraph_services
-            .push((name.to_string(), Arc::new(service_maker)));
+            .push((name.to_string(), Box::new(service_maker)));
         self
     }
 
@@ -695,7 +698,9 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
+    pub(crate) async fn build(
+        mut self,
+    ) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
         let schema = self.planner.schema();
@@ -717,9 +722,19 @@ impl PluggableSupergraphServiceBuilder {
         }
 
         let plugins = Arc::new(plugins);
+        for (_, service) in self.subgraph_services.iter_mut() {
+            if let Some(subgraph) =
+                (service as &mut dyn std::any::Any).downcast_mut::<SubgraphService>()
+            {
+                subgraph.client_factory.plugins = plugins.clone();
+            }
+        }
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
-            self.subgraph_services,
+            self.subgraph_services
+                .into_iter()
+                .map(|(name, service)| (name, service.into()))
+                .collect(),
             plugins.clone(),
         ));
 

@@ -1,0 +1,10 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+assertion_line: 660
+expression: report.to_string()
+---
+Schema features:
+* @join__field.overrideLabel
+  https://specs.apollo.dev/join/v0.4
+
+The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.

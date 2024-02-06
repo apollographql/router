@@ -48,18 +48,18 @@ where
                         return Ok(ControlFlow::Continue(req));
                     }
 
-                    let doc = match req.context.private_entries.lock().get::<ParsedDocument>() {
+                    let doc = match req.context.extensions().lock().get::<ParsedDocument>() {
                         None => {
                             let errors = vec![Error::builder()
                                 .message("Cannot find executable document".to_string())
                                 .extension_code("MISSING_EXECUTABLE_DOCUMENT")
                                 .build()];
-                            let res = SupergraphResponse::builder()
+                            let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
                                 .extensions(Object::default())
                                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                                 .context(req.context.clone())
-                                .build()?;
+                                .build();
 
                             return Ok(ControlFlow::Break(res));
                         }
@@ -76,12 +76,12 @@ where
                                 .message("Cannot find operation".to_string())
                                 .extension_code("MISSING_OPERATION")
                                 .build()];
-                            let res = SupergraphResponse::builder()
+                            let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
                                 .extensions(Object::default())
                                 .status_code(StatusCode::METHOD_NOT_ALLOWED)
                                 .context(req.context)
-                                .build()?;
+                                .build();
 
                             Ok(ControlFlow::Break(res))
                         }
@@ -282,7 +282,7 @@ mod forbid_http_get_mutations_tests {
 
         let context = Context::new();
         context
-            .private_entries
+            .extensions()
             .lock()
             .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
                 ast,

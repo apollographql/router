@@ -92,7 +92,7 @@ To enable distributed caching of query plans, add the following to your router's
 ```yaml title="router.yaml"
 supergraph:
   query_planning:
-    experimental_cache:
+    cache:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
         username: admin/123 # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the username in the URL

@@ -848,7 +848,7 @@ impl Default for Apq {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
-    pub(crate) experimental_cache: Cache,
+    pub(crate) cache: Cache,
     /// Warms up the cache on reloads by running the query plan over
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
@@ -927,6 +927,9 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// TTL for entries
     pub(crate) ttl: Option<Duration>,
+
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
 
     #[serde(default)]
     /// TLS client configuration

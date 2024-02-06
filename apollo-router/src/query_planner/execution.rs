@@ -218,7 +218,7 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     let fetch_time_offset =
                         parameters.context.created_at.elapsed().as_nanos() as i64;
-                    match fetch_node
+                    let (v, e) = fetch_node
                         .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
                             FETCH_SPAN_NAME,
@@ -226,18 +226,9 @@ impl PlanNode {
                             "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                             "apollo_private.sent_time_offset" = fetch_time_offset
                         ))
-                        .await
-                    {
-                        Ok((v, e)) => {
-                            value = v;
-                            errors = e;
-                        }
-                        Err(err) => {
-                            failfast_error!("Fetch error: {}", err);
-                            errors = vec![err.to_graphql_error(Some(current_dir.to_owned()))];
-                            value = Value::default();
-                        }
-                    }
+                        .await;
+                    value = v;
+                    errors = e;
                 }
                 PlanNode::Defer {
                     primary:
@@ -354,6 +345,10 @@ impl PlanNode {
                                     .await;
                                 value.deep_merge(v);
                                 errors.extend(err.into_iter());
+                            } else if current_dir.is_empty() {
+                                // If the condition is on the root selection set and it's the only one
+                                // For queries like {get @skip(if: true) {id name}}
+                                value.deep_merge(Value::Object(Default::default()));
                             }
                         } else if let Some(node) = else_clause {
                             let (v, err) = node
@@ -370,6 +365,10 @@ impl PlanNode {
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
+                        } else if current_dir.is_empty() {
+                            // If the condition is on the root selection set and it's the only one
+                            // For queries like {get @include(if: false) {id name}}
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(

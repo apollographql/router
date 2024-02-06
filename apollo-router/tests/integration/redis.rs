@@ -18,19 +18,26 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() -> Result<(), BoxError> {
+        // If this test fails and the cache key format changed you'll need to update the key here.
+        // 1. Force this test to run locally by removing the cfg() line at the top of this file.
+        // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
+        // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
+        // 4. Run this test and yank the updated cache key from the redis logs.
+        let known_cache_key = "plan:v2.7.1:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
+
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await?;
 
-        client.del::<String, _>("plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112.4f918cb09d5956bea87fe8addb4db3bd16de2cdf935e899cf252cac5528090e4").await.unwrap();
+        client.del::<String, _>(known_cache_key).await.unwrap();
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(json!({
                 "supergraph": {
                     "query_planning": {
-                        "experimental_cache": {
+                        "cache": {
                             "in_memory": {
                                 "limit": 2
                             },
@@ -52,10 +59,7 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s:String = client
-          .get("plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112.4f918cb09d5956bea87fe8addb4db3bd16de2cdf935e899cf252cac5528090e4")
-          .await
-          .unwrap();
+        let s: String = client.get(known_cache_key).await.unwrap();
         let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
         // ignore the usage reporting field for which the order of elements in `referenced_fields_by_type` can change
         let query_plan = query_plan_res
@@ -268,7 +272,7 @@ mod test {
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(json!({
-                "experimental_entity_cache": {
+                "preview_entity_cache": {
                     "redis": {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"
@@ -372,7 +376,7 @@ mod test {
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(json!({
-                "experimental_entity_cache": {
+                "preview_entity_cache": {
                     "redis": {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"
@@ -566,7 +570,7 @@ mod test {
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(json!({
-                "experimental_entity_cache": {
+                "preview_entity_cache": {
                     "redis": {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"

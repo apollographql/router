@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use clap::builder::FalseyValueParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::CommandFactory;
@@ -234,7 +235,7 @@ pub struct Opt {
     apollo_uplink_poll_interval: Duration,
 
     /// Disable sending anonymous usage information to Apollo.
-    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED")]
+    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
@@ -291,6 +292,10 @@ impl Opt {
             poll_interval: self.apollo_uplink_poll_interval,
             timeout: self.apollo_uplink_timeout,
         })
+    }
+
+    pub(crate) fn is_telemetry_disabled(&self) -> bool {
+        self.anonymous_telemetry_disabled
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -433,7 +438,15 @@ impl Executable {
         }
 
         copy_args_to_env();
-        init_telemetry(&opt.log_level)?;
+
+        let apollo_telemetry_initialized = if graph_os() {
+            init_telemetry(&opt.log_level)?;
+            true
+        } else {
+            // Best effort init telemetry
+            init_telemetry(&opt.log_level).is_ok()
+        };
+
         setup_panic_handler();
 
         if opt.schema {
@@ -474,12 +487,14 @@ impl Executable {
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
-        // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
-        tokio::task::spawn_blocking(move || {
-            opentelemetry::global::shutdown_tracer_provider();
-            meter_provider().shutdown();
-        })
-        .await?;
+        if apollo_telemetry_initialized {
+            // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
+            tokio::task::spawn_blocking(move || {
+                opentelemetry::global::shutdown_tracer_provider();
+                meter_provider().shutdown();
+            })
+            .await?;
+        }
         result
     }
 
@@ -678,6 +693,10 @@ impl Executable {
         }
         Ok(())
     }
+}
+
+fn graph_os() -> bool {
+    std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
 }
 
 fn setup_panic_handler() {
