@@ -1,4 +1,4 @@
-experimental_entity_cache:
+preview_entity_cache:
   redis:
     urls: [ "redis://localhost:6379" ]
     timeout: 5ms

@@ -305,6 +305,46 @@ impl Response {
         )
     }
 
+    /// This is the constructor (or builder) to use when constructing a real Response..
+    ///
+    /// Required parameters are required in non-testing code to create a Response..
+    #[allow(clippy::too_many_arguments)]
+    #[builder(visibility = "pub(crate)")]
+    fn infallible_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<Error>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<HeaderName, HeaderValue>,
+        context: Context,
+    ) -> Self {
+        // Build a response
+        let b = graphql::Response::builder()
+            .and_label(label)
+            .and_path(path)
+            .errors(errors)
+            .extensions(extensions);
+        let res = match data {
+            Some(data) => b.data(data).build(),
+            None => b.build(),
+        };
+
+        // Build an http Response
+        let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
+        for (header_name, values) in headers {
+            for header_value in values {
+                builder = builder.header(header_name.clone(), header_value);
+            }
+        }
+
+        let response = builder.body(once(ready(res)).boxed()).expect("can't fail");
+
+        Self { response, context }
+    }
+
     pub(crate) fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
         Self {
             response: http::Response::new(once(ready(response)).boxed()),
