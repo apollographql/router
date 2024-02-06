@@ -22,6 +22,7 @@ use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::cache::redis::TtlOption;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
@@ -112,7 +113,7 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
-        let storage = RedisCacheStorage::new(init.config.redis).await?;
+        let storage = RedisCacheStorage::new(init.config.redis, TtlOption::Expire).await?;
 
         Ok(Self {
             storage,

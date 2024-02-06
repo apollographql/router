@@ -35,6 +35,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::ClientRequestAccepts;
+use crate::cache::redis::TtlOption;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -737,8 +738,12 @@ impl RouterCreator {
         let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
-                DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
-                    .await,
+                DeduplicatingCache::from_configuration(
+                    &configuration.apq.router.cache,
+                    "APQ",
+                    TtlOption::Expire,
+                )
+                .await,
             )
         } else {
             APQLayer::disabled()

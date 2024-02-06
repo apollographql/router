@@ -49,6 +49,15 @@ pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
+    refresh: TtlOption,
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) enum TtlOption {
+    // refresh the cache entry on GET
+    Refresh,
+    // let the cache entry expire
+    Expire,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -135,7 +144,7 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
+    pub(crate) async fn new(config: RedisCache, refresh: TtlOption) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
 
@@ -197,6 +206,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             namespace: config.namespace.map(Arc::new),
             ttl: config.ttl,
+            refresh,
         })
     }
 
@@ -245,6 +255,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             ttl: None,
             namespace: None,
+            refresh: TtlOption::Expire,
         })
     }
 
@@ -356,16 +367,66 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
-        self.inner
-            .get::<RedisValue<V>, _>(self.make_key(key))
-            .await
-            .map_err(|e| {
-                if !e.is_not_found() {
-                    tracing::error!("get error: {}", e);
-                }
-                e
-            })
-            .ok()
+        if self.refresh == TtlOption::Refresh && self.ttl.is_some() {
+            let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.pipeline();
+            let key = self.make_key(key);
+            let res = pipeline
+                .get::<fred::types::RedisValue, _>(&key)
+                .await
+                .map_err(|e| {
+                    if !e.is_not_found() {
+                        tracing::error!(error = %e, "redis get error");
+                    }
+                    e
+                })
+                .ok()?;
+            if !res.is_queued() {
+                tracing::error!("could not queue GET command");
+                return None;
+            }
+            let res: fred::types::RedisValue = pipeline
+                .expire(
+                    &key,
+                    self.ttl
+                        .expect("we already checked the presence of ttl")
+                        .as_secs() as i64,
+                )
+                .await
+                .map_err(|e| {
+                    if !e.is_not_found() {
+                        tracing::error!(error = %e, "redis get error");
+                    }
+                    e
+                })
+                .ok()?;
+            if !res.is_queued() {
+                tracing::error!("could not queue EXPIRE command");
+                return None;
+            }
+
+            let (first, _): (Option<RedisValue<V>>, bool) = pipeline
+                .all()
+                .await
+                .map_err(|e| {
+                    if !e.is_not_found() {
+                        tracing::error!(error = %e, "redis get error");
+                    }
+                    e
+                })
+                .ok()?;
+            first
+        } else {
+            self.inner
+                .get::<RedisValue<V>, _>(self.make_key(key))
+                .await
+                .map_err(|e| {
+                    if !e.is_not_found() {
+                        tracing::error!(error = %e, "redis get error");
+                    }
+                    e
+                })
+                .ok()
+        }
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(

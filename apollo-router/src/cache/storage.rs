@@ -60,12 +60,13 @@ where
         max_capacity: NonZeroUsize,
         config: Option<RedisCache>,
         caller: &str,
+        refresh: TtlOption,
     ) -> Self {
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
-                match RedisCacheStorage::new(config).await {
+                match RedisCacheStorage::new(config, refresh).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
