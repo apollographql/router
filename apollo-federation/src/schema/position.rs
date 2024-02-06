@@ -270,6 +270,44 @@ impl AbstractTypeDefinitionPosition {
     }
 }
 
+impl TryFrom<TypeDefinitionPosition> for AbstractTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            TypeDefinitionPosition::Interface(value) => {
+                Ok(AbstractTypeDefinitionPosition::Interface(value))
+            }
+            TypeDefinitionPosition::Union(value) => {
+                Ok(AbstractTypeDefinitionPosition::Union(value))
+            }
+            _ => Err(FederationError::internal(format!(
+                "Type \"{}\" was unexpectedly not an interface/union type",
+                value,
+            ))),
+        }
+    }
+}
+
+impl TryFrom<OutputTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            OutputTypeDefinitionPosition::Interface(value) => {
+                Ok(AbstractTypeDefinitionPosition::Interface(value))
+            }
+            OutputTypeDefinitionPosition::Union(value) => {
+                Ok(AbstractTypeDefinitionPosition::Union(value))
+            }
+            _ => Err(FederationError::internal(format!(
+                "Type \"{}\" was unexpectedly not an interface/union type",
+                value,
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceTypeDefinitionPosition {
     Object(ObjectTypeDefinitionPosition),
@@ -364,6 +402,10 @@ impl FieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn is_introspection_typename_field(&self) -> bool {
+        *self.field_name() == *INTROSPECTION_TYPENAME_FIELD_NAME
+    }
+
     pub(crate) fn parent(&self) -> CompositeTypeDefinitionPosition {
         match self {
             FieldDefinitionPosition::Object(field) => field.parent().into(),
@@ -412,6 +454,10 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.field_name,
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => &field.field_name,
         }
+    }
+
+    pub(crate) fn is_introspection_typename_field(&self) -> bool {
+        *self.field_name() == *INTROSPECTION_TYPENAME_FIELD_NAME
     }
 
     pub(crate) fn parent(&self) -> ObjectOrInterfaceTypeDefinitionPosition {
@@ -1665,6 +1711,10 @@ pub(crate) struct ObjectFieldDefinitionPosition {
 }
 
 impl ObjectFieldDefinitionPosition {
+    pub(crate) fn is_introspection_typename_field(&self) -> bool {
+        self.field_name == *INTROSPECTION_TYPENAME_FIELD_NAME
+    }
+
     pub(crate) fn parent(&self) -> ObjectTypeDefinitionPosition {
         ObjectTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -2914,6 +2964,10 @@ pub(crate) struct InterfaceFieldDefinitionPosition {
 }
 
 impl InterfaceFieldDefinitionPosition {
+    pub(crate) fn is_introspection_typename_field(&self) -> bool {
+        self.field_name == *INTROSPECTION_TYPENAME_FIELD_NAME
+    }
+
     pub(crate) fn parent(&self) -> InterfaceTypeDefinitionPosition {
         InterfaceTypeDefinitionPosition {
             type_name: self.type_name.clone(),

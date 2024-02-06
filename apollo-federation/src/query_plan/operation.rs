@@ -35,12 +35,15 @@ const TYPENAME_FIELD: Name = name!("__typename");
 // Global storage for the counter used to uniquely identify selections
 static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 
-// opaque wrapper of the unique selection ID type
+/// Opaque wrapper of the unique selection ID type.
+///
+/// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
+/// to be something like UUIDs.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SelectionId(usize);
 
 impl SelectionId {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         // atomically increment global counter
         Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
     }
@@ -206,12 +209,12 @@ pub(crate) mod normalized_selection_map {
             self.0
         }
 
-        pub(crate) fn get_selection_set_mut(&mut self) -> &mut Option<NormalizedSelectionSet> {
-            &mut Arc::make_mut(self.0).selection_set
+        pub(crate) fn get_sibling_typename_mut(&mut self) -> &mut Option<Name> {
+            Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
-        pub(crate) fn get_sibling_typename_mut(&mut self) -> &mut Option<Name> {
-            &mut Arc::make_mut(self.0).sibling_typename
+        pub(crate) fn get_selection_set_mut(&mut self) -> &mut Option<NormalizedSelectionSet> {
+            &mut Arc::make_mut(self.0).selection_set
         }
     }
 
@@ -525,7 +528,6 @@ pub(crate) mod normalized_field_selection {
     pub(crate) struct NormalizedFieldSelection {
         pub(crate) field: NormalizedField,
         pub(crate) selection_set: Option<NormalizedSelectionSet>,
-        pub(crate) sibling_typename: Option<Name>,
     }
 
     impl HasNormalizedSelectionKey for NormalizedFieldSelection {
@@ -553,6 +555,10 @@ pub(crate) mod normalized_field_selection {
         pub(crate) fn data(&self) -> &NormalizedFieldData {
             &self.data
         }
+
+        pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<Name> {
+            &mut self.data.sibling_typename
+        }
     }
 
     impl HasNormalizedSelectionKey for NormalizedField {
@@ -568,6 +574,7 @@ pub(crate) mod normalized_field_selection {
         pub(crate) alias: Option<Name>,
         pub(crate) arguments: Arc<Vec<Node<Argument>>>,
         pub(crate) directives: Arc<DirectiveList>,
+        pub(crate) sibling_typename: Option<Name>,
     }
 
     impl NormalizedFieldData {
@@ -663,6 +670,8 @@ pub(crate) mod normalized_fragment_spread_selection {
 }
 
 pub(crate) mod normalized_inline_fragment_selection {
+    use crate::error::FederationError;
+    use crate::link::graphql_definition::{defer_directive_arguments, DeferDirectiveArguments};
     use crate::query_plan::operation::{
         directives_with_sorted_arguments, is_deferred_selection, HasNormalizedSelectionKey,
         NormalizedSelectionKey, NormalizedSelectionSet, SelectionId,
@@ -726,6 +735,18 @@ pub(crate) mod normalized_inline_fragment_selection {
         pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
         pub(crate) directives: Arc<DirectiveList>,
         pub(crate) selection_id: SelectionId,
+    }
+
+    impl NormalizedInlineFragmentData {
+        pub(crate) fn defer_directive_arguments(
+            &self,
+        ) -> Result<Option<DeferDirectiveArguments>, FederationError> {
+            if let Some(directive) = self.directives.get("defer") {
+                Ok(Some(defer_directive_arguments(directive)?))
+            } else {
+                Ok(None)
+            }
+        }
     }
 
     impl HasNormalizedSelectionKey for NormalizedInlineFragmentData {
@@ -1264,6 +1285,7 @@ impl NormalizedFieldSelection {
                 alias: field.alias.clone(),
                 arguments: Arc::new(field.arguments.clone()),
                 directives: Arc::new(field.directives.clone()),
+                sibling_typename: None,
             }),
             selection_set: if field_composite_type_result.is_ok() {
                 Some(NormalizedSelectionSet::normalize_and_expand_fragments(
@@ -1275,7 +1297,6 @@ impl NormalizedFieldSelection {
             } else {
                 None
             },
-            sibling_typename: None,
         }))
     }
 }
@@ -1730,7 +1751,6 @@ impl Display for NormalizedField {
         let selection = NormalizedFieldSelection {
             field: self.clone(),
             selection_set: None,
-            sibling_typename: None,
         };
         selection.fmt(f)
     }

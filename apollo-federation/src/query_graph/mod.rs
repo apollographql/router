@@ -1,15 +1,16 @@
 use crate::error::{FederationError, SingleFederationError};
 use crate::query_plan::operation::normalized_field_selection::NormalizedField;
+use crate::query_plan::operation::normalized_inline_fragment_selection::NormalizedInlineFragment;
 use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, ObjectTypeDefinitionPosition,
-    OutputTypeDefinitionPosition, SchemaRootDefinitionKind,
+    CompositeTypeDefinitionPosition, FieldDefinitionPosition, InterfaceFieldDefinitionPosition,
+    ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition, SchemaRootDefinitionKind,
 };
 use crate::schema::ValidFederationSchema;
 use apollo_compiler::schema::{Name, NamedType};
 use apollo_compiler::NodeStr;
 use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
+use petgraph::graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use std::fmt::{Display, Formatter};
@@ -393,28 +394,108 @@ impl QueryGraph {
         &self.non_trivial_followup_edges
     }
 
+    /// All outward edges from the given node (including self-key and self-root-type-resolution
+    /// edges). Primarily used by `@defer`, when needing to re-enter a subgraph for a deferred
+    /// section.
+    pub(crate) fn out_edges_with_federation_self_edges(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
+        self.graph.edges_directed(node, Direction::Outgoing)
+    }
+
+    /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
+    /// as they're rarely useful (currently only used by `@defer`).
+    pub(crate) fn out_edges(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter(|edge_ref| {
+                !(edge_ref.source() == edge_ref.target()
+                    && matches!(
+                        edge_ref.weight().transition,
+                        QueryGraphEdgeTransition::KeyResolution
+                            | QueryGraphEdgeTransition::RootTypeResolution { .. }
+                    ))
+            })
+    }
+
     pub(crate) fn edge_for_field(
         &self,
         node: NodeIndex,
         field: &NormalizedField,
     ) -> Option<EdgeIndex> {
-        self.graph
-            .edges_directed(node, Direction::Outgoing)
-            .find_map(|edge_ref| {
-                let edge_weight = edge_ref.weight();
-                let QueryGraphEdgeTransition::FieldCollection {
-                    field_definition_position,
-                    ..
-                } = &edge_weight.transition
-                else {
-                    return None;
-                };
-                if field.data().field_position == *field_definition_position {
-                    Some(edge_ref.id())
-                } else {
-                    None
-                }
-            })
+        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+            let edge_weight = edge_ref.weight();
+            let QueryGraphEdgeTransition::FieldCollection {
+                field_definition_position,
+                ..
+            } = &edge_weight.transition
+            else {
+                return None;
+            };
+            // We explicitly avoid comparing parent type's here, to allow interface object
+            // fields to match operation fields with the same name but differing types.
+            if field.data().field_position.field_name() == field_definition_position.field_name() {
+                Some(edge_ref.id())
+            } else {
+                None
+            }
+        });
+        if let Some(candidate) = candidates.next() {
+            // PORT_NOTE: The JS codebase used an assertion rather than a debug assertion here. We
+            // consider it unlikely for there to be more than one candidate given all the code paths
+            // that create edges, so we've downgraded this to a debug assertion.
+            debug_assert!(
+                candidates.next().is_none(),
+                "Unexpectedly found multiple candidates",
+            );
+            Some(candidate)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn edge_for_inline_fragment(
+        &self,
+        node: NodeIndex,
+        inline_fragment: &NormalizedInlineFragment,
+    ) -> Option<EdgeIndex> {
+        let Some(type_condition_pos) = &inline_fragment.data().type_condition_position else {
+            // No type condition means the type hasn't changed, meaning there is no edge to take.
+            return None;
+        };
+        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+            let edge_weight = edge_ref.weight();
+            let QueryGraphEdgeTransition::Downcast {
+                to_type_position, ..
+            } = &edge_weight.transition
+            else {
+                return None;
+            };
+            // We explicitly avoid comparing type kinds, to allow interface object types to
+            // match operation inline fragments (where the supergraph type kind is interface,
+            // but the subgraph type kind is object).
+            if type_condition_pos.type_name() == to_type_position.type_name() {
+                Some(edge_ref.id())
+            } else {
+                None
+            }
+        });
+        if let Some(candidate) = candidates.next() {
+            // PORT_NOTE: The JS codebase used an assertion rather than a debug assertion here. We
+            // consider it unlikely for there to be more than one candidate given all the code paths
+            // that create edges, so we've downgraded this to a debug assertion.
+            debug_assert!(
+                candidates.next().is_none(),
+                "Unexpectedly found multiple candidates",
+            );
+            Some(candidate)
+        } else {
+            None
+        }
     }
 
     /// Given the possible runtime types at the head of the given edge, returns the possible runtime
@@ -503,5 +584,39 @@ impl QueryGraph {
                 Ok(possible_runtime_types.clone())
             }
         };
+    }
+
+    pub(crate) fn get_locally_satisfiable_key(
+        &self,
+        _node: NodeIndex,
+    ) -> Result<Option<NormalizedSelectionSet>, FederationError> {
+        todo!()
+    }
+
+    pub(crate) fn is_cross_subgraph_edge(&self, edge: EdgeIndex) -> Result<bool, FederationError> {
+        let (head, tail) = self.edge_endpoints(edge)?;
+        let head_weight = self.node_weight(head)?;
+        let tail_weight = self.node_weight(tail)?;
+        Ok(head_weight.source != tail_weight.source)
+    }
+
+    pub(crate) fn is_provides_edge(&self, edge: EdgeIndex) -> Result<bool, FederationError> {
+        let edge_weight = self.edge_weight(edge)?;
+        let QueryGraphEdgeTransition::FieldCollection {
+            is_part_of_provides,
+            ..
+        } = &edge_weight.transition
+        else {
+            return Ok(false);
+        };
+        Ok(*is_part_of_provides)
+    }
+
+    pub(crate) fn has_an_implementation_with_provides(
+        &self,
+        _source: &NodeStr,
+        _interface_field_definition_position: InterfaceFieldDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        todo!()
     }
 }

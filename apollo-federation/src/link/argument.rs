@@ -1,4 +1,5 @@
 use crate::error::{FederationError, SingleFederationError};
+use crate::link::graphql_definition::BooleanOrVariable;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::{Directive, Name};
 use apollo_compiler::{Node, NodeStr};
@@ -140,4 +141,22 @@ pub(crate) fn directive_required_boolean_argument(
         }
         .into()
     })
+}
+
+pub(crate) fn directive_optional_variable_boolean_argument(
+    application: &Node<Directive>,
+    name: &Name,
+) -> Result<Option<BooleanOrVariable>, FederationError> {
+    match application.argument_by_name(name) {
+        Some(value) => match value.deref() {
+            Value::Variable(name) => Ok(Some(BooleanOrVariable::Variable(name.clone()))),
+            Value::Boolean(value) => Ok(Some(BooleanOrVariable::Boolean(*value))),
+            Value::Null => Ok(None),
+            _ => Err(FederationError::internal(format!(
+                "Argument \"{}\" of directive \"@{}\" must be a boolean.",
+                name, application.name
+            ))),
+        },
+        None => Ok(None),
+    }
 }

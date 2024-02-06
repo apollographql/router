@@ -1,10 +1,23 @@
-use apollo_compiler::executable::Name;
-use apollo_compiler::NodeStr;
+use crate::error::FederationError;
+use crate::link::argument::{
+    directive_optional_string_argument, directive_optional_variable_boolean_argument,
+};
+use apollo_compiler::executable::{Directive, Name};
+use apollo_compiler::{name, Node, NodeStr};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DeferDirectiveArguments {
     label: Option<NodeStr>,
     if_: Option<BooleanOrVariable>,
+}
+
+pub(crate) fn defer_directive_arguments(
+    application: &Node<Directive>,
+) -> Result<DeferDirectiveArguments, FederationError> {
+    Ok(DeferDirectiveArguments {
+        label: directive_optional_string_argument(application, &name!("label"))?,
+        if_: directive_optional_variable_boolean_argument(application, &name!("if"))?,
+    })
 }
 
 /// This struct is meant for recording the original structure/intent of `@skip`/`@include`

@@ -4,9 +4,11 @@ use crate::query_graph::graph_path::OpGraphPath;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::operation::NormalizedSelectionSet;
+use apollo_compiler::NodeStr;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use petgraph::graph::{EdgeIndex, NodeIndex};
+use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -86,6 +88,24 @@ impl OpPathTree {
                 .map(|(path, selections)| (path.iter(), *selections))
                 .collect::<Vec<_>>(),
         )
+    }
+
+    pub(crate) fn is_all_in_same_subgraph(&self) -> Result<bool, FederationError> {
+        let node_weight = self.graph.node_weight(self.node)?;
+        self.is_all_in_same_subgraph_internal(&node_weight.source)
+    }
+
+    fn is_all_in_same_subgraph_internal(&self, target: &NodeStr) -> Result<bool, FederationError> {
+        let node_weight = self.graph.node_weight(self.node)?;
+        if node_weight.source != *target {
+            return Ok(false);
+        }
+        for child in &self.childs {
+            if !child.tree.is_all_in_same_subgraph_internal(target)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -272,6 +292,16 @@ where
                 .collect(),
             childs,
         })
+    }
+}
+
+impl<TTrigger, TEdge> Display for PathTree<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Copy + Eq + Hash + Into<Option<EdgeIndex>>,
+{
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }
 
