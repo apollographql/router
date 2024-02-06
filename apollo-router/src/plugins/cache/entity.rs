@@ -63,13 +63,17 @@ pub(crate) struct Config {
     /// Per subgraph configuration
     #[serde(default)]
     subgraphs: HashMap<String, Subgraph>,
-    #[serde(default)]
-    /// Allow the router to start without a connection to Redis. Option name TBD
-    pub(crate) fail_open: bool,
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
 
     /// Entity caching evaluation metrics
     #[serde(default)]
     metrics: Metrics,
+}
+
+fn default_required_to_start() -> bool {
+    true
 }
 
 /// Per subgraph configuration for entity caching
@@ -118,7 +122,7 @@ impl Plugin for EntityCache {
         let storage = match RedisCacheStorage::new(init.config.redis).await {
             Ok(storage) => Some(storage),
             Err(e) => {
-                if init.config.fail_open {
+                if !init.config.required_to_start {
                     None
                 } else {
                     return Err(e);

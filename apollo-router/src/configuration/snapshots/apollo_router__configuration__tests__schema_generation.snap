@@ -2034,11 +2034,6 @@ expression: "&schema"
           "type": "boolean",
           "nullable": true
         },
-        "fail_open": {
-          "description": "Allow the router to start without a connection to Redis. Option name TBD",
-          "default": false,
-          "type": "boolean"
-        },
         "metrics": {
           "description": "Entity caching evaluation metrics",
           "type": "object",
@@ -2143,6 +2138,11 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "required_to_start": {
+          "description": "Prevents the router from starting if it cannot connect to Redis",
+          "default": true,
+          "type": "boolean"
         },
         "subgraphs": {
           "description": "Per subgraph configuration",
