@@ -6,6 +6,7 @@ use std::sync::Arc;
 use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::Planner;
 
+use crate::cache::redis::TtlOption;
 use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
 use crate::query_planner::QueryPlanResult;
