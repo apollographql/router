@@ -158,8 +158,8 @@ ingress:
 
 # set to true to enable istio's virtualservice
 virtualservice:
-  enabled: true
-  namespace: "default"
+  enabled: false
+  # namespace: ""
   # gatewayName: "" # Deprecated in favor of gatewayNames
   # gatewayNames: []
   #  - "gateway-1"
