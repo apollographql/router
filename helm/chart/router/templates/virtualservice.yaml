@@ -21,9 +21,14 @@ metadata:
 spec:
   hosts:
   - "*"
+  {{- if .Values.virtualservice.gatewayName }}
   gateways:
   - {{ .Values.virtualservice.gatewayName }}
-    {{- if .Values.virtualservice.http }}
+  {{- else if .Values.virtualservice.gatewayNames }}
+  gateways:
+    {{- toYaml .Values.virtualservice.gatewayNames | nindent 4 }}
+  {{- end }}
+  {{- if .Values.virtualservice.http }}
   http:
   {{- if .Values.virtualservice.http.main.enabled }}
     - name: "router-graphql-routes"
