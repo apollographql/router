@@ -23,6 +23,13 @@
           [
             "enterprise"
           ]
+        ],
+        "Entity caching": [
+          "/configuration/entity-caching",
+          [
+            "enterprise",
+            "preview"
+          ]
         ]
       },
       "Debugging": {
