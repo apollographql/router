@@ -298,7 +298,7 @@ impl LicenseEnforcementReport {
                 .name("Coprocessor plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.query_planning.experimental_cache.redis")
+                .path("$.supergraph.query_planning.cache.redis")
                 .name("Query plan caching")
                 .build(),
             ConfigurationRestriction::builder()
