@@ -210,9 +210,8 @@ mod tests {
     use mockall::mock;
     use test_log::test;
 
-    use crate::cache::redis::TtlOption;
-
     use super::DeduplicatingCache;
+    use crate::cache::redis::TtlOption;
 
     #[tokio::test]
     async fn example_cache_usage() {
