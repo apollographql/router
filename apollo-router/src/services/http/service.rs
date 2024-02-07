@@ -22,6 +22,12 @@ use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
+use opentelemetry_api::trace::SpanContext;
+use opentelemetry_api::trace::SpanId;
+use opentelemetry_api::trace::TraceContextExt;
+use opentelemetry_api::trace::TraceFlags;
+use opentelemetry_api::trace::TraceId;
+use opentelemetry_api::trace::TraceState;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -226,8 +232,21 @@ impl tower::Service<HttpRequest> for HttpClientService {
             //"graphql.operation.name" = %operation_name,
         );
         get_text_map_propagator(|propagator| {
+            let mut context = http_req_span.context();
+
+            if !context.span().span_context().is_valid() {
+                let span_context = SpanContext::new(
+                    TraceId::from(42),
+                    SpanId::from(42),
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                );
+                context = context.with_remote_span_context(span_context);
+            }
+
             propagator.inject_context(
-                &http_req_span.context(),
+                &context,
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
