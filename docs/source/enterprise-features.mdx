@@ -116,7 +116,7 @@ Follow these steps to configure an Apollo Router to use an offline Enterprise li
     * [`APOLLO_SUPERGRAPH_PATH`](./configuration/overview/#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
     * [`APOLLO_SUPERGRAPH_URLS`](./configuration/overview/#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
-1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](../configuration/overview#apollo_graph_ref) environment variables. 
+1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](./configuration/overview#apollo_graph_ref) environment variables. 
 
     These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 
