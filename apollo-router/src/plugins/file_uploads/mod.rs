@@ -49,7 +49,7 @@ struct FileUploadsPlugin {
     config: FileUploadsConfig,
 }
 
-register_private_plugin!("apollo", "experimental_file_uploads", FileUploadsPlugin);
+register_private_plugin!("apollo", "preview_file_uploads", FileUploadsPlugin);
 
 #[async_trait::async_trait]
 impl PluginPrivate for FileUploadsPlugin {
