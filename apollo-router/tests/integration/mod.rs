@@ -1,4 +1,5 @@
 mod docs;
+mod file_upload;
 mod operation_limits;
 mod redis;
 mod rhai;

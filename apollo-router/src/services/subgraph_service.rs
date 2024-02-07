@@ -44,7 +44,6 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::HeartbeatInterval;
