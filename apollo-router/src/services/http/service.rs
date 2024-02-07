@@ -22,12 +22,6 @@ use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::SpanId;
-use opentelemetry_api::trace::TraceContextExt;
-use opentelemetry_api::trace::TraceFlags;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::trace::TraceState;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -47,6 +41,8 @@ use super::HttpResponse;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::reload::prepare_context;
+use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
@@ -232,21 +228,32 @@ impl tower::Service<HttpRequest> for HttpClientService {
             //"graphql.operation.name" = %operation_name,
         );
         get_text_map_propagator(|propagator| {
-            let mut context = http_req_span.context();
+            /*println!("got propagator");
+            let mut context = prepare_context(http_req_span.context());
+            println!("got context: {:?}", context);
+            println!("got context span: {:?}", context.span());
+
+            println!("got span context: {:?}", context.span().span_context());
+            println!(
+                "is sampled: {:?}",
+                context.span().span_context().is_sampled()
+            );
 
             if !context.span().span_context().is_valid() {
-                let span_context = SpanContext::new(
-                    TraceId::from(42),
-                    SpanId::from(42),
-                    TraceFlags::default(),
-                    false,
-                    TraceState::default(),
-                );
-                context = context.with_remote_span_context(span_context);
-            }
+                if let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+                    let span_context = SpanContext::new(
+                        tracer.new_trace_id(),
+                        tracer.new_span_id(),
+                        TraceFlags::default(),
+                        false,
+                        TraceState::default(),
+                    );
+                    context = context.with_remote_span_context(span_context);
+                }
+            }*/
 
             propagator.inject_context(
-                &context,
+                &prepare_context(http_req_span.context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
