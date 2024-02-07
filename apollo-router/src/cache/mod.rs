@@ -6,7 +6,6 @@ use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
-use self::redis::TtlOption;
 use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
@@ -37,26 +36,18 @@ where
         capacity: NonZeroUsize,
         redis: Option<RedisCache>,
         caller: &str,
-        refresh: TtlOption,
     ) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity, redis, caller, refresh).await,
+            storage: CacheStorage::new(capacity, redis, caller).await,
         }
     }
 
     pub(crate) async fn from_configuration(
         config: &crate::configuration::Cache,
         caller: &str,
-        refresh: TtlOption,
     ) -> Self {
-        Self::with_capacity(
-            config.in_memory.limit,
-            config.redis.clone(),
-            caller,
-            refresh,
-        )
-        .await
+        Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
@@ -211,18 +202,12 @@ mod tests {
     use test_log::test;
 
     use super::DeduplicatingCache;
-    use crate::cache::redis::TtlOption;
 
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::with_capacity(
-            NonZeroUsize::new(1).unwrap(),
-            None,
-            "test",
-            TtlOption::Expire,
-        )
-        .await;
+        let cache =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test").await;
 
         let entry = cache.get(&k).await;
 
@@ -238,13 +223,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(
-            NonZeroUsize::new(13).unwrap(),
-            None,
-            "test",
-            TtlOption::Expire,
-        )
-        .await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(13).unwrap(), None, "test").await;
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -266,13 +246,8 @@ mod tests {
 
         mock.expect_retrieve().times(1).return_const(1usize);
 
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(
-            NonZeroUsize::new(10).unwrap(),
-            None,
-            "test",
-            TtlOption::Expire,
-        )
-        .await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test").await;
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made

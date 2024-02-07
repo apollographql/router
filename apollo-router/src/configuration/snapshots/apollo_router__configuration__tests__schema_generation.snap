@@ -93,6 +93,11 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -2073,6 +2078,11 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
+            "reset_ttl": {
+              "description": "When a TTL is set on a key, reset it when reading the data from that key",
+              "default": true,
+              "type": "boolean"
+            },
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
               "default": null,
@@ -2481,6 +2491,11 @@ expression: "&schema"
                       "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
                       "nullable": true
+                    },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
+                      "type": "boolean"
                     },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",

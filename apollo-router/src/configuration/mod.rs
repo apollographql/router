@@ -934,6 +934,14 @@ pub(crate) struct RedisCache {
     #[serde(default)]
     /// TLS client configuration
     pub(crate) tls: Option<TlsClient>,
+
+    #[serde(default = "default_reset_ttl")]
+    /// When a TTL is set on a key, reset it when reading the data from that key
+    pub(crate) reset_ttl: bool,
+}
+
+fn default_reset_ttl() -> bool {
+    true
 }
 
 /// TLS related configuration options.

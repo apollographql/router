@@ -18,7 +18,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use crate::cache::redis::TtlOption;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -79,7 +78,6 @@ where
             DeduplicatingCache::from_configuration(
                 &configuration.supergraph.query_planning.cache,
                 "query planner",
-                TtlOption::Refresh,
             )
             .await,
         );

@@ -49,15 +49,7 @@ pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
-    refresh: TtlOption,
-}
-
-#[derive(Clone, PartialEq)]
-pub(crate) enum TtlOption {
-    // refresh the cache entry on GET
-    Refresh,
-    // let the cache entry expire
-    Expire,
+    reset_ttl: bool,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -144,7 +136,7 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(config: RedisCache, refresh: TtlOption) -> Result<Self, BoxError> {
+    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
 
@@ -206,7 +198,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             namespace: config.namespace.map(Arc::new),
             ttl: config.ttl,
-            refresh,
+            reset_ttl: config.reset_ttl,
         })
     }
 
@@ -255,7 +247,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             ttl: None,
             namespace: None,
-            refresh: TtlOption::Expire,
+            reset_ttl: false,
         })
     }
 
@@ -367,7 +359,7 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
-        if self.refresh == TtlOption::Refresh && self.ttl.is_some() {
+        if self.reset_ttl && self.ttl.is_some() {
             let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.pipeline();
             let key = self.make_key(key);
             let res = pipeline

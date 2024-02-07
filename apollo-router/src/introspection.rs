@@ -6,7 +6,6 @@ use std::sync::Arc;
 use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::Planner;
 
-use crate::cache::redis::TtlOption;
 use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
 use crate::query_planner::QueryPlanResult;
@@ -26,7 +25,7 @@ impl Introspection {
         capacity: NonZeroUsize,
     ) -> Self {
         Self {
-            cache: CacheStorage::new(capacity, None, "introspection", TtlOption::Refresh).await,
+            cache: CacheStorage::new(capacity, None, "introspection").await,
             planner,
         }
     }

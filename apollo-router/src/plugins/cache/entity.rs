@@ -22,7 +22,6 @@ use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
-use crate::cache::redis::TtlOption;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
@@ -113,7 +112,10 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
-        let storage = RedisCacheStorage::new(init.config.redis, TtlOption::Expire).await?;
+        // we need to explicitely disable TTL reset because it is managed directly by this plugin
+        let mut redis_config = init.config.redis.clone();
+        redis_config.reset_ttl = false;
+        let storage = RedisCacheStorage::new(redis_config).await?;
 
         Ok(Self {
             storage,
