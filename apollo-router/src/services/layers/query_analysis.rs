@@ -47,7 +47,7 @@ impl QueryAnalysisLayer {
                 configuration
                     .supergraph
                     .query_planning
-                    .experimental_cache
+                    .cache
                     .in_memory
                     .limit,
             ))),
