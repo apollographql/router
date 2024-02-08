@@ -103,11 +103,7 @@ impl Plugin for Record {
                     let context = res.context.clone();
 
                     let after_complete = once(async move {
-                        let recording = context
-                            .private_entries
-                            .lock()
-                            .get_mut::<Recording>()
-                            .cloned();
+                        let recording = context.extensions().lock().get_mut::<Recording>().cloned();
 
                         if let Some(mut recording) = recording {
                             let res_headers = externalize_header_map(&headers)?;
@@ -172,7 +168,7 @@ impl Plugin for Record {
 
                 let recording_enabled =
                     if req.supergraph_request.headers().contains_key(RECORD_HEADER) {
-                        req.context.private_entries.lock().insert(Recording {
+                        req.context.extensions().lock().insert(Recording {
                             supergraph_sdl: supergraph_sdl.clone().to_string(),
                             client_request: Default::default(),
                             client_response: Default::default(),
@@ -193,8 +189,7 @@ impl Plugin for Record {
                     let method = req.supergraph_request.method().to_string();
                     let uri = req.supergraph_request.uri().to_string();
 
-                    if let Some(recording) =
-                        req.context.private_entries.lock().get_mut::<Recording>()
+                    if let Some(recording) = req.context.extensions().lock().get_mut::<Recording>()
                     {
                         recording.client_request = RequestDetails {
                             query,
@@ -211,7 +206,7 @@ impl Plugin for Record {
             .map_response(|res: supergraph::Response| {
                 let context = res.context.clone();
                 res.map_stream(move |chunk| {
-                    if let Some(recording) = context.private_entries.lock().get_mut::<Recording>() {
+                    if let Some(recording) = context.extensions().lock().get_mut::<Recording>() {
                         recording.client_response.chunks.push(chunk.clone());
                     }
 
@@ -225,7 +220,7 @@ impl Plugin for Record {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|req: execution::Request| {
-                if let Some(recording) = req.context.private_entries.lock().get_mut::<Recording>() {
+                if let Some(recording) = req.context.extensions().lock().get_mut::<Recording>() {
                     recording.formatted_query_plan = req.query_plan.formatted_query_plan.clone();
                 }
                 req
@@ -281,7 +276,7 @@ impl Plugin for Record {
                                 };
 
                                 if let Some(recording) =
-                                    res.context.private_entries.lock().get_mut::<Recording>()
+                                    res.context.extensions().lock().get_mut::<Recording>()
                                 {
                                     if recording.subgraph_fetches.is_none() {
                                         recording.subgraph_fetches = Some(Default::default());

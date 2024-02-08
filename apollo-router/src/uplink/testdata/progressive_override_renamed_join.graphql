@@ -1,0 +1,77 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION, as: "j") {
+  query: Query
+}
+
+directive @j__enumValue(graph: j__Graph!) repeatable on ENUM_VALUE
+
+directive @j__field(
+  graph: j__Graph
+  requires: j__FieldSet
+  provides: j__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+  overrideLabel: String
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @j__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @j__implements(
+  graph: j__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @j__type(
+  graph: j__Graph!
+  key: j__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @j__unionMember(graph: j__Graph!, member: String!) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar j__FieldSet
+
+enum j__Graph {
+  SUBGRAPH1 @j__graph(name: "Subgraph1", url: "https://Subgraph1")
+  SUBGRAPH2 @j__graph(name: "Subgraph2", url: "https://Subgraph2")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  \`SECURITY\` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  \`EXECUTION\` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query @j__type(graph: SUBGRAPH1) @j__type(graph: SUBGRAPH2) {
+  t: T @j__field(graph: SUBGRAPH1)
+}
+
+type T
+  @j__type(graph: SUBGRAPH1, key: "k")
+  @j__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  a: Int
+    @j__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo")
+    @j__field(graph: SUBGRAPH2, overrideLabel: "foo")
+  b: Int @j__field(graph: SUBGRAPH2)
+}

@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/plugins/telemetry/logging/mod.rs
+expression: yaml
+---
+- fields: {}
+  level: INFO
+  message: response
+  span:
+    apollo.subgraph.name: subgraph
+    graphql.document: "query { foo }"
+    graphql.operation.name: ""
+    name: subgraph
+    otel.kind: INTERNAL
+  spans:
+    - apollo.subgraph.name: subgraph
+      graphql.document: "query { foo }"
+      graphql.operation.name: ""
+      name: subgraph
+      otel.kind: INTERNAL
+

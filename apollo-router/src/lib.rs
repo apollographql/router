@@ -79,8 +79,11 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+pub use crate::axum_factory::unsupported_set_axum_router_callback;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
+pub use crate::context::extensions::sync::ExtensionsMutex;
+pub use crate::context::extensions::Extensions;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
