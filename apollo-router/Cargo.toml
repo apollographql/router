@@ -187,6 +187,7 @@ reqwest = { version = "0.11.24", default-features = false, features = [
 router-bridge = "=0.5.16+v2.7.1"
 rust-embed = "8.2.0"
 rustls = "0.21.10"
+rustls-native-certs = "0.6.3"
 rustls-pemfile = "1.0.4"
 schemars = { version = "0.8.16", features = ["url"] }
 shellexpand = "3.1.0"
