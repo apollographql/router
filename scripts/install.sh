@@ -97,15 +97,6 @@ get_architecture() {
         fi
     fi
 
-    # If our OS is Darwin, we only have binaries for arm64 machines.
-    # Check and exit early
-    if [ "$_ostype" = Darwin ] && [ "$_cputype" != arm64 ]; then
-        say "No precompiled binaries available on macOS for CPU architecture: $_cputype"
-        say "The most recent macOS release which supports Intel is 1.37.0"
-        say "Please refer to this issue for more details:  https://github.com/apollographql/router/issues/4483"
-        err "No precompiled binaries available on macOS for CPU architecture: $_cputype"
-    fi
-
     case "$_ostype" in
         Linux)
             _ostype=unknown-linux-gnu
