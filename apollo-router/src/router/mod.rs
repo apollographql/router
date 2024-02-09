@@ -396,8 +396,9 @@ mod tests {
             .await
             .expect("couldn't deserialize into json"))
     }
-    /*
+
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(target_os = "windows"))]
     async fn basic_event_stream_test() {
         let mut router_handle = TestRouterHttpServer::new();
 
@@ -444,6 +445,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(target_os = "windows"))]
     async fn schema_update_test() {
         let mut router_handle = TestRouterHttpServer::new();
         // let's push a valid configuration to the state machine, so it can start up
@@ -557,5 +559,5 @@ mod tests {
             response.errors[0].extensions.get("code").unwrap()
         );
         router_handle.shutdown().await.unwrap();
-    }*/
+    }
 }
