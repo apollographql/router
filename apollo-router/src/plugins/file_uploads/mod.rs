@@ -1,4 +1,7 @@
 use indexmap::IndexMap;
+use indexmap::IndexSet;
+use std::cmp;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
@@ -30,12 +33,16 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::plugin::PluginInit;
+use crate::query_planner::FlattenNode;
+use crate::query_planner::PlanNode;
 use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
 use crate::services::http::HttpRequest;
+use crate::services::execution::QueryPlan;
 use crate::services::router;
 
 use crate::layers::ServiceBuilderExt;
+use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -76,6 +83,17 @@ impl PluginPrivate for FileUploadsPlugin {
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: supergraph::Request| {
                 extract_map(req)
+                    .map(|req| Ok(ControlFlow::Continue(req)))
+                    .boxed()
+            })
+            .service(service)
+            .boxed()
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        ServiceBuilder::new()
+            .oneshot_checkpoint_async(|req: execution::Request| {
+                rearange_execution_plan(req)
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
@@ -191,9 +209,10 @@ async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
         // assert!(map_field.len());
 
         let variables = &mut req.supergraph_request.body_mut().variables;
+        let mut files_order = IndexSet::new();
         let mut map_per_variable: MapPerVariable = HashMap::new();
-        for (file, paths) in map_field.iter() {
-            for path in paths.iter() {
+        for (filename, paths) in map_field.into_iter() {
+            for path in paths.into_iter() {
                 let mut segments = path.split('.');
                 let first_segment = segments.next();
                 if first_segment != Some("variables") {
@@ -221,17 +240,18 @@ async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
                 drop(core::mem::replace(
                     json_value,
                     serde_json_bytes::Value::String(
-                        format!("<Placeholder for file '{}'>", file).into(),
+                        format!("<Placeholder for file '{}'>", filename).into(),
                     ),
                 ));
 
                 map_per_variable
                     .entry(variable_name.to_owned())
                     .or_insert_with(|| HashMap::new())
-                    .entry(file.clone())
+                    .entry(filename.clone())
                     .or_insert_with(|| Vec::new())
                     .push(variable_path);
             }
+            files_order.insert(filename);
         }
 
         req.context
@@ -240,6 +260,7 @@ async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
             .insert(SupergraphLayerResult {
                 multipart: Arc::new(Mutex::new(multipart)),
                 map_per_variable,
+                files_order,
             });
     }
     req
@@ -265,7 +286,186 @@ type MapPerVariable = HashMap<String, HashMap<String, Vec<Vec<String>>>>;
 #[derive(Clone)]
 struct SupergraphLayerResult {
     multipart: Arc<Mutex<Multipart<'static>>>,
+    files_order: IndexSet<String>,
     map_per_variable: MapPerVariable,
+}
+
+// FIXME: Remove async???
+async fn rearange_execution_plan(mut req: execution::Request) -> execution::Request {
+    let supergraph_result = req
+        .context
+        .extensions()
+        .lock()
+        .get::<SupergraphLayerResult>()
+        .cloned();
+    if let Some(supergraph_result) = supergraph_result {
+        let SupergraphLayerResult {
+            files_order,
+            map_per_variable,
+            ..
+        } = supergraph_result;
+
+        let root = &req.query_plan.root;
+        let (_, root) = rearrange_plan_node(root, &files_order, &map_per_variable);
+        req = execution::Request {
+            query_plan: Arc::new(QueryPlan {
+                root,
+                usage_reporting: req.query_plan.usage_reporting.clone(),
+                formatted_query_plan: req.query_plan.formatted_query_plan.clone(),
+                query: req.query_plan.query.clone(),
+            }),
+            ..req
+        };
+    }
+    req
+}
+
+fn rearrange_plan_node<'a>(
+    node: &PlanNode,
+    files_order: &IndexSet<String>,
+    map_per_variable: &'a MapPerVariable,
+) -> (HashSet<&'a str>, PlanNode) {
+    match node {
+        PlanNode::Condition {
+            condition,
+            if_clause,
+            else_clause,
+        } => {
+            let mut files = HashSet::new();
+            let if_clause = if_clause.as_ref().map(|node| {
+                let (node_files, node) = rearrange_plan_node(node, files_order, map_per_variable);
+                files.extend(node_files);
+                Box::new(node)
+            });
+            let else_clause = else_clause.as_ref().map(|node| {
+                let (node_files, node) = rearrange_plan_node(node, files_order, map_per_variable);
+                files.extend(node_files);
+                Box::new(node)
+            });
+
+            (
+                files,
+                PlanNode::Condition {
+                    condition: condition.clone(),
+                    if_clause,
+                    else_clause,
+                },
+            )
+        }
+        PlanNode::Fetch(fetch) => {
+            let files: HashSet<&str> = fetch
+                .variable_usages
+                .iter()
+                .filter_map(|name| {
+                    map_per_variable
+                        .get(name)
+                        .map(|map| map.keys().map(|key| key.as_str()))
+                })
+                .flatten()
+                .collect();
+            (files, PlanNode::Fetch(fetch.clone()))
+        }
+        PlanNode::Subscription { primary, rest } => {
+            let files: HashSet<&str> = primary
+                .variable_usages
+                .iter()
+                .filter_map(|name| {
+                    map_per_variable
+                        .get(name)
+                        .map(|map| map.keys().map(|key| key.as_str()))
+                })
+                .flatten()
+                .collect();
+            // FIXME: error if rest contain files
+            (
+                files,
+                PlanNode::Subscription {
+                    primary: primary.clone(),
+                    rest: rest.clone(),
+                },
+            )
+        }
+        PlanNode::Defer { primary, deferred } => {
+            let mut primary = primary.clone();
+            let deferred = deferred.clone();
+
+            // FIXME: error if deferred contain files
+            if let Some(node) = primary.node {
+                let (files, node) = rearrange_plan_node(&node, files_order, map_per_variable);
+                primary.node = Some(Box::new(node));
+                (files, PlanNode::Defer { primary, deferred })
+            } else {
+                (HashSet::new(), PlanNode::Defer { primary, deferred })
+            }
+        }
+        PlanNode::Flatten(flatten_node) => {
+            let (files, node) =
+                rearrange_plan_node(&flatten_node.node, &files_order, map_per_variable);
+            let node = PlanNode::Flatten(FlattenNode {
+                node: Box::new(node),
+                path: flatten_node.path.clone(),
+            });
+            (files, node)
+        }
+        PlanNode::Sequence { nodes } => {
+            let mut files = HashSet::new();
+            let mut sequence = Vec::new();
+            let mut last_file = None;
+            for node in nodes.iter() {
+                let (node_files, node) = rearrange_plan_node(node, &files_order, map_per_variable);
+                for file in node_files.into_iter() {
+                    let index = files_order.get_index_of(file);
+                    // FIXME: errors
+                    assert!(!files.contains(file));
+                    assert!(index > last_file);
+                    last_file = index;
+                    files.insert(file);
+                }
+                sequence.push(node);
+            }
+            (files, PlanNode::Sequence { nodes: sequence })
+        }
+        PlanNode::Parallel { nodes } => {
+            let mut files = HashSet::new();
+            let mut parallel = Vec::new();
+            let mut sequence = BTreeMap::new();
+
+            for node in nodes.iter() {
+                let (node_files, node) = rearrange_plan_node(node, &files_order, map_per_variable);
+                if node_files.is_empty() {
+                    parallel.push(node);
+                    continue;
+                }
+
+                let mut first_file = None;
+                let mut last_file = None;
+                for file in node_files.into_iter() {
+                    let seen = files.insert(file);
+                    // FIXME: error
+                    assert!(!seen);
+                    let index = files_order.get_index_of(file);
+                    first_file = cmp::min(first_file, index);
+                    last_file = cmp::min(last_file, index);
+                }
+                sequence.insert(first_file, (node, last_file));
+            }
+
+            if !sequence.is_empty() {
+                let mut nodes = Vec::new();
+                let mut sequence_last_file = None;
+                for (node, last_file) in sequence.into_values() {
+                    // FIXME: error
+                    assert!(last_file > sequence_last_file);
+                    sequence_last_file = last_file;
+                    nodes.push(node);
+                }
+
+                parallel.push(PlanNode::Sequence { nodes });
+            }
+
+            (files, PlanNode::Parallel { nodes: parallel })
+        }
+    }
 }
 
 async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
@@ -279,6 +479,7 @@ async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
         let SupergraphLayerResult {
             multipart,
             map_per_variable,
+            ..
         } = supergraph_result;
 
         let variables = &mut req.subgraph_request.body_mut().variables;
