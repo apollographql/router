@@ -60,6 +60,7 @@ use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
 use self::config::TraceIdFormat;
+use self::config_new::instruments::Instrumented;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -241,21 +242,24 @@ impl Plugin for Telemetry {
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
+        let public_meter_provider = Some(FilterMeterProvider::public(
+            metrics_builder.public_meter_provider_builder.build(),
+        ));
+        let private_meter_provider = Some(FilterMeterProvider::private(
+            metrics_builder.apollo_meter_provider_builder.build(),
+        ));
+        let public_prometheus_meter_provider = metrics_builder
+            .prometheus_meter_provider
+            .map(FilterMeterProvider::public);
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
-            public_meter_provider: Some(FilterMeterProvider::public(
-                metrics_builder.public_meter_provider_builder.build(),
-            )),
-            private_meter_provider: Some(FilterMeterProvider::private(
-                metrics_builder.apollo_meter_provider_builder.build(),
-            )),
-            public_prometheus_meter_provider: metrics_builder
-                .prometheus_meter_provider
-                .map(FilterMeterProvider::public),
+            public_meter_provider,
+            private_meter_provider,
+            public_prometheus_meter_provider,
             sampling_filter_ratio,
             config: Arc::new(config),
             is_active: false,
@@ -335,6 +339,12 @@ impl Plugin for Telemetry {
                         .router
                         .attributes
                         .on_request(request);
+
+                    config_request
+                        .instrumentation
+                        .instruments
+                        .router
+                        .on_request(request);
                     custom_attributes.extend([
                         KeyValue::new(CLIENT_NAME_KEY, client_name.to_string()),
                         KeyValue::new(CLIENT_VERSION_KEY, client_version.to_string()),
@@ -375,6 +385,11 @@ impl Plugin for Telemetry {
                                     .attributes
                                     .on_response(response),
                             );
+                            config
+                                .instrumentation
+                                .instruments
+                                .router
+                                .on_response(response);
                             if expose_trace_id.enabled {
                                 if let Some(header_name) = &expose_trace_id.header_name {
                                     let mut headers: HashMap<String, Vec<String>> =
@@ -406,6 +421,7 @@ impl Plugin for Telemetry {
                             span.set_dyn_attributes(
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
+                            config.instrumentation.instruments.router.on_error(err);
                         }
 
                         response
@@ -1481,6 +1497,8 @@ impl Telemetry {
 
         old_meter_providers[2] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
+
+        dbg!("reload metrics");
 
         metrics_layer().clear();
 

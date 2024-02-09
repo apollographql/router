@@ -88,9 +88,8 @@ pub(crate) struct Instrumentation {
     pub(crate) events: config_new::events::Events,
     /// Span configuration
     pub(crate) spans: config_new::spans::Spans,
-    #[serde(skip)]
     /// Instrument configuration
-    pub(crate) instruments: config_new::instruments::Instruments,
+    pub(crate) instruments: config_new::instruments::InstrumentsConfig,
 }
 
 /// Metrics configuration
