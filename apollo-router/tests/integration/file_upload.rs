@@ -397,6 +397,70 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
         .await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
+    use reqwest::multipart::{Form, Part};
+
+    // Construct a manual multipart request with files out of order
+    let request = Form::new()
+        .part(
+            "operations",
+            Part::text(
+                serde_json::json!({
+                    "query": "mutation SomeMutation($file0: Upload, $file1: Upload) {
+                        uploadFile2(arg1: $file1) {
+                          id
+                        }
+                        uploadFile1(arg2: $file0) {
+                          id
+                        }
+                    }",
+                    "variables": {
+                        "file0": null,
+                        "file1": null,
+                    },
+                })
+                .to_string(),
+            ),
+        )
+        .part(
+            "map",
+            Part::text(
+                serde_json::json!({
+                    "0": ["variables.file0"],
+                    "1": ["variables.file1"],
+                })
+                .to_string(),
+            ),
+        )
+        .part("0", Part::text("file0 contents").file_name("file0"))
+        .part("1", Part::text("file1 contents").file_name("file1"));
+
+    // Run the test
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG)
+        .handler(make_handler!(helper::always_fail))
+        .request(request)
+        .build()
+        .run_test(|response| {
+            // We should get back an error from the supergraph
+            assert_eq!(
+                response.errors.len(),
+                1,
+                "expected only a supergraph error but got {}: {:?}",
+                response.errors.len(),
+                response
+                    .errors
+                    .into_iter()
+                    .map(|err| err.message)
+                    .collect::<Vec<_>>()
+            );
+
+            // TODO: Add check that error is correct when error handling is added to the plugin
+        })
+        .await
+}
+
 mod helper {
     use std::collections::BTreeMap;
     use std::net::IpAddr;
