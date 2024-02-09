@@ -1,0 +1,283 @@
+---
+title: File uploads
+description: Receive file uploads with the Apollo Router
+minVersion: X.x  
+---
+
+<PreviewFeature />
+
+<EnterpriseFeature />
+
+Learn how to configure the Apollo Router to receive file uploads in client requests using the [GraphQL Multipart Request Spec](https://github.com/jaydenseric/graphql-multipart-request-spec).
+
+## About file uploads using multipart requests
+
+The [GraphQL Multipart Request Spec](https://github.com/jaydenseric/graphql-multipart-request-spec) enables you to send files using arguments in a GraphQL mutation.
+
+{/* To-do: specifics + examples */}
+
+## File upload configuration and usage
+
+To enable file uploads in clients, you must both [configure support in the Apollo Router](#configure-file-upload-support-in-the-router) and [ensure client usage conforms to requirements](#client-usage-requirements).
+
+### Configure file upload support in the router
+
+By default, receiving client file uploads is _not_ enabled in the Apollo Router.
+To enable file upload support, set the following fields in your `router.yaml` configuration file:
+
+```yaml title="router.yaml" showLineNumbers="false"
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: streaming
+      limits:
+        max_file_size: 5mb # default 1mb
+        max_files: 2 # default 4
+```
+
+#### Mode
+
+The only supported `mode` is `streaming`. This mode means that the router doesn't retain uploaded files in memory during a request.
+If a request cannot be fulfilled in a streaming fashion, the router returns the [`UPLOADS_OPERATION_CANNOT_STREAM`](#uploads_operation_cannot_stream) error.
+
+#### Limits
+
+Configure the maximum file size and number of files to accept to prevent denial-of-service attacks. If requests exceed limits, the router rejects them.
+
+#### Configuration reference
+
+<table class="field-table">
+<thead>
+<tr>
+<th>Attribute/ <br/> Default value</th>
+<th>Description</th>
+<th>Valid Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+
+##### `enabled`
+
+Default: `false`
+
+</td>
+<td>Flag to enable reception of client file uploads</td>
+<td>boolean</td>
+
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.enabled`
+Default: `false`
+
+</td>
+<td>Flag to enable reception of multipart file uploads</td>
+<td>boolean</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.mode`
+Default: None
+
+</td>
+<td>Supported file upload mode</td>
+<td> 
+
+`streaming`
+(required value)
+
+</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.limits.max_file_size`
+Default: `1MB`
+
+</td>
+<td>The maximum file size to accept</td>
+<td>integer of MB</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.limits.max_files`
+Default: `4`
+
+</td>
+<td>The maximum number of files to accept</td>
+<td>integer</td>
+</tr>
+</tbody>
+</table>
+
+
+### Client usage requirements
+
+When calling a mutation with file uploads, the client must send the following HTTP parts in the following order:
+
+1. The raw GraphQL query
+1. A map of file(s) to variable name(s)
+1. The files to be uploaded, one HTTP request part per file
+
+<Note>
+
+The order of the files sent must match the order they're declared in the map sent in the second part of the request.
+
+</Note>
+
+The following is an example of such a multipart HTTP request:
+
+```http disableCopy showLineNumbers=false
+--------------------------gc0p4Jq0M2Yt08jU534c0p
+Content-Disposition: form-data; name="operations"
+
+{ "query": "mutation ($file: Upload!) { singleUpload(file: $file) { id } }", "variables": { "file": null } }
+--------------------------gc0p4Jq0M2Yt08jU534c0p
+Content-Disposition: form-data; name="map"
+
+{ "file1": ["variables.file"], "file2": ["variables.file"] }
+--------------------------gc0p4Jq0M2Yt08jU534c0p
+Content-Disposition: form-data; name="file1"; filename="a.txt"
+Content-Type: text/plain
+
+Alpha file content.
+--------------------------gc0p4Jq0M2Yt08jU534c0p
+Content-Disposition: form-data; name="file2"; filename="b.txt"
+Content-Type: text/plain
+
+Beta file content.
+
+--------------------------gc0p4Jq0M2Yt08jU534c0p--
+```
+
+<Note>
+
+`gc0p4Jq0M2Yt08jU534c0p` is an example of the boundary parameter required by [multipart requests](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html).
+
+</Note>
+
+Refer to the docs for your client library for further instructions.
+
+- [Apollo Client (web)](/react/data/file-uploads/)
+- [Apollo iOS](/ios/file-uploads/)
+- [Apollo Kotlin](/kotlin/advanced/upload/)
+
+Custom clients can be implemented following the [spec documentation](https://github.com/jaydenseric/graphql-multipart-request-spec).
+
+## Security
+
+Without additional security, HTTP multipart requests can be exploited as part of [cross-site request forgery](https://owasp.org/www-community/attacks/csrf) (CSRF) attacks.
+
+The Apollo Router already has a mechanism to prevent these type of attacks, which is enabled by default. You should verify that your router has not disabled this mechanism before using file uploads. See [Cross-Site Request Forgery Prevention](../configuration/csrf) for details.
+
+## Metrics for file uploads
+
+Metrics in the Apollo Router for file uploads:
+
+<table class="field-table metrics">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr>
+<td>
+
+##### `apollo.router.operations.file_uploads`
+
+</td>
+<td>
+
+Counter for the number of file uploads.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `apollo.router.operations.file_uploads.file_size`
+
+</td>
+<td>
+
+Histogram for the size of uploaded files.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `apollo.router.operations.file_uploads.files`
+
+</td>
+<td>
+
+Histogram for the number of uploaded files.
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+## Error codes for file uploads
+
+A file upload request may receive the following error responses:
+
+<table class="field-table metrics">
+<tr>
+<th>Error Code</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_LIMITS_MAX_FILES_EXCEEDED`
+
+</td>
+<td>The number of files in the payload exceeded the configured limit.</td>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_LIMITS_MAX_FILE_SIZE_EXCEEDED`
+
+</td>
+<td>A file exceeded the maximum configured file size.</td>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_FILE_MISSING`
+
+</td>
+<td>The operation specified a file that was missing from the request.</td>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_OPERATION_CANNOT_STREAM`
+
+</td>
+<td>The query was invalid as it cannot be streamed to the client.</td>
+</tr>
+</table>
+
+
+## Known limitations
+
+### Unsupported query modes
+
+When file uploads are enabled in the router, any operations using the [`@defer`](/graphos/operations/defer/) are unsupported.

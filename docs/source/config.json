@@ -81,6 +81,13 @@
             "experimental"
           ]
       ],
+      "File uploads": [
+        "/executing-operations/file-uploads",
+        [
+          "enterprise",
+          "preview"
+        ]
+      ],
       "GraphQL Subscriptions": {
         "Subscriptions setup": [
           "/executing-operations/subscription-support",
@@ -101,7 +108,7 @@
             "enterprise"
           ]
         ]
-      }
+      }  
     },
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",
