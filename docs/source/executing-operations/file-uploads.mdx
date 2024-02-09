@@ -122,7 +122,7 @@ Default: `4`
 
 When calling a mutation with file uploads, the client must send the following HTTP parts in the following order:
 
-1. The raw GraphQL query
+1. The raw GraphQL operation
 1. A map of file(s) to variable name(s)
 1. The files to be uploaded, one HTTP request part per file
 
@@ -142,24 +142,19 @@ Content-Disposition: form-data; name="operations"
 --------------------------gc0p4Jq0M2Yt08jU534c0p
 Content-Disposition: form-data; name="map"
 
-{ "file1": ["variables.file"], "file2": ["variables.file"] }
+{ "file1": ["variables.file"] }
 --------------------------gc0p4Jq0M2Yt08jU534c0p
 Content-Disposition: form-data; name="file1"; filename="a.txt"
 Content-Type: text/plain
 
 Alpha file content.
---------------------------gc0p4Jq0M2Yt08jU534c0p
-Content-Disposition: form-data; name="file2"; filename="b.txt"
-Content-Type: text/plain
-
-Beta file content.
-
 --------------------------gc0p4Jq0M2Yt08jU534c0p--
 ```
 
 <Note>
 
-`gc0p4Jq0M2Yt08jU534c0p` is an example of the boundary parameter required by [multipart requests](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html).
+- `gc0p4Jq0M2Yt08jU534c0p` is an example of the boundary parameter required by [multipart requests](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html).
+- `variables.file` in the raw GraphQL operation must be set to `null` according to the [specification](https://github.com/jaydenseric/graphql-multipart-request-spec).
 
 </Note>
 
