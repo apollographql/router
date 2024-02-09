@@ -182,7 +182,9 @@ where
             if self.fmt_event.format_event(&ctx, &mut buf, event).is_ok() {
                 let mut writer = self.make_writer.make_writer();
                 if let Err(err) = std::io::Write::write_all(&mut writer, buf.as_bytes()) {
-                    eprintln!("cannot flush the logging buffer, this is a bug: {err:?}");
+                    if err.kind() != std::io::ErrorKind::WouldBlock {
+                        eprintln!("cannot flush the logging buffer, this is a bug: {err:?}");
+                    }
                 }
             }
             buf.clear();

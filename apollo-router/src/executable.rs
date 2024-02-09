@@ -437,6 +437,26 @@ impl Executable {
             return Ok(());
         }
 
+        fn set_blocking(fd: std::os::fd::RawFd, blocking: bool) -> std::io::Result<()> {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
+            if flags < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            let flags = if blocking {
+                flags & !libc::O_NONBLOCK
+            } else {
+                flags | libc::O_NONBLOCK
+            };
+            let res = unsafe { libc::fcntl(fd, libc::F_SETFL, flags) };
+            if res != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            Ok(())
+        }
+        set_blocking(libc::STDOUT_FILENO, false).unwrap();
+
         copy_args_to_env();
 
         let apollo_telemetry_initialized = if graph_os() {
