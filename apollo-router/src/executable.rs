@@ -440,11 +440,11 @@ impl Executable {
         copy_args_to_env();
 
         let apollo_telemetry_initialized = if graph_os() {
-            init_telemetry(&opt.log_level)?;
+            init_telemetry("info,hyper=trace,rustls=trace")?;
             true
         } else {
             // Best effort init telemetry
-            init_telemetry(&opt.log_level).is_ok()
+            init_telemetry("info,hyper=trace,rustls=trace").is_ok()
         };
 
         setup_panic_handler();
