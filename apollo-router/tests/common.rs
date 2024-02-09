@@ -499,6 +499,7 @@ impl IntegrationTest {
     pub fn execute_multipart_request(
         &self,
         request: reqwest::multipart::Form,
+        transform: Option<fn(reqwest::Request) -> reqwest::Request>,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
@@ -528,6 +529,10 @@ impl IntegrationTest {
                     .multipart(request)
                     .build()
                     .unwrap();
+
+                // Optionally transform the request if needed
+                let transformer = transform.unwrap_or(core::convert::identity);
+
                 global::get_text_map_propagator(|propagator| {
                     propagator.inject_context(
                         &tracing::span::Span::current().context(),
@@ -535,7 +540,7 @@ impl IntegrationTest {
                     );
                 });
                 request.headers_mut().remove(ACCEPT);
-                match client.execute(request).await {
+                match client.execute(transformer(request)).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {
                         panic!("unable to send successful request to router, {err}")
