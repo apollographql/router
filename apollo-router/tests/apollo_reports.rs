@@ -1,3 +1,4 @@
+#![cfg(not(target_os = "windows"))]
 //! Be aware that this test file contains some fairly flaky tests which embed a number of
 //! assumptions about how traces and stats are reported to Apollo Studio.
 //!
