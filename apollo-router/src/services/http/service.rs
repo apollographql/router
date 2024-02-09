@@ -215,6 +215,8 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let path = schema_uri.path();
 
+        println!("subgraph request to {host} {path} {schema_uri}");
+
         let http_req_span = tracing::info_span!("http_request",
             "otel.kind" = "CLIENT",
             "net.peer.name" = %host,
@@ -311,6 +313,7 @@ async fn do_fetch(
     let (parts, body) = client
         .call(request)
         .map_err(|err| {
+            println!("fetch error: {err:?}");
             tracing::error!(fetch_error = ?err);
             FetchError::SubrequestHttpError {
                 status_code: None,
