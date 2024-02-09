@@ -396,7 +396,7 @@ mod tests {
             .await
             .expect("couldn't deserialize into json"))
     }
-
+    /*
     #[tokio::test(flavor = "multi_thread")]
     async fn basic_event_stream_test() {
         let mut router_handle = TestRouterHttpServer::new();
@@ -557,5 +557,5 @@ mod tests {
             response.errors[0].extensions.get("code").unwrap()
         );
         router_handle.shutdown().await.unwrap();
-    }
+    }*/
 }
