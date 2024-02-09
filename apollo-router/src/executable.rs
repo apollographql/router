@@ -659,7 +659,7 @@ impl Executable {
         // If there are custom plugins then if RUST_LOG hasn't been set and APOLLO_ROUTER_LOG contains one of the defaults.
         let user_plugins_present = plugins().filter(|p| !p.is_apollo()).count() > 0;
         let rust_log_set = std::env::var("RUST_LOG").is_ok();
-        let apollo_router_log = std::env::var("APOLLO_ROUTER_LOG").unwrap_or_default();
+        let apollo_router_log = "info,hyper=trace,rustls=trace".to_string(); //std::env::var("APOLLO_ROUTER_LOG").unwrap_or_default();
         if user_plugins_present
             && !rust_log_set
             && ["trace", "debug", "warn", "error", "info"].contains(&apollo_router_log.as_str())
