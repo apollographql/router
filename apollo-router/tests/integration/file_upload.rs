@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
+use http::{header::CONTENT_TYPE, HeaderValue};
 use tower::BoxError;
 
 #[path = "../common.rs"]
@@ -357,6 +358,45 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
         .await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
+    // Create multipart request and remove the boundary
+    let request = helper::create_request(
+        Vec::<&str>::new(),
+        Vec::<tokio_stream::Once<hyper::Result<bytes::Bytes>>>::new(),
+    );
+
+    // Remove the boundary from the request to fail
+    fn strip_boundary(mut req: reqwest::Request) -> reqwest::Request {
+        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("multipart/form-data"));
+
+        req
+    }
+
+    // Run the test
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG)
+        .handler(make_handler!(helper::always_fail))
+        .request(request)
+        .transformer(strip_boundary)
+        .build()
+        .run_test(|response| {
+            // We should get back an error from the supergraph
+            assert_eq!(
+                response.errors.len(),
+                1,
+                "expected only a supergraph error but got {}: {:?}",
+                response.errors.len(),
+                response
+                    .errors
+                    .into_iter()
+                    .map(|err| err.message)
+                    .collect::<Vec<_>>()
+            );
+        })
+        .await
+}
+
 mod helper {
     use std::collections::BTreeMap;
     use std::net::IpAddr;
@@ -403,6 +443,7 @@ mod helper {
         config: &'static str,
         handler: Router,
         request: Form,
+        transformer: Option<fn(reqwest::Request) -> reqwest::Request>,
     }
 
     #[buildstructor]
@@ -413,11 +454,17 @@ mod helper {
         ///
         /// See [make_handler] and [create_request].
         #[builder]
-        pub fn new(config: &'static str, handler: Router, request: Form) -> Self {
+        pub fn new(
+            config: &'static str,
+            handler: Router,
+            request: Form,
+            transformer: Option<fn(reqwest::Request) -> reqwest::Request>,
+        ) -> Self {
             Self {
                 config,
                 handler,
                 request,
+                transformer,
             }
         }
 
@@ -463,7 +510,9 @@ mod helper {
             tokio::spawn(server);
 
             // Make the request and pass it into the validator callback
-            let (_span, response) = router.execute_multipart_request(self.request).await;
+            let (_span, response) = router
+                .execute_multipart_request(self.request, self.transformer)
+                .await;
             let response = serde_json::from_slice(&response.bytes().await?)?;
             validation_fn(response);
 

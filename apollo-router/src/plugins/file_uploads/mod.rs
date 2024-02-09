@@ -33,6 +33,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::plugin::PluginInit;
+use crate::plugins::file_uploads::error::FileUploadError;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
 use crate::plugin::PluginPrivate;
@@ -49,6 +50,9 @@ use crate::services::supergraph;
 use self::config::FileUploadsConfig;
 
 mod config;
+mod error;
+
+type UploadResult<T> = Result<T, error::FileUploadError>;
 
 // FIXME: check if we need to hide docs
 #[doc(hidden)] // Only public for integration tests
@@ -71,9 +75,20 @@ impl PluginPrivate for FileUploadsPlugin {
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: router::Request| {
-                extract_operations(req)
-                    .map(|req| Ok(ControlFlow::Continue(req)))
-                    .boxed()
+                async {
+                    // FIXME: Does an error mean an OK(ControlFlow) or Err(BoxError)?
+                    let context = req.context.clone();
+                    Ok(match extract_operations(req).await {
+                        Ok(req) => ControlFlow::Continue(req),
+                        Err(err) => ControlFlow::Break(
+                            router::Response::error_builder()
+                                .errors(vec![err.into()])
+                                .context(context)
+                                .build()?,
+                        ),
+                    })
+                }
+                .boxed()
             })
             .service(service)
             .boxed()
@@ -144,10 +159,15 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
-async fn extract_operations(req: router::Request) -> router::Request {
+async fn extract_operations(req: router::Request) -> UploadResult<router::Request> {
     if let Some(mime) = get_multipart_mime(&req) {
         // FIXME: remove unwrap, "No boundary found in `Content-Type` header"
-        let boundary = mime.get_param(BOUNDARY).unwrap().to_string();
+        let boundary = mime
+            .get_param(BOUNDARY)
+            .ok_or(FileUploadError::InvalidMultipartRequest(
+                multer::Error::NoBoundary,
+            ))?
+            .to_string();
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
         let mut multipart = Multipart::new(request_body, boundary);
@@ -173,12 +193,13 @@ async fn extract_operations(req: router::Request) -> router::Request {
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        return router::Request::from((
+        return Ok(router::Request::from((
             http::Request::from_parts(request_parts, hyper::Body::wrap_stream(operations_field)),
             req.context,
-        ));
+        )));
     }
-    req
+
+    Ok(req)
 }
 
 struct ServiceLayerResult {
