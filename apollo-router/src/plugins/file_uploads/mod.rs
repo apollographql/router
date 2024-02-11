@@ -324,6 +324,7 @@ async fn rearange_execution_plan(mut req: execution::Request) -> execution::Requ
     req
 }
 
+// Recursive, and recursion is safe here since query plan is executed recursively.
 fn rearrange_plan_node<'a>(
     node: &PlanNode,
     files_order: &IndexSet<String>,
@@ -448,8 +449,12 @@ fn rearrange_plan_node<'a>(
                     // FIXME: error
                     assert!(!seen);
                     let index = files_order.get_index_of(file);
-                    first_file = cmp::min(first_file, index);
-                    last_file = cmp::min(last_file, index);
+                    // FIXME: check min?
+                    first_file = match first_file {
+                        None => index,
+                        Some(first_file) => cmp::min(Some(first_file), index),
+                    };
+                    last_file = cmp::max(last_file, index);
                 }
                 sequence.insert(first_file, (node, last_file));
             }
@@ -457,9 +462,9 @@ fn rearrange_plan_node<'a>(
             if !sequence.is_empty() {
                 let mut nodes = Vec::new();
                 let mut sequence_last_file = None;
-                for (node, last_file) in sequence.into_values() {
+                for (first_file, (node, last_file)) in sequence.into_iter() {
                     // FIXME: error
-                    assert!(last_file > sequence_last_file);
+                    assert!(first_file > sequence_last_file);
                     sequence_last_file = last_file;
                     nodes.push(node);
                 }
