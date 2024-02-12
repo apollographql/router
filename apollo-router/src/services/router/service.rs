@@ -788,8 +788,4 @@ impl RouterCreator {
     pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.supergraph_creator.cache_keys(count).await
     }
-
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.supergraph_creator.planner()
-    }
 }
