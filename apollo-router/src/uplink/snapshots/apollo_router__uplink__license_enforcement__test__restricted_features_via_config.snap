@@ -44,3 +44,6 @@ Configuration yaml:
 
 * Advanced telemetry
   .telemetry..spans.subgraph
+
+* File uploads plugin
+  .preview_file_uploads
