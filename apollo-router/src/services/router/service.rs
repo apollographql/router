@@ -1,5 +1,7 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -26,7 +28,9 @@ use http_body::Body as _;
 use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
+use parking_lot::Mutex;
 use router_bridge::planner::Planner;
+use tokio::sync::oneshot;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -62,6 +66,8 @@ use crate::services::HasPlugins;
 use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -609,13 +615,17 @@ impl RouterService {
 
         let ok_results = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());
+        let batch_size = ok_results.len();
 
-        if ok_results.len() > 1 {
+        let shared_batch_details: Option<Arc<Mutex<SharedBatchDetails>>> = if ok_results.len() > 1 {
             context
                 .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
-        }
+            Some(Arc::new(Mutex::new(SharedBatchDetails::new(batch_size))))
+        } else {
+            None
+        };
 
         let mut ok_results_it = ok_results.into_iter();
         let first = ok_results_it
@@ -628,16 +638,16 @@ impl RouterService {
         // through the pipeline. This is because there is simply no way to clone http
         // extensions.
         //
-        // Secondly, we can't clone private_entries, but we need to propagate at least
+        // Secondly, we can't clone extensions, but we need to propagate at least
         // ClientRequestAccepts to ensure correct processing of the response. We do that manually,
-        // but the concern is that there may be other private_entries that wish to propagate into
+        // but the concern is that there may be other extensions that wish to propagate into
         // each request or we may add them in future and not know about it here...
         //
-        // (Technically we could clone private entries, since it is held under an `Arc`, but that
-        // would mean all the requests in a batch shared the same set of private entries and review
+        // (Technically we could clone extensions, since it is held under an `Arc`, but that
+        // would mean all the requests in a batch shared the same set of extensions and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        for graphql_request in ok_results_it {
+        for (index, graphql_request) in ok_results_it.enumerate() {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
@@ -649,22 +659,34 @@ impl RouterService {
                 .lock()
                 .get::<ClientRequestAccepts>()
                 .cloned();
-            if let Some(client_request_accepts) = client_request_accepts_opt {
-                new_context
-                    .extensions()
-                    .lock()
-                    .insert(client_request_accepts);
+            {
+                // Sub-scope so that new_context_guard is dropped before pushing into the new
+                // SupergraphRequest
+                let mut new_context_guard = new_context.extensions().lock();
+                if let Some(client_request_accepts) = client_request_accepts_opt {
+                    new_context_guard.insert(client_request_accepts);
+                }
+                new_context_guard.insert(self.experimental_batching.clone());
+                if let Some(shared_batch_details) = &shared_batch_details {
+                    new_context_guard
+                        .insert(BatchDetails::new(index + 1, shared_batch_details.clone()));
+                }
             }
-            new_context
-                .extensions()
-                .lock()
-                .insert(self.experimental_batching.clone());
+
             results.push(SupergraphRequest {
                 supergraph_request: new,
                 // Build a new context. Cloning would cause issues.
                 context: new_context,
             });
         }
+
+        if let Some(shared_batch_details) = shared_batch_details {
+            context
+                .extensions()
+                .lock()
+                .insert(BatchDetails::new(0, shared_batch_details));
+        }
+
         results.insert(
             0,
             SupergraphRequest {
@@ -676,6 +698,119 @@ impl RouterService {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct BatchDetails {
+    pub(crate) index: usize,
+    // Request Details
+    pub(crate) request: Option<SubgraphRequest>,
+    pub(crate) body: Option<graphql::Request>,
+    pub(crate) context: Option<Context>,
+    pub(crate) service_name: Option<String>,
+    // Shared Request Details
+    shared: Arc<Mutex<SharedBatchDetails>>,
+}
+
+impl fmt::Display for BatchDetails {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "index: {}", self.index)?;
+        // Use try_lock. If the shared details are locked, we won't display them.
+        // TODO: Maybe improve to handle the error...?
+        let guard = self.shared.try_lock().ok_or(fmt::Error)?;
+        write!(f, "size: {}", guard.size)?;
+        write!(f, "expected: {:?}", guard.expected)?;
+        write!(f, "seen: {:?}", guard.seen)?;
+        write!(f, "waiters: {:?}", guard.waiters)
+    }
+}
+
+impl BatchDetails {
+    fn new(index: usize, shared: Arc<Mutex<SharedBatchDetails>>) -> Self {
+        Self {
+            index,
+            shared,
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn ready(&self) -> bool {
+        self.shared.lock().ready()
+    }
+
+    pub(crate) fn get_waiter(
+        &mut self,
+        request: SubgraphRequest,
+        body: graphql::Request,
+        context: Context,
+        service_name: &str,
+    ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
+        tracing::info!("getting a waiter for {}", self.index);
+        self.request = Some(request);
+        self.body = Some(body);
+        self.context = Some(context);
+        self.service_name = Some(service_name.to_string());
+        self.shared.lock().get_waiter(self.index)
+    }
+
+    pub(crate) fn increment_subgraph_seen(&self) {
+        let mut shared_guard = self.shared.lock();
+        let value = shared_guard.seen.entry(self.index).or_default();
+        *value += 1;
+    }
+
+    pub(crate) fn set_subgraph_fetches(&self, fetches: usize) {
+        let mut shared_guard = self.shared.lock();
+        let value = shared_guard.expected.entry(self.index).or_default();
+        *value = fetches;
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SharedBatchDetails {
+    pub(crate) size: usize,
+    pub(crate) expected: HashMap<usize, usize>,
+    pub(crate) seen: HashMap<usize, usize>,
+    pub(crate) waiters: HashMap<usize, Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>>,
+}
+
+impl SharedBatchDetails {
+    fn new(size: usize) -> Self {
+        Self {
+            size,
+            expected: HashMap::new(),
+            seen: HashMap::new(),
+            waiters: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn ready(&self) -> bool {
+        self.expected.len() == self.size && self.expected == self.seen
+    }
+
+    pub(crate) fn get_waiter(
+        &mut self,
+        index: usize,
+    ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
+        let (tx, rx) = oneshot::channel();
+        let value = self.waiters.entry(index).or_default();
+        value.push(tx);
+        rx
+    }
+}
+
+/*
+        let (tx, mut rx) = mpsc::channel::<String>(10);
+        let (b_tx, _b_rx) = broadcast::channel::<(usize, String)>(10);
+
+            // Build up our batch co-ordinator for later use in subgraph processing
+            tokio::task::spawn(async move {
+                while let Some(body) = rx.recv().await {
+                    todo!();
+                }
+                // At this point we have our accumulated stuff, we need to figure out a way to send
+                // this to clients.
+                todo!()
+            });
+*/
 struct TranslateError<'a> {
     status: StatusCode,
     error: &'a str,

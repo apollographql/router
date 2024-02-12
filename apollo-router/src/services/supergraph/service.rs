@@ -54,6 +54,7 @@ use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
+use crate::services::router::service::BatchDetails;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
@@ -606,19 +607,26 @@ async fn plan_query(
         context.extensions().lock().insert::<ParsedDocument>(doc);
     }
 
-    planning
+    let qpr = planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context)
+                .context(context.clone())
                 .build(),
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
             "otel.kind" = "INTERNAL"
         ))
-        .await
+        .await?;
+
+    if let Some(batching) = context.extensions().lock().get::<BatchDetails>() {
+        if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
+            batching.set_subgraph_fetches(plan.root.subgraph_fetches());
+        }
+    }
+    Ok(qpr)
 }
 
 fn clone_supergraph_request(

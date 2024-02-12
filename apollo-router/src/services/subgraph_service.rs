@@ -57,6 +57,7 @@ use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
+use crate::services::router::service::BatchDetails;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
@@ -194,6 +195,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     }
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
+        tracing::info!("SUBGRAPH SERVICE CALLED");
         let subscription_config = (request.operation_kind == OperationKind::Subscription)
             .then(|| self.subscription_config.clone())
             .flatten();
@@ -234,6 +236,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         let arc_apq_enabled = self.apq.clone();
 
         let mut notify = self.notify.clone();
+
         let make_calls = async move {
             // Subscription handling
             if request.operation_kind == OperationKind::Subscription
@@ -364,7 +367,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
             if !apq_enabled.load(Relaxed) {
-                return call_http(request, body, context, client, &service_name).await;
+                return call_batched_http(request, body, context, client, &service_name).await;
             }
 
             // Else, if APQ is enabled,
@@ -394,7 +397,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 extensions: extensions_with_apq,
             };
 
-            let response = call_http(
+            let response = call_batched_http(
                 request.clone(),
                 apq_body.clone(),
                 context.clone(),
@@ -411,11 +414,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    call_http(request, body, context, client, &service_name).await
+                    call_batched_http(request, body, context, client, &service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
                     apq_body.query = query;
-                    call_http(request, apq_body, context, client, &service_name).await
+                    call_batched_http(request, apq_body, context, client, &service_name).await
                 }
                 _ => Ok(response),
             }
@@ -614,8 +617,68 @@ async fn call_websocket(
     ))
 }
 
+/*
+use tokio::sync::mpsc;
+use tokio::sync::broadcast;
+use tokio::sync::oneshot;
+        let (tx, mut rx) = mpsc::channel::<String>(10);
+        let (b_tx, _b_rx) = broadcast::channel::<(usize, String)>(10);
+
+            // Build up our batch co-ordinator for later use in subgraph processing
+            tokio::task::spawn(async move {
+                while let Some(body) = rx.recv().await {
+                    todo!();
+                }
+                // At this point we have our accumulated stuff, we need to figure out a way to send
+                // this to clients.
+                todo!()
+            });
+*/
+
+async fn call_batched_http(
+    request: SubgraphRequest,
+    body: graphql::Request,
+    context: Context,
+    client: crate::services::http::BoxService,
+    service_name: &str,
+) -> Result<SubgraphResponse, BoxError> {
+    // We'd like to park a task here, but we can't park it whilst we have the context extensions
+    // lock held. That would be very bad...
+    // So, we set an optional listener and wait to hear back from the batch processor
+    let mut batch_responder: Option<
+        tokio::sync::oneshot::Receiver<Result<SubgraphResponse, BoxError>>,
+    > = None;
+    if let Some(batching) = context.extensions().lock().get_mut::<BatchDetails>() {
+        tracing::info!("in subgraph we have batching: {batching:?}, service: {service_name}");
+        {
+            batching.increment_subgraph_seen();
+            tracing::info!("ready to process batch?: {}", batching.ready());
+        }
+        if batching.ready() {
+            //TODO: This is where we start processing our accumulated batch data
+            tracing::info!("Batch data: {batching:?}");
+            todo!()
+        } else {
+            batch_responder = Some(batching.get_waiter(
+                request.clone(),
+                body.clone(),
+                context.clone(),
+                service_name,
+            ));
+        }
+    }
+    if let Some(receiver) = batch_responder {
+        println!("WE HAVE A WAITER");
+        receiver.await;
+        todo!()
+    } else {
+        println!("WE CALLED HTTP");
+        call_http(request, body, context, client, service_name).await
+    }
+}
+
 /// call_http makes http calls with modified graphql::Request (body)
-async fn call_http(
+pub(crate) async fn call_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
@@ -634,6 +697,7 @@ async fn call_http(
 
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+    tracing::info!("our JSON body: {body:?}");
     let mut request = http::Request::from_parts(parts, Body::from(body));
 
     request
