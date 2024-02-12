@@ -39,6 +39,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::file_uploads::error::FileUploadError;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
+use crate::register_private_plugin;
 use crate::services::execution;
 use crate::services::execution::QueryPlan;
 use crate::services::router;
@@ -72,7 +73,6 @@ impl PluginPrivate for FileUploadsPlugin {
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: router::Request| {
                 async {
-                    // FIXME: Does an error mean an OK(ControlFlow) or Err(BoxError)?
                     let context = req.context.clone();
                     Ok(match extract_operations(req).await {
                         Ok(req) => ControlFlow::Continue(req),
@@ -93,9 +93,19 @@ impl PluginPrivate for FileUploadsPlugin {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: supergraph::Request| {
-                extract_map(req)
-                    .map(|req| Ok(ControlFlow::Continue(req)))
-                    .boxed()
+                async {
+                    let context = req.context.clone();
+                    Ok(match extract_map(req).await {
+                        Ok(req) => ControlFlow::Continue(req),
+                        Err(err) => ControlFlow::Break(
+                            supergraph::Response::error_builder()
+                                .errors(vec![err.into()])
+                                .context(context)
+                                .build()?,
+                        ),
+                    })
+                }
+                .boxed()
             })
             .service(service)
             .boxed()
@@ -141,24 +151,19 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
 
 async fn extract_operations(req: router::Request) -> UploadResult<router::Request> {
     if let Some(mime) = get_multipart_mime(&req) {
-        // FIXME: remove unwrap, "No boundary found in `Content-Type` header"
         let boundary = mime
             .get_param(BOUNDARY)
-            .ok_or(FileUploadError::InvalidMultipartRequest(
-                multer::Error::NoBoundary,
-            ))?
+            .ok_or_else(|| FileUploadError::InvalidMultipartRequest(multer::Error::NoBoundary))?
             .to_string();
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
         let mut multipart = Multipart::new(request_body, boundary);
 
-        // FIXME: unwrap
-        let operations_field = multipart.next_field().await.unwrap().unwrap();
-        // FIXME
-        assert!(
-            operations_field.name() == Some("operations"),
-            "Missing multipart field ‘operations’, please see GRAPHQL_MULTIPART_REQUEST_SPEC_URL.",
-        );
+        let operations_field = multipart
+            .next_field()
+            .await?
+            .filter(|field| field.name() == Some("operations"))
+            .ok_or_else(|| FileUploadError::MissingOperationsField)?;
 
         req.context
             .extensions()
@@ -186,7 +191,7 @@ struct ServiceLayerResult {
     multipart: Multipart<'static>,
 }
 
-async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
+async fn extract_map(mut req: supergraph::Request) -> UploadResult<supergraph::Request> {
     let service_layer_result = req
         .context
         .extensions()
@@ -194,18 +199,16 @@ async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
         .remove::<ServiceLayerResult>();
 
     if let Some(ServiceLayerResult { mut multipart }) = service_layer_result {
-        // FIXME: unwrap
-        let map_field = multipart.next_field().await.unwrap().unwrap();
-        // FIXME
-        assert!(
-            map_field.name() == Some("map"),
-            "Missing multipart field ‘map’, please see GRAPHQL_MULTIPART_REQUEST_SPEC_URL.",
-        );
-        // FIXME: apply some limit on size of map field
+        let map_field = multipart
+            .next_field()
+            .await?
+            .filter(|field| field.name() == Some("map"))
+            .ok_or_else(|| FileUploadError::MissingMapField)?;
 
-        let map_field = map_field.bytes().await.unwrap();
-        // FIXME: unwrap
-        let map_field: MapField = serde_json::from_slice(&map_field).unwrap();
+        // FIXME: apply some limit on size of map field
+        let map_field = map_field.bytes().await?;
+        let map_field: MapField = serde_json::from_slice(&map_field)
+            .map_err(|e| FileUploadError::InvalidJsonInMapField(e))?;
         // FIXME: check number of files
         // assert!(map_field.len());
 
@@ -221,23 +224,20 @@ async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
                         .and_then(|str| str.parse::<usize>().ok())
                         .is_some()
                     {
-                        assert!(false, "batch requests are not supported");
+                        return Err(FileUploadError::BatchRequestAreNotSupported);
                     }
-                    assert!(
-                        false,
-                        "invalid path inside 'map' field, it should start with 'variables.'."
-                    );
+                    return Err(FileUploadError::InvalidPathInsideMapField(path));
                 }
-                // FIXME: validation error
-                let variable_name = segments.next().unwrap();
+                let variable_name = segments.next().ok_or_else(|| {
+                    FileUploadError::MissingVariableNameInsideMapField(path.clone())
+                })?;
                 let variable_path: Vec<String> = segments.map(|str| str.to_owned()).collect();
 
                 // patch variables to pass validation
                 let json_value = variables
                     .get_mut(variable_name)
-                    .and_then(|root| try_path(root, &variable_path));
-                // FIXME: validation error
-                let json_value = json_value.unwrap();
+                    .and_then(|root| try_path(root, &variable_path))
+                    .ok_or_else(|| FileUploadError::InputValueNotFound(path.clone()))?;
                 drop(core::mem::replace(
                     json_value,
                     serde_json_bytes::Value::String(
@@ -264,7 +264,7 @@ async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
                 files_order,
             });
     }
-    req
+    Ok(req)
 }
 
 fn try_path<'a>(
