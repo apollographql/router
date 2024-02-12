@@ -58,12 +58,12 @@ executors:
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:2024.02.1"
+      image: "windows-server-2019-vs2019:edge"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:2024.02.1"
+      image: "windows-server-2019-vs2019:edge"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
