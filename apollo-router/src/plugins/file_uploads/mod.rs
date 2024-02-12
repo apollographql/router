@@ -485,7 +485,7 @@ async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
         let SupergraphLayerResult {
             multipart,
             map_per_variable,
-            ..
+            files_order,
         } = supergraph_result;
 
         let variables = &mut req.subgraph_request.body_mut().variables;
@@ -516,6 +516,7 @@ async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
             }
         }
         if !map_field.is_empty() {
+            map_field.sort_by_cached_key(|file, _| files_order.get_index_of(file));
             req.subgraph_request
                 .extensions_mut()
                 .insert(SubgraphHttpRequestExtensions {
