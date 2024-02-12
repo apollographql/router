@@ -235,7 +235,7 @@ impl InstrumentData {
             opt.parser.max_tokens,
             "$[?(@.parser_max_tokens)]",
             opt.request.max_size,
-            "$[?(@.experimental_http_max_request_bytes)]"
+            "$[?(@.http_max_request_bytes)]"
         );
         populate_config_instrument!(
             apollo.router.config.apq,
@@ -280,7 +280,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.entity_cache,
-            "$.experimental_entity_cache",
+            "$.preview_entity_cache",
             opt.enabled,
             "$[?(@.enabled)]",
             opt.subgraph.enabled,
@@ -367,13 +367,18 @@ impl InstrumentData {
             env_var_exists("APOLLO_ROUTER_SUPERGRAPH_PATH"),
         );
 
+        attributes.insert(
+            "opt.apollo.dev".to_string(),
+            env_var_exists("APOLLO_ROUTER_DEV_ENV"),
+        );
+
         self.data
             .insert("apollo.router.config.env".to_string(), (1, attributes));
     }
 
     pub(crate) fn populate_license_instrument(&mut self, license_state: &LicenseState) {
         self.data.insert(
-            "apollo.router.config.license".to_string(),
+            "apollo.router.lifecycle.license".to_string(),
             (
                 1,
                 [(

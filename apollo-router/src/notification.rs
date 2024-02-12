@@ -391,7 +391,7 @@ struct HandleGuard<K, V>
 where
     K: Clone,
 {
-    topic: K,
+    topic: Arc<K>,
     pubsub_sender: mpsc::Sender<Notification<K, V>>,
 }
 
@@ -413,7 +413,7 @@ where
 {
     fn drop(&mut self) {
         let err = self.pubsub_sender.try_send(Notification::Unsubscribe {
-            topic: self.topic.clone(),
+            topic: self.topic.as_ref().clone(),
         });
         if let Err(err) = err {
             tracing::trace!("cannot unsubscribe {err:?}");
@@ -460,7 +460,7 @@ where
     ) -> Self {
         Self {
             handle_guard: HandleGuard {
-                topic,
+                topic: Arc::new(topic),
                 pubsub_sender,
             },
             msg_sender,
@@ -583,7 +583,7 @@ where
     }
 
     fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let topic = self.handle_guard.topic.clone();
+        let topic = self.handle_guard.topic.as_ref().clone();
         let _ = self
             .handle_guard
             .pubsub_sender
@@ -614,8 +614,10 @@ async fn task<K, V>(
             _ = ttl_fut.next() => {
                 let heartbeat_error_message = heartbeat_error_message.clone();
                 pubsub.kill_dead_topics(heartbeat_error_message).await;
-                tracing::info!(
-                    value.apollo_router_opened_subscriptions = pubsub.subscriptions.len() as u64,
+                u64_counter!(
+                    "apollo_router_opened_subscriptions",
+                    "Number of opened subscriptions",
+                    pubsub.subscriptions.len() as u64
                 );
             }
             message = receiver.next() => {

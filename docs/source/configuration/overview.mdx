@@ -5,8 +5,6 @@ description: Command arguments and YAML config
 
 Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
 
-Arguments for this command are described below.
-
 ## Environment variables
 
 If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
@@ -34,7 +32,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
 The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
 
-**Required** if using managed federation.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
 
 </td>
 </tr>
@@ -48,7 +46,7 @@ The graph ref for the GraphOS graph and variant that the router fetches its supe
 
 The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
 
-**Required** if using managed federation.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
 
 </td>
 </tr>
@@ -83,12 +81,14 @@ This reference lists and describes the options supported by the `router` binary.
 
 ##### `-s` / `--supergraph`
 
-`APOLLO_ROUTER_SUPERGRAPH_PATH`
+`APOLLO_ROUTER_SUPERGRAPH_PATH`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
 
 </td>
 <td>
 
-The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
+The Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema). Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+
+> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages. 
 
 Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
 
@@ -159,6 +159,27 @@ If set, the router watches for changes to its configuration file and any supergr
 The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
 The default value is `info`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--license`
+
+`APOLLO_ROUTER_LICENSE_PATH`, `APOLLO_ROUTER_LICENSE`
+
+</td>
+<td>
+
+An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.
+
+An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
+
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](../enterprise-features/#the-enterprise-license).
+
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](../enterprise-features/#offline-enterprise-license).
 
 </td>
 </tr>
@@ -425,7 +446,7 @@ Path parameters and wildcards are supported. For example:
 
 - `/:my_dynamic_prefix/graphql` matches both `/my_project_a/graphql` and `/my_project_b/graphql`.
 - `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
-- `/g*` matches `/graphql` and `/gateway`.
+- `/g*` matches `/graphql`, `/gateway` and `/graphql/api`.
 
 <Note>
 
@@ -519,7 +540,9 @@ By default, the Apollo Router stores the following data in its in-memory cache t
 
 You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-memory caching in the Apollo Router](./in-memory-caching/).
 
-**If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
+**If you have a GraphOS Enterprise plan:** 
+- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
+- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the Apollo Router](./entity-caching/).
 
 ### Safelisting with persisted queries
 
@@ -702,7 +725,7 @@ The router rejects any request that violates at least one of these limits.
 ```yaml title="router.yaml"
 limits:
   # Network-based limits
-  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
+  http_max_request_bytes: 2000000 # Default value: 2 MB
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
@@ -722,8 +745,6 @@ See [this article](./operation-limits/).
 #### Network-based limits
 
 ##### `http_max_request_bytes`
-
-<ExperimentalFeature />
 
 Limits the amount of data read from the network for the body of HTTP requests,
 to protect against unbounded memory consumption.
@@ -882,3 +903,7 @@ You can also view a diff of exactly which changes are necessary to upgrade your 
 ```bash
 ./router config upgrade --diff <path_to_config.yaml>
 ```
+
+## Related topics
+
+* [Checklist for configuring the router for production](/technotes/TN0008-production-readiness-checklist/#apollo-router)

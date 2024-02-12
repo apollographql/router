@@ -11,6 +11,8 @@ use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use http::Uri;
+use semver::Version;
+use semver::VersionReq;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -124,9 +126,7 @@ impl Schema {
             }
         }
 
-        let mut hasher = Sha256::new();
-        hasher.update(sdl.as_bytes());
-        let schema_id = Some(format!("{:x}", hasher.finalize()));
+        let schema_id = Some(Self::schema_id(sdl));
         tracing::info!(
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
@@ -142,6 +142,12 @@ impl Schema {
             api_schema: None,
             schema_id,
         })
+    }
+
+    pub(crate) fn schema_id(sdl: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(sdl.as_bytes());
+        format!("{:x}", hasher.finalize())
     }
 
     pub(crate) fn create_api_schema(&self) -> String {
@@ -178,6 +184,10 @@ impl Schema {
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
         self.definitions.get_interface(abstract_type).is_some()
+    }
+
+    pub(crate) fn is_union(&self, abstract_type: &str) -> bool {
+        self.definitions.get_union(abstract_type).is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
@@ -229,22 +239,43 @@ impl Schema {
         self.diagnostics.is_some()
     }
 
-    pub(crate) fn has_spec(&self, url: &str) -> bool {
+    pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
         self.definitions
             .schema_definition
             .directives
             .iter()
             .filter(|dir| dir.name.as_str() == "link")
             .any(|link| {
-                link.argument_by_name("url")
+                if let Some(url_in_link) = link
+                    .argument_by_name("url")
                     .and_then(|value| value.as_str())
-                    == Some(url)
+                {
+                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_in_url) =
+                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
+                        return false;
+                    };
+
+                    base_url_in_link == base_url && version_range.matches(&version_in_url)
+                } else {
+                    false
+                }
             })
     }
 
     pub(crate) fn directive_name(
         schema: &apollo_compiler::schema::Schema,
-        url: &str,
+        base_url: &str,
+        expected_version_range: &str,
         default: &str,
     ) -> Option<String> {
         schema
@@ -253,9 +284,29 @@ impl Schema {
             .iter()
             .filter(|dir| dir.name.as_str() == "link")
             .find(|link| {
-                link.argument_by_name("url")
+                if let Some(url_in_link) = link
+                    .argument_by_name("url")
                     .and_then(|value| value.as_str())
-                    == Some(url)
+                {
+                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_in_url) =
+                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
+                        return false;
+                    };
+
+                    base_url_in_link == base_url && version_range.matches(&version_in_url)
+                } else {
+                    false
+                }
             })
             .map(|link| {
                 link.argument_by_name("as")

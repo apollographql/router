@@ -76,7 +76,7 @@ flowchart LR;
 
    - **The client does _not_ use a WebSocket protocol.** Instead, it receives updates via [multipart HTTP responses](./subscription-multipart-protocol/).
    - By using HTTP for subscriptions, clients can execute _all_ GraphQL operation types over HTTP instead of using two different protocols.
-   - Apollo Client for [Web](/react/data/subscriptions#http), [Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [iOS](/ios/fetching/subscriptions#http) all support GraphQL subscriptions over HTTP with minimal configuration. See each library's documentation for details.
+   - [Apollo Client](/react/data/subscriptions#http), [Apollo Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [Apollo iOS](/ios/fetching/subscriptions#http) all support GraphQL subscriptions over HTTP with minimal configuration. See each library's documentation for details. Apollo Client also provides network adapters for the [Relay](/react/data/subscriptions#relay) and [urql](/react/data/subscriptions#urql) libraries.
 
 2. When your router receives a subscription, it executes that _same_ subscription against whichever subgraph defines the requested field (`stockPricesChanged` in the example above).
 
@@ -185,7 +185,7 @@ Callback mode requires your subgraph library to support the router's [HTTP callb
 
 <Note>
 
-Currently, [Apollo Server 4.9](https://github.com/apollographql/apollo-server/releases/tag/%40apollo%2Fserver%404.9.0) supports a *preview* of this protocol. If you're implementing support in a subgraph library, please [create a GitHub discussion](https://github.com/apollographql/router/discussions/).
+Currently, [Apollo Server 4.10](https://github.com/apollographql/apollo-server/releases/tag/%40apollo%2Fserver%404.10.0) and [Spring GraphQL 4.3.0](https://github.com/apollographql/federation-jvm/tree/main/spring-subscription-callback#usage) support this protocol. If you're implementing support in a subgraph library, please [create a GitHub discussion](https://github.com/apollographql/router/discussions/).
 
 </Note>
 
@@ -339,7 +339,7 @@ To quickly try out the Apollo Router's HTTP-based subscriptions _without_ settin
 
 ```bash
  curl 'http://localhost:4000/' -v \
-  -H 'accept: multipart/mixed; boundary="graphql"; subscriptionSpec=1.0, application/json' \
+  -H 'accept: multipart/mixed;subscriptionSpec=1.0, application/json' \
   -H 'content-type: application/json' \
   --data-raw '{"query":"subscription OnProductPriceChanged { productPriceChanged { name price reviews { score } } }","operationName":"OnProductPriceChanged"}'
 ```

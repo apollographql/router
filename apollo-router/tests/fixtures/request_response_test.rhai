@@ -3,13 +3,16 @@
 // If any of the tests fail, the thrown error will cause the respective rust
 // unit test to fail.
 
-fn process_common_request(check_context_and_method, request) {
-    if check_context_and_method {
+fn process_common_request(check_context_method_and_id, request) {
+    if check_context_method_and_id {
         if request.context.entries != () {
             throw(`context entries: expected: (), actual: ${request.context.entries}`);
         }
         if request.method != "GET" {
             throw(`query: expected: "GET", actual: ${request.method}`);
+        }
+        if type_of(request.id) != "string" {
+            throw(`query: expected: "string", actual: ${type_of(request.id)}`);
         }
     }
     if request.body.operation_name != () {
@@ -104,6 +107,9 @@ fn process_common_response(response) {
     }
     if response.body.extensions != #{} {
         throw(`query: expected: #{}, actual: ${response.body.extensions}`);
+    }
+    if type_of(response.id) != "string" {
+        throw(`query: expected: "string", actual: ${type_of(response.id)}`);
     }
 }
 

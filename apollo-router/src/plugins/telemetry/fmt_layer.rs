@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io::IsTerminal;
 use std::marker::PhantomData;
 
 use opentelemetry::Key;
@@ -33,31 +34,45 @@ pub(crate) fn create_fmt_layer(
     config: &config::Conf,
 ) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
     match &config.exporters.logging.stdout {
-        StdOut { enabled, format } if *enabled => match format {
-            Format::Json(format_config) => {
-                let format = Json::new(
-                    config.exporters.logging.common.to_resource(),
-                    format_config.clone(),
-                );
-                FmtLayer::new(
-                    FilteringFormatter::new(format, filter_metric_events),
-                    std::io::stdout,
-                )
-                .boxed()
-            }
+        StdOut {
+            enabled,
+            format,
+            tty_format,
+            rate_limit,
+        } if *enabled => {
+            let format = if std::io::stdout().is_terminal() && tty_format.is_some() {
+                tty_format
+                    .as_ref()
+                    .expect("checked previously in the if; qed")
+            } else {
+                format
+            };
+            match format {
+                Format::Json(format_config) => {
+                    let format = Json::new(
+                        config.exporters.logging.common.to_resource(),
+                        format_config.clone(),
+                    );
+                    FmtLayer::new(
+                        FilteringFormatter::new(format, filter_metric_events, rate_limit),
+                        std::io::stdout,
+                    )
+                    .boxed()
+                }
 
-            Format::Text(format_config) => {
-                let format = Text::new(
-                    config.exporters.logging.common.to_resource(),
-                    format_config.clone(),
-                );
-                FmtLayer::new(
-                    FilteringFormatter::new(format, filter_metric_events),
-                    std::io::stdout,
-                )
-                .boxed()
+                Format::Text(format_config) => {
+                    let format = Text::new(
+                        config.exporters.logging.common.to_resource(),
+                        format_config.clone(),
+                    );
+                    FmtLayer::new(
+                        FilteringFormatter::new(format, filter_metric_events, rate_limit),
+                        std::io::stdout,
+                    )
+                    .boxed()
+                }
             }
-        },
+        }
         _ => NoOpLayer.boxed(),
     }
 }
@@ -257,6 +272,7 @@ mod tests {
 
     use super::*;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
+    use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
 
@@ -333,7 +349,7 @@ mod tests {
         let buff = LogBuffer::default();
         let format = Text::default();
         let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events),
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
             buff.clone(),
         )
         .boxed();
@@ -350,7 +366,7 @@ mod tests {
         let buff = LogBuffer::default();
         let format = Text::default();
         let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events),
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
             buff.clone(),
         )
         .boxed();
@@ -368,7 +384,7 @@ mod tests {
         let buff = LogBuffer::default();
         let format = Json::default();
         let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events),
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
             buff.clone(),
         )
         .boxed();
@@ -385,7 +401,7 @@ mod tests {
         let buff = LogBuffer::default();
         let format = Json::default();
         let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events),
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
             buff.clone(),
         )
         .boxed();
@@ -409,7 +425,7 @@ mod tests {
         };
         let format = Json::new(Default::default(), json_format);
         let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events),
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
             buff.clone(),
         )
         .boxed();
@@ -434,7 +450,7 @@ mod tests {
         };
         let format = Text::new(Default::default(), text_format);
         let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events),
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
             buff.clone(),
         )
         .boxed();

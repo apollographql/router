@@ -39,7 +39,7 @@ Attributes may be drawn from [standard attributes](./standard-attributes) or [se
 
 <EnterpriseFeature>
 
-Custom attributes for spans via selector is an Enterprise Feature that requires a [GraphOS Enterprise plan](/graphos/enterprise/).
+Granular customization of attributes on spans is an Enterprise Feature that requires a [GraphOS Enterprise plan](/graphos/enterprise/).
 
 </EnterpriseFeature>
 
@@ -161,6 +161,7 @@ telemetry:
             default: "unknown"
           "acme.custom_3":
             env: "ENV_VAR"
+          "static_attribute": "my_static_value"
             # ...
           
       supergraph:

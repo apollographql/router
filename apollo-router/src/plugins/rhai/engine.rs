@@ -413,6 +413,12 @@ mod router_context {
     ) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.context.clone()))
     }
+    #[rhai_fn(get = "id", pure)]
+    pub(crate) fn router_first_response_id_get(
+        obj: &mut SharedMut<router::FirstResponse>,
+    ) -> String {
+        obj.with_mut(|response| response.context.id.clone())
+    }
     #[rhai_fn(set = "context", return_raw)]
     pub(crate) fn router_first_response_context_set(
         obj: &mut SharedMut<router::FirstResponse>,
@@ -428,6 +434,12 @@ mod router_context {
     ) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.context.clone()))
     }
+    #[rhai_fn(get = "id", pure)]
+    pub(crate) fn supergraph_first_response_id_get(
+        obj: &mut SharedMut<supergraph::FirstResponse>,
+    ) -> String {
+        obj.with_mut(|response| response.context.id.clone())
+    }
     #[rhai_fn(set = "context", return_raw)]
     pub(crate) fn supergraph_first_response_context_set(
         obj: &mut SharedMut<supergraph::FirstResponse>,
@@ -442,6 +454,12 @@ mod router_context {
         obj: &mut SharedMut<execution::FirstResponse>,
     ) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(get = "id", pure)]
+    pub(crate) fn execution_first_response_id_get(
+        obj: &mut SharedMut<execution::FirstResponse>,
+    ) -> String {
+        obj.with_mut(|response| response.context.id.clone())
     }
     #[rhai_fn(set = "context", return_raw)]
     pub(crate) fn execution_first_response_context_set(
@@ -459,6 +477,12 @@ mod router_context {
     ) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.context.clone()))
     }
+    #[rhai_fn(get = "id", pure)]
+    pub(crate) fn router_deferred_response_id_get(
+        obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> String {
+        obj.with_mut(|response| response.context.id.clone())
+    }
     #[rhai_fn(set = "context", return_raw)]
     pub(crate) fn router_deferred_response_context_set(
         obj: &mut SharedMut<router::DeferredResponse>,
@@ -474,6 +498,12 @@ mod router_context {
     ) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.context.clone()))
     }
+    #[rhai_fn(get = "id", pure)]
+    pub(crate) fn supergraph_deferred_response_id_get(
+        obj: &mut SharedMut<supergraph::DeferredResponse>,
+    ) -> String {
+        obj.with_mut(|response| response.context.id.clone())
+    }
     #[rhai_fn(set = "context", return_raw)]
     pub(crate) fn supergraph_deferred_response_context_set(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
@@ -488,6 +518,12 @@ mod router_context {
         obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(get = "id", pure)]
+    pub(crate) fn execution_deferred_response_id_get(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> String {
+        obj.with_mut(|response| response.context.id.clone())
     }
     #[rhai_fn(set = "context", return_raw)]
     pub(crate) fn execution_deferred_response_context_set(
@@ -1267,6 +1303,32 @@ macro_rules! register_rhai_router_interface {
                 }
             );
 
+            // Id
+            $engine.register_get(
+                "id",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> String {
+                    obj.with_mut(|request| request.context.id.clone())
+                }
+            )
+            .register_get(
+                "id",
+                |obj: &mut SharedMut<$base::ChunkedRequest>| -> String {
+                    obj.with_mut(|request| request.context.id.clone())
+                }
+            )
+            .register_get(
+                "id",
+                |obj: &mut SharedMut<$base::Response>| -> String {
+                    obj.with_mut(|response| response.context.id.clone())
+                }
+            )
+            .register_get(
+                "id",
+                |obj: &mut SharedMut<$base::DeferredResponse>| -> String {
+                    obj.with_mut(|response| response.context.id.clone())
+                }
+            );
+
             // Originating Request
             $engine.register_get(
                 "headers",
@@ -1386,6 +1448,20 @@ macro_rules! register_rhai_interface {
                 |obj: &mut SharedMut<$base::Response>, context: Context| {
                     obj.with_mut(|response| response.context = context);
                     Ok(())
+                }
+            );
+
+            // Id
+            $engine.register_get(
+                "id",
+                |obj: &mut SharedMut<$base::Request>| -> String {
+                    obj.with_mut(|request| request.context.id.clone())
+                }
+            )
+            .register_get(
+                "id",
+                |obj: &mut SharedMut<$base::Response>| -> String {
+                    obj.with_mut(|response| response.context.id.clone())
                 }
             );
 

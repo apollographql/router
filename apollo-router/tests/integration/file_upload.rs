@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
-use http::{header::CONTENT_TYPE, HeaderValue};
+use http::header::CONTENT_TYPE;
+use http::HeaderValue;
 use tower::BoxError;
 
 #[path = "../common.rs"]
@@ -253,7 +254,8 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_fails_invalid_multipart_order() -> Result<(), BoxError> {
-    use reqwest::multipart::{Form, Part};
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
 
     // Construct a manual multipart request out of order
     // Note: The order is wrong, but the parts follow the spec
@@ -300,7 +302,8 @@ async fn it_fails_invalid_multipart_order() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
-    use reqwest::multipart::{Form, Part};
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
 
     // Construct a manual multipart request with files out of order
     let request = Form::new()
@@ -368,7 +371,10 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
 
     // Remove the boundary from the request to fail
     fn strip_boundary(mut req: reqwest::Request) -> reqwest::Request {
-        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("multipart/form-data"));
+        req.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data"),
+        );
 
         req
     }
@@ -399,7 +405,8 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
-    use reqwest::multipart::{Form, Part};
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
 
     // Construct a manual multipart request with files out of order
     let request = Form::new()

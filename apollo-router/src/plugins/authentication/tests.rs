@@ -4,6 +4,7 @@ use std::path::Path;
 
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use insta::assert_yaml_snapshot;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::CommonParameters;
@@ -16,9 +17,12 @@ use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use serde::Serialize;
 use serde_json::Value;
+use tracing::subscriber;
 
 use super::*;
+use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
+use crate::plugins::authentication::jwks::parse_jwks;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
@@ -622,7 +626,7 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::HS256, key.common.key_algorithm.unwrap());
     assert_eq!("key2", key.common.key_id.unwrap());
 }
 
@@ -639,7 +643,7 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::HS256, key.common.key_algorithm.unwrap());
     assert_eq!("key1", key.common.key_id.unwrap());
 }
 
@@ -668,7 +672,7 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::ES256, key.common.key_algorithm.unwrap());
     assert_eq!(
         "afda85e09a320cf748177874592de64d",
         key.common.key_id.unwrap()
@@ -688,7 +692,7 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::RS256, key.common.key_algorithm.unwrap());
     assert_eq!(
         "022516583d56b68faf40260fda72978a",
         key.common.key_id.unwrap()
@@ -731,7 +735,7 @@ async fn issuer_check() {
         common: CommonParameters {
             public_key_use: Some(PublicKeyUse::Signature),
             key_operations: Some(vec![KeyOperations::Verify]),
-            algorithm: Some(Algorithm::ES256),
+            key_algorithm: Some(KeyAlgorithm::ES256),
             key_id: Some("hello".to_string()),
             ..Default::default()
         },
@@ -763,7 +767,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             panic!("unexpected response: {res:?}");
         }
@@ -796,7 +800,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -836,7 +840,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -871,7 +875,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -1051,4 +1055,12 @@ async fn it_accepts_rsa_key_without_alg() {
     };
 
     assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[test]
+fn test_parse_failure_logs() {
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let jwks = parse_jwks(include_str!("testdata/jwks.json")).expect("expected to parse jwks");
+        assert_yaml_snapshot!(jwks);
+    });
 }

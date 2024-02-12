@@ -766,7 +766,7 @@ pub(crate) struct Limits {
 
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
-    pub(crate) experimental_http_max_request_bytes: usize,
+    pub(crate) http_max_request_bytes: usize,
 }
 
 impl Default for Limits {
@@ -778,7 +778,7 @@ impl Default for Limits {
             max_root_fields: None,
             max_aliases: None,
             warn_only: false,
-            experimental_http_max_request_bytes: 2_000_000,
+            http_max_request_bytes: 2_000_000,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
@@ -848,13 +848,36 @@ impl Default for Apq {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
-    pub(crate) experimental_cache: Cache,
+    pub(crate) cache: Cache,
     /// Warms up the cache on reloads by running the query plan over
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
     /// the in memory cache
     #[serde(default)]
     pub(crate) warmed_up_queries: Option<usize>,
+
+    /// Sets a limit to the number of generated query plans.
+    /// The planning process generates many different query plans as it
+    /// explores the graph, and the list can grow large. By using this
+    /// limit, we prevent that growth and still get a valid query plan,
+    /// but it may not be the optimal one.
+    ///
+    /// The default limit is set to 10000, but it may change in the future
+    pub(crate) experimental_plans_limit: Option<u32>,
+
+    /// Before creating query plans, for each path of fields in the query we compute all the
+    /// possible options to traverse that path via the subgraphs. Multiple options can arise because
+    /// fields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions
+    /// and interfaces) returned by fields sometimes require the query planner to traverse through
+    /// each constituent object type. The number of options generated in this computation can grow
+    /// large if the schema or query are sufficiently complex, and that will increase the time spent
+    /// planning.
+    ///
+    /// This config allows specifying a per-path limit to the number of options considered. If any
+    /// path's options exceeds this limit, query planning will abort and the operation will fail.
+    ///
+    /// The default value is None, which specifies no limit.
+    pub(crate) experimental_paths_limit: Option<u32>,
 }
 
 /// Cache configuration
@@ -890,6 +913,11 @@ pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
 
+    /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
+    pub(crate) username: Option<String>,
+    /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
+    pub(crate) password: Option<String>,
+
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
@@ -899,6 +927,9 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// TTL for entries
     pub(crate) ttl: Option<Duration>,
+
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
 
     #[serde(default)]
     /// TLS client configuration

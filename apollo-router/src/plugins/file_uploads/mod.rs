@@ -1,5 +1,3 @@
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -19,6 +17,8 @@ use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
@@ -32,21 +32,19 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::config::FileUploadsConfig;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::file_uploads::error::FileUploadError;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
 use crate::register_plugin;
+use crate::services::execution;
 use crate::services::execution::QueryPlan;
 use crate::services::router;
-
-use crate::layers::ServiceBuilderExt;
-use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
-
-use self::config::FileUploadsConfig;
 
 mod config;
 mod error;
@@ -164,7 +162,7 @@ async fn extract_operations(req: router::Request) -> UploadResult<router::Reques
         );
 
         req.context
-            .private_entries
+            .extensions()
             .lock()
             .insert(ServiceLayerResult { multipart });
 
@@ -192,7 +190,7 @@ struct ServiceLayerResult {
 async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
     let service_layer_result = req
         .context
-        .private_entries
+        .extensions()
         .lock()
         .remove::<ServiceLayerResult>();
 
@@ -259,7 +257,7 @@ async fn extract_map(mut req: supergraph::Request) -> supergraph::Request {
         }
 
         req.context
-            .private_entries
+            .extensions()
             .lock()
             .insert(SupergraphLayerResult {
                 multipart: Arc::new(Mutex::new(multipart)),
@@ -298,7 +296,7 @@ struct SupergraphLayerResult {
 async fn rearange_execution_plan(mut req: execution::Request) -> execution::Request {
     let supergraph_result = req
         .context
-        .private_entries
+        .extensions()
         .lock()
         .get::<SupergraphLayerResult>()
         .cloned();
@@ -480,7 +478,7 @@ fn rearrange_plan_node<'a>(
 async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
     let supergraph_result = req
         .context
-        .private_entries
+        .extensions()
         .lock()
         .get::<SupergraphLayerResult>()
         .cloned();
@@ -536,26 +534,27 @@ struct SubgraphHttpRequestExtensions {
 }
 
 use tower::Service;
-use tower_http::decompression::DecompressionBody;
-
-use crate::services::subgraph_service::HTTPClientService;
 
 const APOLLO_REQUIRE_PREFLIGHT: http::HeaderName =
     HeaderName::from_static("apollo-require-preflight");
 const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
 pub(crate) async fn wrap_http_client_call(
-    mut client: HTTPClientService,
-    mut request: http::Request<hyper::Body>,
-) -> Result<http::Response<DecompressionBody<hyper::Body>>, hyper::Error> {
-    let supergraph_result = request.extensions_mut().remove();
+    mut client: crate::services::http::BoxService,
+    mut http_request: crate::services::http::HttpRequest,
+) -> Result<crate::services::http::HttpResponse, BoxError> {
+    let supergraph_result = http_request.http_request.extensions_mut().remove();
     if let Some(supergraph_result) = supergraph_result {
         let SubgraphHttpRequestExtensions {
             multipart,
             map_field,
         } = supergraph_result;
 
-        let (mut request_parts, request_body) = request.into_parts();
+        let crate::services::http::HttpRequest {
+            http_request,
+            context,
+        } = http_request;
+        let (mut request_parts, request_body) = http_request.into_parts();
 
         let form = MultipartFormData::new();
         request_parts
@@ -592,10 +591,15 @@ pub(crate) async fn wrap_http_client_call(
             .chain(last);
 
         let request_body = hyper::Body::wrap_stream(new_body);
-        let request = http::Request::from_parts(request_parts, request_body);
-        return client.call(request).await;
+        let http_request = http::Request::from_parts(request_parts, request_body);
+        return client
+            .call(crate::services::http::HttpRequest {
+                http_request,
+                context,
+            })
+            .await;
     }
-    client.call(request).await
+    client.call(http_request).await
 }
 
 struct MultipartFileStream {

@@ -36,7 +36,7 @@ pub(crate) enum MultipartRequestMode {
     /// In practice, this means that certain queries will fail due to ordering of the
     /// files.
     #[default]
-    Stream
+    Stream,
 }
 
 /// Configuration for a multipart request for file uploads.
