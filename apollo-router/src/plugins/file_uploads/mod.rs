@@ -33,13 +33,13 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::file_uploads::error::FileUploadError;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
-use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
-use crate::services::http::HttpRequest;
 use crate::services::execution::QueryPlan;
+use crate::services::http::HttpRequest;
 use crate::services::router;
 
 use crate::layers::ServiceBuilderExt;

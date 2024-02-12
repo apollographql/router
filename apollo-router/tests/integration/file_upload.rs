@@ -368,7 +368,10 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
 
     // Remove the boundary from the request to fail
     fn strip_boundary(mut req: reqwest::Request) -> reqwest::Request {
-        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("multipart/form-data"));
+        req.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data"),
+        );
 
         req
     }
