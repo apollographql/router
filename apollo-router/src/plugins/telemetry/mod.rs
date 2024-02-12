@@ -357,9 +357,9 @@ impl Plugin for Telemetry {
                         ),
                     ]);
 
-                    custom_attributes
+                    (custom_attributes, request.context.clone())
                 },
-                move |custom_attributes: LinkedList<KeyValue>, fut| {
+                move |(custom_attributes, ctx): (LinkedList<KeyValue>, Context), fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
 
@@ -421,7 +421,11 @@ impl Plugin for Telemetry {
                             span.set_dyn_attributes(
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
-                            config.instrumentation.instruments.router.on_error(err);
+                            config
+                                .instrumentation
+                                .instruments
+                                .router
+                                .on_error(err, &ctx);
                         }
 
                         response
@@ -586,6 +590,11 @@ impl Plugin for Telemetry {
                         .subgraph
                         .attributes
                         .on_request(sub_request);
+                    config
+                        .instrumentation
+                        .instruments
+                        .subgraph
+                        .on_request(sub_request);
 
                     (sub_request.context.clone(), custom_attributes)
                 },
@@ -615,6 +624,7 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
+                                conf.instrumentation.instruments.subgraph.on_response(resp);
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, "Error");
@@ -622,6 +632,10 @@ impl Plugin for Telemetry {
                                 span.set_dyn_attributes(
                                     conf.instrumentation.spans.subgraph.attributes.on_error(err),
                                 );
+                                conf.instrumentation
+                                    .instruments
+                                    .subgraph
+                                    .on_error(err, &context);
                             }
                         }
 
