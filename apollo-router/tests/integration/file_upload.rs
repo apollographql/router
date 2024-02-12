@@ -36,22 +36,16 @@ async fn it_uploads_a_single_file() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // Make sure that it succeeded
-            assert_eq!(response.errors, Vec::new());
-
-            // Make sure that we get back the file
-            let upload_response = response
-                .data
-                .expect("empty GraphQL response from subgraph")
-                .get("file0")
-                .cloned()
-                .take()
-                .expect("invalid response from subgraph");
-            let upload: helper::Upload = serde_json_bytes::value::from_value(upload_response)
-                .expect("invalid upload response from subgraph");
-
-            assert_eq!(upload.filename, Some(FILE_NAME.into()));
-            assert_eq!(upload.body, Some(FILE.into()));
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "example.txt",
+                  "body": "Hello, world!"
+                }
+              }
+            }
+            "###);
         })
         .await
 }
@@ -66,14 +60,16 @@ async fn it_uploads_multiple_files() -> Result<(), BoxError> {
             "
             message: |
                 Hello, world!
-        ",
+        "
+            .trim(),
         ),
         (
             "example.toml",
             "
             [message]
             Hello, world!
-        ",
+        "
+            .trim(),
         ),
     ]);
 
@@ -93,21 +89,28 @@ async fn it_uploads_multiple_files() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(move |response| {
-            assert_eq!(response.errors, Vec::new());
-
-            let upload_response = response.data.expect("empty GraphQL response from subgraph");
-            let upload_response = upload_response.as_object().unwrap();
-
-            for (index, (&name, &file)) in files.iter().enumerate() {
-                let response = upload_response
-                    .get(format!("file{index}").as_str())
-                    .expect("missing file in response");
-                let response: helper::Upload = serde_json_bytes::from_value(response.to_owned())
-                    .expect("invalid upload response");
-
-                assert_eq!(response.filename, Some(name.into()));
-                assert_eq!(response.body, Some(file.into()));
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "example.json",
+                  "body": "{ \"message\": \"Hello, world!\" }"
+                },
+                "file1": {
+                  "filename": "example.toml",
+                  "body": "[message]\n            Hello, world!"
+                },
+                "file2": {
+                  "filename": "example.txt",
+                  "body": "Hello, world!"
+                },
+                "file3": {
+                  "filename": "example.yaml",
+                  "body": "message: |\n                Hello, world!"
+                }
+              }
             }
+            "###);
         })
         .await
 }
@@ -139,8 +142,16 @@ async fn it_uploads_a_massive_file() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // We just want to make sure that the file was processed correctly
-            assert_eq!(response.errors, Vec::new());
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "fat.payload.bin",
+                  "body": "successfully verified all bytes as '0xAA'"
+                }
+              }
+            }
+            "###);
         })
         .await
 }
@@ -157,20 +168,9 @@ async fn it_fails_upload_without_file() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // We should get back an error from the supergraph
-            assert_eq!(
-                response.errors.len(),
-                1,
-                "expected only a supergraph error but got {}: {:?}",
-                response.errors.len(),
-                response
-                    .errors
-                    .into_iter()
-                    .map(|err| err.message)
-                    .collect::<Vec<_>>()
-            );
-
-            // TODO: Verify that the error is the correct kind when error handling exists for the plugin
+            insta::assert_json_snapshot!(response, @r###"
+                TODO: Currently panics
+            "###);
         })
         .await
 }
@@ -195,20 +195,9 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // We should get back an error from the supergraph
-            assert_eq!(
-                response.errors.len(),
-                1,
-                "expected only a supergraph error but got {}: {:?}",
-                response.errors.len(),
-                response
-                    .errors
-                    .into_iter()
-                    .map(|err| err.message)
-                    .collect::<Vec<_>>()
-            );
-
-            // TODO: Check that error is correct once we have concrete error handling in the plugin
+            insta::assert_json_snapshot!(response, @r###"
+                TODO: Currently does not error at supergraph
+            "###);
         })
         .await
 }
@@ -234,20 +223,9 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // We should get back an error from the supergraph
-            assert_eq!(
-                response.errors.len(),
-                1,
-                "expected only a supergraph error but got {}: {:?}",
-                response.errors.len(),
-                response
-                    .errors
-                    .into_iter()
-                    .map(|err| err.message)
-                    .collect::<Vec<_>>()
-            );
-
-            // TODO: Check that error is correct once we have concrete error handling in the plugin
+            insta::assert_json_snapshot!(response, @r###"
+                TODO: Currently does not error at supergraph
+            "###);
         })
         .await
 }
@@ -282,20 +260,9 @@ async fn it_fails_invalid_multipart_order() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // We should get back an error from the supergraph
-            assert_eq!(
-                response.errors.len(),
-                1,
-                "expected only a supergraph error but got {}: {:?}",
-                response.errors.len(),
-                response
-                    .errors
-                    .into_iter()
-                    .map(|err| err.message)
-                    .collect::<Vec<_>>()
-            );
-
-            // TODO: Check that error is correct once we have concrete error handling in the plugin
+            insta::assert_json_snapshot!(response, @r###"
+                TODO: Currently panics
+            "###);
         })
         .await
 }
@@ -343,20 +310,9 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // We should get back an error from the supergraph
-            assert_eq!(
-                response.errors.len(),
-                1,
-                "expected only a supergraph error but got {}: {:?}",
-                response.errors.len(),
-                response
-                    .errors
-                    .into_iter()
-                    .map(|err| err.message)
-                    .collect::<Vec<_>>()
-            );
-
-            // TODO: Add check that error is correct when error handling is added to the plugin
+            insta::assert_json_snapshot!(response, @r###"
+                TODO: Currently does not error at supergraph
+            "###);
         })
         .await
 }
@@ -387,18 +343,18 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
         .transformer(strip_boundary)
         .build()
         .run_test(|response| {
-            // We should get back an error from the supergraph
-            assert_eq!(
-                response.errors.len(),
-                1,
-                "expected only a supergraph error but got {}: {:?}",
-                response.errors.len(),
-                response
-                    .errors
-                    .into_iter()
-                    .map(|err| err.message)
-                    .collect::<Vec<_>>()
-            );
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "errors": [
+                {
+                  "message": "invalid multipart request: multipart boundary not found in Content-Type",
+                  "extensions": {
+                    "code": "FILE_UPLOAD"
+                  }
+                }
+              ]
+            }
+            "###);
         })
         .await
 }
@@ -408,19 +364,17 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
     use reqwest::multipart::Form;
     use reqwest::multipart::Part;
 
-    // Construct a manual multipart request with files out of order
+    // Construct a manual multipart request with an impossible file order
+    // Note: With the `stream` mode of file upload this order is impossible since
+    // the second file needs to be processed first
     let request = Form::new()
         .part(
             "operations",
             Part::text(
                 serde_json::json!({
                     "query": "mutation SomeMutation($file0: Upload, $file1: Upload) {
-                        uploadFile2(arg1: $file1) {
-                          id
-                        }
-                        uploadFile1(arg2: $file0) {
-                          id
-                        }
+                        first: singleUpload(file: $file1) { filename }
+                        second: singleUpload(file: $file0) { filename }
                     }",
                     "variables": {
                         "file0": null,
@@ -450,20 +404,9 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
         .request(request)
         .build()
         .run_test(|response| {
-            // We should get back an error from the supergraph
-            assert_eq!(
-                response.errors.len(),
-                1,
-                "expected only a supergraph error but got {}: {:?}",
-                response.errors.len(),
-                response
-                    .errors
-                    .into_iter()
-                    .map(|err| err.message)
-                    .collect::<Vec<_>>()
-            );
-
-            // TODO: Add check that error is correct when error handling is added to the plugin
+            insta::assert_json_snapshot!(response, @r###"
+                TODO: Currently does not error at supergraph
+            "###);
         })
         .await
 }
@@ -825,6 +768,7 @@ mod helper {
             .next_field()
             .await?
             .ok_or(FileUploadError::MissingFile("verification stream".into()))?;
+        let file_name = file.file_name().unwrap_or("file0").to_string();
 
         let mut count = 0;
         while let Some(chunk) = file.chunk().await? {
@@ -857,8 +801,8 @@ mod helper {
         Ok(Json(json!({
             "data": {
                 "file0": Upload {
-                    filename: Some("streamed".into()),
-                    body: Some("successfully verified".into()),
+                    filename: Some(file_name),
+                    body: Some(format!("successfully verified all bytes as '{byte_value:#X}'")),
                 }
             }
         })))
