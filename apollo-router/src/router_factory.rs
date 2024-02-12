@@ -27,6 +27,7 @@ use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::plugins::traffic_shaping::TrafficShapingSubgraph;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::services::apollo_graph_reference;
@@ -37,7 +38,6 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
-use crate::services::subgraph;
 use crate::services::transport;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
@@ -338,17 +338,7 @@ pub(crate) async fn create_subgraph_services(
 ) -> Result<
     IndexMap<
         String,
-        impl Service<
-                subgraph::Request,
-                Response = subgraph::Response,
-                Error = BoxError,
-                Future = crate::plugins::traffic_shaping::TrafficShapingSubgraphFuture<
-                    SubgraphService,
-                >,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
+        TrafficShapingSubgraph<SubgraphService>,
     >,
     BoxError,
 > {

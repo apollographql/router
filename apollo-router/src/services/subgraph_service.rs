@@ -43,6 +43,8 @@ use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::MockSubgraphService;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
@@ -53,6 +55,8 @@ use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+use crate::plugins::traffic_shaping::set_plugins;
+use crate::plugins::traffic_shaping::TrafficShapingSubgraph;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
@@ -1001,20 +1005,30 @@ impl SubgraphServiceFactory {
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
     fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+    fn set_http_plugins(&mut self, plugins: Arc<Plugins>);
 }
 
-impl<S> MakeSubgraphService for S
-where
-    S: Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<SubgraphRequest>>::Future: Send,
-{
+impl MakeSubgraphService for TrafficShapingSubgraph<SubgraphService> {
     fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.clone().boxed()
     }
+    fn set_http_plugins(&mut self, plugins: Arc<Plugins>) {
+        set_plugins(self, plugins);
+    }
+}
+
+impl MakeSubgraphService for MockSubgraph {
+    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        self.clone().boxed()
+    }
+    fn set_http_plugins(&mut self, _plugins: Arc<Plugins>) {}
+}
+
+impl MakeSubgraphService for MockSubgraphService {
+    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        self.clone().boxed()
+    }
+    fn set_http_plugins(&mut self, _plugins: Arc<Plugins>) {}
 }
 
 #[cfg(test)]

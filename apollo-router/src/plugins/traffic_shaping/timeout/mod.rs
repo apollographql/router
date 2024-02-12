@@ -24,7 +24,7 @@ pub(crate) use crate::plugins::traffic_shaping::timeout::error::Elapsed;
 /// Applies a timeout to requests.
 #[derive(Debug, Clone)]
 pub(crate) struct Timeout<T: Clone> {
-    inner: T,
+    pub(crate) inner: T,
     timeout: Duration,
 }
 

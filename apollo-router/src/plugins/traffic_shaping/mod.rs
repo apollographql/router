@@ -13,6 +13,7 @@ pub(crate) mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -30,19 +31,21 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use self::deduplication::QueryDeduplicationLayer;
+use self::deduplication::QueryDeduplicationService;
+use self::rate::RateLimit;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
+use self::timeout::Timeout;
 use self::timeout::TimeoutLayer;
 use crate::error::ConfigurationError;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
+use crate::plugin::PluginPrivate;
 use crate::services::http::service::Compression;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::SubgraphRequest;
+use crate::services::Plugins;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -226,7 +229,7 @@ pub(crate) struct TrafficShaping {
 }
 
 #[async_trait::async_trait]
-impl Plugin for TrafficShaping {
+impl PluginPrivate for TrafficShaping {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -261,23 +264,38 @@ impl Plugin for TrafficShaping {
             })
         }
     }
-}
 
-pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
-    Either<
-        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-        timeout::future::ResponseFuture<
-            Oneshot<
-                Either<
-                    Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
-                    Either<rate::service::RateLimit<S>, S>,
-                >,
-                subgraph::Request,
-            >,
-        >,
-    >,
-    <S as Service<subgraph::Request>>::Future,
->;
+    fn http_client_service(
+        &self,
+        name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        let all_config = self.config.all.as_ref();
+        let subgraph_config = self.config.subgraphs.get(name);
+        let final_config = Self::merge_config(all_config, subgraph_config);
+
+        if let Some(config) = final_config {
+            println!("creating http client service for include_subgraph_errors for {name}");
+            service
+                .map_request(move |mut req: crate::services::http::HttpRequest| {
+                    if let Some(compression) = config.shaping.compression {
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string())
+                    .expect(
+                    "compression is manually implemented and already have the right values; qed",
+                );
+                        req.http_request
+                            .headers_mut()
+                            .insert(CONTENT_ENCODING, compression_header_val);
+                    }
+
+                    req
+                })
+                .boxed()
+        } else {
+            service
+        }
+    }
+}
 
 impl TrafficShaping {
     fn merge_config<T: Merge + Clone>(
@@ -326,15 +344,7 @@ impl TrafficShaping {
         &self,
         name: &str,
         service: S,
-    ) -> impl Service<
-        subgraph::Request,
-        Response = subgraph::Response,
-        Error = BoxError,
-        Future = TrafficShapingSubgraphFuture<S>,
-    > + Clone
-           + Send
-           + Sync
-           + 'static
+    ) -> TrafficShapingSubgraph<S>
     where
         S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
             + Clone
@@ -375,27 +385,29 @@ impl TrafficShaping {
                 tower::retry::RetryLayer::new(retry_policy)
             });
 
-            Either::A(ServiceBuilder::new()
-
-                .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
-                  QueryDeduplicationLayer::default
-                ))
+            Either::A(
+                ServiceBuilder::new()
+                    .option_layer(
+                        config
+                            .shaping
+                            .deduplicate_query
+                            .unwrap_or_default()
+                            .then(QueryDeduplicationLayer::default),
+                    )
                     .layer(TimeoutLayer::new(
-                        config.shaping
-                        .timeout
-                        .unwrap_or(DEFAULT_TIMEOUT),
+                        config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
                     ))
                     .option_layer(retry)
                     .option_layer(rate_limit)
-                .service(service)
-                .map_request(move |mut req: SubgraphRequest| {
-                    if let Some(compression) = config.shaping.compression {
-                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
-                    }
+                    .service(service), /*.map_request(move |mut req: SubgraphRequest| {
+                                           if let Some(compression) = config.shaping.compression {
+                                               let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                                               req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                                           }
 
-                    req
-                }))
+                                           req
+                                       })*/
+            )
         } else {
             Either::B(service)
         }
@@ -411,7 +423,63 @@ impl TrafficShaping {
     }
 }
 
-register_plugin!("apollo", "traffic_shaping", TrafficShaping);
+pub(crate) type TrafficShapingSubgraph<S> = Either<
+    Either<
+        QueryDeduplicationService<
+            Timeout<Either<Retry<RetryPolicy, Either<RateLimit<S>, S>>, Either<RateLimit<S>, S>>>,
+        >,
+        Timeout<Either<Retry<RetryPolicy, Either<RateLimit<S>, S>>, Either<RateLimit<S>, S>>>,
+    >,
+    S,
+>;
+
+// this serie of functions is used to set the plugins list in the HTTP client service factory in subgraph services
+pub(crate) fn set_plugins(
+    s: &mut TrafficShapingSubgraph<crate::services::SubgraphService>,
+    plugins: Arc<Plugins>,
+) {
+    println!("SET PLUGINS");
+    match s {
+        Either::A(e) => match e {
+            Either::A(dedup) => set_plugins2(&mut dedup.service, plugins),
+            Either::B(s) => set_plugins2(s, plugins),
+        },
+        Either::B(service) => service.client_factory.plugins = plugins,
+    }
+}
+
+fn set_plugins2(
+    s: &mut Timeout<
+        Either<
+            Retry<
+                RetryPolicy,
+                Either<
+                    RateLimit<crate::services::SubgraphService>,
+                    crate::services::SubgraphService,
+                >,
+            >,
+            Either<RateLimit<crate::services::SubgraphService>, crate::services::SubgraphService>,
+        >,
+    >,
+    plugins: Arc<Plugins>,
+) {
+    match &mut s.inner {
+        Either::A(r) => set_plugins3(r.get_mut(), plugins),
+        Either::B(s) => set_plugins3(s, plugins),
+    }
+}
+
+fn set_plugins3(
+    s: &mut Either<RateLimit<crate::services::SubgraphService>, crate::services::SubgraphService>,
+    plugins: Arc<Plugins>,
+) {
+    match s {
+        Either::A(r) => r.inner.client_factory.plugins = plugins,
+        Either::B(service) => service.client_factory.plugins = plugins,
+    }
+}
+
+register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
@@ -422,7 +490,9 @@ mod test {
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use subgraph::Request as SubgraphRequest;
     use tower::Service;
+    use tower::ServiceExt;
 
     use super::*;
     use crate::json_ext::Object;

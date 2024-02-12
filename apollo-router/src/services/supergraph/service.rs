@@ -64,7 +64,6 @@ use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
-use crate::services::SubgraphService;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -722,12 +721,12 @@ impl PluggableSupergraphServiceBuilder {
         }
 
         let plugins = Arc::new(plugins);
+
         for (_, service) in self.subgraph_services.iter_mut() {
-            if let Some(subgraph) =
-                (service as &mut dyn std::any::Any).downcast_mut::<SubgraphService>()
-            {
-                subgraph.client_factory.plugins = plugins.clone();
-            }
+            // we need to set the list of services here instead of when creating the HTTP service,
+            // because at that point, the list of plugins is not yet an Arc<Plugins>, because we first
+            // need to create all the subgraphs, and then activate telemetry (just above)
+            service.set_http_plugins(plugins.clone());
         }
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
