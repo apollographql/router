@@ -62,12 +62,10 @@ mod test {
 
         let current_dir = env::current_dir().unwrap();
         // Scaffold the main project
-        let opts = Opts::builder()
+        let opts = Opts::builder(PathBuf::from("templates").join("base"))
             .project_name("temp")
             .target_dir(temp_dir.path())
-            .template_path(PathBuf::from("templates").join("base"))
-            .force(true)
-            .build();
+            .force(true);
         ScaffoldDescription::new(opts)
             .unwrap()
             .scaffold_with_parameters(BTreeMap::from([(
@@ -118,12 +116,10 @@ mod test {
     }
 
     fn scaffold_plugin(current_dir: &Path, dir: &TempDir, plugin_type: &str) -> Result<()> {
-        let opts = Opts::builder()
+        let opts = Opts::builder(PathBuf::from("templates").join("plugin"))
             .project_name(plugin_type)
             .target_dir(dir.path())
-            .append(true)
-            .template_path(PathBuf::from("templates").join("plugin"))
-            .build();
+            .append(true);
         ScaffoldDescription::new(opts)?.scaffold_with_parameters(BTreeMap::from([
             (
                 format!("type_{plugin_type}"),
