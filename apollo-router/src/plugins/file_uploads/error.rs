@@ -1,5 +1,6 @@
-use crate::graphql;
 use thiserror::Error;
+
+use crate::graphql;
 
 /// Errors that may occur during file upload
 #[derive(Debug, Error)]

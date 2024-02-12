@@ -1,5 +1,3 @@
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -19,6 +17,8 @@ use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
@@ -32,22 +32,18 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::config::FileUploadsConfig;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::file_uploads::error::FileUploadError;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
-use crate::register_private_plugin;
-use crate::services::execution::QueryPlan;
-use crate::services::http::HttpRequest;
-use crate::services::router;
-
-use crate::layers::ServiceBuilderExt;
 use crate::services::execution;
+use crate::services::execution::QueryPlan;
+use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-
-use self::config::FileUploadsConfig;
 
 mod config;
 mod error;
@@ -138,7 +134,7 @@ impl PluginPrivate for FileUploadsPlugin {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: HttpRequest| {
+            .oneshot_checkpoint_async(|req: crate::services::http::HttpRequest| {
                 send_multipart_request(req)
                     .boxed()
                     .map(|req| Ok(ControlFlow::Continue(req)))
@@ -556,7 +552,9 @@ const APOLLO_REQUIRE_PREFLIGHT: http::HeaderName =
     HeaderName::from_static("apollo-require-preflight");
 const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
-async fn send_multipart_request(mut req: HttpRequest) -> HttpRequest {
+async fn send_multipart_request(
+    mut req: crate::services::http::HttpRequest,
+) -> crate::services::http::HttpRequest {
     let supergraph_result = req.http_request.extensions_mut().remove();
     if let Some(supergraph_result) = supergraph_result {
         let SubgraphHttpRequestExtensions {
