@@ -127,22 +127,6 @@ impl PluginPrivate for FileUploadsPlugin {
             .service(service)
             .boxed()
     }
-
-    fn http_client_service(
-        &self,
-        _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
-        ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: crate::services::http::HttpRequest| {
-                send_multipart_request(req)
-                    .boxed()
-                    .map(|req| Ok(ControlFlow::Continue(req)))
-                    .boxed()
-            })
-            .service(service)
-            .boxed()
-    }
 }
 
 fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
@@ -548,21 +532,28 @@ struct SubgraphHttpRequestExtensions {
     map_field: MapField,
 }
 
+use tower::Service;
+
 const APOLLO_REQUIRE_PREFLIGHT: http::HeaderName =
     HeaderName::from_static("apollo-require-preflight");
 const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
-async fn send_multipart_request(
-    mut req: crate::services::http::HttpRequest,
-) -> crate::services::http::HttpRequest {
-    let supergraph_result = req.http_request.extensions_mut().remove();
+pub(crate) async fn wrap_http_client_call(
+    mut client: crate::services::http::BoxService,
+    mut http_request: crate::services::http::HttpRequest,
+) -> Result<crate::services::http::HttpResponse, BoxError> {
+    let supergraph_result = http_request.http_request.extensions_mut().remove();
     if let Some(supergraph_result) = supergraph_result {
         let SubgraphHttpRequestExtensions {
             multipart,
             map_field,
         } = supergraph_result;
 
-        let (mut request_parts, request_body) = req.http_request.into_parts();
+        let crate::services::http::HttpRequest {
+            http_request,
+            context,
+        } = http_request;
+        let (mut request_parts, request_body) = http_request.into_parts();
 
         let form = MultipartFormData::new();
         request_parts
@@ -599,9 +590,15 @@ async fn send_multipart_request(
             .chain(last);
 
         let request_body = hyper::Body::wrap_stream(new_body);
-        req.http_request = http::Request::from_parts(request_parts, request_body);
+        let http_request = http::Request::from_parts(request_parts, request_body);
+        return client
+            .call(crate::services::http::HttpRequest {
+                http_request,
+                context,
+            })
+            .await;
     }
-    req
+    client.call(http_request).await
 }
 
 struct MultipartFileStream {

@@ -44,6 +44,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::HeartbeatInterval;
@@ -810,8 +811,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: crate::services::http::BoxService,
-
+    client: crate::services::http::BoxService,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
@@ -825,20 +825,22 @@ async fn do_fetch(
     FetchError,
 > {
     let _active_request_guard = context.enter_active_request();
-    let response = client
-        .call(HttpRequest {
+    let response = file_uploads::wrap_http_client_call(
+        client,
+        HttpRequest {
             http_request: request,
             context: context.clone(),
-        })
-        .map_err(|err| {
-            tracing::error!(fetch_error = ?err);
-            FetchError::SubrequestHttpError {
-                status_code: None,
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            }
-        })
-        .await?;
+        },
+    )
+    .map_err(|err| {
+        tracing::error!(fetch_error = ?err);
+        FetchError::SubrequestHttpError {
+            status_code: None,
+            service: service_name.to_string(),
+            reason: err.to_string(),
+        }
+    })
+    .await?;
 
     let (parts, body) = response.http_response.into_parts();
 
