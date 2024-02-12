@@ -216,9 +216,51 @@ impl YamlRouterFactory {
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<RouterCreator, BoxError> {
+        let mut supergraph_creator = self
+            .inner_create_supergraph(
+                configuration.clone(),
+                schema,
+                previous_router.map(|router| &*router.supergraph_creator),
+                initial_telemetry_plugin,
+                extra_plugins,
+            )
+            .await?;
+        // Instantiate the parser here so we can use it to warm up the planner below
+        let query_analysis_layer =
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
+
+        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
+
+        if let Some(previous_router) = previous_router {
+            let cache_keys = previous_router
+                .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                .await;
+
+            supergraph_creator
+                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, cache_keys)
+                .await;
+        };
+        RouterCreator::new(
+            query_analysis_layer,
+            persisted_query_layer,
+            Arc::new(supergraph_creator),
+            configuration,
+        )
+        .await
+    }
+
+    pub(crate) async fn inner_create_supergraph<'a>(
+        &'a mut self,
+        configuration: Arc<Configuration>,
+        schema: String,
+        previous_supergraph: Option<&'a SupergraphCreator>,
+        initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
+        let bridge_query_planner = match previous_supergraph.as_ref().map(|router| router.planner())
+        {
             None => {
                 BridgeQueryPlanner::new(schema.clone(), configuration.clone())
                     .instrument(query_planner_span)
@@ -231,12 +273,12 @@ impl YamlRouterFactory {
             }
         };
 
-        let schema_changed = previous_router
-            .map(|router| router.supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+        let schema_changed = previous_supergraph
+            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl.as_ref() == &schema)
             .unwrap_or_default();
 
-        let config_changed = previous_router
-            .map(|router| router.supergraph_creator.config() == configuration)
+        let config_changed = previous_supergraph
+            .map(|supergraph_creator| supergraph_creator.config() == configuration)
             .unwrap_or_default();
 
         if config_changed {
@@ -280,35 +322,9 @@ impl YamlRouterFactory {
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let mut supergraph_creator = builder.build().await?;
+            let supergraph_creator = builder.build().await?;
 
-            // Instantiate the parser here so we can use it to warm up the planner below
-            let query_analysis_layer =
-                QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration))
-                    .await;
-
-            let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
-
-            if let Some(previous_router) = previous_router {
-                let cache_keys = previous_router
-                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
-                    .await;
-
-                supergraph_creator
-                    .warm_up_query_planner(
-                        &query_analysis_layer,
-                        &persisted_query_layer,
-                        cache_keys,
-                    )
-                    .await;
-            };
-            RouterCreator::new(
-                query_analysis_layer,
-                persisted_query_layer,
-                Arc::new(supergraph_creator),
-                configuration,
-            )
-            .await
+            Ok(supergraph_creator)
         }
         .instrument(tracing::info_span!("supergraph_creation"))
         .await
@@ -381,42 +397,6 @@ pub(crate) async fn create_subgraph_services(
     }
 
     Ok(subgraph_services)
-}
-
-impl YamlRouterFactory {
-    pub(crate) async fn create_supergraph<'a>(
-        &'a mut self,
-        configuration: Arc<Configuration>,
-        schema: String,
-        previous_router: Option<&'a SupergraphCreator>,
-        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    ) -> Result<SupergraphCreator, BoxError> {
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
-            None => BridgeQueryPlanner::new(schema.clone(), configuration.clone()).await?,
-            Some(planner) => {
-                BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
-                    .await?
-            }
-        };
-
-        let schema = bridge_query_planner.schema();
-
-        // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema, None, extra_plugins).await?;
-
-        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
-        builder = builder.with_configuration(configuration.clone());
-        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
-        for (name, subgraph_service) in subgraph_services {
-            builder = builder.with_subgraph_service(&name, subgraph_service);
-        }
-        for (plugin_name, plugin) in plugins {
-            builder = builder.with_dyn_plugin(plugin_name, plugin);
-        }
-
-        builder.build().await.map_err(BoxError::from)
-    }
 }
 
 impl TlsClient {
