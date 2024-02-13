@@ -16,7 +16,7 @@ Try out these Enterprise features for free with an [Enterprise trial](/graphos/o
 - **Real-time updates** via [GraphQL subscriptions](./executing-operations/subscription-support/)
 - **Authentication of inbound requests** via [JSON Web Token (JWT)](./configuration/authn-jwt/)
 - [**Authorization** of specific fields and types](./configuration/authorization) through the [`@requiresScopes`](./configuration/authorization#requiresscopes), [`@authenticated`](./configuration/authorization#authenticated), and [`@policy`](./configuration/authorization#policy) directives
-- Redis-backed [**distributed caching** of query plans and persisted queries](./configuration/distributed-caching/)
+- Redis-backed [**distributed caching** of query plans and persisted queries](./configuration/distributed-caching/) and [**subgraph entity caching**](./configuration/entity-caching/)
 - **Custom request handling** in any language via [external coprocessing](./customizations/coprocessor/)
 - **Mitigation of potentially malicious requests** via [operation limits](./configuration/operation-limits) and [safelisting with persisted queries](./configuration/persisted-queries)
 - **Custom instrumentation and telemetry**, including [custom attributes for spans](./configuration/telemetry/instrumentation/spans/#attributes).
@@ -116,7 +116,7 @@ Follow these steps to configure an Apollo Router to use an offline Enterprise li
     * [`APOLLO_SUPERGRAPH_PATH`](./configuration/overview/#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
     * [`APOLLO_SUPERGRAPH_URLS`](./configuration/overview/#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
-1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](../configuration/overview#apollo_graph_ref) environment variables. 
+1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](./configuration/overview#apollo_graph_ref) environment variables. 
 
     These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 

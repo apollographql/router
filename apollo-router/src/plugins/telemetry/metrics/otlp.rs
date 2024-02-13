@@ -1,5 +1,6 @@
 use opentelemetry::runtime;
 use opentelemetry::sdk::metrics::PeriodicReader;
+use opentelemetry::sdk::metrics::View;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
@@ -63,6 +64,11 @@ impl MetricsConfigurator for super::super::otlp::Config {
                             .with_timeout(self.batch_processor.max_export_timeout)
                             .build(),
                     );
+                for metric_view in metrics_config.views.clone() {
+                    let view: Box<dyn View> = metric_view.try_into()?;
+                    builder.public_meter_provider_builder =
+                        builder.public_meter_provider_builder.with_view(view);
+                }
                 Ok(builder)
             }
             None => Err("otlp metric export does not support http yet".into()),
