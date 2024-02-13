@@ -243,7 +243,7 @@ commands:
             - run:
                 name: Install gcc
                 command: |
-                  choco install mingw --version=13.2.0
+                  choco install mingw --version=13.2.0 -y
                   refreshenv
       - when:
           condition:
