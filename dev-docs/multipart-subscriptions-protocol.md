@@ -47,7 +47,7 @@ Content-Type: application/json
 
 When a GraphQL response is received, it is returned in the `payload` field using the [format from the GraphQL spec](https://spec.graphql.org/draft/#sec-Response-Format).
 
-A GraphQL response may contains [errors](https://spec.graphql.org/October2021/#sec-Errors). These errors are not fatal (meaning the subscription stream should be kept open) and are delivered within the payload:
+A GraphQL response may contain [errors](https://spec.graphql.org/October2021/#sec-Errors). These errors are not fatal (meaning the subscription stream should be kept open) and are delivered within the payload:
 
 ```json
 {
