@@ -33,6 +33,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use self::config::FileUploadsConfig;
+use self::config::MultipartRequestLimits;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -54,7 +55,8 @@ type UploadResult<T> = Result<T, error::FileUploadError>;
 // FIXME: check if we need to hide docs
 #[doc(hidden)] // Only public for integration tests
 struct FileUploadsPlugin {
-    config: FileUploadsConfig,
+    enabled: bool,
+    limits: MultipartRequestLimits,
 }
 
 register_private_plugin!("apollo", "preview_file_uploads", FileUploadsPlugin);
@@ -64,12 +66,16 @@ impl PluginPrivate for FileUploadsPlugin {
     type Config = FileUploadsConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(Self {
-            config: init.config,
-        })
+        let config = init.config;
+        let enabled = config.enabled && config.protocols.multipart.enabled;
+        let limits = config.protocols.multipart.limits;
+        Ok(Self { enabled, limits })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        if !self.enabled {
+            return service;
+        }
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: router::Request| {
                 async {
@@ -91,6 +97,9 @@ impl PluginPrivate for FileUploadsPlugin {
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        if !self.enabled {
+            return service;
+        }
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: supergraph::Request| {
                 async {
@@ -112,6 +121,9 @@ impl PluginPrivate for FileUploadsPlugin {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        if !self.enabled {
+            return service;
+        }
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 Ok(ControlFlow::Continue(rearange_execution_plan(req)))
@@ -125,6 +137,9 @@ impl PluginPrivate for FileUploadsPlugin {
         _subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
+        if !self.enabled {
+            return service;
+        }
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: subgraph::Request| {
                 call_subgraph(req)
@@ -576,7 +591,6 @@ pub(crate) async fn wrap_http_client_call(
             (file.headers().clone(), hyper::Body::wrap_stream(file))
         });
         // FIXME: check that operation is not compressed
-        // FIXME: skip unussed files
         let new_body = form
             .field("operations", request_body)
             .chain(form.field("map", map_stream))
@@ -605,7 +619,7 @@ struct MultipartFileStream {
 }
 
 impl Stream for MultipartFileStream {
-    type Item = multer::Result<multer::Field<'static>>;
+    type Item = UploadResult<multer::Field<'static>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
@@ -621,8 +635,11 @@ impl Stream for MultipartFileStream {
                             return Poll::Ready(Some(Ok(field)));
                         }
                     }
+                    // The file is extraneous.
+                    // As the rest can still be processed, just ignore it and don’t exit with an error.
+                    // Matching https://github.com/jaydenseric/graphql-upload/blob/f24d71bfe5be343e65d084d23073c3686a7f4d18/processRequest.mjs#L231-L236
                 }
-                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
+                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
                 Poll::Pending => return Poll::Pending,
             }
         }
