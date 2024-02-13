@@ -261,7 +261,16 @@ async fn it_fails_invalid_multipart_order() -> Result<(), BoxError> {
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
-                TODO: Currently panics
+            {
+              "errors": [
+                {
+                  "message": "Missing multipart field 'operations', it should be a first field in request body.",
+                  "extensions": {
+                    "code": "FILE_UPLOAD"
+                  }
+                }
+              ]
+            }
             "###);
         })
         .await
