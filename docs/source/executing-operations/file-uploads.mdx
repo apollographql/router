@@ -111,7 +111,7 @@ If a request cannot be fulfilled in a streaming fashion, the router returns the 
 
 #### Limits
 
-The router includes limits to prevent denial-of-service attacks.
+The router includes default limits for file uploads to prevent denial-of-service attacks.
 You can configure both the maximum file size and number of files to accept.
 If a request exceeds limits, the router rejects them.
 
@@ -319,7 +319,7 @@ A file upload request may receive the following error responses:
 ##### `UPLOADS_LIMITS_MAX_FILES_EXCEEDED`
 
 </td>
-<td>The number of files in the request exceeded the configured limit.</td>
+<td>The number of files in the request exceeded the configured limit</td>
 </tr>
 <tr>
 <td>
@@ -335,7 +335,7 @@ A file upload request may receive the following error responses:
 ##### `UPLOADS_FILE_MISSING`
 
 </td>
-<td>The operation specified a file that was missing from the request.</td>
+<td>The operation specified a file that was missing from the request</td>
 </tr>
 <tr>
 <td>
@@ -343,7 +343,7 @@ A file upload request may receive the following error responses:
 ##### `UPLOADS_OPERATION_CANNOT_STREAM`
 
 </td>
-<td>The request was invalid as it couldn't be streamed to the client.</td>
+<td>The request was invalid as it couldn't be streamed to the client</td>
 </tr>
 </table>
 
