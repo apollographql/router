@@ -240,6 +240,11 @@ commands:
                   choco install cmake -y
                   echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
                   exit $LASTEXITCODE
+            - run:
+                name: Install gcc
+                command: |
+                  choco install mingw --version=13.2.0
+                  refreshenv
       - when:
           condition:
             or:
