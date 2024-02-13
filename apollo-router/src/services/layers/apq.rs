@@ -88,7 +88,11 @@ async fn apq_request(
             if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                 tracing::trace!("apq: cache insert");
                 let _ = request.context.insert("persisted_query_register", true);
-                cache.insert(redis_key(&query_hash), query).await;
+                let query = query.to_owned();
+                let cache = cache.clone();
+                tokio::spawn(async move {
+                    cache.insert(redis_key(&query_hash), query).await;
+                });
                 Ok(request)
             } else {
                 tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
