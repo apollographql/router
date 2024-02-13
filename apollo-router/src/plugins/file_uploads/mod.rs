@@ -113,10 +113,8 @@ impl PluginPrivate for FileUploadsPlugin {
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: execution::Request| {
-                rearange_execution_plan(req)
-                    .map(|req| Ok(ControlFlow::Continue(req)))
-                    .boxed()
+            .checkpoint(|req: execution::Request| {
+                Ok(ControlFlow::Continue(rearange_execution_plan(req)))
             })
             .service(service)
             .boxed()
@@ -291,8 +289,7 @@ struct SupergraphLayerResult {
     map_per_variable: MapPerVariable,
 }
 
-// FIXME: Remove async???
-async fn rearange_execution_plan(mut req: execution::Request) -> execution::Request {
+fn rearange_execution_plan(mut req: execution::Request) -> execution::Request {
     let supergraph_result = req
         .context
         .extensions()
