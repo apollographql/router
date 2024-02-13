@@ -36,7 +36,13 @@ pub struct Package {
 
 impl Package {
     pub fn run(&self) -> Result<()> {
-        let release_path = TARGET_DIR.join("release").join(RELEASE_BIN);
+        let release_path = match &self.target {
+            None => TARGET_DIR.join("release").join(RELEASE_BIN),
+            Some(target) => TARGET_DIR
+                .join(target.to_string())
+                .join("release")
+                .join(RELEASE_BIN),
+        };
 
         ensure!(
             release_path.exists(),
