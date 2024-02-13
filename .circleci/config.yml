@@ -244,7 +244,8 @@ commands:
                 name: Install gcc
                 command: |
                   choco install mingw --version=13.2.0 -y
-                  refreshenv
+                  echo 'export PATH="/c/ProgramData/mingw64/mingw64/bin:$PATH"' >> "$BASH_ENV"
+
       - when:
           condition:
             or:
