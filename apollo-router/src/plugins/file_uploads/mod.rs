@@ -10,11 +10,11 @@ use std::task::Poll;
 
 use bytes::Bytes;
 use futures::stream::StreamExt;
+use futures::stream::TryStreamExt;
 use futures::FutureExt;
 use futures::Stream;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use indexmap::IndexMap;
@@ -191,8 +191,11 @@ async fn extract_operations(req: router::Request) -> UploadResult<router::Reques
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
+        let request_body = hyper::Body::wrap_stream(
+            operations_field.map_err(|e| FileUploadError::InvalidMultipartRequest(e)),
+        );
         return Ok(router::Request::from((
-            http::Request::from_parts(request_parts, hyper::Body::wrap_stream(operations_field)),
+            http::Request::from_parts(request_parts, request_body),
             req.context,
         )));
     }
@@ -573,28 +576,26 @@ pub(crate) async fn http_request_wrapper(
 
         let multipart = multipart.lock_owned().await;
         let file_names = map_field.into_keys().collect();
-        let files = (MultipartFileStream {
+        let files = MultipartFileStream {
             multipart,
             file_names,
-        })
-        .map(move |field| {
-            // FIXME
-            let file = field.unwrap();
-            (file.headers().clone(), hyper::Body::wrap_stream(file))
-        });
+        };
         // FIXME: check that operation is not compressed
         let new_body = form
             .field("operations", request_body)
             .chain(form.field("map", map_stream))
-            .chain(
-                files
-                    .map(move |(headers, body)| form.file(headers, body))
-                    .flatten(),
-            )
+            .chain(hyper::Body::wrap_stream(files.flat_map(
+                move |field| match field {
+                    Ok(field) => form.file(field).boxed(),
+                    Err(e) => tokio_stream::once(Err(e)).boxed(),
+                },
+            )))
             .chain(last);
 
-        let request_body = hyper::Body::wrap_stream(new_body);
-        return Ok(http::Request::from_parts(request_parts, request_body));
+        return Ok(http::Request::from_parts(
+            request_parts,
+            hyper::Body::wrap_stream(new_body),
+        ));
     }
     Ok(req)
 }
@@ -671,16 +672,15 @@ impl MultipartFormData {
             .chain(tokio_stream::once(Ok("\r\n".into())))
     }
 
-    fn file(
+    fn file<'a>(
         &self,
-        headers: HeaderMap,
-        value_stream: impl Stream<Item = hyper::Result<Bytes>>,
-    ) -> impl Stream<Item = hyper::Result<Bytes>> {
+        field: multer::Field<'static>,
+    ) -> impl Stream<Item = UploadResult<Bytes>> + 'a {
         let mut prefix = Vec::new();
         prefix.extend_from_slice(b"--");
         prefix.extend_from_slice(self.boundary.as_bytes());
         prefix.extend_from_slice(b"\r\n");
-        for (k, v) in headers.iter() {
+        for (k, v) in field.headers().iter() {
             prefix.extend_from_slice(k.as_str().as_bytes());
             prefix.extend_from_slice(b": ");
             prefix.extend_from_slice(v.as_bytes());
@@ -690,7 +690,7 @@ impl MultipartFormData {
 
         let prefix = tokio_stream::once(Ok(Bytes::from(prefix)));
         prefix
-            .chain(value_stream)
+            .chain(field.map_err(Into::into).map_ok(Into::into))
             .chain(tokio_stream::once(Ok("\r\n".into())))
     }
 }
