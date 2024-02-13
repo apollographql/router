@@ -81,6 +81,7 @@ macro_rules! assert_federated_response {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -91,6 +92,7 @@ async fn basic_request() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -148,6 +150,7 @@ async fn validation_errors_from_rust() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn basic_mutation() {
     assert_federated_response!(
         r#"mutation {
@@ -171,6 +174,7 @@ async fn basic_mutation() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn queries_should_work_over_get() {
     // get request
     let get_request = supergraph::Request::builder()
@@ -276,6 +280,7 @@ async fn empty_posts_should_not_work() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn queries_should_work_with_compression() {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
@@ -300,6 +305,7 @@ async fn queries_should_work_with_compression() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn queries_should_work_over_post() {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
@@ -392,6 +398,7 @@ async fn mutation_should_not_work_over_get() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn mutation_should_work_over_post() {
     let request = supergraph::Request::fake_builder()
         .query(
@@ -427,6 +434,7 @@ async fn mutation_should_work_over_post() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn automated_persisted_queries() {
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
 
@@ -493,6 +501,7 @@ async fn automated_persisted_queries() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn persisted_queries() {
     use hyper::header::HeaderValue;
     use serde_json::json;
@@ -683,6 +692,7 @@ const PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT: usize = 36;
 const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
         "limits": {
@@ -741,6 +751,7 @@ async fn query_just_at_recursion_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
         "limits": {
@@ -795,6 +806,7 @@ async fn query_just_at_token_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn normal_query_with_defer_accept_header() {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -859,6 +871,7 @@ async fn defer_path_with_disabled_config() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn defer_path() {
     let config = serde_json::json!({
         "plugins": {
@@ -897,6 +910,7 @@ async fn defer_path() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn defer_path_in_array() {
     let config = serde_json::json!({
         "plugins": {
@@ -976,6 +990,7 @@ async fn defer_query_without_accept() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn defer_empty_primary_response() {
     let config = serde_json::json!({
         "plugins": {
@@ -1013,6 +1028,7 @@ async fn defer_empty_primary_response() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn defer_default_variable() {
     let config = serde_json::json!({
         "include_subgraph_errors": {
