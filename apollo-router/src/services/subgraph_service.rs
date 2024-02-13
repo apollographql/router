@@ -686,6 +686,9 @@ async fn call_http(
 
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
+    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4631
+    let request = file_uploads::http_request_wrapper(request).await?;
+
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     let (parts, content_type, body) =
         do_fetch(client, &context, service_name, request, display_body)
@@ -811,7 +814,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    client: crate::services::http::BoxService,
+    mut client: crate::services::http::BoxService,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
@@ -825,22 +828,20 @@ async fn do_fetch(
     FetchError,
 > {
     let _active_request_guard = context.enter_active_request();
-    let response = file_uploads::wrap_http_client_call(
-        client,
-        HttpRequest {
+    let response = client
+        .call(HttpRequest {
             http_request: request,
             context: context.clone(),
-        },
-    )
-    .map_err(|err| {
-        tracing::error!(fetch_error = ?err);
-        FetchError::SubrequestHttpError {
-            status_code: None,
-            service: service_name.to_string(),
-            reason: err.to_string(),
-        }
-    })
-    .await?;
+        })
+        .map_err(|err| {
+            tracing::error!(fetch_error = ?err);
+            FetchError::SubrequestHttpError {
+                status_code: None,
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            }
+        })
+        .await?;
 
     let (parts, body) = response.http_response.into_parts();
 

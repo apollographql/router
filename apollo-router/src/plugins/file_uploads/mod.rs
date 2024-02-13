@@ -545,28 +545,20 @@ struct SubgraphHttpRequestExtensions {
     map_field: MapField,
 }
 
-use tower::Service;
-
 const APOLLO_REQUIRE_PREFLIGHT: http::HeaderName =
     HeaderName::from_static("apollo-require-preflight");
 const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
-pub(crate) async fn wrap_http_client_call(
-    mut client: crate::services::http::BoxService,
-    mut http_request: crate::services::http::HttpRequest,
-) -> Result<crate::services::http::HttpResponse, BoxError> {
-    let supergraph_result = http_request.http_request.extensions_mut().remove();
+pub(crate) async fn http_request_wrapper(
+    mut req: http::Request<hyper::Body>,
+) -> UploadResult<http::Request<hyper::Body>> {
+    let supergraph_result = req.extensions_mut().remove();
     if let Some(supergraph_result) = supergraph_result {
         let SubgraphHttpRequestExtensions {
             multipart,
             map_field,
         } = supergraph_result;
-
-        let crate::services::http::HttpRequest {
-            http_request,
-            context,
-        } = http_request;
-        let (mut request_parts, request_body) = http_request.into_parts();
+        let (mut request_parts, request_body) = req.into_parts();
 
         let form = MultipartFormData::new();
         request_parts
@@ -602,15 +594,9 @@ pub(crate) async fn wrap_http_client_call(
             .chain(last);
 
         let request_body = hyper::Body::wrap_stream(new_body);
-        let http_request = http::Request::from_parts(request_parts, request_body);
-        return client
-            .call(crate::services::http::HttpRequest {
-                http_request,
-                context,
-            })
-            .await;
+        return Ok(http::Request::from_parts(request_parts, request_body));
     }
-    client.call(http_request).await
+    Ok(req)
 }
 
 struct MultipartFileStream {
