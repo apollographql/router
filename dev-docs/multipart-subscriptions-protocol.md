@@ -70,6 +70,6 @@ When the router encounters an error that is fatal and should lead to termination
 }
 ```
 
-The top-level `errors` may be present to give more details about the errors. It follows the [GraphQL error format](http://spec.graphql.org/draft/#sec-Errors.Error-Result-Format) but will never contain `locations` or `path` fields.
+The top-level `errors` field may be present to give more details about the errors. It follows the [GraphQL error format](http://spec.graphql.org/draft/#sec-Errors.Error-Result-Format) but will never contain `locations` or `path` fields.
 After a fatal error, the router closes the connection.
 
