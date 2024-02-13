@@ -43,13 +43,11 @@ Content-Type: application/json
 --graphql--
 ```
 
-## Messages
+## GraphQL Responses
 
-The protocol differentiates between transport-level concerns and the GraphQL response payloads themselves. One reason for this is that [the response format is part of the GraphQL spec](https://spec.graphql.org/draft/#sec-Response-Format), and additional fields might be confusing or could even break client typing.
+When a GraphQL response is received, it is returned in the `payload` field using the [format from the GraphQL spec](https://spec.graphql.org/draft/#sec-Response-Format).
 
-Except for [heartbeats](#heartbeats), every message will therefore include a `payload`, but the payload may be `null`.
-
-Some errors are part of an execution result. Results may include partial data, and these errors are not fatal (meaning the subscription stream should be kept open). They are therefore delivered within the payload:
+A GraphQL response may contains [errors](https://spec.graphql.org/October2021/#sec-Errors). These errors are not fatal (meaning the subscription stream should be kept open) and are delivered within the payload:
 
 ```json
 {
@@ -61,7 +59,9 @@ Some errors are part of an execution result. Results may include partial data, a
 }
 ```
 
-When the router encounters an error that is fatal and should lead to termination of the subscription, it will instead send a message with a top-level `errors` field, and then close the connection:
+## Fatal Errors
+
+When the router encounters an error that is fatal and should lead to termination of the subscription, `payload` is null:
 
 ```json
 {
@@ -70,5 +70,6 @@ When the router encounters an error that is fatal and should lead to termination
 }
 ```
 
-Both types of `errors` will follow the [GraphQL error format](http://spec.graphql.org/draft/#sec-Errors.Error-Result-Format) (but top-level `errors` will never have `locations` or `path`).
+The top-level `errors` may be present to give more details about the errors. It follows the [GraphQL error format](http://spec.graphql.org/draft/#sec-Errors.Error-Result-Format) but will never contain `locations` or `path` fields.
+After a fatal error, the router closes the connection.
 
