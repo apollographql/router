@@ -585,8 +585,8 @@ pub(crate) async fn http_request_wrapper(
             .field("operations", request_body.map_err(Into::into))
             .chain(form.field("map", map_stream))
             .chain(files.flat_map(move |field| match field {
-                Ok(field) => form.file(field).boxed(),
-                Err(e) => tokio_stream::once(Err(e)).boxed(),
+                Ok(field) => form.file(field).left_stream(),
+                Err(e) => tokio_stream::once(Err(e)).right_stream(),
             }))
             .chain(last);
 
