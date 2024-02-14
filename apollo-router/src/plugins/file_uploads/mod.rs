@@ -555,7 +555,7 @@ const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
 pub(crate) async fn http_request_wrapper(
     mut req: http::Request<hyper::Body>,
-) -> UploadResult<http::Request<hyper::Body>> {
+) -> http::Request<hyper::Body> {
     let supergraph_result = req.extensions_mut().remove();
     if let Some(supergraph_result) = supergraph_result {
         let SubgraphHttpRequestExtensions {
@@ -581,7 +581,6 @@ pub(crate) async fn http_request_wrapper(
             stream: multipart,
             file_names,
         };
-        // FIXME: check that operation is not compressed
         let new_body = form
             .field("operations", request_body)
             .chain(form.field("map", map_stream))
@@ -593,12 +592,12 @@ pub(crate) async fn http_request_wrapper(
             )))
             .chain(last);
 
-        return Ok(http::Request::from_parts(
+        return http::Request::from_parts(
             request_parts,
             hyper::Body::wrap_stream(new_body),
-        ));
+        );
     }
-    Ok(req)
+    req
 }
 
 struct MultipartFileStream {
