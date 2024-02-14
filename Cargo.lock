@@ -348,6 +348,7 @@ dependencies = [
  "rstack",
  "rust-embed",
  "rustls",
+ "rustls-native-certs",
  "rustls-pemfile",
  "schemars",
  "semver 1.0.21",
