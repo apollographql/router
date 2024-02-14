@@ -188,6 +188,8 @@ impl PlanNode {
         }
     }
 
+    /// Count the number of fetches
+    ///
     pub(crate) fn subgraph_fetches(&self, include_requires: bool) -> usize {
         match self {
             PlanNode::Sequence { nodes } => nodes
@@ -198,7 +200,13 @@ impl PlanNode {
                 .iter()
                 .map(|n| n.subgraph_fetches(include_requires))
                 .sum(),
-            PlanNode::Fetch(_) => 1,
+            PlanNode::Fetch(node) => {
+                if include_requires || node.requires.is_empty() {
+                    1
+                } else {
+                    0
+                }
+            }
             PlanNode::Flatten(node) => node.node.subgraph_fetches(include_requires),
             PlanNode::Defer { primary, deferred } => {
                 primary
