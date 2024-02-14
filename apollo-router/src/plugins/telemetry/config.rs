@@ -1,10 +1,18 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 use axum::headers::HeaderName;
+use opentelemetry::sdk::metrics::new_view;
+use opentelemetry::sdk::metrics::Aggregation;
+use opentelemetry::sdk::metrics::Instrument;
+use opentelemetry::sdk::metrics::Stream;
+use opentelemetry::sdk::metrics::View;
 use opentelemetry::sdk::trace::SpanLimits;
 use opentelemetry::Array;
 use opentelemetry::Value;
+use opentelemetry_api::metrics::MetricsError;
+use opentelemetry_api::metrics::Unit;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -108,8 +116,10 @@ pub(crate) struct MetricsCommon {
     pub(crate) service_namespace: Option<String>,
     /// The Open Telemetry resource
     pub(crate) resource: BTreeMap<String, AttributeValue>,
-    /// Custom buckets for histograms
+    /// Custom buckets for all histograms
     pub(crate) buckets: Vec<f64>,
+    /// Views applied on metrics
+    pub(crate) views: Vec<MetricView>,
 }
 
 impl Default for MetricsCommon {
@@ -119,11 +129,70 @@ impl Default for MetricsCommon {
             service_name: None,
             service_namespace: None,
             resource: BTreeMap::new(),
+            views: Vec::with_capacity(0),
             buckets: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MetricView {
+    /// The instrument name you're targeting
+    pub(crate) name: String,
+    /// New description to set to the instrument
+    pub(crate) description: Option<String>,
+    /// New unit to set to the instrument
+    pub(crate) unit: Option<String>,
+    /// New aggregation settings to set
+    pub(crate) aggregation: Option<MetricAggregation>,
+    /// An allow-list of attribute keys that will be preserved for the instrument.
+    ///
+    /// Any attribute recorded for the instrument with a key not in this set will be
+    /// dropped. If the set is empty, all attributes will be dropped, if `None` all
+    /// attributes will be kept.
+    pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
+}
+
+impl TryInto<Box<dyn View>> for MetricView {
+    type Error = MetricsError;
+
+    fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
+        let aggregation = self
+            .aggregation
+            .map(
+                |MetricAggregation::Histogram { buckets }| Aggregation::ExplicitBucketHistogram {
+                    boundaries: buckets,
+                    record_min_max: true,
+                },
+            );
+        let mut instrument = Instrument::new().name(self.name);
+        if let Some(desc) = self.description {
+            instrument = instrument.description(desc);
+        }
+        if let Some(unit) = self.unit {
+            instrument = instrument.unit(Unit::new(unit));
+        }
+        let mut mask = Stream::new();
+        if let Some(aggregation) = aggregation {
+            mask = mask.aggregation(aggregation);
+        }
+        if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
+            mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
+        }
+
+        new_view(instrument, mask)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum MetricAggregation {
+    /// An aggregation that summarizes a set of measurements as an histogram with
+    /// explicitly defined buckets.
+    Histogram { buckets: Vec<f64> },
 }
 
 /// Tracing configuration

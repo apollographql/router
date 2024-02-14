@@ -64,6 +64,23 @@ use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
+struct SessionCountGuard;
+
+impl SessionCountGuard {
+    fn start() -> Self {
+        let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
+        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        Self
+    }
+}
+
+impl Drop for SessionCountGuard {
+    fn drop(&mut self) {
+        let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
+        tracing::info!(value.apollo_router_session_count_active = session_count,);
+    }
+}
+
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug, Default)]
@@ -554,8 +571,7 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
-    tracing::info!(value.apollo_router_session_count_active = session_count,);
+    let _guard = SessionCountGuard::start();
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -573,9 +589,6 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
-            tracing::info!(value.apollo_router_session_count_active = session_count,);
-
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -614,10 +627,6 @@ async fn handle_graphql(
                     Body::wrap_stream(compressor.process(body))
                 }
             };
-
-            // FIXME: we should instead reduce it after the response has been entirely written
-            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
-            tracing::info!(value.apollo_router_session_count_active = session_count,);
 
             http::Response::from_parts(parts, body).into_response()
         }
