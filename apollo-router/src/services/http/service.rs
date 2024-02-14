@@ -41,6 +41,7 @@ use super::HttpResponse;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
@@ -227,7 +228,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
         );
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &http_req_span.context(),
+                &prepare_context(http_req_span.context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
