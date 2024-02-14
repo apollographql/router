@@ -33,6 +33,9 @@ pub(crate) enum FileUploadError {
     // FIXME: better name
     #[error("missing files.")]
     FilesMissing,
+
+    #[error("{0}")]
+    HyperBodyErrorWrapper(#[from] hyper::Error),
 }
 
 impl From<FileUploadError> for graphql::Error {

@@ -582,20 +582,15 @@ pub(crate) async fn http_request_wrapper(
             file_names,
         };
         let new_body = form
-            .field("operations", request_body)
+            .field("operations", request_body.map_err(Into::into))
             .chain(form.field("map", map_stream))
-            .chain(hyper::Body::wrap_stream(files.flat_map(
-                move |field| match field {
-                    Ok(field) => form.file(field).boxed(),
-                    Err(e) => tokio_stream::once(Err(e)).boxed(),
-                },
-            )))
+            .chain(files.flat_map(move |field| match field {
+                Ok(field) => form.file(field).boxed(),
+                Err(e) => tokio_stream::once(Err(e)).boxed(),
+            }))
             .chain(last);
 
-        return http::Request::from_parts(
-            request_parts,
-            hyper::Body::wrap_stream(new_body),
-        );
+        return http::Request::from_parts(request_parts, hyper::Body::wrap_stream(new_body));
     }
     req
 }
@@ -690,8 +685,8 @@ impl MultipartFormData {
     fn field(
         &self,
         name: &str,
-        value_stream: impl Stream<Item = hyper::Result<Bytes>>,
-    ) -> impl Stream<Item = hyper::Result<Bytes>> {
+        value_stream: impl Stream<Item = UploadResult<Bytes>>,
+    ) -> impl Stream<Item = UploadResult<Bytes>> {
         let prefix = format!(
             "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n",
             self.boundary, name
