@@ -1,6 +1,8 @@
-### Add a .remove method for headers in Rhai
+### Add a `.remove` method for headers in Rhai
 
-This allows users to remove headers in a Rhai script with a `.remove`. For example:
+The router supports a new `.remove` method that enables users to remove headers in a Rhai script. 
+
+For example:
 
 ``` rust
 fn supergraph_service(service) {

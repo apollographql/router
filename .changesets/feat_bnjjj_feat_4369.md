@@ -1,9 +1,11 @@
-### Ability to automatically switch the logging format depending on the terminal ([Issue #4369](https://github.com/apollographql/router/issues/4369))
+### Configure logging format automatically based on terminal ([Issue #4369](https://github.com/apollographql/router/issues/4369))
 
-You can configure the logging output format when you're running on an interactive shell. If bother `format` and `tty_format` are configured then the format depends on how the router is run:
+You can configure the logging output format when running with an interactive shell.
 
-* In an interactive shell, `tty_format` will take precedence.
-* In a non-interactive shell, `format` will take precedence.
+If both `format` and `tty_format` are configured, then the format used depends on how the router is run:
+
+* If running with an interactive shell, then `tty_format` takes precedence.
+* If running with a non-interactive shell, then `format` takes precedence.
 
 You can explicitly set the format in `router.yaml` with `telemetry.exporters.logging.stdout.tty_format`:
 

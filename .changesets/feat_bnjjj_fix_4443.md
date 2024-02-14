@@ -1,8 +1,10 @@
-### Add selectors to extract body elements from subgraph response using JSONPath ([Issue #4443](https://github.com/apollographql/router/issues/4443))
+### Replace selector to extract body elements from subgraph responses via JSONPath ([Issue #4443](https://github.com/apollographql/router/issues/4443))
 
-Deprecated `subgraph_response_body` in favor of `subgraph_response_data` and `subgraph_response_errors` which is a [selector](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors/) and use a JSON Path to fetch data/errors from the subgraph response. 
+The `subgraph_response_body` [selector](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors/) has been deprecated and replaced with selectors for a response body's constituent elements: `subgraph_response_data` and `subgraph_response_errors`.
 
-Example:
+When configuring `subgraph_response_data` and `subgraph_response_errors`, both use a JSONPath expression to fetch data or errors from a subgraph response. 
+
+An example configuration:
 
 ```yaml
 telemetry:
