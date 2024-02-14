@@ -562,35 +562,23 @@ pub(crate) async fn http_request_wrapper(
             multipart,
             map_field,
         } = supergraph_result;
-        let (mut request_parts, request_body) = req.into_parts();
 
-        let form = MultipartFormData::new();
+        let (mut request_parts, operations) = req.into_parts();
+        let map = serde_json::to_vec(&map_field).expect("map should be serializable to JSON");
+        let files = SubgraphFileProxyStream {
+            stream: multipart.lock_owned().await,
+            file_names: map_field.into_keys().collect(),
+        };
+
+        let form = MultipartFormData::new(operations, map.into(), files);
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
         request_parts.headers.insert(APOLLO_REQUIRE_PREFLIGHT, TRUE);
-
-        let last = tokio_stream::once(Ok(format!("--{}--\r\n", form.boundary).into()));
-        let map_stream = tokio_stream::once(Ok(Bytes::from(
-            serde_json::to_vec(&map_field).expect("map should be serializable to JSON"),
-        )));
-
-        let multipart = multipart.lock_owned().await;
-        let file_names = map_field.into_keys().collect();
-        let files = SubgraphFileProxyStream {
-            stream: multipart,
-            file_names,
-        };
-        let new_body = form
-            .field("operations", request_body.map_err(Into::into))
-            .chain(form.field("map", map_stream))
-            .chain(files.flat_map(move |field| match field {
-                Ok(field) => form.file(field).left_stream(),
-                Err(e) => tokio_stream::once(Err(e)).right_stream(),
-            }))
-            .chain(last);
-
-        return http::Request::from_parts(request_parts, hyper::Body::wrap_stream(new_body));
+        return http::Request::from_parts(
+            request_parts,
+            hyper::Body::wrap_stream(form.into_stream()),
+        );
     }
     req
 }
@@ -658,18 +646,25 @@ impl Stream for SubgraphFileProxyStream {
     }
 }
 
-#[derive(Debug, Clone)]
 struct MultipartFormData {
     boundary: String,
+    operations: hyper::Body,
+    map: Bytes,
+    files: SubgraphFileProxyStream,
 }
 
 impl MultipartFormData {
-    fn new() -> Self {
+    fn new(operations: hyper::Body, map: Bytes, files: SubgraphFileProxyStream) -> Self {
         let boundary = format!(
             "------------------------{:016x}",
             rand::thread_rng().next_u64()
         );
-        Self { boundary }
+        Self {
+            boundary,
+            operations,
+            map,
+            files,
+        }
     }
 
     fn content_type(&self) -> HeaderValue {
@@ -682,40 +677,57 @@ impl MultipartFormData {
             .expect("mime should be valid header value")
     }
 
-    fn field(
-        &self,
-        name: &str,
-        value_stream: impl Stream<Item = UploadResult<Bytes>>,
-    ) -> impl Stream<Item = UploadResult<Bytes>> {
-        let prefix = format!(
-            "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n",
-            self.boundary, name
-        );
-        let prefix = tokio_stream::once(Ok(Bytes::from(prefix)));
-        prefix
-            .chain(value_stream)
-            .chain(tokio_stream::once(Ok("\r\n".into())))
-    }
+    fn into_stream(self) -> impl Stream<Item = UploadResult<Bytes>> {
+        fn field(
+            boundary: &str,
+            name: &str,
+            value_stream: impl Stream<Item = UploadResult<Bytes>>,
+        ) -> impl Stream<Item = UploadResult<Bytes>> {
+            let prefix = format!(
+                "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n",
+                boundary, name
+            ).into();
 
-    fn file<'a>(
-        &self,
-        field: multer::Field<'static>,
-    ) -> impl Stream<Item = UploadResult<Bytes>> + 'a {
-        let mut prefix = Vec::new();
-        prefix.extend_from_slice(b"--");
-        prefix.extend_from_slice(self.boundary.as_bytes());
-        prefix.extend_from_slice(b"\r\n");
-        for (k, v) in field.headers().iter() {
-            prefix.extend_from_slice(k.as_str().as_bytes());
-            prefix.extend_from_slice(b": ");
-            prefix.extend_from_slice(v.as_bytes());
-            prefix.extend_from_slice(b"\r\n");
+            tokio_stream::once(Ok(prefix))
+                .chain(value_stream)
+                .chain(tokio_stream::once(Ok("\r\n".into())))
         }
-        prefix.extend_from_slice(b"\r\n");
 
-        let prefix = tokio_stream::once(Ok(Bytes::from(prefix)));
-        prefix
-            .chain(field.map_err(Into::into).map_ok(Into::into))
-            .chain(tokio_stream::once(Ok("\r\n".into())))
+        fn file<'a>(
+            boundary: &str,
+            field: multer::Field<'static>,
+        ) -> impl Stream<Item = UploadResult<Bytes>> + 'a {
+            let mut prefix = Vec::new();
+            prefix.extend_from_slice(b"--");
+            prefix.extend_from_slice(boundary.as_bytes());
+            prefix.extend_from_slice(b"\r\n");
+            for (k, v) in field.headers().iter() {
+                prefix.extend_from_slice(k.as_str().as_bytes());
+                prefix.extend_from_slice(b": ");
+                prefix.extend_from_slice(v.as_bytes());
+                prefix.extend_from_slice(b"\r\n");
+            }
+            prefix.extend_from_slice(b"\r\n");
+
+            tokio_stream::once(Ok(Bytes::from(prefix)))
+                .chain(field.map_err(Into::into).map_ok(Into::into))
+                .chain(tokio_stream::once(Ok("\r\n".into())))
+        }
+
+        let Self {
+            boundary,
+            operations,
+            map,
+            files,
+        } = self;
+        let last = tokio_stream::once(Ok(format!("--{}--\r\n", boundary).into()));
+
+        field(&boundary, "operations", operations.map_err(Into::into))
+            .chain(field(&boundary, "map", tokio_stream::once(Ok(map))))
+            .chain(files.flat_map(move |field| match field {
+                Ok(field) => file(&boundary, field).left_stream(),
+                Err(e) => tokio_stream::once(Err(e)).right_stream(),
+            }))
+            .chain(last)
     }
 }
