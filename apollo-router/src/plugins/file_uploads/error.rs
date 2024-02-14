@@ -29,6 +29,10 @@ pub(crate) enum FileUploadError {
 
     #[error("Invalid path '{0}' found inside 'map' field, it does not point to a valid value inside 'operations' field.")]
     InputValueNotFound(String),
+
+    // FIXME: better name
+    #[error("missing files.")]
+    FilesMissing,
 }
 
 impl From<FileUploadError> for graphql::Error {

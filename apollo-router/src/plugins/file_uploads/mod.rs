@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
+use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task;
@@ -275,7 +276,7 @@ async fn extract_map(mut req: supergraph::Request) -> UploadResult<supergraph::R
             .extensions()
             .lock()
             .insert(SupergraphLayerResult {
-                multipart: Arc::new(Mutex::new(multipart)),
+                multipart: Arc::new(Mutex::new(MultipartFileStream::new(multipart))),
                 map_per_variable,
                 files_order,
             });
@@ -302,7 +303,7 @@ type MapPerVariable = HashMap<String, HashMap<String, Vec<Vec<String>>>>;
 
 #[derive(Clone)]
 struct SupergraphLayerResult {
-    multipart: Arc<Mutex<Multipart<'static>>>,
+    multipart: Arc<Mutex<MultipartFileStream>>,
     files_order: IndexSet<String>,
     map_per_variable: MapPerVariable,
 }
@@ -544,7 +545,7 @@ async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
 }
 
 struct SubgraphHttpRequestExtensions {
-    multipart: Arc<Mutex<Multipart<'static>>>,
+    multipart: Arc<Mutex<MultipartFileStream>>,
     map_field: MapField,
 }
 
@@ -576,8 +577,8 @@ pub(crate) async fn http_request_wrapper(
 
         let multipart = multipart.lock_owned().await;
         let file_names = map_field.into_keys().collect();
-        let files = MultipartFileStream {
-            multipart,
+        let files = SubgraphFileProxyStream {
+            stream: multipart,
             file_names,
         };
         // FIXME: check that operation is not compressed
@@ -601,22 +602,52 @@ pub(crate) async fn http_request_wrapper(
 }
 
 struct MultipartFileStream {
-    file_names: HashSet<String>,
-    multipart: OwnedMutexGuard<multer::Multipart<'static>>,
+    multipart: multer::Multipart<'static>,
+}
+
+impl MultipartFileStream {
+    fn new(multipart: multer::Multipart<'static>) -> Self {
+        Self { multipart }
+    }
 }
 
 impl Stream for MultipartFileStream {
     type Item = UploadResult<multer::Field<'static>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.multipart.poll_next_field(cx) {
+            Poll::Ready(Ok(None)) => Poll::Ready(None),
+            Poll::Ready(Ok(Some(field))) => Poll::Ready(Some(Ok(field))),
+            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e.into()))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+struct SubgraphFileProxyStream {
+    file_names: HashSet<String>,
+    stream: OwnedMutexGuard<MultipartFileStream>,
+}
+
+impl Stream for SubgraphFileProxyStream {
+    type Item = UploadResult<multer::Field<'static>>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.file_names.is_empty() {
+            return Poll::Ready(None);
+        }
         loop {
-            match self.multipart.poll_next_field(cx) {
-                Poll::Ready(Ok(None)) => {
-                    // FIXME: validation error
-                    assert!(self.file_names.is_empty());
+            let stream = Pin::new(self.stream.deref_mut());
+            let result = stream.poll_next(cx);
+            match result {
+                Poll::Ready(None) => {
+                    if !self.file_names.is_empty() {
+                        self.file_names = HashSet::new();
+                        return Poll::Ready(Some(Err(FileUploadError::FilesMissing)));
+                    }
                     return Poll::Ready(None);
                 }
-                Poll::Ready(Ok(Some(field))) => {
+                Poll::Ready(Some(Ok(field))) => {
                     if let Some(name) = field.name() {
                         if self.file_names.remove(name) {
                             return Poll::Ready(Some(Ok(field)));
@@ -626,7 +657,7 @@ impl Stream for MultipartFileStream {
                     // As the rest can still be processed, just ignore it and don’t exit with an error.
                     // Matching https://github.com/jaydenseric/graphql-upload/blob/f24d71bfe5be343e65d084d23073c3686a7f4d18/processRequest.mjs#L231-L236
                 }
-                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
+                Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
                 Poll::Pending => return Poll::Pending,
             }
         }
