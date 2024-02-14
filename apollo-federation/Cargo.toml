@@ -10,7 +10,7 @@ license = "Elastic-2.0"
 autotests = false                                               # Integration tests are modules of tests/main.rs
 
 [dependencies]
-apollo-compiler = "=1.0.0-beta.12"
+apollo-compiler = "=1.0.0-beta.13"
 derive_more = "0.99.17"
 indexmap = "2.1.0"
 lazy_static = "1.4.0"
