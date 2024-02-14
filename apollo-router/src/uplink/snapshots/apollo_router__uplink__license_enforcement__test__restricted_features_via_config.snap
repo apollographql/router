@@ -13,13 +13,13 @@ Configuration yaml:
   .coprocessor
 
 * Query plan caching
-  .supergraph.query_planning.experimental_cache.redis
+  .supergraph.query_planning.cache.redis
 
 * APQ caching
   .apq.router.cache.redis
 
 * Subgraph entity caching
-  .experimental_entity_cache.enabled
+  .preview_entity_cache.enabled
 
 * Federated subscriptions
   .subscription.enabled

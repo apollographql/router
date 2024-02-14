@@ -14,7 +14,7 @@ coprocessor:
 
 supergraph:
   query_planning:
-    experimental_cache:
+    cache:
       redis:
         urls:
           - https://example.com
@@ -52,7 +52,7 @@ plugins:
   experimental.restricted:
     enabled: true
 
-experimental_entity_cache:
+preview_entity_cache:
   redis:
     urls:
       - https://example.com

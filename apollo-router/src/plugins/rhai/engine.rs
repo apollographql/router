@@ -234,6 +234,19 @@ mod router_header_map {
         }
     }
 
+    // Register a remove function for HeaderMap
+    #[rhai_fn(name = "remove", pure, return_raw)]
+    pub(crate) fn header_map_remove(
+        x: &mut HeaderMap,
+        key: &str,
+    ) -> Result<String, Box<EvalAltResult>> {
+        Ok(x.remove(key)
+            .ok_or("")?
+            .to_str()
+            .map_err(|e| e.to_string())?
+            .to_string())
+    }
+
     // Register a HeaderMap indexer so we can get/set headers
     #[rhai_fn(index_get, pure, return_raw)]
     pub(crate) fn header_map_get(

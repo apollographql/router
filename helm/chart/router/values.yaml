@@ -160,7 +160,10 @@ ingress:
 virtualservice:
   enabled: false
   # namespace: ""
-  # gatewayName: ""
+  # gatewayName: "" # Deprecated in favor of gatewayNames
+  # gatewayNames: []
+  #  - "gateway-1"
+  #  - "gateway-2"
   # http:
   #   main:
   #     # set enabled to true to add

@@ -1,0 +1,5 @@
+description: The query plan cache is no longer experimental
+actions:
+  - type: move
+    from: supergraph.query_planning.experimental_cache
+    to: supergraph.query_planning.cache
