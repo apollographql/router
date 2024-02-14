@@ -1,8 +1,8 @@
 ### Add configurable histogram buckets per metric ([Issue #4543](https://github.com/apollographql/router/issues/4543))
 
-Add support for opentelemetry views (a mechanism to override instrument settings) for metrics. It will let you override default histogram buckets for example.
+The router supports overriding instrument settings for metrics with [OpenTelemetry views](https://opentelemetry.io/docs/concepts/signals/metrics/#views). You can use views to override default histogram buckets.
 
-Example of configuration:
+Configure views with the `views` option. For example:
 
 ```yaml
 telemetry:
