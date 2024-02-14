@@ -201,9 +201,9 @@ checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.12"
+version = "1.0.0-beta.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93138712f22ebc142e59fc0150f269d53700e4a01b4678f0d82f8e088e210629"
+checksum = "e779ed0ba21149a5ffc7266aedd34779da85405da2b2b4f4bc326b85375439a6"
 dependencies = [
  "apollo-parser",
  "ariadne",
@@ -231,27 +231,26 @@ dependencies = [
 [[package]]
 name = "apollo-federation"
 version = "0.0.5"
-source = "git+https://github.com/apollographql/federation-next?branch=renee/api-schema#361020f5b093005c1582a2a40a0698ee1d35be04"
+source = "git+https://github.com/apollographql/federation-next?branch=apollo-compiler@1.0.0-beta.13#11635cd87df49e28e562a58e989a3f54fe933e7d"
 dependencies = [
  "apollo-compiler",
  "derive_more",
  "indexmap 2.2.2",
  "lazy_static",
- "linked-hash-map",
  "petgraph",
  "salsa",
  "serde_json",
  "strum",
- "strum_macros",
+ "strum_macros 0.26.1",
  "thiserror",
  "url",
 ]
 
 [[package]]
 name = "apollo-parser"
-version = "0.7.4"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db2953239e146be68f42333c2eaff528884fd300d0d1ed306b374f2a619a7d85"
+checksum = "5e8111fa921e363466724e8cc80ef703ffbdfc5db64f826c604f7378641b12da"
 dependencies = [
  "memchr",
  "rowan",
@@ -373,7 +372,7 @@ dependencies = [
  "shellexpand",
  "similar",
  "static_assertions",
- "strum_macros",
+ "strum_macros 0.25.3",
  "sys-info",
  "tempfile",
  "test-log",
@@ -2149,7 +2148,7 @@ dependencies = [
  "quote 1.0.35",
  "regex",
  "strum",
- "strum_macros",
+ "strum_macros 0.25.3",
  "syn 1.0.109",
  "syn 2.0.48",
  "thiserror",
@@ -6562,7 +6561,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.25.3",
 ]
 
 [[package]]
@@ -6570,6 +6569,19 @@ name = "strum_macros"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23dc1fa9ac9c169a78ba62f0b841814b7abae11bdd047b9c58f893439e309ea0"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2 1.0.76",
+ "quote 1.0.35",
+ "rustversion",
+ "syn 2.0.48",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a3417fc93d76740d974a01654a09777cb500428cc874ca9f45edfe0c4d4cd18"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2 1.0.76",

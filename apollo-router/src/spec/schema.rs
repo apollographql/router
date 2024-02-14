@@ -152,11 +152,16 @@ impl Schema {
 
     pub(crate) fn create_api_schema(
         &self,
-        _configuration: &Configuration,
+        configuration: &Configuration,
     ) -> Result<String, apollo_federation::error::FederationError> {
-        let schema = apollo_federation::Supergraph::from(self.definitions.clone());
-        // TODO(@goto-bus-stop) enable defer support
-        let api_schema = schema.to_api_schema()?;
+        use apollo_federation::ApiSchemaOptions;
+        use apollo_federation::Supergraph;
+
+        let schema = Supergraph::from(self.definitions.clone());
+        let api_schema = schema.to_api_schema(ApiSchemaOptions {
+            include_defer: configuration.supergraph.defer_support,
+            ..Default::default()
+        })?;
         Ok(api_schema.to_string())
     }
 
