@@ -128,7 +128,11 @@ impl Stream for Multipart {
                                 },
                             };
 
-                            serde_json::to_writer(&mut buf, &resp)?;
+                            if !is_still_open && resp.errors.is_empty() && resp.payload.is_none() {
+                                buf.extend_from_slice(b"{}");
+                            } else {
+                                serde_json::to_writer(&mut buf, &resp)?;
+                            }
                         }
                         ProtocolMode::Defer => {
                             serde_json::to_writer(&mut buf, &response)?;
@@ -204,6 +208,10 @@ mod tests {
                     "test",
                     serde_json_bytes::Value::String("test_extension".into()),
                 )
+                .subscribed(true)
+                .build(),
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::Null)
                 .build(),
         ];
         let gql_responses = stream::iter(responses);
@@ -237,7 +245,13 @@ mod tests {
                     3 => {
                         assert_eq!(
                             res,
-                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":null,\"extensions\":{\"test\":\"test_extension\"}}}\r\n--graphql--\r\n"
+                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":null,\"extensions\":{\"test\":\"test_extension\"}}}\r\n--graphql\r\n"
+                        );
+                    }
+                    4 => {
+                        assert_eq!(
+                            res,
+                            "content-type: application/json\r\n\r\n{}\r\n--graphql--\r\n"
                         );
                     }
                     _ => {
