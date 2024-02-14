@@ -88,7 +88,7 @@ impl QueryPlan {
     }
 
     pub fn subgraph_fetches(&self) -> usize {
-        self.root.subgraph_fetches()
+        self.root.subgraph_fetches(true)
     }
 }
 
