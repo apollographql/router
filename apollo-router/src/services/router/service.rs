@@ -701,25 +701,23 @@ impl RouterService {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct BatchDetails {
     pub(crate) index: usize,
-    // Request Details
-    pub(crate) request: Option<SubgraphRequest>,
-    pub(crate) body: Option<graphql::Request>,
-    pub(crate) context: Option<Context>,
-    pub(crate) service_name: Option<String>,
     // Shared Request Details
     shared: Arc<Mutex<SharedBatchDetails>>,
 }
 
 impl fmt::Display for BatchDetails {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "index: {}", self.index)?;
+        write!(f, "index: {}, ", self.index)?;
         // Use try_lock. If the shared details are locked, we won't display them.
         // TODO: Maybe improve to handle the error...?
         let guard = self.shared.try_lock().ok_or(fmt::Error)?;
-        write!(f, "size: {}", guard.size)?;
-        write!(f, "expected: {:?}", guard.expected)?;
+        write!(f, "size: {}, ", guard.size)?;
+        write!(f, "expected: {:?}, ", guard.expected)?;
         write!(f, "seen: {:?}", guard.seen)?;
-        write!(f, "waiters: {:?}", guard.waiters)
+        for (service, details) in guard.waiters.iter() {
+            write!(f, ", service: {}, waiters: {}", service, details.len())?;
+        }
+        Ok(())
     }
 }
 
@@ -737,18 +735,31 @@ impl BatchDetails {
     }
 
     pub(crate) fn get_waiter(
-        &mut self,
+        &self,
         request: SubgraphRequest,
         body: graphql::Request,
         context: Context,
         service_name: &str,
     ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
         tracing::info!("getting a waiter for {}", self.index);
-        self.request = Some(request);
-        self.body = Some(body);
-        self.context = Some(context);
-        self.service_name = Some(service_name.to_string());
-        self.shared.lock().get_waiter(self.index)
+        self.shared
+            .lock()
+            .get_waiter(request, body, context, service_name.to_string())
+    }
+
+    pub(crate) fn get_waiters(
+        &self,
+    ) -> HashMap<
+        String,
+        Vec<(
+            SubgraphRequest,
+            graphql::Request,
+            Context,
+            oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+        )>,
+    > {
+        let mut guard = self.shared.lock();
+        std::mem::take(&mut guard.waiters)
     }
 
     pub(crate) fn increment_subgraph_seen(&self) {
@@ -769,7 +780,15 @@ pub(crate) struct SharedBatchDetails {
     pub(crate) size: usize,
     pub(crate) expected: HashMap<usize, usize>,
     pub(crate) seen: HashMap<usize, usize>,
-    pub(crate) waiters: HashMap<usize, Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>>,
+    pub(crate) waiters: HashMap<
+        String,
+        Vec<(
+            SubgraphRequest,
+            graphql::Request,
+            Context,
+            oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+        )>,
+    >,
 }
 
 impl SharedBatchDetails {
@@ -788,11 +807,14 @@ impl SharedBatchDetails {
 
     pub(crate) fn get_waiter(
         &mut self,
-        index: usize,
+        request: SubgraphRequest,
+        body: graphql::Request,
+        context: Context,
+        service: String,
     ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
         let (tx, rx) = oneshot::channel();
-        let value = self.waiters.entry(index).or_default();
-        value.push(tx);
+        let value = self.waiters.entry(service).or_default();
+        value.push((request, body, context, tx));
         rx
     }
 }

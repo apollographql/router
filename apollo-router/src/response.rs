@@ -93,6 +93,36 @@ impl Response {
         self.errors.append(errors)
     }
 
+    /// Create a Vec of [`Response`] from the supplied [`Bytes`].
+    ///
+    /// This will return a Vec of response/errors (identifying the faulty service) if the input is invalid.
+    pub(crate) fn array_from_bytes(
+        service_name: &str,
+        b: Bytes,
+        len: usize,
+    ) -> Result<Vec<Response>, FetchError> {
+        let mut result = Vec::with_capacity(len);
+        let value =
+            Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+        let array =
+            ensure_array!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+        for value in array {
+            let object =
+                ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: error.to_string(),
+                })?;
+            result.push(Response::from_object(service_name, object)?);
+        }
+        Ok(result)
+    }
+
     /// Create a [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
@@ -102,12 +132,18 @@ impl Response {
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
-        let mut object =
+        let object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
+        Response::from_object(service_name, object)
+    }
 
+    pub(crate) fn from_object(
+        service_name: &str,
+        mut object: Object,
+    ) -> Result<Response, FetchError> {
         let data = object.remove("data");
         let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
             .map_err(|err| FetchError::SubrequestMalformedResponse {

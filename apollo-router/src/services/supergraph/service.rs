@@ -623,7 +623,12 @@ async fn plan_query(
 
     if let Some(batching) = context.extensions().lock().get::<BatchDetails>() {
         if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
-            batching.set_subgraph_fetches(plan.root.subgraph_fetches());
+            batching.set_subgraph_fetches(plan.root.subgraph_fetches_no_requires());
+            tracing::info!("subgraph fetches: {}", plan.root.subgraph_fetches());
+            tracing::info!(
+                "subgraph fetches (no requires): {}",
+                plan.root.subgraph_fetches_no_requires()
+            );
         }
     }
     Ok(qpr)

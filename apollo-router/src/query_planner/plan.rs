@@ -223,6 +223,60 @@ impl PlanNode {
         }
     }
 
+    pub(crate) fn subgraph_fetches_no_requires(&self) -> usize {
+        match self {
+            PlanNode::Sequence { nodes } => {
+                nodes.iter().map(|n| n.subgraph_fetches_no_requires()).sum()
+            }
+            PlanNode::Parallel { nodes } => {
+                nodes.iter().map(|n| n.subgraph_fetches_no_requires()).sum()
+            }
+            PlanNode::Fetch(node) => {
+                if node.requires.is_empty() {
+                    1
+                } else {
+                    0
+                }
+            }
+            PlanNode::Flatten(node) => node.node.subgraph_fetches_no_requires(),
+            PlanNode::Defer { primary, deferred } => {
+                primary
+                    .node
+                    .as_ref()
+                    .map_or(0, |n| n.subgraph_fetches_no_requires())
+                    + deferred
+                        .iter()
+                        .map(|n| {
+                            n.node
+                                .as_ref()
+                                .map_or(0, |n| n.subgraph_fetches_no_requires())
+                        })
+                        .sum::<usize>()
+            }
+            // A `SubscriptionNode` makes a request to a subgraph, so counting it as 1
+            PlanNode::Subscription { rest, .. } => {
+                rest.as_ref()
+                    .map_or(0, |n| n.subgraph_fetches_no_requires())
+                    + 1
+            }
+            // Compute the highest possible value for condition nodes
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => std::cmp::max(
+                if_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches_no_requires())
+                    .unwrap_or(0),
+                else_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches_no_requires())
+                    .unwrap_or(0),
+            ),
+        }
+    }
+
     pub(crate) fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
         match self {
             PlanNode::Fetch(fetch_node) => {

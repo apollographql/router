@@ -6,7 +6,9 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::Poll;
 
+use bytes::BufMut;
 use bytes::Bytes;
+use bytes::BytesMut;
 use futures::future::BoxFuture;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -17,6 +19,7 @@ use http::header::{self};
 use http::response::Parts;
 use http::HeaderValue;
 use http::Request;
+use http::StatusCode;
 use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use mediatype::names::APPLICATION;
@@ -24,6 +27,7 @@ use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use rustls::RootCertStore;
+use serde::de::Error;
 use serde::Serialize;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -195,7 +199,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     }
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
-        tracing::info!("SUBGRAPH SERVICE CALLED");
         let subscription_config = (request.operation_kind == OperationKind::Subscription)
             .then(|| self.subscription_config.clone())
             .flatten();
@@ -367,7 +370,15 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
             if !apq_enabled.load(Relaxed) {
-                return call_batched_http(request, body, context, client, &service_name).await;
+                return call_batched_http(
+                    request,
+                    body,
+                    context,
+                    client,
+                    client_factory.clone(),
+                    &service_name,
+                )
+                .await;
             }
 
             // Else, if APQ is enabled,
@@ -402,6 +413,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 apq_body.clone(),
                 context.clone(),
                 client_factory.create(&service_name),
+                client_factory.clone(),
                 &service_name,
             )
             .await?;
@@ -414,11 +426,27 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    call_batched_http(request, body, context, client, &service_name).await
+                    call_batched_http(
+                        request,
+                        body,
+                        context,
+                        client,
+                        client_factory.clone(),
+                        &service_name,
+                    )
+                    .await
                 }
                 APQError::PersistedQueryNotFound => {
                     apq_body.query = query;
-                    call_batched_http(request, apq_body, context, client, &service_name).await
+                    call_batched_http(
+                        request,
+                        apq_body,
+                        context,
+                        client,
+                        client_factory.clone(),
+                        &service_name,
+                    )
+                    .await
                 }
                 _ => Ok(response),
             }
@@ -617,62 +645,288 @@ async fn call_websocket(
     ))
 }
 
-/*
-use tokio::sync::mpsc;
-use tokio::sync::broadcast;
-use tokio::sync::oneshot;
-        let (tx, mut rx) = mpsc::channel::<String>(10);
-        let (b_tx, _b_rx) = broadcast::channel::<(usize, String)>(10);
-
-            // Build up our batch co-ordinator for later use in subgraph processing
-            tokio::task::spawn(async move {
-                while let Some(body) = rx.recv().await {
-                    todo!();
-                }
-                // At this point we have our accumulated stuff, we need to figure out a way to send
-                // this to clients.
-                todo!()
-            });
-*/
-
 async fn call_batched_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
     client: crate::services::http::BoxService,
+    client_factory: crate::services::http::HttpClientServiceFactory,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
+    let mut do_fetch_count = 0;
     // We'd like to park a task here, but we can't park it whilst we have the context extensions
     // lock held. That would be very bad...
     // So, we set an optional listener and wait to hear back from the batch processor
     let mut batch_responder: Option<
         tokio::sync::oneshot::Receiver<Result<SubgraphResponse, BoxError>>,
     > = None;
+    let mut waiters_opt = None;
     if let Some(batching) = context.extensions().lock().get_mut::<BatchDetails>() {
-        tracing::info!("in subgraph we have batching: {batching:?}, service: {service_name}");
-        {
-            batching.increment_subgraph_seen();
-            tracing::info!("ready to process batch?: {}", batching.ready());
-        }
+        tracing::info!("in subgraph we have batching: {batching}, service: {service_name}");
+        batching.increment_subgraph_seen();
+        tracing::info!("ready to process batch?: {}", batching.ready());
+        batch_responder =
+            Some(batching.get_waiter(request.clone(), body.clone(), context.clone(), service_name));
         if batching.ready() {
             //TODO: This is where we start processing our accumulated batch data
-            tracing::info!("Batch data: {batching:?}");
-            todo!()
-        } else {
-            batch_responder = Some(batching.get_waiter(
-                request.clone(),
-                body.clone(),
-                context.clone(),
-                service_name,
-            ));
+            // Now we need to "batch up" our data and send it to our subgraphs
+            // We need our own batch aware version of call_http which only makes one call to each
+            // subgraph, but is able to decode the responses. I'll probably need to break call_http
+            // down into sub-functions.
+            tracing::info!("Batch data: {batching}");
+            waiters_opt = Some(batching.get_waiters());
         }
     }
     if let Some(receiver) = batch_responder {
-        println!("WE HAVE A WAITER");
-        receiver.await;
-        todo!()
+        tracing::info!("WE HAVE A WAITER");
+        match waiters_opt {
+            Some(waiters) => {
+                let mut total_count_to_send = waiters.values().fold(0, |acc, v| acc + v.len());
+                for (service, requests) in waiters.into_iter() {
+                    let mut txs = Vec::with_capacity(requests.len());
+                    let mut requests_it = requests.into_iter();
+                    let first = requests_it
+                        .next()
+                        .expect("we should have at least one request");
+                    let context = first.2; // XXX SHADOWING
+                    txs.push(first.3);
+                    let SubgraphRequest {
+                        subgraph_request, ..
+                    } = first.0;
+                    let operation_name = subgraph_request
+                        .body()
+                        .operation_name
+                        .clone()
+                        .unwrap_or_default();
+
+                    let (parts, _) = subgraph_request.into_parts();
+                    let body = serde_json::to_string(&first.1)
+                        .expect("JSON serialization should not fail");
+                    let mut bytes = BytesMut::new();
+                    bytes.put_u8(b'[');
+                    bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
+                    for request in requests_it {
+                        txs.push(request.3);
+                        bytes.put(&b", "[..]);
+                        let body = serde_json::to_string(&request.1)
+                            .expect("JSON serialization should not fail");
+                        bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
+                    }
+                    bytes.put_u8(b']');
+                    let body_bytes = bytes.freeze();
+                    tracing::info!("ABOUT TO SUBMIT BATCH: {:?}", body_bytes);
+                    let mut request = http::Request::from_parts(parts, Body::from(body_bytes));
+
+                    request
+                        .headers_mut()
+                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+                    request
+                        .headers_mut()
+                        .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
+
+                    let schema_uri = request.uri();
+                    let host = schema_uri.host().unwrap_or_default();
+                    let port = schema_uri.port_u16().unwrap_or_else(|| {
+                        let scheme = schema_uri.scheme_str();
+                        if scheme == Some("https") {
+                            443
+                        } else if scheme == Some("http") {
+                            80
+                        } else {
+                            0
+                        }
+                    });
+
+                    let path = schema_uri.path();
+
+                    let subgraph_req_span = tracing::info_span!("subgraph_request",
+                        "otel.kind" = "CLIENT",
+                        "net.peer.name" = %host,
+                        "net.peer.port" = %port,
+                        "http.route" = %path,
+                        "http.url" = %schema_uri,
+                        "net.transport" = "ip_tcp",
+                        "apollo.subgraph.name" = %service_name,
+                        "graphql.operation.name" = %operation_name,
+                    );
+
+                    // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
+                    //
+                    // "If the response uses a non-200 status code and the media type of the response payload is application/json
+                    // then the client MUST NOT rely on the body to be a well-formed GraphQL response since the source of the response
+                    // may not be the server but instead some intermediary such as API gateways, proxies, firewalls, etc."
+                    //
+                    // The TLDR of this is that it's really asking us to do the best we can with whatever information we have with some modifications depending on content type.
+                    // Our goal is to give the user the most relevant information possible in the response errors
+                    //
+                    // Rules:
+                    // 1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
+                    // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
+                    // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
+
+                    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+                    let client = client_factory.create(&service);
+                    // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
+                    let (parts, content_type, body) =
+                        do_fetch(client, &context, service_name, request, display_body)
+                            .instrument(subgraph_req_span)
+                            .await?;
+                    do_fetch_count += 1;
+
+                    if display_body {
+                        if let Some(Ok(b)) = &body {
+                            tracing::info!(
+                                response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                            );
+                        }
+                    }
+
+                    tracing::info!(
+                        "parts: {parts:?}, content_type: {content_type:?}, body: {body:?}"
+                    );
+
+                    let value = serde_json::from_slice(&body.unwrap().unwrap())
+                        .map_err(serde_json::Error::custom)?;
+
+                    tracing::info!("JSON VALUE FROM BODY IS: {value:?}");
+
+                    let array = ensure_array!(value).map_err(|error| {
+                        FetchError::SubrequestMalformedResponse {
+                            service: service_name.to_string(),
+                            reason: error.to_string(),
+                        }
+                    })?;
+                    let mut graphql_responses = Vec::with_capacity(array.len());
+                    for value in array {
+                        let object = ensure_object!(value).map_err(|error| {
+                            FetchError::SubrequestMalformedResponse {
+                                service: service_name.to_string(),
+                                reason: error.to_string(),
+                            }
+                        })?;
+                        let body = Some(serde_json::to_vec(&object));
+
+                        let mut graphql_response =
+                            match (content_type.clone(), body, parts.status.is_success()) {
+                                (
+                                    Ok(ContentType::ApplicationGraphqlResponseJson),
+                                    Some(Ok(body)),
+                                    _,
+                                )
+                                | (Ok(ContentType::ApplicationJson), Some(Ok(body)), true) => {
+                                    // Application graphql json expects valid graphql response
+                                    // Application json expects valid graphql response if 2xx
+                                    tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+                                        // Application graphql json expects valid graphql response
+                                        graphql::Response::from_bytes(service_name, body.into())
+                                            .unwrap_or_else(|error| {
+                                                graphql::Response::builder()
+                                                    .error(error.to_graphql_error(None))
+                                                    .build()
+                                            })
+                                    })
+                                }
+                                (Ok(ContentType::ApplicationJson), Some(Ok(body)), false) => {
+                                    // Application json does not expect a valid graphql response if not 2xx.
+                                    // If parse fails then attach the entire payload as an error
+                                    tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+                                        // Application graphql json expects valid graphql response
+                                        let mut original_response =
+                                            String::from_utf8_lossy(&body).to_string();
+                                        if original_response.is_empty() {
+                                            original_response = "<empty response body>".into()
+                                        }
+                                        graphql::Response::from_bytes(service_name, body.into())
+                                            .unwrap_or_else(|_error| {
+                                                graphql::Response::builder()
+                                                    .error(
+                                                        FetchError::SubrequestMalformedResponse {
+                                                            service: service_name.to_string(),
+                                                            reason: original_response,
+                                                        }
+                                                        .to_graphql_error(None),
+                                                    )
+                                                    .build()
+                                            })
+                                    })
+                                }
+                                (content_type, body, _) => {
+                                    // Something went wrong, compose a response with errors if they are present
+                                    let mut graphql_response = graphql::Response::builder().build();
+                                    if let Err(err) = content_type {
+                                        graphql_response.errors.push(err.to_graphql_error(None));
+                                    }
+                                    /* TODO: XXX NEED TO UNDERSTAND
+                                    if let Some(Err(err)) = body {
+                                        graphql_response.errors.push(err.to_graphql_error(None));
+                                    }
+                                    */
+                                    graphql_response
+                                }
+                            };
+
+                        // Add an error for response codes that are not 2xx
+                        if !parts.status.is_success() {
+                            let status = parts.status;
+                            graphql_response.errors.insert(
+                                0,
+                                FetchError::SubrequestHttpError {
+                                    service: service_name.to_string(),
+                                    status_code: Some(status.as_u16()),
+                                    reason: format!(
+                                        "{}: {}",
+                                        status.as_str(),
+                                        status.canonical_reason().unwrap_or("Unknown")
+                                    ),
+                                }
+                                .to_graphql_error(None),
+                            )
+                        }
+                        graphql_responses.push(graphql_response);
+                    }
+
+                    tracing::info!("we have a vec of graphql_responses: {graphql_responses:?}");
+                    // Reverse txs to get things back in the right order
+                    txs.reverse();
+                    for graphql_response in graphql_responses {
+                        total_count_to_send -= 1;
+                        // Build an http Response
+                        let mut resp = http::Response::builder()
+                            .status(StatusCode::OK)
+                            .body(graphql_response)
+                            .expect("Response is serializable; qed");
+
+                        // *response.headers_mut() = headers.unwrap_or_default();
+                        // let resp = http::Response::from_parts(parts, graphql_response);
+                        tracing::info!("we have a resp: {resp:?}");
+                        let subgraph_response =
+                            SubgraphResponse::new_from_response(resp, context.clone());
+                        if total_count_to_send > 0 {
+                            let tx = txs
+                                .pop()
+                                .expect("should have the same number of txs as responses");
+                            tx.send(Ok(subgraph_response));
+                        } else {
+                            tracing::info!(
+                                "TO PROCESS THIS BATCH WE ISSUE: {do_fetch_count} fetches"
+                            );
+                            return Ok(subgraph_response);
+                        }
+                    }
+                    // Ok(SubgraphResponse::new_from_response(resp, context))
+                }
+                // Instead of todo return a fake error for now
+                return Err(Box::new(FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: "fake_error".to_string(),
+                }));
+                // todo!()
+            }
+            None => receiver.await?,
+        }
     } else {
-        println!("WE CALLED HTTP");
+        tracing::info!("WE CALLED HTTP");
         call_http(request, body, context, client, service_name).await
     }
 }
@@ -834,6 +1088,7 @@ pub(crate) async fn call_http(
     Ok(SubgraphResponse::new_from_response(resp, context))
 }
 
+#[derive(Clone, Debug)]
 enum ContentType {
     ApplicationJson,
     ApplicationGraphqlResponseJson,
