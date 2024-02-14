@@ -734,6 +734,10 @@ impl BatchDetails {
         self.shared.lock().ready()
     }
 
+    pub(crate) fn finished(&self) -> bool {
+        self.shared.lock().finished()
+    }
+
     pub(crate) fn get_waiter(
         &self,
         request: SubgraphRequest,
@@ -759,6 +763,7 @@ impl BatchDetails {
         )>,
     > {
         let mut guard = self.shared.lock();
+        guard.finished = true;
         std::mem::take(&mut guard.waiters)
     }
 
@@ -789,6 +794,7 @@ pub(crate) struct SharedBatchDetails {
             oneshot::Sender<Result<SubgraphResponse, BoxError>>,
         )>,
     >,
+    finished: bool,
 }
 
 impl SharedBatchDetails {
@@ -798,14 +804,19 @@ impl SharedBatchDetails {
             expected: HashMap::new(),
             seen: HashMap::new(),
             waiters: HashMap::new(),
+            finished: false,
         }
     }
 
-    pub(crate) fn ready(&self) -> bool {
+    fn ready(&self) -> bool {
         self.expected.len() == self.size && self.expected == self.seen
     }
 
-    pub(crate) fn get_waiter(
+    fn finished(&self) -> bool {
+        self.finished
+    }
+
+    fn get_waiter(
         &mut self,
         request: SubgraphRequest,
         body: graphql::Request,
@@ -819,20 +830,6 @@ impl SharedBatchDetails {
     }
 }
 
-/*
-        let (tx, mut rx) = mpsc::channel::<String>(10);
-        let (b_tx, _b_rx) = broadcast::channel::<(usize, String)>(10);
-
-            // Build up our batch co-ordinator for later use in subgraph processing
-            tokio::task::spawn(async move {
-                while let Some(body) = rx.recv().await {
-                    todo!();
-                }
-                // At this point we have our accumulated stuff, we need to figure out a way to send
-                // this to clients.
-                todo!()
-            });
-*/
 struct TranslateError<'a> {
     status: StatusCode,
     error: &'a str,

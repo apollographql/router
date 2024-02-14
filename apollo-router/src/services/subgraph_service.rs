@@ -662,26 +662,30 @@ async fn call_batched_http(
     > = None;
     let mut waiters_opt = None;
     if let Some(batching) = context.extensions().lock().get_mut::<BatchDetails>() {
-        tracing::info!("in subgraph we have batching: {batching}, service: {service_name}");
-        batching.increment_subgraph_seen();
-        tracing::info!("ready to process batch?: {}", batching.ready());
-        batch_responder =
-            Some(batching.get_waiter(request.clone(), body.clone(), context.clone(), service_name));
-        if batching.ready() {
-            //TODO: This is where we start processing our accumulated batch data
-            // Now we need to "batch up" our data and send it to our subgraphs
-            // We need our own batch aware version of call_http which only makes one call to each
-            // subgraph, but is able to decode the responses. I'll probably need to break call_http
-            // down into sub-functions.
-            tracing::info!("Batch data: {batching}");
-            waiters_opt = Some(batching.get_waiters());
+        if !batching.finished() {
+            tracing::info!("in subgraph we have batching: {batching}, service: {service_name}");
+            batching.increment_subgraph_seen();
+            tracing::info!("ready to process batch?: {}", batching.ready());
+            batch_responder = Some(batching.get_waiter(
+                request.clone(),
+                body.clone(),
+                context.clone(),
+                service_name,
+            ));
+            if batching.ready() {
+                //TODO: This is where we start processing our accumulated batch data
+                // Now we need to "batch up" our data and send it to our subgraphs
+                // We need our own batch aware version of call_http which only makes one call to each
+                // subgraph, but is able to decode the responses. I'll probably need to break call_http
+                // down into sub-functions.
+                tracing::info!("Batch data: {batching}");
+                waiters_opt = Some(batching.get_waiters());
+            }
         }
     }
     if let Some(receiver) = batch_responder {
-        tracing::info!("WE HAVE A WAITER");
         match waiters_opt {
             Some(waiters) => {
-                let mut total_count_to_send = waiters.values().fold(0, |acc, v| acc + v.len());
                 for (service, requests) in waiters.into_iter() {
                     let mut txs = Vec::with_capacity(requests.len());
                     let mut requests_it = requests.into_iter();
@@ -714,7 +718,7 @@ async fn call_batched_http(
                     }
                     bytes.put_u8(b']');
                     let body_bytes = bytes.freeze();
-                    tracing::info!("ABOUT TO SUBMIT BATCH: {:?}", body_bytes);
+                    tracing::info!("ABOUT TO CREATE BATCH: {:?}", body_bytes);
                     let mut request = http::Request::from_parts(parts, Body::from(body_bytes));
 
                     request
@@ -890,9 +894,8 @@ async fn call_batched_http(
                     // Reverse txs to get things back in the right order
                     txs.reverse();
                     for graphql_response in graphql_responses {
-                        total_count_to_send -= 1;
                         // Build an http Response
-                        let mut resp = http::Response::builder()
+                        let resp = http::Response::builder()
                             .status(StatusCode::OK)
                             .body(graphql_response)
                             .expect("Response is serializable; qed");
@@ -902,28 +905,54 @@ async fn call_batched_http(
                         tracing::info!("we have a resp: {resp:?}");
                         let subgraph_response =
                             SubgraphResponse::new_from_response(resp, context.clone());
-                        if total_count_to_send > 0 {
-                            let tx = txs
-                                .pop()
-                                .expect("should have the same number of txs as responses");
-                            tx.send(Ok(subgraph_response));
-                        } else {
-                            tracing::info!(
-                                "TO PROCESS THIS BATCH WE ISSUE: {do_fetch_count} fetches"
-                            );
-                            return Ok(subgraph_response);
+                        match txs.pop() {
+                            Some(tx) => {
+                                tx.send(Ok(subgraph_response)).map_err(|_error| {
+                                    FetchError::SubrequestMalformedResponse {
+                                        service: service_name.to_string(),
+                                        reason: "tx send failed".to_string(),
+                                    }
+                                })?;
+                            }
+                            None => {
+                                tracing::info!(
+                                    "TO PROCESS THIS BATCH WE ISSUE: {do_fetch_count} fetches"
+                                );
+                                return Ok(subgraph_response);
+                            }
                         }
                     }
-                    // Ok(SubgraphResponse::new_from_response(resp, context))
                 }
+                /*
                 // Instead of todo return a fake error for now
                 return Err(Box::new(FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
                     reason: "fake_error".to_string(),
                 }));
+                */
                 // todo!()
             }
-            None => receiver.await?,
+            None => {
+                tracing::info!("WE HAVE A NONE WAITER");
+                /*
+                tracing::info!("WE HAVE A WAITER");
+                // receiver.await?
+                match receiver.await {
+                    Ok(v) => v,
+                    Err(err) => {
+                        panic!("A RECEIVER FAILED: {err}");
+                    }
+                }
+                */
+            }
+        }
+        tracing::info!("WE HAVE A WAITER");
+        // receiver.await?
+        match receiver.await {
+            Ok(v) => v,
+            Err(err) => {
+                panic!("A RECEIVER FAILED: {err}");
+            }
         }
     } else {
         tracing::info!("WE CALLED HTTP");
