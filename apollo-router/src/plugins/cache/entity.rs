@@ -261,7 +261,6 @@ impl InnerCacheService {
                             cache_control,
                             root_cache_key,
                         )
-                        .instrument(tracing::info_span!("cache_store"))
                         .await?;
 
                         Ok(response)
@@ -290,7 +289,6 @@ impl InnerCacheService {
                         cache_control,
                         cache_result.0,
                     )
-                    .instrument(tracing::info_span!("cache_store"))
                     .await?;
                     Ok(response)
                 }
@@ -424,16 +422,21 @@ async fn cache_store_root_from_response(
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            cache
-                .insert(
-                    RedisKey(cache_key),
-                    RedisValue(CacheEntry {
-                        control: cache_control,
-                        data: data.clone(),
-                    }),
-                    ttl,
-                )
-                .await;
+            let span = tracing::info_span!("cache_store");
+            let data = data.clone();
+            tokio::spawn(async move {
+                cache
+                    .insert(
+                        RedisKey(cache_key),
+                        RedisValue(CacheEntry {
+                            control: cache_control,
+                            data,
+                        }),
+                        ttl,
+                    )
+                    .instrument(span)
+                    .await;
+            });
         }
     }
 
@@ -463,7 +466,7 @@ async fn cache_store_entities_from_response(
                     reason: "expected an array of entities".to_string(),
                 })?,
             &response.response.body().errors,
-            &cache,
+            cache,
             subgraph_ttl,
             cache_control,
             &mut result_from_cache,
@@ -715,7 +718,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: &RedisCacheStorage,
+    cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -797,7 +800,14 @@ async fn insert_entities_in_result(
     }
 
     if !to_insert.is_empty() {
-        cache.insert_multiple(&to_insert, ttl).await;
+        let span = tracing::info_span!("cache_store");
+
+        tokio::spawn(async move {
+            cache
+                .insert_multiple(&to_insert, ttl)
+                .instrument(span)
+                .await;
+        });
     }
 
     for (ty, nb) in inserted_types {
