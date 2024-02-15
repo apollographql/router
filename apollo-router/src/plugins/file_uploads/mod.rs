@@ -309,7 +309,8 @@ fn try_path<'a>(
 }
 
 type MapField = IndexMap<String, Vec<String>>;
-type MapPerVariable = HashMap<String, HashMap<String, Vec<Vec<String>>>>;
+type MapPerVariable = HashMap<String, MapPerFile>;
+type MapPerFile = HashMap<String, Vec<Vec<String>>>;
 
 #[derive(Clone)]
 struct SupergraphLayerResult {
@@ -333,7 +334,7 @@ fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::R
         } = supergraph_result;
 
         let root = &req.query_plan.root;
-        let root = rearrange_plan_node(root, &mut HashSet::new(), &files_order, &map_per_variable)?;
+        let root = rearrange_plan_node(root, &mut HashMap::new(), &files_order, &map_per_variable)?;
         return Ok(execution::Request {
             query_plan: Arc::new(QueryPlan {
                 root,
@@ -350,7 +351,7 @@ fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::R
 // Recursive, and recursion is safe here since query plan is executed recursively.
 fn rearrange_plan_node<'a>(
     node: &PlanNode,
-    acc_files: &mut HashSet<&'a str>,
+    acc_variables: &mut HashMap<String, &'a MapPerFile>,
     files_order: &IndexSet<String>,
     map_per_variable: &'a MapPerVariable,
 ) -> UploadResult<PlanNode> {
@@ -363,7 +364,7 @@ fn rearrange_plan_node<'a>(
             let if_clause = if let Some(node) = if_clause {
                 Some(Box::new(rearrange_plan_node(
                     node,
-                    acc_files,
+                    acc_variables,
                     files_order,
                     map_per_variable,
                 )?))
@@ -374,7 +375,7 @@ fn rearrange_plan_node<'a>(
             let else_clause = if let Some(node) = else_clause {
                 Some(Box::new(rearrange_plan_node(
                     node,
-                    acc_files,
+                    acc_variables,
                     files_order,
                     map_per_variable,
                 )?))
@@ -389,31 +390,19 @@ fn rearrange_plan_node<'a>(
             }
         }
         PlanNode::Fetch(fetch) => {
-            acc_files.extend(
-                fetch
-                    .variable_usages
-                    .iter()
-                    .filter_map(|name| {
-                        map_per_variable
-                            .get(name)
-                            .map(|map| map.keys().map(|key| key.as_str()))
-                    })
-                    .flatten(),
-            );
+            for variable_name in fetch.variable_usages.iter() {
+                if let Some(map) = map_per_variable.get(variable_name) {
+                    acc_variables.entry(variable_name.clone()).or_insert(map);
+                }
+            }
             PlanNode::Fetch(fetch.clone())
         }
         PlanNode::Subscription { primary, rest } => {
-            acc_files.extend(
-                primary
-                    .variable_usages
-                    .iter()
-                    .filter_map(|name| {
-                        map_per_variable
-                            .get(name)
-                            .map(|map| map.keys().map(|key| key.as_str()))
-                    })
-                    .flatten(),
-            );
+            for variable_name in primary.variable_usages.iter() {
+                if let Some(map) = map_per_variable.get(variable_name) {
+                    acc_variables.entry(variable_name.clone()).or_insert(map);
+                }
+            }
             // FIXME: error if rest contain files
             PlanNode::Subscription {
                 primary: primary.clone(),
@@ -429,7 +418,8 @@ fn rearrange_plan_node<'a>(
             // }
             // FIXME: error if deferred contain files
             if let Some(node) = primary.node {
-                let node = rearrange_plan_node(&node, acc_files, files_order, map_per_variable)?;
+                let node =
+                    rearrange_plan_node(&node, acc_variables, files_order, map_per_variable)?;
                 primary.node = Some(Box::new(node));
                 PlanNode::Defer { primary, deferred }
             } else {
@@ -439,7 +429,7 @@ fn rearrange_plan_node<'a>(
         PlanNode::Flatten(flatten_node) => {
             let node = rearrange_plan_node(
                 &flatten_node.node,
-                acc_files,
+                acc_variables,
                 &files_order,
                 map_per_variable,
             )?;
@@ -452,46 +442,50 @@ fn rearrange_plan_node<'a>(
             let mut sequence = Vec::new();
             let mut last_file = None;
             for node in nodes.iter() {
-                let mut node_files = HashSet::new();
+                let mut node_variables = HashMap::new();
                 let node =
-                    rearrange_plan_node(node, &mut node_files, &files_order, map_per_variable)?;
-                for file in node_files.into_iter() {
-                    acc_files.insert(file);
-                    let index = files_order.get_index_of(file);
-                    // FIXME: errors
-                    assert!(index > last_file);
-                    last_file = index;
+                    rearrange_plan_node(node, &mut node_variables, &files_order, map_per_variable)?;
+                for (variable, map) in node_variables.into_iter() {
+                    acc_variables.insert(variable, map);
+
+                    for file in map.keys() {
+                        let index = files_order.get_index_of(file);
+                        // FIXME: errors
+                        assert!(index > last_file);
+                        last_file = index;
+                    }
                 }
                 sequence.push(node);
             }
             PlanNode::Sequence { nodes: sequence }
         }
         PlanNode::Parallel { nodes } => {
-            // FIXME: switch from files to variables
-            // FIXME: first fill acc_variables and just track error instead of throw 
+            // FIXME: first fill acc_variables and just track error instead of throw
             // FIXME: BTree key => (first_file, last_file)
             let mut parallel = Vec::new();
             let mut sequence = BTreeMap::new();
 
             for node in nodes.iter() {
-                let mut node_files = HashSet::new();
+                let mut node_variables = HashMap::new();
                 let node =
-                    rearrange_plan_node(node, &mut node_files, &files_order, map_per_variable)?;
-                if node_files.is_empty() {
+                    rearrange_plan_node(node, &mut node_variables, &files_order, map_per_variable)?;
+                if node_variables.is_empty() {
                     parallel.push(node);
                     continue;
                 }
 
                 let mut first_file = None;
                 let mut last_file = None;
-                for file in node_files.into_iter() {
-                    acc_files.insert(file);
-                    let index = files_order.get_index_of(file);
-                    first_file = match first_file {
-                        None => index,
-                        Some(first_file) => cmp::min(Some(first_file), index),
-                    };
-                    last_file = cmp::max(last_file, index);
+                for (variable, map) in node_variables.into_iter() {
+                    acc_variables.insert(variable, map);
+                    for file in map.keys() {
+                        let index = files_order.get_index_of(file);
+                        first_file = match first_file {
+                            None => index,
+                            Some(first_file) => cmp::min(Some(first_file), index),
+                        };
+                        last_file = cmp::max(last_file, index);
+                    }
                 }
                 sequence.insert(first_file, (node, last_file));
             }
