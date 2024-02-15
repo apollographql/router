@@ -27,7 +27,7 @@ The Apollo Router enables query plan caching by default. In your router's [YAML 
 ```yaml title="router.yaml"
 supergraph:
   query_planning:
-    experimental_cache:
+    cache:
       in_memory:
         limit: 512 # This is the default value.
 ```
@@ -39,7 +39,7 @@ supergraph:
   query_planning:
     # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
     warmed_up_queries: 100
-    experimental_cache:
+    cache:
       in_memory:
         limit: 512
 ```

@@ -7,5 +7,7 @@ Exit code: Some(0)
 stderr:
 
 stdout:
-This Router version has no preview configuration
+List of all preview configurations with related GitHub discussions:
+
+	- preview_entity_cache: https://github.com/apollographql/router/discussions/4592
 

@@ -1309,149 +1309,6 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "experimental_entity_cache": {
-      "description": "Configuration for entity caching",
-      "type": "object",
-      "required": [
-        "redis"
-      ],
-      "properties": {
-        "enabled": {
-          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
-          "default": null,
-          "type": "boolean",
-          "nullable": true
-        },
-        "metrics": {
-          "description": "Entity caching evaluation metrics",
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "description": "enables metrics evaluating the benefits of entity caching",
-              "default": false,
-              "type": "boolean"
-            },
-            "separate_per_type": {
-              "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
-              "default": false,
-              "type": "boolean"
-            },
-            "ttl": {
-              "description": "Metrics counter TTL",
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "additionalProperties": false
-        },
-        "redis": {
-          "description": "Redis cache configuration",
-          "type": "object",
-          "required": [
-            "urls"
-          ],
-          "properties": {
-            "namespace": {
-              "description": "namespace used to prefix Redis keys",
-              "type": "string",
-              "nullable": true
-            },
-            "password": {
-              "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
-              "type": "string",
-              "nullable": true
-            },
-            "timeout": {
-              "description": "Redis request timeout (default: 2ms)",
-              "default": null,
-              "type": "string",
-              "nullable": true
-            },
-            "tls": {
-              "description": "TLS client configuration",
-              "default": null,
-              "type": "object",
-              "properties": {
-                "certificate_authorities": {
-                  "description": "list of certificate authorities in PEM format",
-                  "default": null,
-                  "type": "string",
-                  "nullable": true
-                },
-                "client_authentication": {
-                  "description": "client certificate authentication",
-                  "default": null,
-                  "type": "object",
-                  "required": [
-                    "certificate_chain",
-                    "key"
-                  ],
-                  "properties": {
-                    "certificate_chain": {
-                      "description": "list of certificates in PEM format",
-                      "writeOnly": true,
-                      "type": "string"
-                    },
-                    "key": {
-                      "description": "key in PEM format",
-                      "writeOnly": true,
-                      "type": "string"
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
-            "ttl": {
-              "description": "TTL for entries",
-              "default": null,
-              "type": "string",
-              "nullable": true
-            },
-            "urls": {
-              "description": "List of URLs to the Redis cluster",
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "uri"
-              }
-            },
-            "username": {
-              "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "additionalProperties": false
-        },
-        "subgraphs": {
-          "description": "Per subgraph configuration",
-          "type": "object",
-          "additionalProperties": {
-            "description": "Per subgraph configuration for entity caching",
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "description": "activates caching for this subgraph, overrides the global configuration",
-                "default": null,
-                "type": "boolean",
-                "nullable": true
-              },
-              "ttl": {
-                "description": "expiration for all keys",
-                "type": "string",
-                "nullable": true
-              }
-            },
-            "additionalProperties": false
-          }
-        }
-      },
-      "additionalProperties": false
-    },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
       "default": "both",
@@ -2164,6 +2021,149 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "preview_entity_cache": {
+      "description": "Configuration for entity caching",
+      "type": "object",
+      "required": [
+        "redis"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
+          "default": null,
+          "type": "boolean",
+          "nullable": true
+        },
+        "metrics": {
+          "description": "Entity caching evaluation metrics",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "enables metrics evaluating the benefits of entity caching",
+              "default": false,
+              "type": "boolean"
+            },
+            "separate_per_type": {
+              "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
+              "default": false,
+              "type": "boolean"
+            },
+            "ttl": {
+              "description": "Metrics counter TTL",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "redis": {
+          "description": "Redis cache configuration",
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "namespace": {
+              "description": "namespace used to prefix Redis keys",
+              "type": "string",
+              "nullable": true
+            },
+            "password": {
+              "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
+              "type": "string",
+              "nullable": true
+            },
+            "timeout": {
+              "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "tls": {
+              "description": "TLS client configuration",
+              "default": null,
+              "type": "object",
+              "properties": {
+                "certificate_authorities": {
+                  "description": "list of certificate authorities in PEM format",
+                  "default": null,
+                  "type": "string",
+                  "nullable": true
+                },
+                "client_authentication": {
+                  "description": "client certificate authentication",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "certificate_chain",
+                    "key"
+                  ],
+                  "properties": {
+                    "certificate_chain": {
+                      "description": "list of certificates in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    },
+                    "key": {
+                      "description": "key in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "ttl": {
+              "description": "TTL for entries",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "username": {
+              "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "subgraphs": {
+          "description": "Per subgraph configuration",
+          "type": "object",
+          "additionalProperties": {
+            "description": "Per subgraph configuration for entity caching",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "description": "activates caching for this subgraph, overrides the global configuration",
+                "default": null,
+                "type": "boolean",
+                "nullable": true
+              },
+              "ttl": {
+                "description": "expiration for all keys",
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "progressive_override": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
@@ -2372,7 +2372,7 @@ expression: "&schema"
         "experimental_reuse_query_fragments": null,
         "defer_support": true,
         "query_planning": {
-          "experimental_cache": {
+          "cache": {
             "in_memory": {
               "limit": 512
             },
@@ -2423,7 +2423,7 @@ expression: "&schema"
         "query_planning": {
           "description": "Query planning options",
           "default": {
-            "experimental_cache": {
+            "cache": {
               "in_memory": {
                 "limit": 512
               },
@@ -2435,7 +2435,7 @@ expression: "&schema"
           },
           "type": "object",
           "properties": {
-            "experimental_cache": {
+            "cache": {
               "description": "Cache configuration",
               "default": {
                 "in_memory": {
@@ -5330,7 +5330,7 @@ expression: "&schema"
                       "additionalProperties": false
                     },
                     "buckets": {
-                      "description": "Custom buckets for histograms",
+                      "description": "Custom buckets for all histograms",
                       "default": [
                         0.001,
                         0.005,
@@ -5424,6 +5424,74 @@ expression: "&schema"
                       "default": null,
                       "type": "string",
                       "nullable": true
+                    },
+                    "views": {
+                      "description": "Views applied on metrics",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name"
+                        ],
+                        "properties": {
+                          "aggregation": {
+                            "description": "New aggregation settings to set",
+                            "oneOf": [
+                              {
+                                "description": "An aggregation that summarizes a set of measurements as an histogram with explicitly defined buckets.",
+                                "type": "object",
+                                "required": [
+                                  "histogram"
+                                ],
+                                "properties": {
+                                  "histogram": {
+                                    "type": "object",
+                                    "required": [
+                                      "buckets"
+                                    ],
+                                    "properties": {
+                                      "buckets": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ],
+                            "nullable": true
+                          },
+                          "allowed_attribute_keys": {
+                            "description": "An allow-list of attribute keys that will be preserved for the instrument.\n\nAny attribute recorded for the instrument with a key not in this set will be dropped. If the set is empty, all attributes will be dropped, if `None` all attributes will be kept.",
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "uniqueItems": true,
+                            "nullable": true
+                          },
+                          "description": {
+                            "description": "New description to set to the instrument",
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "name": {
+                            "description": "The instrument name you're targeting",
+                            "type": "string"
+                          },
+                          "unit": {
+                            "description": "New unit to set to the instrument",
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "additionalProperties": false

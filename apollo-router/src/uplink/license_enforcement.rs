@@ -30,6 +30,7 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
+use crate::plugins::authentication::convert_key_algorithm;
 use crate::spec::LINK_AS_ARGUMENT;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::LINK_URL_ARGUMENT;
@@ -297,7 +298,7 @@ impl LicenseEnforcementReport {
                 .name("Coprocessor plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.query_planning.experimental_cache.redis")
+                .path("$.supergraph.query_planning.cache.redis")
                 .name("Query plan caching")
                 .build(),
             ConfigurationRestriction::builder()
@@ -305,7 +306,7 @@ impl LicenseEnforcementReport {
                 .name("APQ caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.experimental_entity_cache.enabled")
+                .path("$.preview_entity_cache.enabled")
                 .value(true)
                 .name("Subgraph entity caching")
                 .build(),
@@ -483,9 +484,12 @@ impl FromStr for License {
                 // Set up the validation for the JWT.
                 // We don't require exp as we are only interested in haltAt and warnAt
                 let mut validation = Validation::new(
-                    jwk.common
-                        .algorithm
-                        .expect("alg is required on all keys in router.jwks.json"),
+                    convert_key_algorithm(
+                        jwk.common
+                            .key_algorithm
+                            .expect("alg is required on all keys in router.jwks.json"),
+                    )
+                    .expect("only signing algorithms are used"),
                 );
                 validation.validate_exp = false;
                 validation.set_required_spec_claims(&["iss", "sub", "aud", "warnAt", "haltAt"]);

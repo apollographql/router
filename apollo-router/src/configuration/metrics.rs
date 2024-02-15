@@ -280,7 +280,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.entity_cache,
-            "$.experimental_entity_cache",
+            "$.preview_entity_cache",
             opt.enabled,
             "$[?(@.enabled)]",
             opt.subgraph.enabled,
