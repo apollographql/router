@@ -113,7 +113,7 @@ fn supergraph_service(service) {
 }
 ```
 
-Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](https://www.apollographql.com/docs/router/configuration/rhai).
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](./coprocessor/#terminating-a-client-request).
 
 If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 

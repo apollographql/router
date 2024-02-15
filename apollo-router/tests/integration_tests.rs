@@ -1282,8 +1282,12 @@ async fn query_rust_with_config(
 }
 
 async fn fallible_setup_router_and_registry(
-    config: serde_json::Value,
+    mut config: serde_json::Value,
 ) -> Result<(router::BoxCloneService, CountingServiceRegistry), BoxError> {
+    if config["experimental_api_schema_generation_mode"].is_null() {
+        config["experimental_api_schema_generation_mode"] = "both".into();
+    }
+
     let counting_registry = CountingServiceRegistry::new();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
