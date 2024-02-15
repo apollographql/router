@@ -875,9 +875,10 @@ mod helper {
             }
         };
 
+        let alias = format!("file{field_name}");
         Ok(Json(json!({
             "data": {
-                "file0": upload,
+                alias: upload,
             }
         })))
     }
