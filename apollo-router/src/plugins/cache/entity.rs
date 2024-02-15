@@ -15,6 +15,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
@@ -241,7 +242,10 @@ impl InnerCacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
-                match cache_lookup_root(self.name, self.storage.clone(), request).await? {
+                match cache_lookup_root(self.name, self.storage.clone(), request)
+                    .instrument(tracing::info_span!("cache_lookup"))
+                    .await?
+                {
                     ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, root_cache_key)) => {
                         let response = self.service.call(request).await?;
@@ -257,6 +261,7 @@ impl InnerCacheService {
                             cache_control,
                             root_cache_key,
                         )
+                        .instrument(tracing::info_span!("cache_store"))
                         .await?;
 
                         Ok(response)
@@ -266,7 +271,10 @@ impl InnerCacheService {
                 self.service.call(request).await
             }
         } else {
-            match cache_lookup_entities(self.name, self.storage.clone(), request).await? {
+            match cache_lookup_entities(self.name, self.storage.clone(), request)
+                .instrument(tracing::info_span!("cache_lookup"))
+                .await?
+            {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
@@ -282,6 +290,7 @@ impl InnerCacheService {
                         cache_control,
                         cache_result.0,
                     )
+                    .instrument(tracing::info_span!("cache_store"))
                     .await?;
                     Ok(response)
                 }
