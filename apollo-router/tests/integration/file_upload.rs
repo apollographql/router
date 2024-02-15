@@ -578,7 +578,16 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
-                TODO: Currently panics
+            {
+              "errors": [
+                {
+                  "message": "References to variables containing files are ordered in the way that prevent streaming of files.",
+                  "extensions": {
+                    "code": "FILE_UPLOAD"
+                  }
+                }
+              ]
+            }
             "###);
         })
         .await
