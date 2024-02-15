@@ -195,7 +195,7 @@ impl PartialEq for Configuration {
     }
 }
 
-/// GraphQL validation modes.
+/// API schema generation modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]

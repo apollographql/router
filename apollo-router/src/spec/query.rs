@@ -276,7 +276,7 @@ impl Query {
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
             Err(WithErrors { errors, .. }) => {
-                return Err(SpecError::ParsingError(errors.to_string_no_color()));
+                return Err(SpecError::ParsingError(errors.to_string()));
             }
         };
         let schema = &schema.api_schema().definitions;

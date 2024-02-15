@@ -95,53 +95,79 @@ impl BridgeQueryPlanner {
                 let api_schema = planner.api_schema().await?;
                 api_schema.schema
             }
-            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(),
+            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(&configuration)?,
 
             crate::configuration::ApiSchemaMode::Both => {
-                let api_schema = planner.api_schema().await?;
-                let new_api_schema = schema.create_api_schema();
+                let api_schema = planner
+                    .api_schema()
+                    .await
+                    .map(|api_schema| api_schema.schema);
+                let new_api_schema = schema.create_api_schema(&configuration);
 
-                if api_schema.schema != new_api_schema {
-                    tracing::warn!(
-                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                        generation.is_matched = false,
-                        "API schema generation mismatch: apollo-federation and router-bridge write different schema"
-                    );
+                match (&api_schema, &new_api_schema) {
+                    (Err(js_error), Ok(_)) => {
+                        tracing::warn!("JS API schema error: {}", js_error);
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = false,
+                            "API schema generation mismatch: JS returns error but Rust does not"
+                        );
+                    }
+                    (Ok(_), Err(rs_error)) => {
+                        tracing::warn!("Rust API schema error: {}", rs_error);
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = false,
+                            "API schema generation mismatch: JS returns API schema but Rust errors out"
+                        );
+                    }
+                    (Ok(left), Ok(right)) if left != right => {
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = false,
+                            "API schema generation mismatch: apollo-federation and router-bridge write different schema"
+                        );
 
-                    let differences = diff::lines(&api_schema.schema, &new_api_schema);
-                    let mut output = String::new();
-                    for diff_line in differences {
-                        match diff_line {
-                            diff::Result::Left(l) => {
-                                let trimmed = l.trim();
-                                if !trimmed.starts_with('#') && !trimmed.is_empty() {
-                                    writeln!(&mut output, "-{l}").expect("write will never fail");
-                                } else {
+                        let differences = diff::lines(left, right);
+                        let mut output = String::new();
+                        for diff_line in differences {
+                            match diff_line {
+                                diff::Result::Left(l) => {
+                                    let trimmed = l.trim();
+                                    if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                                        writeln!(&mut output, "-{l}")
+                                            .expect("write will never fail");
+                                    } else {
+                                        writeln!(&mut output, " {l}")
+                                            .expect("write will never fail");
+                                    }
+                                }
+                                diff::Result::Both(l, _) => {
                                     writeln!(&mut output, " {l}").expect("write will never fail");
                                 }
-                            }
-                            diff::Result::Both(l, _) => {
-                                writeln!(&mut output, " {l}").expect("write will never fail");
-                            }
-                            diff::Result::Right(r) => {
-                                let trimmed = r.trim();
-                                if trimmed != "---" && !trimmed.is_empty() {
-                                    writeln!(&mut output, "+{r}").expect("write will never fail");
+                                diff::Result::Right(r) => {
+                                    let trimmed = r.trim();
+                                    if trimmed != "---" && !trimmed.is_empty() {
+                                        writeln!(&mut output, "+{r}")
+                                            .expect("write will never fail");
+                                    }
                                 }
                             }
                         }
+                        tracing::debug!(
+                            "different API schema between apollo-federation and router-bridge:\n{}",
+                            output
+                        );
                     }
-                    tracing::debug!(
-                        "different API schema between apollo-federation and router-bridge:\n{}",
-                        output
-                    );
-                } else {
-                    tracing::warn!(
-                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                        generation.is_matched = true,
-                    );
+                    (Err(_), Err(_)) | (Ok(_), Ok(_)) => {
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = true,
+                        );
+                    }
                 }
-                api_schema.schema
+
+                api_schema?
             }
         };
         let api_schema = Schema::parse(&api_schema_string)?;

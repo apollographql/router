@@ -22,6 +22,7 @@ use tower::BoxError;
 use tower::Service;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::Context;
 
@@ -283,7 +284,7 @@ where
 
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &tracing::span::Span::current().context(),
+                &prepare_context(tracing::span::Span::current().context()),
                 &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
             );
         });

@@ -1,6 +1,7 @@
 //! Router errors.
 use std::sync::Arc;
 
+use apollo_federation::error::FederationError;
 use displaydoc::Display;
 use lazy_static::__Deref;
 use router_bridge::introspect::IntrospectionError;
@@ -221,6 +222,9 @@ pub(crate) enum ServiceBuildError {
     /// couldn't build Router Service: {0}
     QueryPlannerError(QueryPlannerError),
 
+    /// API schema generation failed: {0}
+    ApiSchemaError(FederationError),
+
     /// schema error: {0}
     Schema(SchemaError),
 }
@@ -228,6 +232,12 @@ pub(crate) enum ServiceBuildError {
 impl From<SchemaError> for ServiceBuildError {
     fn from(err: SchemaError) -> Self {
         ServiceBuildError::Schema(err)
+    }
+}
+
+impl From<FederationError> for ServiceBuildError {
+    fn from(err: FederationError) -> Self {
+        ServiceBuildError::ApiSchemaError(err)
     }
 }
 
@@ -550,7 +560,7 @@ impl IntoGraphQLErrors for ParseErrors {
             .iter()
             .map(|diagnostic| {
                 Error::builder()
-                    .message(diagnostic.message().to_string())
+                    .message(diagnostic.error.to_string())
                     .locations(
                         diagnostic
                             .get_line_column()
