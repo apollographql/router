@@ -351,7 +351,7 @@ fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::R
 // Recursive, and recursion is safe here since query plan is executed recursively.
 fn rearrange_plan_node<'a>(
     node: &PlanNode,
-    acc_variables: &mut HashMap<String, &'a MapPerFile>,
+    acc_variables: &mut HashMap<&'a str, &'a MapPerFile>,
     files_order: &IndexSet<String>,
     map_per_variable: &'a MapPerVariable,
 ) -> UploadResult<PlanNode> {
@@ -390,17 +390,17 @@ fn rearrange_plan_node<'a>(
             }
         }
         PlanNode::Fetch(fetch) => {
-            for variable_name in fetch.variable_usages.iter() {
-                if let Some(map) = map_per_variable.get(variable_name) {
-                    acc_variables.entry(variable_name.clone()).or_insert(map);
+            for variable in fetch.variable_usages.iter() {
+                if let Some((name, map)) = map_per_variable.get_key_value(variable) {
+                    acc_variables.entry(name).or_insert(map);
                 }
             }
             PlanNode::Fetch(fetch.clone())
         }
         PlanNode::Subscription { primary, rest } => {
-            for variable_name in primary.variable_usages.iter() {
-                if let Some(map) = map_per_variable.get(variable_name) {
-                    acc_variables.entry(variable_name.clone()).or_insert(map);
+            for variable in primary.variable_usages.iter() {
+                if let Some((name, map)) = map_per_variable.get_key_value(variable) {
+                    acc_variables.entry(name).or_insert(map);
                 }
             }
             // FIXME: error if rest contain files
@@ -413,8 +413,9 @@ fn rearrange_plan_node<'a>(
             let mut primary = primary.clone();
             let deferred = deferred.clone();
 
+            // let deferred_variables = HashMap::new();
             // for node in deferred.iter() {
-            //     let (files, _) = rearrange_plan_node(node, files_order, map_per_variable).ok();
+            //     rearrange_plan_node(node, &mut deferred_variables, files_order, map_per_variable);
             // }
             // FIXME: error if deferred contain files
             if let Some(node) = primary.node {
