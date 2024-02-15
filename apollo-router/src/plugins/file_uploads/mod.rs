@@ -2,6 +2,7 @@ use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::mem;
 use std::ops::ControlFlow;
 use std::ops::DerefMut;
 use std::pin::Pin;
@@ -624,8 +625,16 @@ impl Stream for SubgraphFileProxyStream {
             match result {
                 Poll::Ready(None) => {
                     if !self.file_names.is_empty() {
-                        self.file_names = HashSet::new();
-                        return Poll::Ready(Some(Err(FileUploadError::FilesMissing)));
+                        let files = mem::replace(&mut self.file_names, HashSet::new())
+                            .iter()
+                            .fold(String::new(), |acc, str| {
+                                if acc.is_empty() {
+                                    format!("'{}'", str)
+                                } else {
+                                    format!("{}, '{}'", acc, str)
+                                }
+                            });
+                        return Poll::Ready(Some(Err(FileUploadError::MissingFiles(files))));
                     }
                     return Poll::Ready(None);
                 }
@@ -686,7 +695,8 @@ impl MultipartFormData {
             let prefix = format!(
                 "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n",
                 boundary, name
-            ).into();
+            )
+            .into();
 
             tokio_stream::once(Ok(prefix))
                 .chain(value_stream)

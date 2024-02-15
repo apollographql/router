@@ -275,7 +275,19 @@ async fn it_fails_upload_without_file() -> Result<(), BoxError> {
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
-                TODO: Currently panics
+            {
+              "errors": [
+                {
+                  "message": "HTTP fetch failed from 'uploads': could not compress request: error reading a body from connection: Missing files in the request: '0'.",
+                  "path": [],
+                  "extensions": {
+                    "code": "SUBREQUEST_HTTP_ERROR",
+                    "service": "uploads",
+                    "reason": "could not compress request: error reading a body from connection: Missing files in the request: '0'."
+                  }
+                }
+              ]
+            }
             "###);
         })
         .await

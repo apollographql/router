@@ -30,9 +30,8 @@ pub(crate) enum FileUploadError {
     #[error("Invalid path '{0}' found inside 'map' field, it does not point to a valid value inside 'operations' field.")]
     InputValueNotFound(String),
 
-    // FIXME: better name
-    #[error("missing files.")]
-    FilesMissing,
+    #[error("Missing files in the request: {0}.")]
+    MissingFiles(String),
 
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
