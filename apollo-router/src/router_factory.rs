@@ -179,10 +179,10 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         )
                         .await
                     {
-                        Ok(mut plugin) => {
+                        Ok(plugin) => {
                             if let Some(telemetry) = plugin
-                                .as_any_mut()
-                                .downcast_mut::<crate::plugins::telemetry::Telemetry>(
+                                .as_any()
+                                .downcast_ref::<crate::plugins::telemetry::Telemetry>(
                             ) {
                                 telemetry.activate();
                             }

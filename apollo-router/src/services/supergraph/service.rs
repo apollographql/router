@@ -716,7 +716,7 @@ impl PluggableSupergraphServiceBuilder {
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
         for (_, plugin) in plugins.iter_mut() {
-            if let Some(telemetry) = plugin.as_any_mut().downcast_mut::<Telemetry>() {
+            if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
                 telemetry.activate();
             }
         }
