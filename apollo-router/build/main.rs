@@ -9,15 +9,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("could not read Cargo.toml"),
     )
     .expect("could not parse Cargo.toml");
-    let router_bridge_version = cargo_manifest
+
+    let router_bridge = cargo_manifest
         .get("dependencies")
         .expect("Cargo.toml does not contain dependencies")
         .as_object()
         .expect("Cargo.toml dependencies key is not an object")
         .get("router-bridge")
-        .expect("Cargo.toml dependencies does not have an entry for router-bridge")
+        .expect("Cargo.toml dependencies does not have an entry for router-bridge");
+    let router_bridge_version = router_bridge
         .as_str()
-        .unwrap_or_default();
+        .or_else(|| {
+            router_bridge
+                .as_object()
+                .and_then(|o| o.get("version"))
+                .and_then(|version| version.as_str())
+        })
+        .expect("router-bridge does not have a version");
 
     let mut it = router_bridge_version.split('+');
     let _ = it.next();
