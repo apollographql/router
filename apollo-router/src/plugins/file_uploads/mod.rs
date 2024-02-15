@@ -21,6 +21,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
@@ -40,6 +41,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::file_uploads::error::FileUploadError;
+use crate::query_planner::DeferredNode;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
 use crate::register_private_plugin;
@@ -403,7 +405,26 @@ fn rearrange_plan_node<'a>(
                     acc_variables.entry(name).or_insert(map);
                 }
             }
-            // FIXME: error if rest contain files
+
+            if let Some(rest) = rest {
+                let mut rest_variables = HashMap::new();
+                // ignore result use it just to collect variables
+                drop(rearrange_plan_node(
+                    rest,
+                    &mut rest_variables,
+                    files_order,
+                    map_per_variable,
+                ));
+                if !rest_variables.is_empty() {
+                    return Err(FileUploadError::VariblesForbiddenInsideSubscription(
+                        rest_variables
+                            .into_keys()
+                            .map(|name| format!("${}", name))
+                            .join(", "),
+                    ));
+                }
+            }
+
             PlanNode::Subscription {
                 primary: primary.clone(),
                 rest: rest.clone(),
@@ -413,11 +434,27 @@ fn rearrange_plan_node<'a>(
             let mut primary = primary.clone();
             let deferred = deferred.clone();
 
-            // let deferred_variables = HashMap::new();
-            // for node in deferred.iter() {
-            //     rearrange_plan_node(node, &mut deferred_variables, files_order, map_per_variable);
-            // }
-            // FIXME: error if deferred contain files
+            let mut deferred_variables = HashMap::new();
+            for DeferredNode { node, .. } in deferred.iter() {
+                if let Some(node) = node {
+                    // ignore result use it just to collect variables
+                    drop(rearrange_plan_node(
+                        node,
+                        &mut deferred_variables,
+                        files_order,
+                        map_per_variable,
+                    ));
+                }
+            }
+            if !deferred_variables.is_empty() {
+                return Err(FileUploadError::VariblesForbiddenInsideDeffer(
+                    deferred_variables
+                        .into_keys()
+                        .map(|name| format!("${}", name))
+                        .join(", "),
+                ));
+            }
+
             if let Some(node) = primary.node {
                 let node =
                     rearrange_plan_node(&node, acc_variables, files_order, map_per_variable)?;
@@ -643,16 +680,13 @@ impl Stream for SubgraphFileProxyStream {
             match result {
                 Poll::Ready(None) => {
                     if !self.file_names.is_empty() {
-                        let files = mem::replace(&mut self.file_names, HashSet::new())
-                            .iter()
-                            .fold(String::new(), |acc, str| {
-                                if acc.is_empty() {
-                                    format!("'{}'", str)
-                                } else {
-                                    format!("{}, '{}'", acc, str)
-                                }
-                            });
-                        return Poll::Ready(Some(Err(FileUploadError::MissingFiles(files))));
+                        let files = mem::replace(&mut self.file_names, HashSet::new());
+                        return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
+                            files
+                                .into_iter()
+                                .map(|file| format!("'{}'", file))
+                                .join(", "),
+                        ))));
                     }
                     return Poll::Ready(None);
                 }

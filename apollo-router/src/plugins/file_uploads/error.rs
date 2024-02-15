@@ -33,6 +33,12 @@ pub(crate) enum FileUploadError {
     #[error("Missing files in the request: {0}.")]
     MissingFiles(String),
 
+    #[error("Variables containing files are forbidden inside @defer: {0}.")]
+    VariblesForbiddenInsideDeffer(String),
+
+    #[error("Variables containing files are forbidden inside subscription: {0}.")]
+    VariblesForbiddenInsideSubscription(String),
+
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
 }
