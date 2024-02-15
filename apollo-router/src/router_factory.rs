@@ -42,6 +42,7 @@ use crate::services::transport;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
+use crate::services::Plugins;
 use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
 use crate::spec::Schema;
@@ -300,14 +301,18 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // Process the plugins.
-        let plugins = create_plugins(
-            &configuration,
-            &schema,
-            initial_telemetry_plugin,
-            extra_plugins,
-        )
-        .instrument(span)
-        .await?;
+        let plugins: Arc<Plugins> = Arc::new(
+            create_plugins(
+                &configuration,
+                &schema,
+                initial_telemetry_plugin,
+                extra_plugins,
+            )
+            .instrument(span)
+            .await?
+            .into_iter()
+            .collect(),
+        );
 
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
@@ -317,12 +322,9 @@ impl YamlRouterFactory {
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
             }
-            for (plugin_name, plugin) in plugins {
-                builder = builder.with_dyn_plugin(plugin_name, plugin);
-            }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let supergraph_creator = builder.build().await?;
+            let supergraph_creator = builder.with_plugins(plugins).build().await?;
 
             Ok(supergraph_creator)
         }
@@ -332,7 +334,7 @@ impl YamlRouterFactory {
 }
 
 pub(crate) async fn create_subgraph_services(
-    plugins: &[(String, Box<dyn DynPlugin>)],
+    plugins: &Arc<Plugins>,
     schema: &Schema,
     configuration: &Configuration,
 ) -> Result<
@@ -382,7 +384,7 @@ pub(crate) async fn create_subgraph_services(
         )?;
 
         let http_service_factory =
-            HttpClientServiceFactory::new(Arc::new(http_service), Arc::new(IndexMap::new()));
+            HttpClientServiceFactory::new(Arc::new(http_service), plugins.clone());
 
         let subgraph_service = shaping.subgraph_service_internal(
             name,
@@ -473,7 +475,7 @@ pub(crate) async fn create_plugins(
     schema: &Schema,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
+) -> Result<Plugins, BoxError> {
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -494,7 +496,7 @@ pub(crate) async fn create_plugins(
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
-    let mut plugin_instances = Vec::new();
+    let mut plugin_instances = Plugins::new();
 
     // Use fonction-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
@@ -507,7 +509,9 @@ pub(crate) async fn create_plugins(
                 )
                 .await
             {
-                Ok(plugin) => plugin_instances.push(($name, plugin)),
+                Ok(plugin) => {
+                    let _ = plugin_instances.insert($name, plugin);
+                }
                 Err(err) => errors.push(ConfigurationError::PluginConfiguration {
                     plugin: $name,
                     error: err.to_string(),
@@ -594,7 +598,7 @@ pub(crate) async fn create_plugins(
                 add_mandatory_apollo_plugin!("telemetry");
             }
             Some(plugin) => {
-                plugin_instances.push(("apollo.telemetry".to_string(), plugin));
+                let _ = plugin_instances.insert("apollo.telemetry".to_string(), plugin);
                 apollo_plugins_config.remove("apollo.telemetry");
                 apollo_plugin_factories.remove("apollo.telemetry");
             }
