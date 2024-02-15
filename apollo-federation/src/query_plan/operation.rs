@@ -26,6 +26,7 @@ use apollo_compiler::executable::{
 };
 use apollo_compiler::{name, Node};
 use indexmap::{IndexMap, IndexSet};
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::sync::{atomic, Arc};
@@ -89,7 +90,7 @@ pub(crate) mod normalized_selection_map {
     };
     use apollo_compiler::ast::Name;
     use indexmap::IndexMap;
-    use std::borrow::Borrow;
+    use std::borrow::{Borrow, Cow};
     use std::hash::Hash;
     use std::iter::Map;
     use std::ops::Deref;
@@ -157,6 +158,89 @@ pub(crate) mod normalized_selection_map {
                 indexmap::map::Entry::Occupied(entry) => Entry::Occupied(OccupiedEntry(entry)),
                 indexmap::map::Entry::Vacant(entry) => Entry::Vacant(VacantEntry(entry)),
             }
+        }
+
+        /// Returns the selection set resulting from "recursively" filtering any selection
+        /// that does not match the provided predicate.
+        /// This method calls `predicate` on every selection of the selection set,
+        /// not just top-level ones, and apply a "depth-first" strategy:
+        /// when the predicate is called on a given selection it is guaranteed that
+        /// filtering has happened on all the selections of its sub-selection.
+        pub(crate) fn filter_recursive_depth_first(
+            &self,
+            predicate: &mut dyn FnMut(&NormalizedSelection) -> Result<bool, FederationError>,
+        ) -> Result<Cow<'_, Self>, FederationError> {
+            fn recur_sub_selections<'sel>(
+                selection: &'sel NormalizedSelection,
+                predicate: &mut dyn FnMut(&NormalizedSelection) -> Result<bool, FederationError>,
+            ) -> Result<Cow<'sel, NormalizedSelection>, FederationError> {
+                Ok(match selection {
+                    NormalizedSelection::Field(field) => {
+                        if let Some(sub_selections) = &field.selection_set {
+                            match sub_selections.filter_recursive_depth_first(predicate)? {
+                                Cow::Borrowed(_) => Cow::Borrowed(selection),
+                                Cow::Owned(new) => Cow::Owned(NormalizedSelection::Field(
+                                    Arc::new(NormalizedFieldSelection {
+                                        field: field.field.clone(),
+                                        selection_set: Some(new),
+                                    }),
+                                )),
+                            }
+                        } else {
+                            Cow::Borrowed(selection)
+                        }
+                    }
+                    NormalizedSelection::InlineFragment(fragment) => match fragment
+                        .selection_set
+                        .filter_recursive_depth_first(predicate)?
+                    {
+                        Cow::Borrowed(_) => Cow::Borrowed(selection),
+                        Cow::Owned(selection_set) => {
+                            Cow::Owned(NormalizedSelection::InlineFragment(Arc::new(
+                                NormalizedInlineFragmentSelection {
+                                    inline_fragment: fragment.inline_fragment.clone(),
+                                    selection_set,
+                                },
+                            )))
+                        }
+                    },
+                    NormalizedSelection::FragmentSpread(_) => {
+                        return Err(FederationError::internal("unexpected fragment spread"))
+                    }
+                })
+            }
+            let mut iter = self.0.iter();
+            let mut enumerated = (&mut iter).enumerate();
+            let mut new_map: IndexMap<_, _>;
+            loop {
+                let Some((index, (key, selection))) = enumerated.next() else {
+                    return Ok(Cow::Borrowed(self));
+                };
+                let filtered = recur_sub_selections(selection, predicate)?;
+                let keep = predicate(&filtered)?;
+                if keep && matches!(filtered, Cow::Borrowed(_)) {
+                    // Nothing changed so far, continue without cloning
+                    continue;
+                }
+
+                // Clone the map so far
+                new_map = self.0.as_slice()[..index]
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+
+                if keep {
+                    new_map.insert(key.clone(), filtered.into_owned());
+                }
+                break;
+            }
+            for (key, selection) in iter {
+                let filtered = recur_sub_selections(selection, predicate)?;
+                if predicate(&filtered)? {
+                    new_map.insert(key.clone(), filtered.into_owned());
+                }
+            }
+            Ok(Cow::Owned(Self(new_map)))
         }
     }
 
@@ -787,6 +871,10 @@ impl NormalizedSelectionSet {
         }
     }
 
+    fn is_empty(&self) -> bool {
+        self.selections.is_empty()
+    }
+
     pub(crate) fn contains_top_level_field(
         &self,
         field: &NormalizedField,
@@ -1210,6 +1298,39 @@ impl NormalizedSelectionSet {
         Ok(())
     }
 
+    pub(crate) fn without_empty_branches(&self) -> Result<Option<Cow<'_, Self>>, FederationError> {
+        let filtered = self.filter_recursive_depth_first(&mut |sel| match sel {
+            NormalizedSelection::Field(field) => Ok(if let Some(set) = &field.selection_set {
+                !set.is_empty()
+            } else {
+                true
+            }),
+            NormalizedSelection::InlineFragment(inline) => Ok(!inline.selection_set.is_empty()),
+            NormalizedSelection::FragmentSpread(_) => {
+                Err(FederationError::internal("unexpected fragment spread"))
+            }
+        })?;
+        Ok(if filtered.selections.is_empty() {
+            None
+        } else {
+            Some(filtered)
+        })
+    }
+
+    pub(crate) fn filter_recursive_depth_first(
+        &self,
+        predicate: &mut dyn FnMut(&NormalizedSelection) -> Result<bool, FederationError>,
+    ) -> Result<Cow<'_, Self>, FederationError> {
+        match self.selections.filter_recursive_depth_first(predicate)? {
+            Cow::Borrowed(_) => Ok(Cow::Borrowed(self)),
+            Cow::Owned(selections) => Ok(Cow::Owned(Self {
+                schema: self.schema.clone(),
+                type_position: self.type_position.clone(),
+                selections: Arc::new(selections),
+            })),
+        }
+    }
+
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         // If the conditions of all the selections within the set are the same,
         // then those are conditions of the whole set and we return it.
@@ -1625,24 +1746,19 @@ impl TryFrom<&NormalizedSelection> for Selection {
     }
 }
 
-impl TryFrom<&NormalizedFieldSelection> for Field {
+impl TryFrom<&NormalizedField> for Field {
     type Error = FederationError;
 
-    fn try_from(val: &NormalizedFieldSelection) -> Result<Self, Self::Error> {
-        let normalized_field = &val.field;
+    fn try_from(normalized_field: &NormalizedField) -> Result<Self, Self::Error> {
         let definition = normalized_field
             .data()
             .field_position
             .get(normalized_field.data().schema.schema())?
             .node
             .to_owned();
-        let selection_set = if let Some(selection_set) = &val.selection_set {
-            selection_set.try_into()?
-        } else {
-            SelectionSet {
-                ty: definition.ty.inner_named_type().clone(),
-                selections: vec![],
-            }
+        let selection_set = SelectionSet {
+            ty: definition.ty.inner_named_type().clone(),
+            selections: vec![],
         };
         Ok(Self {
             definition,
@@ -1655,23 +1771,58 @@ impl TryFrom<&NormalizedFieldSelection> for Field {
     }
 }
 
-impl TryFrom<&NormalizedInlineFragmentSelection> for InlineFragment {
+impl TryFrom<&NormalizedFieldSelection> for Field {
     type Error = FederationError;
 
-    fn try_from(val: &NormalizedInlineFragmentSelection) -> Result<Self, Self::Error> {
-        let normalized_inline_fragment = &val.inline_fragment;
-        Ok(Self {
-            type_condition: normalized_inline_fragment
+    fn try_from(val: &NormalizedFieldSelection) -> Result<Self, Self::Error> {
+        let mut field = Self::try_from(&val.field)?;
+        if let Some(selection_set) = &val.selection_set {
+            field.selection_set = selection_set.try_into()?;
+        }
+        Ok(field)
+    }
+}
+
+impl TryFrom<&NormalizedInlineFragment> for InlineFragment {
+    type Error = FederationError;
+
+    fn try_from(
+        normalized_inline_fragment: &NormalizedInlineFragment,
+    ) -> Result<Self, Self::Error> {
+        let type_condition = normalized_inline_fragment
+            .data()
+            .type_condition_position
+            .as_ref()
+            .map(|pos| pos.type_name().clone());
+        let ty = type_condition.clone().unwrap_or_else(|| {
+            normalized_inline_fragment
                 .data()
-                .type_condition_position
-                .as_ref()
-                .map(|pos| pos.type_name().clone()),
+                .parent_type_position
+                .type_name()
+                .clone()
+        });
+        Ok(Self {
+            type_condition,
             directives: normalized_inline_fragment
                 .data()
                 .directives
                 .deref()
                 .to_owned(),
+            selection_set: SelectionSet {
+                ty,
+                selections: Vec::new(),
+            },
+        })
+    }
+}
+
+impl TryFrom<&NormalizedInlineFragmentSelection> for InlineFragment {
+    type Error = FederationError;
+
+    fn try_from(val: &NormalizedInlineFragmentSelection) -> Result<Self, Self::Error> {
+        Ok(Self {
             selection_set: (&val.selection_set).try_into()?,
+            ..Self::try_from(&val.inline_fragment)?
         })
     }
 }

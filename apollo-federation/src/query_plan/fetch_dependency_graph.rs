@@ -1,14 +1,18 @@
+use super::operation::NormalizedSelection;
 use crate::error::FederationError;
 use crate::query_graph::graph_path::{OpGraphPathContext, OpPath};
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
+use crate::query_plan::fetch_dependency_graph_processor::RebasedFragments;
 use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::{FetchDataPathElement, QueryPathElement};
 use crate::query_plan::{FetchDataRewrite, QueryPlanCost};
 use crate::schema::position::{CompositeTypeDefinitionPosition, SchemaRootDefinitionKind};
 use crate::schema::ValidFederationSchema;
-use apollo_compiler::NodeStr;
+use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::{Node, NodeStr};
 use indexmap::{IndexMap, IndexSet};
 use petgraph::stable_graph::{NodeIndex, StableDiGraph};
 use std::sync::Arc;
@@ -22,7 +26,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub(crate) struct FetchDependencyGraphNode {
     /// The subgraph this fetch is queried against.
-    subgraph_name: NodeStr,
+    pub(crate) subgraph_name: NodeStr,
     /// Which root operation kind the fetch should have.
     root_kind: SchemaRootDefinitionKind,
     /// The parent type of the fetch's selection set. For fetches against the root, this is the
@@ -58,10 +62,10 @@ pub(crate) struct FetchDependencyGraphNode {
 #[derive(Debug, Clone)]
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
-    selection_set: Arc<NormalizedSelectionSet>,
+    pub(crate) selection_set: Arc<NormalizedSelectionSet>,
     /// The conditions determining whether the fetch should be executed (which must be recomputed
     /// from the selection set when it changes).
-    conditions: Conditions,
+    pub(crate) conditions: Conditions,
 }
 
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
@@ -133,19 +137,19 @@ pub(crate) struct DeferTracking {
 // TODO: Write docstrings
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredInfo {
-    label: NodeStr,
-    path: FetchDependencyGraphPath,
-    sub_selection: NormalizedSelectionSet,
-    deferred: IndexSet<NodeStr>,
-    dependencies: IndexSet<NodeStr>,
+    pub(crate) label: NodeStr,
+    pub(crate) path: FetchDependencyGraphPath,
+    pub(crate) sub_selection: NormalizedSelectionSet,
+    pub(crate) deferred: IndexSet<NodeStr>,
+    pub(crate) dependencies: IndexSet<NodeStr>,
 }
 
 // TODO: Write docstrings
 #[derive(Debug, Clone)]
 pub(crate) struct FetchDependencyGraphPath {
-    full_path: OpPath,
-    path_in_node: OpPath,
-    response_path: Vec<FetchDataPathElement>,
+    pub(crate) full_path: OpPath,
+    pub(crate) path_in_node: OpPath,
+    pub(crate) response_path: Vec<FetchDataPathElement>,
 }
 
 #[derive(Debug, Default)]
@@ -251,6 +255,57 @@ impl FetchDependencyGraph {
             must_preserve_selection_set: false,
             is_known_useful: false,
         })))
+    }
+}
+
+impl FetchDependencyGraphNode {
+    pub(crate) fn cost(&mut self) -> Result<QueryPlanCost, FederationError> {
+        if self.cached_cost.is_none() {
+            self.cached_cost = Some(self.selection_set.selection_set.cost(1)?)
+        }
+        Ok(self.cached_cost.unwrap())
+    }
+
+    // TODO: https://github.com/apollographql/federation/blob/f69a0694b95/query-planner-js/src/buildPlan.ts#L1518-L1573
+    pub(crate) fn to_plan_node(
+        &self,
+        _config: &QueryPlannerConfig,
+        _handled_conditions: &Conditions,
+        _variable_definitions: &[Node<VariableDefinition>],
+        _fragments: Option<&RebasedFragments>,
+        _op_name: Option<String>,
+    ) -> Option<super::PlanNode> {
+        todo!()
+    }
+}
+
+impl NormalizedSelectionSet {
+    pub(crate) fn cost(&self, depth: QueryPlanCost) -> Result<QueryPlanCost, FederationError> {
+        // The cost is essentially the number of elements in the selection,
+        // but we make deep element cost a tiny bit more,
+        // mostly to make things a tad more deterministic
+        // (typically, if we have an interface with a single implementation,
+        // then we can have a choice between a query plan that type-explode a field of the interface
+        // and one that doesn't, and both will be almost identical,
+        // except that the type-exploded field will be a different depth;
+        // by favoring lesser depth in that case, we favor not type-exploding).
+        self.selections.values().try_fold(0, |sum, selection| {
+            let subselections = match selection {
+                NormalizedSelection::Field(field) => field.selection_set.as_ref(),
+                NormalizedSelection::InlineFragment(inline) => Some(&inline.selection_set),
+                NormalizedSelection::FragmentSpread(_) => {
+                    return Err(FederationError::internal(
+                        "unexpected fragment spread in FetchDependencyGraphNode",
+                    ))
+                }
+            };
+            let subselections_cost = if let Some(selection_set) = subselections {
+                selection_set.cost(depth + 1)?
+            } else {
+                0
+            };
+            Ok(sum + depth + subselections_cost)
+        })
     }
 }
 
