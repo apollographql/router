@@ -223,7 +223,7 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(planner.clone()).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
             None
         };
@@ -279,7 +279,7 @@ impl BridgeQueryPlanner {
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(planner.clone()).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
             None
         };

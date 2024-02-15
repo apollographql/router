@@ -738,7 +738,7 @@ impl RouterCreator {
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
-                    .await,
+                    .await?,
             )
         } else {
             APQLayer::disabled()

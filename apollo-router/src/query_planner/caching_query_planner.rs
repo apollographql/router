@@ -13,6 +13,7 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
+use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -73,24 +74,24 @@ where
         schema: Arc<Schema>,
         configuration: &Configuration,
         plugins: Plugins,
-    ) -> CachingQueryPlanner<T> {
+    ) -> Result<CachingQueryPlanner<T>, BoxError> {
         let cache = Arc::new(
             DeduplicatingCache::from_configuration(
                 &configuration.supergraph.query_planning.cache,
                 "query planner",
             )
-            .await,
+            .await?,
         );
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
-        Self {
+        Ok(Self {
             cache,
             delegate,
             schema,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
-        }
+        })
     }
 
     pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
@@ -584,7 +585,7 @@ mod tests {
         );
 
         let mut planner =
-            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new()).await;
+            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new()).await.unwrap();
 
         let configuration = Configuration::default();
 
@@ -667,7 +668,7 @@ mod tests {
 
         let mut planner =
             CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
-                .await;
+                .await.unwrap();
 
         let context = Context::new();
         context.extensions().lock().insert::<ParsedDocument>(doc);

@@ -710,7 +710,7 @@ impl PluggableSupergraphServiceBuilder {
             &configuration,
             IndexMap::new(),
         )
-        .await;
+        .await?;
 
         let mut plugins = self.plugins;
         // Activate the telemetry plugin.
