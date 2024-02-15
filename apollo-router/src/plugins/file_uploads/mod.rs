@@ -128,7 +128,16 @@ impl PluginPrivate for FileUploadsPlugin {
         }
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
-                Ok(ControlFlow::Continue(rearange_execution_plan(req)))
+                let context = req.context.clone();
+                Ok(match rearange_execution_plan(req) {
+                    Ok(req) => ControlFlow::Continue(req),
+                    Err(err) => ControlFlow::Break(
+                        execution::Response::error_builder()
+                            .errors(vec![err.into()])
+                            .context(context)
+                            .build()?,
+                    ),
+                })
             })
             .service(service)
             .boxed()
@@ -309,7 +318,7 @@ struct SupergraphLayerResult {
     map_per_variable: MapPerVariable,
 }
 
-fn rearange_execution_plan(mut req: execution::Request) -> execution::Request {
+fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::Request> {
     let supergraph_result = req
         .context
         .extensions()
@@ -324,8 +333,8 @@ fn rearange_execution_plan(mut req: execution::Request) -> execution::Request {
         } = supergraph_result;
 
         let root = &req.query_plan.root;
-        let (_, root) = rearrange_plan_node(root, &files_order, &map_per_variable);
-        req = execution::Request {
+        let root = rearrange_plan_node(root, &mut HashSet::new(), &files_order, &map_per_variable)?;
+        return Ok(execution::Request {
             query_plan: Arc::new(QueryPlan {
                 root,
                 usage_reporting: req.query_plan.usage_reporting.clone(),
@@ -333,124 +342,141 @@ fn rearange_execution_plan(mut req: execution::Request) -> execution::Request {
                 query: req.query_plan.query.clone(),
             }),
             ..req
-        };
+        });
     }
-    req
+    Ok(req)
 }
 
 // Recursive, and recursion is safe here since query plan is executed recursively.
 fn rearrange_plan_node<'a>(
     node: &PlanNode,
+    acc_files: &mut HashSet<&'a str>,
     files_order: &IndexSet<String>,
     map_per_variable: &'a MapPerVariable,
-) -> (HashSet<&'a str>, PlanNode) {
-    match node {
+) -> UploadResult<PlanNode> {
+    Ok(match node {
         PlanNode::Condition {
             condition,
             if_clause,
             else_clause,
         } => {
-            let mut files = HashSet::new();
-            let if_clause = if_clause.as_ref().map(|node| {
-                let (node_files, node) = rearrange_plan_node(node, files_order, map_per_variable);
-                files.extend(node_files);
-                Box::new(node)
-            });
-            let else_clause = else_clause.as_ref().map(|node| {
-                let (node_files, node) = rearrange_plan_node(node, files_order, map_per_variable);
-                files.extend(node_files);
-                Box::new(node)
-            });
+            let if_clause = if let Some(node) = if_clause {
+                Some(Box::new(rearrange_plan_node(
+                    node,
+                    acc_files,
+                    files_order,
+                    map_per_variable,
+                )?))
+            } else {
+                None
+            };
 
-            (
-                files,
-                PlanNode::Condition {
-                    condition: condition.clone(),
-                    if_clause,
-                    else_clause,
-                },
-            )
+            let else_clause = if let Some(node) = else_clause {
+                Some(Box::new(rearrange_plan_node(
+                    node,
+                    acc_files,
+                    files_order,
+                    map_per_variable,
+                )?))
+            } else {
+                None
+            };
+
+            PlanNode::Condition {
+                condition: condition.clone(),
+                if_clause,
+                else_clause,
+            }
         }
         PlanNode::Fetch(fetch) => {
-            let files: HashSet<&str> = fetch
-                .variable_usages
-                .iter()
-                .filter_map(|name| {
-                    map_per_variable
-                        .get(name)
-                        .map(|map| map.keys().map(|key| key.as_str()))
-                })
-                .flatten()
-                .collect();
-            (files, PlanNode::Fetch(fetch.clone()))
+            acc_files.extend(
+                fetch
+                    .variable_usages
+                    .iter()
+                    .filter_map(|name| {
+                        map_per_variable
+                            .get(name)
+                            .map(|map| map.keys().map(|key| key.as_str()))
+                    })
+                    .flatten(),
+            );
+            PlanNode::Fetch(fetch.clone())
         }
         PlanNode::Subscription { primary, rest } => {
-            let files: HashSet<&str> = primary
-                .variable_usages
-                .iter()
-                .filter_map(|name| {
-                    map_per_variable
-                        .get(name)
-                        .map(|map| map.keys().map(|key| key.as_str()))
-                })
-                .flatten()
-                .collect();
+            acc_files.extend(
+                primary
+                    .variable_usages
+                    .iter()
+                    .filter_map(|name| {
+                        map_per_variable
+                            .get(name)
+                            .map(|map| map.keys().map(|key| key.as_str()))
+                    })
+                    .flatten(),
+            );
             // FIXME: error if rest contain files
-            (
-                files,
-                PlanNode::Subscription {
-                    primary: primary.clone(),
-                    rest: rest.clone(),
-                },
-            )
+            PlanNode::Subscription {
+                primary: primary.clone(),
+                rest: rest.clone(),
+            }
         }
         PlanNode::Defer { primary, deferred } => {
             let mut primary = primary.clone();
             let deferred = deferred.clone();
 
+            // for node in deferred.iter() {
+            //     let (files, _) = rearrange_plan_node(node, files_order, map_per_variable).ok();
+            // }
             // FIXME: error if deferred contain files
             if let Some(node) = primary.node {
-                let (files, node) = rearrange_plan_node(&node, files_order, map_per_variable);
+                let node = rearrange_plan_node(&node, acc_files, files_order, map_per_variable)?;
                 primary.node = Some(Box::new(node));
-                (files, PlanNode::Defer { primary, deferred })
+                PlanNode::Defer { primary, deferred }
             } else {
-                (HashSet::new(), PlanNode::Defer { primary, deferred })
+                PlanNode::Defer { primary, deferred }
             }
         }
         PlanNode::Flatten(flatten_node) => {
-            let (files, node) =
-                rearrange_plan_node(&flatten_node.node, &files_order, map_per_variable);
-            let node = PlanNode::Flatten(FlattenNode {
+            let node = rearrange_plan_node(
+                &flatten_node.node,
+                acc_files,
+                &files_order,
+                map_per_variable,
+            )?;
+            PlanNode::Flatten(FlattenNode {
                 node: Box::new(node),
                 path: flatten_node.path.clone(),
-            });
-            (files, node)
+            })
         }
         PlanNode::Sequence { nodes } => {
-            let mut files = HashSet::new();
             let mut sequence = Vec::new();
             let mut last_file = None;
             for node in nodes.iter() {
-                let (node_files, node) = rearrange_plan_node(node, &files_order, map_per_variable);
+                let mut node_files = HashSet::new();
+                let node =
+                    rearrange_plan_node(node, &mut node_files, &files_order, map_per_variable)?;
                 for file in node_files.into_iter() {
+                    acc_files.insert(file);
                     let index = files_order.get_index_of(file);
                     // FIXME: errors
-                    assert!(!files.contains(file));
                     assert!(index > last_file);
                     last_file = index;
-                    files.insert(file);
                 }
                 sequence.push(node);
             }
-            (files, PlanNode::Sequence { nodes: sequence })
+            PlanNode::Sequence { nodes: sequence }
         }
         PlanNode::Parallel { nodes } => {
-            let mut files = HashSet::new();
+            // FIXME: switch from files to variables
+            // FIXME: first fill acc_variables and just track error instead of throw 
+            // FIXME: BTree key => (first_file, last_file)
             let mut parallel = Vec::new();
             let mut sequence = BTreeMap::new();
 
             for node in nodes.iter() {
-                let (node_files, node) = rearrange_plan_node(node, &files_order, map_per_variable);
+                let mut node_files = HashSet::new();
+                let node =
+                    rearrange_plan_node(node, &mut node_files, &files_order, map_per_variable)?;
                 if node_files.is_empty() {
                     parallel.push(node);
                     continue;
@@ -459,11 +485,8 @@ fn rearrange_plan_node<'a>(
                 let mut first_file = None;
                 let mut last_file = None;
                 for file in node_files.into_iter() {
-                    let seen = files.insert(file);
-                    // FIXME: error
-                    assert!(!seen);
+                    acc_files.insert(file);
                     let index = files_order.get_index_of(file);
-                    // FIXME: check min?
                     first_file = match first_file {
                         None => index,
                         Some(first_file) => cmp::min(Some(first_file), index),
@@ -486,9 +509,9 @@ fn rearrange_plan_node<'a>(
                 parallel.push(PlanNode::Sequence { nodes });
             }
 
-            (files, PlanNode::Parallel { nodes: parallel })
+            PlanNode::Parallel { nodes: parallel }
         }
-    }
+    })
 }
 
 async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
