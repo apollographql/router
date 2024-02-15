@@ -488,8 +488,9 @@ fn rearrange_plan_node<'a>(
 
                     for file in map.keys() {
                         let index = files_order.get_index_of(file);
-                        // FIXME: errors
-                        assert!(index > last_file);
+                        if index > last_file {
+                            return Err(FileUploadError::MisorderedVariables);
+                        }
                         last_file = index;
                     }
                 }
@@ -532,8 +533,9 @@ fn rearrange_plan_node<'a>(
                 let mut nodes = Vec::new();
                 let mut sequence_last_file = None;
                 for (first_file, (node, last_file)) in sequence.into_iter() {
-                    // FIXME: error
-                    assert!(first_file > sequence_last_file);
+                    if first_file > sequence_last_file {
+                        return Err(FileUploadError::MisorderedVariables);
+                    }
                     sequence_last_file = last_file;
                     nodes.push(node);
                 }

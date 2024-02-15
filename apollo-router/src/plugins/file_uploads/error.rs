@@ -39,6 +39,9 @@ pub(crate) enum FileUploadError {
     #[error("Variables containing files are forbidden inside subscription: {0}.")]
     VariblesForbiddenInsideSubscription(String),
 
+    #[error("References to variables containing files are ordered in the way that prevent streaming of files.")]
+    MisorderedVariables,
+
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
 }
