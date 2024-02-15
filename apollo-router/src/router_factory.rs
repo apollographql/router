@@ -335,13 +335,7 @@ pub(crate) async fn create_subgraph_services(
     plugins: &[(String, Box<dyn DynPlugin>)],
     schema: &Schema,
     configuration: &Configuration,
-) -> Result<
-    IndexMap<
-        String,
-        TrafficShapingSubgraph<SubgraphService>,
-    >,
-    BoxError,
-> {
+) -> Result<IndexMap<String, TrafficShapingSubgraph<SubgraphService>>, BoxError> {
     let tls_root_store: RootCertStore = configuration
         .tls
         .subgraph

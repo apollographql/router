@@ -53,7 +53,7 @@ impl Clone for CloneSubgraphResponse {
 
 #[derive(Clone)]
 pub(crate) struct QueryDeduplicationService<S: Clone> {
-    pub(crate) service: S,
+    service: S,
     wait_map: WaitMap,
 }
 
@@ -66,6 +66,10 @@ where
             service,
             wait_map: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub(crate) fn inner_mut(&mut self) -> &mut S {
+        &mut self.service
     }
 
     async fn dedup(

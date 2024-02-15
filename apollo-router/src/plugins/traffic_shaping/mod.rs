@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -425,13 +424,15 @@ impl TrafficShaping {
 
 pub(crate) type TrafficShapingSubgraph<S> = Either<
     Either<
-        QueryDeduplicationService<
-            Timeout<Either<Retry<RetryPolicy, Either<RateLimit<S>, S>>, Either<RateLimit<S>, S>>>,
-        >,
-        Timeout<Either<Retry<RetryPolicy, Either<RateLimit<S>, S>>, Either<RateLimit<S>, S>>>,
+        QueryDeduplicationService<OptionalTimeoutRetryRateLimit<S>>,
+        OptionalTimeoutRetryRateLimit<S>,
     >,
     S,
 >;
+
+pub(crate) type OptionalRateLimit<S> = Either<RateLimit<S>, S>;
+pub(crate) type OptionalTimeoutRetryRateLimit<S> =
+    Timeout<Either<Retry<RetryPolicy, OptionalRateLimit<S>>, OptionalRateLimit<S>>>;
 
 // this serie of functions is used to set the plugins list in the HTTP client service factory in subgraph services
 pub(crate) fn set_plugins(
@@ -441,7 +442,7 @@ pub(crate) fn set_plugins(
     println!("SET PLUGINS");
     match s {
         Either::A(e) => match e {
-            Either::A(dedup) => set_plugins2(&mut dedup.service, plugins),
+            Either::A(dedup) => set_plugins2(dedup.inner_mut(), plugins),
             Either::B(s) => set_plugins2(s, plugins),
         },
         Either::B(service) => service.client_factory.plugins = plugins,
@@ -449,21 +450,10 @@ pub(crate) fn set_plugins(
 }
 
 fn set_plugins2(
-    s: &mut Timeout<
-        Either<
-            Retry<
-                RetryPolicy,
-                Either<
-                    RateLimit<crate::services::SubgraphService>,
-                    crate::services::SubgraphService,
-                >,
-            >,
-            Either<RateLimit<crate::services::SubgraphService>, crate::services::SubgraphService>,
-        >,
-    >,
+    s: &mut OptionalTimeoutRetryRateLimit<crate::services::SubgraphService>,
     plugins: Arc<Plugins>,
 ) {
-    match &mut s.inner {
+    match s.inner_mut() {
         Either::A(r) => set_plugins3(r.get_mut(), plugins),
         Either::B(s) => set_plugins3(s, plugins),
     }

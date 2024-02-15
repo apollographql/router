@@ -24,7 +24,7 @@ pub(crate) use crate::plugins::traffic_shaping::timeout::error::Elapsed;
 /// Applies a timeout to requests.
 #[derive(Debug, Clone)]
 pub(crate) struct Timeout<T: Clone> {
-    pub(crate) inner: T,
+    inner: T,
     timeout: Duration,
 }
 
@@ -34,6 +34,10 @@ impl<T: Clone> Timeout<T> {
     /// Creates a new [`Timeout`]
     pub(crate) fn new(inner: T, timeout: Duration) -> Self {
         Timeout { inner, timeout }
+    }
+
+    pub(crate) fn inner_mut(&mut self) -> &mut T {
+        &mut self.inner
     }
 }
 
