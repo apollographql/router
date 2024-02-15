@@ -19,7 +19,6 @@ use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
-use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use pin_project_lite::pin_project;
@@ -41,6 +40,7 @@ use super::HttpResponse;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
@@ -94,7 +94,7 @@ impl HttpClientService {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &Configuration,
-        tls_root_store: &Option<RootCertStore>,
+        tls_root_store: &RootCertStore,
         http2: Http2Config,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
@@ -106,7 +106,7 @@ impl HttpClientService {
             .as_ref()
             .and_then(|subgraph| subgraph.create_certificate_store())
             .transpose()?
-            .or_else(|| tls_root_store.clone());
+            .unwrap_or_else(|| tls_root_store.clone());
         let client_cert_config = configuration
             .tls
             .subgraph
@@ -158,28 +158,49 @@ impl HttpClientService {
             service: Arc::new(service.into()),
         })
     }
+
+    pub(crate) fn native_roots_store() -> RootCertStore {
+        let mut roots = rustls::RootCertStore::empty();
+        let mut valid_count = 0;
+        let mut invalid_count = 0;
+
+        for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
+        {
+            let cert = rustls::Certificate(cert.0);
+            match roots.add(&cert) {
+                Ok(_) => valid_count += 1,
+                Err(err) => {
+                    tracing::trace!("invalid cert der {:?}", cert.0);
+                    tracing::debug!("certificate parsing failed: {:?}", err);
+                    invalid_count += 1
+                }
+            }
+        }
+        tracing::debug!(
+            "with_native_roots processed {} valid and {} invalid certs",
+            valid_count,
+            invalid_count
+        );
+        assert!(!roots.is_empty(), "no CA certificates found");
+        roots
+    }
 }
 
 pub(crate) fn generate_tls_client_config(
-    tls_cert_store: Option<RootCertStore>,
+    tls_cert_store: RootCertStore,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
     let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
-    Ok(match (tls_cert_store, client_cert_config) {
-        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
-        (Some(store), None) => tls_builder
-            .with_root_certificates(store)
-            .with_no_client_auth(),
-        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
-            client_auth_config.certificate_chain.clone(),
-            client_auth_config.key.clone(),
-        )?,
-        (Some(store), Some(client_auth_config)) => tls_builder
-            .with_root_certificates(store)
+    Ok(match client_cert_config {
+        Some(client_auth_config) => tls_builder
+            .with_root_certificates(tls_cert_store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
                 client_auth_config.key.clone(),
             )?,
+        None => tls_builder
+            .with_root_certificates(tls_cert_store)
+            .with_no_client_auth(),
     })
 }
 
@@ -227,7 +248,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
         );
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &http_req_span.context(),
+                &prepare_context(http_req_span.context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
