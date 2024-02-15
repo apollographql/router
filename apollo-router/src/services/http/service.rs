@@ -91,22 +91,23 @@ impl TryFrom<&str> for Compression {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value == "gzip" {
-            return Ok(Compression::Gzip);
+            Ok(Compression::Gzip)
         } else if value == "deflate" {
-            return Ok(Compression::Deflate);
+            Ok(Compression::Deflate)
         } else if value == "br" {
-            return Ok(Compression::Br);
+            Ok(Compression::Br)
         } else if value == "identity" {
-            return Ok(Compression::Identity);
+            Ok(Compression::Identity)
         } else {
             if value.contains(',') {
-                return Err(CompressionError::UnsupportedMultipleCompressionAlgorithms {
+                Err(CompressionError::UnsupportedMultipleCompressionAlgorithms {
                     content_type: value.to_string(),
-                });
+                })
+            } else {
+                Err(CompressionError::UnsupportedCompressionAlgorithm {
+                    algorithm: value.to_string(),
+                })
             }
-            return Err(CompressionError::UnsupportedCompressionAlgorithm {
-                algorithm: value.to_string(),
-            });
         }
     }
 }
