@@ -8,11 +8,16 @@ use once_cell::sync::OnceCell;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_api::trace::SpanContext;
+use opentelemetry_api::trace::TraceFlags;
+use opentelemetry_api::trace::TraceState;
+use opentelemetry_api::Context;
 use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
 use tracing_core::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_opentelemetry::PreSampledTracer;
 use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Filter;
@@ -139,6 +144,26 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
     OPENTELEMETRY_TRACER_HANDLE.get().is_some()
 }
 
+// When propagating trace headers to a subgraph or coprocessor, we need a valid trace id and span id
+// When the SamplingFilter does not sample a trace, those ids are set to 0 and mark the trace as invalid.
+// In that case we still need to propagate headers to subgraphs to tell them they should not sample the trace.
+// To that end, we update the context just for that request to create valid span et trace ids, with the
+// sampling bit set to false
+pub(crate) fn prepare_context(context: Context) -> Context {
+    if !context.span().span_context().is_valid() {
+        if let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            let span_context = SpanContext::new(
+                tracer.new_trace_id(),
+                tracer.new_span_id(),
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            );
+            return context.with_remote_span_context(span_context);
+        }
+    }
+    context
+}
 pub(crate) struct SamplingFilter;
 
 #[allow(dead_code)]

@@ -100,8 +100,13 @@ async fn tls_self_signed() {
             client_authentication: None,
         },
     );
-    let subgraph_service =
-        HttpClientService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
+    let subgraph_service = HttpClientService::from_config(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        Http2Config::Enable,
+    )
+    .unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -152,8 +157,13 @@ async fn tls_custom_root() {
             client_authentication: None,
         },
     );
-    let subgraph_service =
-        HttpClientService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
+    let subgraph_service = HttpClientService::from_config(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        Http2Config::Enable,
+    )
+    .unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -257,8 +267,13 @@ async fn tls_client_auth() {
             }),
         },
     );
-    let subgraph_service =
-        HttpClientService::from_config("test", &config, &None, Http2Config::Enable).unwrap();
+    let subgraph_service = HttpClientService::from_config(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        Http2Config::Enable,
+    )
+    .unwrap();
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
