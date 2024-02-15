@@ -103,6 +103,12 @@ pub(crate) enum FetchError {
         /// The reason the compression failed.
         reason: String,
     },
+
+    /// header value was malformed
+    MalformedHeaderValue {
+        /// The name of the header that was malformed
+        header_name: String,
+    },
 }
 
 impl FetchError {
@@ -178,6 +184,7 @@ impl ErrorExtension for FetchError {
             FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
+            FetchError::MalformedHeaderValue { .. } => "MALFORMED_HEADER_VALUE",
         }
         .to_string()
     }

@@ -57,6 +57,22 @@ type HTTPClient =
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
+#[derive(thiserror::Error, Debug, Eq, PartialEq)]
+/// Errors related to compression
+pub(crate) enum CompressionError {
+    #[error("content-type contained an unsupported compression algorithm")]
+    UnsupportedCompressionAlgorithm {
+        /// The content-type that contained the unsupported compression algorithm
+        algorithm: String,
+    },
+
+    #[error("content-type contained multiple compression algorithms")]
+    UnsupportedMultipleCompressionAlgorithms {
+        /// The unsupported content-type
+        content_type: String,
+    },
+}
+
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Compression {
@@ -68,6 +84,31 @@ pub(crate) enum Compression {
     Br,
     /// identity
     Identity,
+}
+
+impl TryFrom<&str> for Compression {
+    type Error = CompressionError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value == "gzip" {
+            return Ok(Compression::Gzip);
+        } else if value == "deflate" {
+            return Ok(Compression::Deflate);
+        } else if value == "br" {
+            return Ok(Compression::Br);
+        } else if value == "identity" {
+            return Ok(Compression::Identity);
+        } else {
+            if value.contains(',') {
+                return Err(CompressionError::UnsupportedMultipleCompressionAlgorithms {
+                    content_type: value.to_string(),
+                });
+            }
+            return Err(CompressionError::UnsupportedCompressionAlgorithm {
+                algorithm: value.to_string(),
+            });
+        }
+    }
 }
 
 impl Display for Compression {
@@ -236,26 +277,9 @@ impl tower::Service<HttpRequest> for HttpClientService {
         let service_name = self.service.clone();
         Box::pin(async move {
             let (parts, body) = http_request.into_parts();
-            let body = hyper::body::to_bytes(body).await.map_err(|err| {
-                tracing::error!(compress_error = format!("{err:?}").as_str());
 
-                FetchError::CompressionError {
-                    service: service_name.to_string(),
-                    reason: err.to_string(),
-                }
-            })?;
-            let compressed_body = compress(body, &parts.headers)
-                .instrument(tracing::debug_span!("body_compression"))
-                .await
-                .map_err(|err| {
-                    tracing::error!(compress_error = format!("{err:?}").as_str());
-
-                    FetchError::CompressionError {
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    }
-                })?;
-            let mut http_request = http::Request::from_parts(parts, Body::from(compressed_body));
+            let body = maybe_compress(&service_name, body, &parts.headers).await?;
+            let mut http_request = http::Request::from_parts(parts, body);
 
             http_request
                 .headers_mut()
@@ -326,40 +350,79 @@ async fn do_fetch(
     ))
 }
 
-pub(crate) async fn compress(body: Bytes, headers: &HeaderMap) -> Result<Bytes, BoxError> {
-    let content_encoding = headers.get(&CONTENT_ENCODING);
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str()? {
-            "br" => {
-                let mut br_encoder = BrotliEncoder::new(Vec::new());
-                br_encoder.write_all(&body).await?;
-                br_encoder.shutdown().await?;
+pub(crate) async fn maybe_compress(
+    service_name: &str,
+    body: Body,
+    headers: &HeaderMap,
+) -> Result<Body, FetchError> {
+    let compression = headers
+        .get(&CONTENT_ENCODING)
+        .map(HeaderValue::to_str)
+        .transpose()
+        .map_err(|_| FetchError::MalformedHeaderValue {
+            header_name: CONTENT_ENCODING.to_string(),
+        })?
+        .map(Compression::try_from)
+        .transpose()
+        .map_err(|e| FetchError::CompressionError {
+            service: service_name.to_string(),
+            reason: e.to_string(),
+        })?
+        .unwrap_or(Compression::Identity);
 
-                Ok(br_encoder.into_inner().into())
-            }
-            "gzip" => {
-                let mut gzip_encoder = GzipEncoder::new(Vec::new());
-                gzip_encoder.write_all(&body).await?;
-                gzip_encoder.shutdown().await?;
+    // We finally have the content-encoding, we can compress the body if we support the
+    match compression {
+        Compression::Br | Compression::Gzip | Compression::Deflate => {
+            //Only read and compress the body if the content-encoding is supported
+            let body = hyper::body::to_bytes(body).await.map_err(|err| {
+                tracing::error!(compress_error = format!("{err:?}").as_str());
 
-                Ok(gzip_encoder.into_inner().into())
-            }
-            "deflate" => {
-                let mut df_encoder = ZlibEncoder::new(Vec::new());
-                df_encoder.write_all(&body).await?;
-                df_encoder.shutdown().await?;
+                FetchError::CompressionError {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                }
+            })?;
+            let compressed_body = compress(body, &compression)
+                .instrument(tracing::debug_span!("body_compression"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(compress_error = format!("{err:?}").as_str());
 
-                Ok(df_encoder.into_inner().into())
-            }
-            "identity" => Ok(body),
-            unknown => {
-                tracing::error!("unknown content-encoding value '{:?}'", unknown);
-                Err(BoxError::from(format!(
-                    "unknown content-encoding value '{unknown:?}'",
-                )))
-            }
-        },
-        None => Ok(body),
+                    FetchError::CompressionError {
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    }
+                })?;
+            Ok(Body::from(compressed_body))
+        }
+        Compression::Identity => Ok(body),
+    }
+}
+
+pub(crate) async fn compress(body: Bytes, compression: &Compression) -> Result<Bytes, BoxError> {
+    match compression {
+        Compression::Br => {
+            let mut br_encoder = BrotliEncoder::new(Vec::new());
+            br_encoder.write_all(&body).await?;
+            br_encoder.shutdown().await?;
+
+            Ok(br_encoder.into_inner().into())
+        }
+        Compression::Gzip => {
+            let mut gzip_encoder = GzipEncoder::new(Vec::new());
+            gzip_encoder.write_all(&body).await?;
+            gzip_encoder.shutdown().await?;
+
+            Ok(gzip_encoder.into_inner().into())
+        }
+        Compression::Deflate => {
+            let mut df_encoder = ZlibEncoder::new(Vec::new());
+            df_encoder.write_all(&body).await?;
+            df_encoder.shutdown().await?;
+
+            Ok(df_encoder.into_inner().into())
+        }
+        Compression::Identity => unreachable!("compression should not be called with identity"),
     }
 }
 
@@ -384,5 +447,126 @@ where
         use hyper::body::HttpBody;
 
         self.project().inner.poll_data(cx)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::ops::Deref;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    use axum::BoxError;
+    use bytes::Bytes;
+    use futures::stream::BoxStream;
+    use futures::stream::StreamExt;
+    use http::HeaderMap;
+
+    use crate::services::http::service::Compression;
+    use crate::services::http::service::CompressionError;
+
+    #[test]
+    fn test_multiple_compression_parse() {
+        assert_eq!(
+            Compression::try_from("gzip, br, deflate"),
+            Err(CompressionError::UnsupportedMultipleCompressionAlgorithms {
+                content_type: "gzip, br, deflate".to_string()
+            })
+        );
+    }
+    #[test]
+    fn test_unsupported_compression() {
+        assert_eq!(
+            Compression::try_from("gzip_custom"),
+            Err(CompressionError::UnsupportedCompressionAlgorithm {
+                algorithm: "gzip_custom".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_supported_compression() {
+        assert_eq!(Compression::try_from("deflate"), Ok(Compression::Deflate));
+        assert_eq!(Compression::try_from("gzip"), Ok(Compression::Gzip));
+        assert_eq!(Compression::try_from("br"), Ok(Compression::Br));
+        assert_eq!(Compression::try_from("identity"), Ok(Compression::Identity));
+    }
+
+    #[tokio::test]
+    async fn test_compress_no_content_type() {
+        let (bytes, was_drained) = test_compression(HeaderMap::new()).await;
+        assert_eq!(bytes, "test");
+        assert!(!was_drained);
+    }
+
+    #[tokio::test]
+    async fn test_compress_identity() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_ENCODING,
+            http::HeaderValue::from_static("identity"),
+        );
+        let (bytes, was_drained) = test_compression(headers).await;
+        assert_eq!(bytes, "test");
+        assert!(!was_drained);
+    }
+
+    #[tokio::test]
+    async fn test_compress_gzip() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_ENCODING,
+            http::HeaderValue::from_static("gzip"),
+        );
+        let (bytes, was_drained) = test_compression(headers).await;
+        assert_eq!(
+            bytes.deref(),
+            b"\x1f\x8b\x08\0\0\0\0\0\0\xff+I-.\x01\0\x0c~\x7f\xd8\x04\0\0\0"
+        );
+        assert!(was_drained);
+    }
+    #[tokio::test]
+    async fn test_compress_deflate() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_ENCODING,
+            http::HeaderValue::from_static("deflate"),
+        );
+        let (bytes, was_drained) = test_compression(headers).await;
+        assert_eq!(bytes.deref(), b"x\x9c+I-.\x01\0\x04]\x01\xc1");
+        assert!(was_drained);
+    }
+    #[tokio::test]
+    async fn test_compress_brotli() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_ENCODING,
+            http::HeaderValue::from_static("br"),
+        );
+        let (bytes, was_drained) = test_compression(headers).await;
+        assert_eq!(bytes.deref(), b"\x8b\x01\x80test\x03");
+        assert!(was_drained);
+    }
+
+    async fn test_compression(headers: HeaderMap) -> (Bytes, bool) {
+        let was_drained = Arc::new(AtomicBool::new(false));
+
+        let stream: BoxStream<Result<Bytes, BoxError>> =
+            futures::stream::iter(vec![Some(Ok(Bytes::from("test")))])
+                .chain(futures::stream::once({
+                    let was_drained = was_drained.clone();
+                    async move {
+                        was_drained.store(true, std::sync::atomic::Ordering::SeqCst);
+                        None
+                    }
+                }))
+                .filter_map(|x| async { x })
+                .boxed();
+
+        let body = hyper::Body::wrap_stream(stream);
+        let compressed = super::maybe_compress("test", body, &headers).await.unwrap();
+        let was_drained = was_drained.load(std::sync::atomic::Ordering::SeqCst);
+        let bytes = hyper::body::to_bytes(compressed).await.unwrap();
+        (bytes, was_drained)
     }
 }
