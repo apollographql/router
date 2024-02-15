@@ -50,7 +50,13 @@ impl HttpClientServiceFactory {
     ) -> Self {
         use indexmap::IndexMap;
 
-        let service = HttpClientService::from_config(service, configuration, &None, http2).unwrap();
+        let service = HttpClientService::from_config(
+            service,
+            configuration,
+            &rustls::RootCertStore::empty(),
+            http2,
+        )
+        .unwrap();
 
         HttpClientServiceFactory {
             service: Arc::new(service),

@@ -344,7 +344,7 @@ impl Query {
     /// Check for parse errors in a query in the compiler.
     pub(crate) fn check_errors(document: &ParsedDocument) -> Result<(), SpecError> {
         match document.parse_errors.clone() {
-            Some(errors) => Err(SpecError::ParsingError(errors.to_string_no_color())),
+            Some(errors) => Err(SpecError::ParsingError(errors.to_string())),
             None => Ok(()),
         }
     }
