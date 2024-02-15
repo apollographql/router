@@ -98,16 +98,14 @@ impl TryFrom<&str> for Compression {
             Ok(Compression::Br)
         } else if value == "identity" {
             Ok(Compression::Identity)
+        } else if value.contains(',') {
+            Err(CompressionError::UnsupportedMultipleCompressionAlgorithms {
+                content_type: value.to_string(),
+            })
         } else {
-            if value.contains(',') {
-                Err(CompressionError::UnsupportedMultipleCompressionAlgorithms {
-                    content_type: value.to_string(),
-                })
-            } else {
-                Err(CompressionError::UnsupportedCompressionAlgorithm {
-                    algorithm: value.to_string(),
-                })
-            }
+            Err(CompressionError::UnsupportedCompressionAlgorithm {
+                algorithm: value.to_string(),
+            })
         }
     }
 }
