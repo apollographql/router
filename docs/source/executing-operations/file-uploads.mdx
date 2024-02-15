@@ -1,6 +1,6 @@
 ---
 title: File uploads
-subtitle: Receive file uploads with the Apollo Router
+subtitle: Receive files uploaded by clients with the Apollo Router
 description: Configure the Apollo Router to receive file uploads using the GraphQL multipart request spec.
 minVersion: X.x  
 ---
@@ -9,15 +9,15 @@ minVersion: X.x
 
 <EnterpriseFeature />
 
-Learn how to configure the Apollo Router to receive file uploads in client requests using the [GraphQL multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec).
+Learn how to configure the Apollo Router to receive file uploads in client requests using the [GraphQL multipart request specification](https://github.com/jaydenseric/graphql-multipart-request-spec).
 
 ## About file uploads using multipart requests
 
-A [multipart HTTP request](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html) lets you include various data formats&mdash;such as text, file data, and JSON objects&mdash;in a single HTTP request. The [GraphQL multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec) uses multipart requests to upload files using arguments in a GraphQL mutation.
+A [multipart HTTP request](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html) lets you efficiently send multiple files of various data formats&mdash;such as text, binary, and JSON objects&mdash;in a single HTTP request. The [GraphQL multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec) uses multipart requests to upload files using arguments in a GraphQL mutation.
 
 ### Example usage
 
-Imagine you're building a platform where users can create posts with an image and title.
+Imagine you're building a platform where users can create posts with a title and an image file.
 Your subgraph schema may include something like this:
 
 ```graphql showLineNumbers=false  disableCopy
@@ -70,7 +70,7 @@ The exact requirements are documented in [Client usage requirements](#client-usa
 
 ## File upload configuration and usage
 
-To enable file uploads in clients, you must both [configure support in the Apollo Router](#configure-file-upload-support-in-the-router) and [ensure client usage conforms to requirements](#client-usage-requirements).
+To enable file uploads from clients, you must both [configure support in the Apollo Router](#configure-file-upload-support-in-the-router) and [ensure client usage conforms to requirements](#client-usage-requirements).
 
 ### Configure file upload support in the router
 
@@ -113,7 +113,7 @@ If a request cannot be fulfilled in a streaming fashion, the router returns the 
 
 The router includes default limits for file uploads to prevent denial-of-service attacks.
 You can configure both the maximum file size and number of files to accept.
-If a request exceeds limits, the router rejects them.
+If a request exceeds a limit, the router rejects the request.
 
 #### Configuration reference
 
@@ -170,7 +170,9 @@ Default: None
 Default: `1mb`
 
 </td>
-<td>The maximum file size to accept</td>
+<td>The maximum file size to accept.
+If this limit is exceeded, the router rejects the entire request.
+</td>
 <td>
 
 Accepts values in a human-readable format; for example, `5kb` and `99mb` are acceptable values.
@@ -184,7 +186,9 @@ Accepts values in a human-readable format; for example, `5kb` and `99mb` are acc
 Default: `4`
 
 </td>
-<td>The maximum number of files to accept</td>
+<td>The maximum number of files to accept.
+If this limit is exceeded, the router rejects the entire request.
+</td>
 <td>integer</td>
 </tr>
 </tbody>
@@ -327,7 +331,7 @@ A file upload request may receive the following error responses:
 ##### `UPLOADS_LIMITS_MAX_FILE_SIZE_EXCEEDED`
 
 </td>
-<td>A file exceeded the maximum configured file size.</td>
+<td>A file exceeded the maximum configured file size</td>
 </tr>
 <tr>
 <td>
