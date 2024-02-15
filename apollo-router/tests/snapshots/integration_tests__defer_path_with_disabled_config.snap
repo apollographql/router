@@ -5,7 +5,7 @@ expression: stream.next().await.unwrap().unwrap()
 {
   "errors": [
     {
-      "message": "compiler error: cannot find directive `defer` in this document",
+      "message": "cannot find directive `@defer` in this document",
       "locations": [
         {
           "line": 4,
