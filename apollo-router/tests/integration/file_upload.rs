@@ -194,7 +194,7 @@ async fn it_uploads_to_multiple_subgraphs() -> Result<(), BoxError> {
             "operations",
             Part::text(
                 serde_json::json!({
-                    "query": "mutation SomeMutation($file0: Upload, $file1: Upload) {
+                    "query": "mutation SomeMutation($file0: Upload1, $file1: Upload2) {
                         file0: singleUpload1(file: $file0) { filename body }
                         file1: singleUpload2(file: $file1) { filename body }
                     }",
@@ -534,7 +534,7 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
             "operations",
             Part::text(
                 serde_json::json!({
-                    "query": "mutation SomeMutation($file0: Upload, $file1: Upload) {
+                    "query": "mutation SomeMutation($file0: Upload2, $file1: Upload1) {
                         file1: singleUpload1(file: $file1) { filename }
                         file0: singleUpload2(file: $file0) { filename }
                     }",

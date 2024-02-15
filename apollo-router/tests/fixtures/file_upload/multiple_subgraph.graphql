@@ -90,13 +90,22 @@ type User
 }
 
 
-scalar Upload
+scalar Upload1
   @join__type(graph: UPLOADS1)
+
+scalar Upload2
   @join__type(graph: UPLOADS2)
 
-type File
-  @join__type(graph: UPLOADS1, key: "filename")
-  @join__type(graph: UPLOADS2, key: "filename")
+type File1
+  @join__type(graph: UPLOADS1)
+{
+  filename: String!
+  mimetype: String!
+  encoding: String!
+  body: String!
+}
+type File2
+  @join__type(graph: UPLOADS2)
 {
   filename: String!
   mimetype: String!
@@ -108,6 +117,6 @@ type Mutation
   @join__type(graph: UPLOADS1)
   @join__type(graph: UPLOADS2)
 {
-  singleUpload1(file: Upload): File @join__field(graph: UPLOADS1)
-  singleUpload2(file: Upload): File @join__field(graph: UPLOADS2)
+  singleUpload1(file: Upload1): File1 @join__field(graph: UPLOADS1)
+  singleUpload2(file: Upload2): File2 @join__field(graph: UPLOADS2)
 }
