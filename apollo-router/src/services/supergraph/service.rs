@@ -24,6 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::batching::BatchDetails;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
@@ -54,7 +55,6 @@ use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
-use crate::services::router::service::BatchDetails;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
