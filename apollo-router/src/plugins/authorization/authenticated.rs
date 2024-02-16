@@ -1,10 +1,10 @@
 //! Authorization plugin
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
 use tower::BoxError;
 
@@ -178,7 +178,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    implementers_map: &'a HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
@@ -193,7 +193,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        implementers_map: &'a HashMap<Name, Implementers>,
         dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
@@ -225,6 +225,14 @@ impl<'a> AuthenticatedVisitor<'a> {
 
     fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
         t.directives().has(&self.authenticated_directive_name)
+    }
+
+    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+        self.implementers_map
+            .get(type_name)
+            .map(|implementers| implementers.iter())
+            .into_iter()
+            .flatten()
     }
 
     fn implementors_with_different_requirements(
@@ -264,10 +272,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             let mut is_authenticated: Option<bool> = None;
 
             for ty in self
-                .implementers_map
-                .get(type_name)
-                .into_iter()
-                .flatten()
+                .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
                 let ty_is_authenticated = ty.directives().has(&self.authenticated_directive_name);
@@ -294,7 +299,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             if t.is_interface() {
                 let mut is_authenticated: Option<bool> = None;
 
-                for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
+                for ty in self.implementors(parent_type) {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
                         let field_is_authenticated =
                             f.directives.has(&self.authenticated_directive_name);

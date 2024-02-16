@@ -4,7 +4,7 @@ expression: response.errors
 ---
 [
   {
-    "message": "compiler error: the argument `notAnArg` is not supported",
+    "message": "the argument `notAnArg` is not supported by `Product.name`",
     "locations": [
       {
         "line": 1,
@@ -16,7 +16,7 @@ expression: response.errors
     }
   },
   {
-    "message": "compiler error: fragment `Unused` must be used in an operation",
+    "message": "fragment `Unused` must be used in an operation",
     "locations": [
       {
         "line": 1,

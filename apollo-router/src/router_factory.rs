@@ -336,12 +336,13 @@ pub(crate) async fn create_subgraph_services(
     >,
     BoxError,
 > {
-    let tls_root_store: Option<RootCertStore> = configuration
+    let tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
         .all
         .create_certificate_store()
-        .transpose()?;
+        .transpose()?
+        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
 
     let subscription_plugin_conf = plugins
         .iter()
