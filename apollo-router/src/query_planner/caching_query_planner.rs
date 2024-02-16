@@ -585,7 +585,9 @@ mod tests {
         );
 
         let mut planner =
-            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new()).await.unwrap();
+            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new())
+                .await
+                .unwrap();
 
         let configuration = Configuration::default();
 
@@ -668,7 +670,8 @@ mod tests {
 
         let mut planner =
             CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
-                .await.unwrap();
+                .await
+                .unwrap();
 
         let context = Context::new();
         context.extensions().lock().insert::<ParsedDocument>(doc);
