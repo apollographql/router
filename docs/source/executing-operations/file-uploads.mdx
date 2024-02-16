@@ -95,16 +95,24 @@ The only supported `mode` is `streaming`.
 That means the router doesn't retain uploaded files in memory during a request.
 Streaming file uploads can be more memory-efficient, especially for large files, since it avoids loading the entire file into memory.
 
-To ensure your operation is streamable, avoid nesting in file uploads.
-For example, the following operation would not be streamable:
+To ensure your operation is streamable, avoid nesting file uploads.
+For example, the following `nestedUpload` operation attempting to upload `$file3` would not be streamable:
 
 ```graphql title="❌" disableCopy=true showLineNumbers=false
-mutation UploadNestedFiles($files: [Upload!]!) {
-  uploadNestedFiles(files: $files) {
-    success
+mutation uploadFiles($file1: Upload, $file3: Upload, $file3: Upload ) {
+  upload(data: $file1) { 
+    __typename
+  }
+  upload(data: $file2) {
+    __typename
+  }
+  
+  nestedUpload {
+    upload(data: $file3) {
+      __typename
+    }
   }
 }
-
 ```
 
 If a request cannot be fulfilled in a streaming fashion, the router returns the [`UPLOADS_OPERATION_CANNOT_STREAM`](#uploads_operation_cannot_stream) error.
@@ -117,11 +125,13 @@ If a request exceeds a limit, the router rejects the request.
 
 #### Configuration reference
 
+The following are attributes of the root [`preview_file_uploads`](#configure-file-upload-support-in-the-router) configuration.
+
 <table class="field-table">
 <thead>
 <tr>
-<th>Attribute/ <br/> Default value</th>
-<th>Description</th>
+<th>Attribute/ <br/> Description</th>
+<th>Default value</th>
 <th>Valid Values</th>
 </tr>
 </thead>
@@ -131,10 +141,15 @@ If a request exceeds a limit, the router rejects the request.
 
 ##### `enabled`
 
-Default: `false`
+Flag to enable reception of client file uploads
+
 
 </td>
-<td>Flag to enable reception of client file uploads</td>
+<td>
+
+`false`
+
+</td>
 <td>boolean</td>
 
 </tr>
@@ -142,24 +157,33 @@ Default: `false`
 <td>
 
 ##### `protocols.multipart.enabled`
-Default: `false`
+
+Flag to enable reception of multipart file uploads
 
 </td>
-<td>Flag to enable reception of multipart file uploads</td>
+<td>
+
+`false`
+
+</td>
 <td>boolean</td>
 </tr>
 <tr>
 <td>
 
 ##### `protocols.multipart.mode`
-Default: None
+
+Supported file upload mode
 
 </td>
-<td>Supported file upload mode</td>
+<td>
+
+`streaming`
+
+</td>
 <td> 
 
 `streaming`
-(required value)
 
 </td>
 </tr>
@@ -167,15 +191,19 @@ Default: None
 <td>
 
 ##### `protocols.multipart.limits.max_file_size`
-Default: `1mb`
 
-</td>
-<td>The maximum file size to accept.
+The maximum file size to accept.
 If this limit is exceeded, the router rejects the entire request.
+
 </td>
 <td>
 
-Accepts values in a human-readable format; for example, `5kb` and `99mb` are acceptable values.
+`1mb`
+
+</td>
+<td>
+
+values in a [human-readable format](https://crates.io/crates/bytesize), for example, `5kb` and `99mb`
 
 </td>
 </tr>
@@ -183,11 +211,15 @@ Accepts values in a human-readable format; for example, `5kb` and `99mb` are acc
 <td>
 
 ##### `protocols.multipart.limits.max_files`
-Default: `4`
+
+The maximum number of files to accept.
+If this limit is exceeded, the router rejects the entire request.
 
 </td>
-<td>The maximum number of files to accept.
-If this limit is exceeded, the router rejects the entire request.
+<td>
+
+`4`
+
 </td>
 <td>integer</td>
 </tr>
