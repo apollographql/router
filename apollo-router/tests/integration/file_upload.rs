@@ -435,9 +435,9 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
             "operations",
             Part::text(
                 serde_json::json!({
-                    "query": "mutation ($file0: Upload, $file1: Upload) {
-                        file0: singleUpload(file: $file0) { filename }
-                        file1: singleUpload(file: $file1) { filename }
+                    "query": "mutation ($file0: Upload1, $file1: Upload2) {
+                        file0: singleUpload1(file: $file0) { filename }
+                        file1: singleUpload2(file: $file1) { filename }
                     }",
                     "variables": {
                         "file0": null,
@@ -463,14 +463,18 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
     // Run the test
     helper::FileUploadTestServer::builder()
         .config(FILE_CONFIG)
-        .handler(make_handler!(helper::always_fail))
+        .handler(make_handler!(
+            "/s1" => helper::always_fail,
+            "/s2" => helper::always_fail
+        ))
         .request(request)
-        .subgraph_mapping("uploads", "/")
+        .subgraph_mapping("uploads1", "/s1")
+        .subgraph_mapping("uploads2", "/s2")
         .supergraph(PathBuf::from_iter([
             "tests",
             "fixtures",
             "file_upload",
-            "single_subgraph.graphql",
+            "multiple_subgraph.graphql",
         ]))
         .build()
         .run_test(|response| {
