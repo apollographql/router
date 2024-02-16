@@ -27,7 +27,9 @@ use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
 use mediatype::MediaType;
 use mediatype::ReadParams;
+use multer::Constraints;
 use multer::Multipart;
+use multer::SizeLimit;
 use rand::RngCore;
 use tokio::sync::Mutex;
 use tokio::sync::OwnedMutexGuard;
@@ -80,11 +82,12 @@ impl PluginPrivate for FileUploadsPlugin {
         if !self.enabled {
             return service;
         }
+        let max_file_size = self.limits.max_file_size.as_u64();
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: router::Request| {
-                async {
+            .oneshot_checkpoint_async(move |req: router::Request| {
+                async move {
                     let context = req.context.clone();
-                    Ok(match extract_operations(req).await {
+                    Ok(match extract_operations(req, max_file_size).await {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             router::Response::error_builder()
@@ -104,11 +107,12 @@ impl PluginPrivate for FileUploadsPlugin {
         if !self.enabled {
             return service;
         }
+        let max_files = self.limits.max_files;
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: supergraph::Request| {
-                async {
+            .oneshot_checkpoint_async(move |req: supergraph::Request| {
+                async move {
                     let context = req.context.clone();
-                    Ok(match extract_map(req).await {
+                    Ok(match extract_map(req, max_files).await {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             supergraph::Response::error_builder()
@@ -175,7 +179,10 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
-async fn extract_operations(req: router::Request) -> UploadResult<router::Request> {
+async fn extract_operations(
+    req: router::Request,
+    max_file_size: u64,
+) -> UploadResult<router::Request> {
     if let Some(mime) = get_multipart_mime(&req) {
         let boundary = mime
             .get_param(BOUNDARY)
@@ -183,7 +190,17 @@ async fn extract_operations(req: router::Request) -> UploadResult<router::Reques
             .to_string();
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
-        let mut multipart = Multipart::new(request_body, boundary);
+
+        let mut multipart = Multipart::with_constraints(
+            request_body,
+            boundary,
+            Constraints::new().size_limit(
+                SizeLimit::new()
+                    .for_field("operations", u64::MAX) // no limit
+                    .for_field("map", 10 * 1024) // hardcoded to 10kb
+                    .per_field(max_file_size),
+            ),
+        );
 
         let operations_field = multipart
             .next_field()
@@ -220,7 +237,10 @@ struct ServiceLayerResult {
     multipart: Multipart<'static>,
 }
 
-async fn extract_map(mut req: supergraph::Request) -> UploadResult<supergraph::Request> {
+async fn extract_map(
+    mut req: supergraph::Request,
+    max_files: usize,
+) -> UploadResult<supergraph::Request> {
     let service_layer_result = req
         .context
         .extensions()
@@ -238,8 +258,10 @@ async fn extract_map(mut req: supergraph::Request) -> UploadResult<supergraph::R
         let map_field = map_field.bytes().await?;
         let map_field: MapField = serde_json::from_slice(&map_field)
             .map_err(|e| FileUploadError::InvalidJsonInMapField(e))?;
-        // FIXME: check number of files
-        // assert!(map_field.len());
+
+        if map_field.len() > max_files {
+            return Err(FileUploadError::LimitsMaxFilesExceeded(max_files));
+        }
 
         let variables = &mut req.supergraph_request.body_mut().variables;
         let mut files_order = IndexSet::new();
@@ -288,7 +310,7 @@ async fn extract_map(mut req: supergraph::Request) -> UploadResult<supergraph::R
             .extensions()
             .lock()
             .insert(SupergraphLayerResult {
-                multipart: Arc::new(Mutex::new(MultipartFileStream::new(multipart))),
+                multipart: Arc::new(Mutex::new(MultipartFileStream::new(multipart, max_files))),
                 map_per_variable,
                 files_order,
             });
@@ -643,11 +665,17 @@ pub(crate) async fn http_request_wrapper(
 
 struct MultipartFileStream {
     multipart: multer::Multipart<'static>,
+    files_counter: usize,
+    max_files: usize,
 }
 
 impl MultipartFileStream {
-    fn new(multipart: multer::Multipart<'static>) -> Self {
-        Self { multipart }
+    fn new(multipart: multer::Multipart<'static>, max_files: usize) -> Self {
+        Self {
+            multipart,
+            max_files,
+            files_counter: 0,
+        }
     }
 }
 
@@ -657,7 +685,14 @@ impl Stream for MultipartFileStream {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         match self.multipart.poll_next_field(cx) {
             Poll::Ready(Ok(None)) => Poll::Ready(None),
-            Poll::Ready(Ok(Some(field))) => Poll::Ready(Some(Ok(field))),
+            Poll::Ready(Ok(Some(field))) => {
+                Poll::Ready(Some(if self.files_counter == self.max_files {
+                    Err(FileUploadError::LimitsMaxFilesExceeded(self.max_files))
+                } else {
+                    self.files_counter += 1;
+                    Ok(field)
+                }))
+            }
             Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e.into()))),
             Poll::Pending => Poll::Pending,
         }

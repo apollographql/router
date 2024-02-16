@@ -321,7 +321,16 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
-                TODO: Currently does not error at supergraph
+            {
+              "errors": [
+                {
+                  "message": "Max file uploads of 5 files exceeded.",
+                  "extensions": {
+                    "code": "FILE_UPLOAD"
+                  }
+                }
+              ]
+            }
             "###);
         })
         .await
