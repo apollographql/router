@@ -329,6 +329,15 @@ impl InstrumentData {
             opt.mode,
             "$.mode"
         );
+
+        populate_config_instrument!(
+            apollo.router.config.file_uploads.multipart,
+            "$.preview_file_uploads[?(@.enabled == true)].protocols.multipart[?(@.enabled == true)]",
+            opt.limits.max_file_size,
+            "$.limits.max_file_size",
+            opt.limits.max_files,
+            "$.limits.max_files"
+        );
     }
 
     fn populate_env_instrument(&mut self) {
