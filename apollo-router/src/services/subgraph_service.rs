@@ -673,11 +673,9 @@ async fn call_batched_http(
                 service_name,
             ));
             if batching.ready() {
-                //TODO: This is where we start processing our accumulated batch data
-                // Now we need to "batch up" our data and send it to our subgraphs
-                // We need our own batch aware version of call_http which only makes one call to each
-                // subgraph, but is able to decode the responses. I'll probably need to break call_http
-                // down into sub-functions.
+                // This is where we start processing our accumulated batch data.
+                // We can't do it whilst holding the context extensions lock, so signal we are
+                // ready to proceed by updating waiters_opt.
                 tracing::info!("Batch data: {batching}");
                 waiters_opt = Some(batching.get_waiters());
             }
@@ -686,6 +684,10 @@ async fn call_batched_http(
     if let Some(receiver) = batch_responder {
         if let Some(waiters) = waiters_opt {
             for (service, requests) in waiters.into_iter() {
+                // Now we need to "batch up" our data and send it to our subgraphs
+                // We need our own batch aware version of call_http which only makes one call to each
+                // subgraph, but is able to decode the responses. I'll probably need to break call_http
+                // down into sub-functions, that's a TODO for now.
                 let mut txs = Vec::with_capacity(requests.len());
                 let mut requests_it = requests.into_iter();
                 let first = requests_it
