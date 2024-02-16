@@ -79,7 +79,7 @@ base64 = "0.21.7"
 bloomfilter = "1.0.13"
 buildstructor = "0.5.4"
 bytes = "1.5.0"
-clap = { version = "4.5.0", default-features = false, features = [
+clap = { version = "4.5.1", default-features = false, features = [
     "env",
     "derive",
     "std",
