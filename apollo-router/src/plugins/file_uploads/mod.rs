@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::ops::ControlFlow;
+use std::ops::Deref;
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -254,13 +255,12 @@ async fn extract_map(
             .filter(|field| field.name() == Some("map"))
             .ok_or_else(|| FileUploadError::MissingMapField)?;
 
-        // FIXME: apply some limit on size of map field
         let map_field = map_field.bytes().await?;
         let map_field: MapField = serde_json::from_slice(&map_field)
             .map_err(|e| FileUploadError::InvalidJsonInMapField(e))?;
 
         if map_field.len() > max_files {
-            return Err(FileUploadError::LimitsMaxFilesExceeded(max_files));
+            return Err(FileUploadError::MaxFilesLimitExceeded(max_files));
         }
 
         let variables = &mut req.supergraph_request.body_mut().variables;
@@ -680,22 +680,68 @@ impl MultipartFileStream {
 }
 
 impl Stream for MultipartFileStream {
-    type Item = UploadResult<multer::Field<'static>>;
+    type Item = UploadResult<MultipartField>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         match self.multipart.poll_next_field(cx) {
             Poll::Ready(Ok(None)) => Poll::Ready(None),
             Poll::Ready(Ok(Some(field))) => {
                 Poll::Ready(Some(if self.files_counter == self.max_files {
-                    Err(FileUploadError::LimitsMaxFilesExceeded(self.max_files))
+                    Err(FileUploadError::MaxFilesLimitExceeded(self.max_files))
                 } else {
                     self.files_counter += 1;
-                    Ok(field)
+                    Ok(MultipartField::new(field))
                 }))
             }
             Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e.into()))),
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+struct MultipartField {
+    inner: multer::Field<'static>,
+}
+
+impl MultipartField {
+    fn new(inner: multer::Field<'static>) -> Self {
+        Self { inner }
+    }
+}
+
+impl Deref for MultipartField {
+    type Target = multer::Field<'static>;
+
+    fn deref(&self) -> &multer::Field<'static> {
+        &self.inner
+    }
+}
+
+impl Stream for MultipartField {
+    type Item = UploadResult<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        let stream = Pin::new(&mut self.inner);
+        match stream.poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(Some(Ok(item))) => Poll::Ready(Some(Ok(item))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(match e {
+                multer::Error::FieldSizeExceeded { limit, field_name } => {
+                    FileUploadError::MaxFileSizeLimitExceded {
+                        limit,
+                        file_name: field_name
+                            .map(|name| format!("'{0}'", name))
+                            .unwrap_or("unnamed".to_owned()),
+                    }
+                }
+                e => FileUploadError::InvalidMultipartRequest(e),
+            }))),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
     }
 }
 
@@ -705,7 +751,7 @@ struct SubgraphFileProxyStream {
 }
 
 impl Stream for SubgraphFileProxyStream {
-    type Item = UploadResult<multer::Field<'static>>;
+    type Item = UploadResult<MultipartField>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         if self.file_names.is_empty() {
@@ -713,8 +759,7 @@ impl Stream for SubgraphFileProxyStream {
         }
         loop {
             let stream = Pin::new(self.stream.deref_mut());
-            let result = stream.poll_next(cx);
-            match result {
+            match stream.poll_next(cx) {
                 Poll::Ready(None) => {
                     if !self.file_names.is_empty() {
                         let files = mem::replace(&mut self.file_names, HashSet::new());
@@ -794,7 +839,7 @@ impl MultipartFormData {
 
         fn file<'a>(
             boundary: &str,
-            field: multer::Field<'static>,
+            field: MultipartField,
         ) -> impl Stream<Item = UploadResult<Bytes>> + 'a {
             let mut prefix = Vec::new();
             prefix.extend_from_slice(b"--");
@@ -809,7 +854,7 @@ impl MultipartFormData {
             prefix.extend_from_slice(b"\r\n");
 
             tokio_stream::once(Ok(Bytes::from(prefix)))
-                .chain(field.map_err(Into::into).map_ok(Into::into))
+                .chain(field)
                 .chain(tokio_stream::once(Ok("\r\n".into())))
         }
 

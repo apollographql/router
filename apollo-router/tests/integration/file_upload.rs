@@ -324,7 +324,7 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
             {
               "errors": [
                 {
-                  "message": "Max file uploads of 5 files exceeded.",
+                  "message": "Exceeded the limit of 5 file uploads of files in a single request.",
                   "extensions": {
                     "code": "FILE_UPLOAD"
                   }
@@ -365,7 +365,19 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
-                TODO: Currently does not error at supergraph
+            {
+              "errors": [
+                {
+                  "message": "HTTP fetch failed from 'uploads': could not compress request: error reading a body from connection: Exceeded the limit of 512000 bytes on '0' file.",
+                  "path": [],
+                  "extensions": {
+                    "code": "SUBREQUEST_HTTP_ERROR",
+                    "service": "uploads",
+                    "reason": "could not compress request: error reading a body from connection: Exceeded the limit of 512000 bytes on '0' file."
+                  }
+                }
+              ]
+            }
             "###);
         })
         .await

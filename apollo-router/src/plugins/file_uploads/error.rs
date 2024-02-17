@@ -42,8 +42,11 @@ pub(crate) enum FileUploadError {
     #[error("References to variables containing files are ordered in the way that prevent streaming of files.")]
     MisorderedVariables,
 
-    #[error("Max file uploads of {0} files exceeded.")]
-    LimitsMaxFilesExceeded(usize),
+    #[error("Exceeded the limit of {0} file uploads of files in a single request.")]
+    MaxFilesLimitExceeded(usize),
+
+    #[error("Exceeded the limit of {limit} bytes on {file_name} file.")]
+    MaxFileSizeLimitExceded { limit: u64, file_name: String },
 
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
