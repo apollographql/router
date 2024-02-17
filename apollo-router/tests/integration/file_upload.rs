@@ -448,8 +448,8 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
             Part::text(
                 serde_json::json!({
                     "query": "mutation ($file0: Upload1, $file1: Upload2) {
-                        file0: singleUpload1(file: $file0) { filename }
-                        file1: singleUpload2(file: $file1) { filename }
+                        file0: singleUpload1(file: $file0) { filename body }
+                        file1: singleUpload2(file: $file1) { filename body }
                     }",
                     "variables": {
                         "file0": null,
@@ -476,7 +476,7 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
     helper::FileUploadTestServer::builder()
         .config(FILE_CONFIG)
         .handler(make_handler!(
-            "/s1" => helper::always_fail,
+            "/s1" => helper::echo_single_file,
             "/s2" => helper::always_fail
         ))
         .request(request)
@@ -491,7 +491,26 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
-                TODO: Currently does not error at supergraph
+            {
+              "data": {
+                "file0": {
+                  "filename": "file0",
+                  "body": "file0 contents"
+                },
+                "file1": null
+              },
+              "errors": [
+                {
+                  "message": "HTTP fetch failed from 'uploads2': could not compress request: error reading a body from connection: Missing files in the request: '1'.",
+                  "path": [],
+                  "extensions": {
+                    "code": "SUBREQUEST_HTTP_ERROR",
+                    "service": "uploads2",
+                    "reason": "could not compress request: error reading a body from connection: Missing files in the request: '1'."
+                  }
+                }
+              ]
+            }
             "###);
         })
         .await
