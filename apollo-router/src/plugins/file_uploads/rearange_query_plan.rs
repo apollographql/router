@@ -6,13 +6,12 @@ use std::collections::HashSet;
 use indexmap::IndexSet;
 use itertools::Itertools;
 
-use super::UploadResult;
-use super::MapPerVariable;
 use super::error::FileUploadError;
+use super::MapPerVariable;
+use super::UploadResult;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
-
 use crate::services::execution::QueryPlan;
 
 pub(super) fn rearange_query_plan(
@@ -94,7 +93,7 @@ fn rearrange_plan_node<'a>(
                     variable_ranges,
                 ));
                 if !rest_variables.is_empty() {
-                    return Err(FileUploadError::VariblesForbiddenInsideSubscription(
+                    return Err(FileUploadError::VariablesForbiddenInsideSubscription(
                         rest_variables
                             .into_keys()
                             .map(|name| format!("${}", name))
@@ -129,7 +128,7 @@ fn rearrange_plan_node<'a>(
                 }
             }
             if !deferred_variables.is_empty() {
-                return Err(FileUploadError::VariblesForbiddenInsideDeffer(
+                return Err(FileUploadError::VariablesForbiddenInsideDeffer(
                     deferred_variables
                         .into_keys()
                         .map(|name| format!("${}", name))
@@ -243,4 +242,3 @@ fn rearrange_plan_node<'a>(
         }
     })
 }
-

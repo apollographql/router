@@ -34,10 +34,10 @@ pub(super) enum FileUploadError {
     MissingFiles(String),
 
     #[error("Variables containing files are forbidden inside @defer: {0}.")]
-    VariblesForbiddenInsideDeffer(String),
+    VariablesForbiddenInsideDeffer(String),
 
     #[error("Variables containing files are forbidden inside subscription: {0}.")]
-    VariblesForbiddenInsideSubscription(String),
+    VariablesForbiddenInsideSubscription(String),
 
     #[error("References to variables containing files are ordered in the way that prevent streaming of files.")]
     MisorderedVariables,
