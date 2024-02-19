@@ -117,7 +117,7 @@ jsonschema = { version = "0.17.1", default-features = false }
 jsonwebtoken = "9.2.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
-linkme = "0.3.22"
+linkme = "0.3.23"
 lru = "0.12.2"
 maplit = "1.0.2"
 mediatype = "0.19.18"
