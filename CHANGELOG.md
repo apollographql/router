@@ -14,7 +14,17 @@ When the router was configured to sample only a portion of the trace, either thr
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4609
 
+### Load TLS native certificate store  once ([Issue #4491](https://github.com/apollographql/router/issues/4491))
 
+When TLS was not configured for subgraphs, the OS-provided list of certificates was being parsed once _per subgraph_, which resulted in long loading times on macOS.  With this change, the native root store is generated once and then reused across subgraphs, resolving the long loading times.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4616
+
+### Apollo library dependency updates ([Issue #4525](https://github.com/apollographql/router/issues/4525), [Issue #413](https://github.com/apollographql/router/issues/4413))
+
+Updates to our own dependencies of `apollo-rs` and `apollo-federation` bring in upstream fixes for operation validation including adjustments to field merging and enum input values for Rust-based validation.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/4510
 
 # [1.40.0] - 2024-02-14
 
