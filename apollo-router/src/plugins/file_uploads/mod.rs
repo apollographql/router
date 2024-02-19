@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::ops::ControlFlow;
-use std::ops::Deref;
-use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task;
@@ -27,6 +25,7 @@ use mediatype::ReadParams;
 use multer::Constraints;
 use multer::Multipart;
 use multer::SizeLimit;
+use pin_project_lite::pin_project;
 use tokio::sync::Mutex;
 use tokio::sync::OwnedMutexGuard;
 use tower::BoxError;
@@ -274,7 +273,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
             .extensions()
             .lock()
             .insert(SupergraphLayerResult {
-                multipart: Arc::new(Mutex::new(multipart)),
+                multipart,
                 map_per_variable,
                 files_order,
             });
@@ -302,7 +301,7 @@ type MapPerFile = HashMap<String, Vec<Vec<String>>>;
 
 #[derive(Clone)]
 struct SupergraphLayerResult {
-    multipart: Arc<Mutex<MultipartRequest>>,
+    multipart: MultipartRequest,
     files_order: IndexSet<String>,
     map_per_variable: MapPerVariable,
 }
@@ -386,7 +385,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
 }
 
 struct SubgraphHttpRequestExtensions {
-    multipart: Arc<Mutex<MultipartRequest>>,
+    multipart: MultipartRequest,
     map_field: MapField,
 }
 
@@ -406,27 +405,26 @@ pub(crate) async fn http_request_wrapper(
         } = supergraph_result;
 
         let (mut request_parts, operations) = req.into_parts();
-        let map = serde_json::to_vec(&map_field).expect("map should be serializable to JSON");
-        let files = SubgraphFileProxyStream {
-            stream: multipart.lock_owned().await,
-            file_names: map_field.into_keys().collect(),
-        };
-
-        let form = MultipartFormData::new(operations, map.into(), files);
+        let form = MultipartFormData::new(operations, map_field, multipart);
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
         request_parts.headers.insert(APOLLO_REQUIRE_PREFLIGHT, TRUE);
         return http::Request::from_parts(
             request_parts,
-            hyper::Body::wrap_stream(form.into_stream()),
+            hyper::Body::wrap_stream(form.into_stream().await),
         );
     }
     req
 }
 
+#[derive(Clone)]
 struct MultipartRequest {
-    inner: multer::Multipart<'static>,
+    state: Arc<Mutex<MultipartRequestState>>,
+}
+
+struct MultipartRequestState {
+    multer: multer::Multipart<'static>,
     max_files: usize,
     files_counter: usize,
 }
@@ -438,7 +436,7 @@ impl MultipartRequest {
         max_files: usize,
         max_file_size: u64,
     ) -> Self {
-        let inner = Multipart::with_constraints(
+        let multer = Multipart::with_constraints(
             request_body,
             boundary,
             Constraints::new().size_limit(
@@ -449,25 +447,30 @@ impl MultipartRequest {
             ),
         );
         Self {
-            inner,
-            max_files,
-            files_counter: 0,
+            state: Arc::new(Mutex::new(MultipartRequestState {
+                multer,
+                max_files,
+                files_counter: 0,
+            })),
         }
     }
 
-    async fn operations_field(&mut self) -> UploadResult<MultipartField> {
-        Ok(MultipartField::new(
-            self.inner
-                .next_field()
-                .await?
-                .filter(|field| field.name() == Some("operations"))
-                .ok_or_else(|| FileUploadError::MissingOperationsField)?,
-        ))
+    async fn operations_field(&mut self) -> UploadResult<multer::Field<'static>> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .multer
+            .next_field()
+            .await?
+            .filter(|field| field.name() == Some("operations"))
+            .ok_or_else(|| FileUploadError::MissingOperationsField)?)
     }
 
     async fn map_field(&mut self) -> UploadResult<MapField> {
-        let bytes = self
-            .inner
+        let mut state = self.state.lock().await;
+        let bytes = state
+            .multer
             .next_field()
             .await?
             .filter(|field| field.name() == Some("map"))
@@ -477,118 +480,122 @@ impl MultipartRequest {
 
         let map_field: MapField = serde_json::from_slice(&bytes)
             .map_err(|e| FileUploadError::InvalidJsonInMapField(e))?;
-        if map_field.len() > self.max_files {
-            return Err(FileUploadError::MaxFilesLimitExceeded(self.max_files));
+        if map_field.len() > state.max_files {
+            return Err(FileUploadError::MaxFilesLimitExceeded(state.max_files));
         }
         Ok(map_field)
     }
+
+    async fn subgraph_stream<BeforeFn, AfterFn>(
+        &mut self,
+        before_bytes_fn: BeforeFn,
+        file_names: HashSet<String>,
+        after_bytes_fn: AfterFn,
+    ) -> SubgraphFileProxyStream<BeforeFn, AfterFn> {
+        let state = self.state.clone().lock_owned().await;
+        SubgraphFileProxyStream::new(state, before_bytes_fn, file_names, after_bytes_fn)
+    }
 }
 
-impl Stream for MultipartRequest {
-    type Item = UploadResult<MultipartField>;
+pin_project! {
+    struct SubgraphFileProxyStream<BeforeFn, AfterFn> {
+        state: OwnedMutexGuard<MultipartRequestState>,
+        before_bytes_fn: BeforeFn,
+        file_names: HashSet<String>,
+        after_bytes_fn: AfterFn,
+        #[pin]
+        current_field: Option<multer::Field<'static>>,
+    }
+}
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.inner.poll_next_field(cx) {
-            Poll::Ready(Ok(None)) => Poll::Ready(None),
-            Poll::Ready(Ok(Some(field))) => {
-                Poll::Ready(Some(if self.files_counter == self.max_files {
-                    Err(FileUploadError::MaxFilesLimitExceeded(self.max_files))
-                } else {
-                    self.files_counter += 1;
-                    Ok(MultipartField::new(field))
-                }))
-            }
-            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e.into()))),
-            Poll::Pending => Poll::Pending,
+impl<BeforeFn, AfterFn> SubgraphFileProxyStream<BeforeFn, AfterFn> {
+    fn new(
+        state: OwnedMutexGuard<MultipartRequestState>,
+        before_bytes_fn: BeforeFn,
+        file_names: HashSet<String>,
+        after_bytes_fn: AfterFn,
+    ) -> Self {
+        Self {
+            state,
+            before_bytes_fn,
+            file_names,
+            after_bytes_fn,
+            current_field: None,
         }
     }
 }
 
-struct MultipartField {
-    inner: multer::Field<'static>,
-}
-
-impl MultipartField {
-    fn new(inner: multer::Field<'static>) -> Self {
-        Self { inner }
-    }
-}
-
-impl Deref for MultipartField {
-    type Target = multer::Field<'static>;
-
-    fn deref(&self) -> &multer::Field<'static> {
-        &self.inner
-    }
-}
-
-impl Stream for MultipartField {
+impl<BeforeFn, AfterFn> Stream for SubgraphFileProxyStream<BeforeFn, AfterFn>
+where
+    BeforeFn: Fn(&multer::Field<'static>) -> Bytes,
+    AfterFn: Fn() -> Bytes,
+{
     type Item = UploadResult<Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        let stream = Pin::new(&mut self.inner);
-        match stream.poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Ready(Some(Ok(item))) => Poll::Ready(Some(Ok(item))),
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(match e {
-                multer::Error::FieldSizeExceeded { limit, field_name } => {
-                    FileUploadError::MaxFileSizeLimitExceeded {
-                        limit,
-                        file_name: field_name
-                            .map(|name| format!("'{0}'", name))
-                            .unwrap_or("unnamed".to_owned()),
-                    }
-                }
-                e => FileUploadError::InvalidMultipartRequest(e),
-            }))),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-struct SubgraphFileProxyStream {
-    file_names: HashSet<String>,
-    stream: OwnedMutexGuard<MultipartRequest>,
-}
-
-impl Stream for SubgraphFileProxyStream {
-    type Item = UploadResult<MultipartField>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.file_names.is_empty() {
-            return Poll::Ready(None);
-        }
-        loop {
-            let stream = Pin::new(self.stream.deref_mut());
+        if let Some(field) = &mut self.current_field {
+            let stream = Pin::new(field);
             match stream.poll_next(cx) {
+                Poll::Pending => Poll::Pending,
                 Poll::Ready(None) => {
-                    if !self.file_names.is_empty() {
-                        let files = mem::replace(&mut self.file_names, HashSet::new());
-                        return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
-                            files
-                                .into_iter()
-                                .map(|file| format!("'{}'", file))
-                                .join(", "),
-                        ))));
-                    }
-                    return Poll::Ready(None);
+                    self.current_field = None;
+                    Poll::Ready(Some(Ok((self.after_bytes_fn)())))
                 }
-                Poll::Ready(Some(Ok(field))) => {
-                    if let Some(name) = field.name() {
-                        if self.file_names.remove(name) {
-                            return Poll::Ready(Some(Ok(field)));
+                Poll::Ready(Some(Ok(item))) => Poll::Ready(Some(Ok(item))),
+                Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(match e {
+                    multer::Error::FieldSizeExceeded { limit, field_name } => {
+                        FileUploadError::MaxFileSizeLimitExceeded {
+                            limit,
+                            file_name: field_name
+                                .map(|name| format!("'{0}'", name))
+                                .unwrap_or("unnamed".to_owned()),
                         }
                     }
-                    // The file is extraneous.
-                    // As the rest can still be processed, just ignore it and don’t exit with an error.
-                    // Matching https://github.com/jaydenseric/graphql-upload/blob/f24d71bfe5be343e65d084d23073c3686a7f4d18/processRequest.mjs#L231-L236
-                }
-                Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
-                Poll::Pending => return Poll::Pending,
+                    e => FileUploadError::InvalidMultipartRequest(e),
+                }))),
+            }
+        } else {
+            if self.file_names.is_empty() {
+                return Poll::Ready(None);
+            }
+            loop {
+                match self.state.multer.poll_next_field(cx) {
+                    Poll::Ready(Ok(None)) => {
+                        if !self.file_names.is_empty() {
+                            let files = mem::replace(&mut self.file_names, HashSet::new());
+                            return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
+                                files
+                                    .into_iter()
+                                    .map(|file| format!("'{}'", file))
+                                    .join(", "),
+                            ))));
+                        }
+                        return Poll::Ready(None);
+                    }
+                    Poll::Ready(Ok(Some(mut field))) => {
+                        if self.state.files_counter == self.state.max_files {
+                            return Poll::Ready(Some(Err(FileUploadError::MaxFilesLimitExceeded(
+                                self.state.max_files,
+                            ))));
+                        } else {
+                            self.state.files_counter += 1;
+
+                            if let Some(name) = field.name() {
+                                if self.file_names.remove(name) {
+                                    let prefix = (self.before_bytes_fn)(&mut field);
+                                    self.current_field = Some(field);
+                                    return Poll::Ready(Some(Ok(prefix)));
+                                }
+                            }
+
+                            // The file is extraneous, but the rest can still be processed.
+                            // Just ignore it and don’t exit with an error.
+                            // Matching https://github.com/jaydenseric/graphql-upload/blob/f24d71bfe5be343e65d084d23073c3686a7f4d18/processRequest.mjs#L231-L236
+                        }
+                    }
+                    Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
+                    Poll::Pending => return Poll::Pending,
+                };
             }
         }
     }

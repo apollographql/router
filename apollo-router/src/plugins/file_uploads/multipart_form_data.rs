@@ -9,19 +9,19 @@ use mediatype::names::MULTIPART;
 use mediatype::MediaType;
 use rand::RngCore;
 
-use super::MultipartField;
-use super::SubgraphFileProxyStream;
+use super::MapField;
+use super::MultipartRequest;
 use super::UploadResult;
 
 pub(super) struct MultipartFormData {
     boundary: String,
     operations: hyper::Body,
-    map: Bytes,
-    files: SubgraphFileProxyStream,
+    map: MapField,
+    multipart: MultipartRequest,
 }
 
 impl MultipartFormData {
-    pub(super) fn new(operations: hyper::Body, map: Bytes, files: SubgraphFileProxyStream) -> Self {
+    pub(super) fn new(operations: hyper::Body, map: MapField, multipart: MultipartRequest) -> Self {
         let boundary = format!(
             "------------------------{:016x}",
             rand::thread_rng().next_u64()
@@ -30,7 +30,7 @@ impl MultipartFormData {
             boundary,
             operations,
             map,
-            files,
+            multipart,
         }
     }
 
@@ -44,7 +44,7 @@ impl MultipartFormData {
             .expect("mime should be valid header value")
     }
 
-    pub(super) fn into_stream(self) -> impl Stream<Item = UploadResult<Bytes>> {
+    pub(super) async fn into_stream(self) -> impl Stream<Item = UploadResult<Bytes>> {
         fn field(
             boundary: &str,
             name: &str,
@@ -61,10 +61,22 @@ impl MultipartFormData {
                 .chain(tokio_stream::once(Ok("\r\n".into())))
         }
 
-        fn file<'a>(
-            boundary: &str,
-            field: MultipartField,
-        ) -> impl Stream<Item = UploadResult<Bytes>> + 'a {
+        let Self {
+            boundary,
+            operations,
+            map,
+            mut multipart,
+        } = self;
+        let last = tokio_stream::once(Ok(format!("--{}--\r\n", boundary).into()));
+
+        let operations_field = field(&boundary, "operations", operations.map_err(Into::into));
+        let map_bytes = serde_json::to_vec(&map)
+            .expect("map should be serializable to JSON")
+            .into();
+        let map_field = field(&boundary, "map", tokio_stream::once(Ok(map_bytes)));
+
+        let files = map.into_keys().collect();
+        let before_file = move |field: &multer::Field<'static>| {
             let mut prefix = Vec::new();
             prefix.extend_from_slice(b"--");
             prefix.extend_from_slice(boundary.as_bytes());
@@ -76,26 +88,13 @@ impl MultipartFormData {
                 prefix.extend_from_slice(b"\r\n");
             }
             prefix.extend_from_slice(b"\r\n");
+            Bytes::from(prefix)
+        };
+        let after_file = || Bytes::from_static(b"\r\n");
+        let file_fields = multipart
+            .subgraph_stream(before_file, files, after_file)
+            .await;
 
-            tokio_stream::once(Ok(Bytes::from(prefix)))
-                .chain(field)
-                .chain(tokio_stream::once(Ok("\r\n".into())))
-        }
-
-        let Self {
-            boundary,
-            operations,
-            map,
-            files,
-        } = self;
-        let last = tokio_stream::once(Ok(format!("--{}--\r\n", boundary).into()));
-
-        field(&boundary, "operations", operations.map_err(Into::into))
-            .chain(field(&boundary, "map", tokio_stream::once(Ok(map))))
-            .chain(files.flat_map(move |field| match field {
-                Ok(field) => file(&boundary, field).left_stream(),
-                Err(e) => tokio_stream::once(Err(e)).right_stream(),
-            }))
-            .chain(last)
+        operations_field.chain(map_field).chain(file_fields).chain(last)
     }
 }
