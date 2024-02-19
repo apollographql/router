@@ -36,12 +36,12 @@ use tower::ServiceExt;
 
 use self::config::FileUploadsConfig;
 use self::config::MultipartRequestLimits;
+use self::error::FileUploadError;
+use self::multipart_form_data::MultipartFormData;
+use self::rearange_query_plan::rearange_query_plan;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use self::error::FileUploadError;
-use self::rearange_query_plan::rearange_query_plan;
-use self::multipart_form_data::MultipartFormData;
 use crate::register_private_plugin;
 use crate::services::execution;
 use crate::services::router;
@@ -50,8 +50,8 @@ use crate::services::supergraph;
 
 mod config;
 mod error;
-mod rearange_query_plan;
 mod multipart_form_data;
+mod rearange_query_plan;
 
 type UploadResult<T> = Result<T, error::FileUploadError>;
 
@@ -176,10 +176,7 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
-async fn router_layer(
-    req: router::Request,
-    max_file_size: u64,
-) -> UploadResult<router::Request> {
+async fn router_layer(req: router::Request, max_file_size: u64) -> UploadResult<router::Request> {
     if let Some(mime) = get_multipart_mime(&req) {
         let boundary = mime
             .get_param(BOUNDARY)
@@ -363,7 +360,6 @@ fn execution_layer(req: execution::Request) -> UploadResult<execution::Request> 
     Ok(req)
 }
 
-
 async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
     let supergraph_result = req
         .context
@@ -522,7 +518,7 @@ impl Stream for MultipartField {
             Poll::Ready(Some(Ok(item))) => Poll::Ready(Some(Ok(item))),
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(match e {
                 multer::Error::FieldSizeExceeded { limit, field_name } => {
-                    FileUploadError::MaxFileSizeLimitExceded {
+                    FileUploadError::MaxFileSizeLimitExceeded {
                         limit,
                         file_name: field_name
                             .map(|name| format!("'{0}'", name))

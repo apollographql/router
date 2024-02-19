@@ -326,7 +326,7 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
                 {
                   "message": "Exceeded the limit of 5 file uploads of files in a single request.",
                   "extensions": {
-                    "code": "FILE_UPLOAD"
+                    "code": "FILE_UPLOADS_LIMITS_MAX_FILES_EXCEEDED"
                   }
                 }
               ]

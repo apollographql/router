@@ -49,7 +49,7 @@ pub(super) enum FileUploadError {
     MaxFilesLimitExceeded(usize),
 
     #[error("Exceeded the limit of {limit} bytes on {file_name} file.")]
-    MaxFileSizeLimitExceded { limit: u64, file_name: String },
+    MaxFileSizeLimitExceeded { limit: u64, file_name: String },
 
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
@@ -59,7 +59,15 @@ impl From<FileUploadError> for graphql::Error {
     fn from(value: FileUploadError) -> Self {
         Self::builder()
             .message(value.to_string())
-            .extension_code("FILE_UPLOAD") // FIXME: Figure out what this should be
+            .extension_code(match &value {
+                FileUploadError::MaxFilesLimitExceeded(_) => {
+                    "FILE_UPLOADS_LIMITS_MAX_FILES_EXCEEDED".to_string()
+                }
+                FileUploadError::MaxFileSizeLimitExceeded { .. } => {
+                    "FILE_UPLOADS_LIMITS_MAX_FILE_SIZE_EXCEEDED".to_string()
+                }
+                _ => "FILE_UPLOADS_OPERATION_CANNOT_STREAM".to_string(),
+            })
             .build()
     }
 }
