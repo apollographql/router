@@ -128,7 +128,7 @@ fn rearrange_plan_node<'a>(
                 }
             }
             if !deferred_variables.is_empty() {
-                return Err(FileUploadError::VariablesForbiddenInsideDeffer(
+                return Err(FileUploadError::VariablesForbiddenInsideDefer(
                     deferred_variables
                         .into_keys()
                         .map(|name| format!("${}", name))
