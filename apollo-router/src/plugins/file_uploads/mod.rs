@@ -358,7 +358,19 @@ fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::R
         } = supergraph_result;
 
         let root = &req.query_plan.root;
-        let root = rearrange_plan_node(root, &mut HashMap::new(), &files_order, &map_per_variable)?;
+        let mut variable_ranges = HashMap::new();
+        for (name, map) in map_per_variable.iter() {
+            variable_ranges.insert(
+                name.as_str(),
+                map.keys()
+                    .map(|file| files_order.get_index_of(file))
+                    .minmax()
+                    .into_option()
+                    .expect("map always have keys"),
+            );
+        }
+
+        let root = rearrange_plan_node(root, &mut HashMap::new(), &variable_ranges)?;
         return Ok(execution::Request {
             query_plan: Arc::new(QueryPlan {
                 root,
@@ -375,9 +387,8 @@ fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::R
 // Recursive, and recursion is safe here since query plan is executed recursively.
 fn rearrange_plan_node<'a>(
     node: &PlanNode,
-    acc_variables: &mut HashMap<&'a str, &'a MapPerFile>,
-    files_order: &IndexSet<String>,
-    map_per_variable: &'a MapPerVariable,
+    acc_variables: &mut HashMap<&'a str, &'a (Option<usize>, Option<usize>)>,
+    variable_ranges: &'a HashMap<&str, (Option<usize>, Option<usize>)>,
 ) -> UploadResult<PlanNode> {
     Ok(match node {
         PlanNode::Condition {
@@ -385,46 +396,34 @@ fn rearrange_plan_node<'a>(
             if_clause,
             else_clause,
         } => {
-            let if_clause = if let Some(node) = if_clause {
-                Some(Box::new(rearrange_plan_node(
-                    node,
-                    acc_variables,
-                    files_order,
-                    map_per_variable,
-                )?))
-            } else {
-                None
-            };
+            let if_clause = if_clause
+                .as_ref()
+                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
+                .transpose();
 
-            let else_clause = if let Some(node) = else_clause {
-                Some(Box::new(rearrange_plan_node(
-                    node,
-                    acc_variables,
-                    files_order,
-                    map_per_variable,
-                )?))
-            } else {
-                None
-            };
+            let else_clause = else_clause
+                .as_ref()
+                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
+                .transpose();
 
             PlanNode::Condition {
                 condition: condition.clone(),
-                if_clause,
-                else_clause,
+                if_clause: if_clause?.map(Box::new),
+                else_clause: else_clause?.map(Box::new),
             }
         }
         PlanNode::Fetch(fetch) => {
             for variable in fetch.variable_usages.iter() {
-                if let Some((name, map)) = map_per_variable.get_key_value(variable) {
-                    acc_variables.entry(name).or_insert(map);
+                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
+                    acc_variables.entry(name).or_insert(range);
                 }
             }
             PlanNode::Fetch(fetch.clone())
         }
         PlanNode::Subscription { primary, rest } => {
             for variable in primary.variable_usages.iter() {
-                if let Some((name, map)) = map_per_variable.get_key_value(variable) {
-                    acc_variables.entry(name).or_insert(map);
+                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
+                    acc_variables.entry(name).or_insert(range);
                 }
             }
 
@@ -434,8 +433,7 @@ fn rearrange_plan_node<'a>(
                 drop(rearrange_plan_node(
                     rest,
                     &mut rest_variables,
-                    files_order,
-                    map_per_variable,
+                    variable_ranges,
                 ));
                 if !rest_variables.is_empty() {
                     return Err(FileUploadError::VariblesForbiddenInsideSubscription(
@@ -456,6 +454,11 @@ fn rearrange_plan_node<'a>(
             let mut primary = primary.clone();
             let deferred = deferred.clone();
 
+            let primary_node = primary
+                .node
+                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
+                .transpose();
+
             let mut deferred_variables = HashMap::new();
             for DeferredNode { node, .. } in deferred.iter() {
                 if let Some(node) = node {
@@ -463,8 +466,7 @@ fn rearrange_plan_node<'a>(
                     drop(rearrange_plan_node(
                         node,
                         &mut deferred_variables,
-                        files_order,
-                        map_per_variable,
+                        variable_ranges,
                     ));
                 }
             }
@@ -477,22 +479,11 @@ fn rearrange_plan_node<'a>(
                 ));
             }
 
-            if let Some(node) = primary.node {
-                let node =
-                    rearrange_plan_node(&node, acc_variables, files_order, map_per_variable)?;
-                primary.node = Some(Box::new(node));
-                PlanNode::Defer { primary, deferred }
-            } else {
-                PlanNode::Defer { primary, deferred }
-            }
+            primary.node = primary_node?.map(Box::new);
+            PlanNode::Defer { primary, deferred }
         }
         PlanNode::Flatten(flatten_node) => {
-            let node = rearrange_plan_node(
-                &flatten_node.node,
-                acc_variables,
-                &files_order,
-                map_per_variable,
-            )?;
+            let node = rearrange_plan_node(&flatten_node.node, acc_variables, variable_ranges)?;
             PlanNode::Flatten(FlattenNode {
                 node: Box::new(node),
                 path: flatten_node.path.clone(),
@@ -500,36 +491,50 @@ fn rearrange_plan_node<'a>(
         }
         PlanNode::Sequence { nodes } => {
             let mut sequence = Vec::new();
-            let mut last_file = None;
+            let mut sequence_last = None;
+
+            let mut has_overlap = false;
+            let mut duplicate_variables = HashSet::new();
             for node in nodes.iter() {
                 let mut node_variables = HashMap::new();
-                let node =
-                    rearrange_plan_node(node, &mut node_variables, &files_order, map_per_variable)?;
-                for (variable, map) in node_variables.into_iter() {
-                    acc_variables.insert(variable, map);
-
-                    for file in map.keys() {
-                        let index = files_order.get_index_of(file);
-                        if index <= last_file {
-                            return Err(FileUploadError::MisorderedVariables);
-                        }
-                        last_file = index;
-                    }
-                }
+                let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
                 sequence.push(node);
+
+                for (variable, range) in node_variables.into_iter() {
+                    if acc_variables.insert(variable, range).is_some() {
+                        duplicate_variables.insert(variable);
+                        continue;
+                    }
+
+                    let (first, last) = range;
+                    if *first <= sequence_last {
+                        has_overlap = true;
+                    }
+                    sequence_last = *last;
+                }
+            }
+
+            if !duplicate_variables.is_empty() {
+                return Err(FileUploadError::DuplicateVariableUsages(
+                    duplicate_variables
+                        .iter()
+                        .map(|name| format!("${}", name))
+                        .join(", "),
+                ));
+            }
+            if has_overlap {
+                return Err(FileUploadError::MisorderedVariables);
             }
             PlanNode::Sequence { nodes: sequence }
         }
         PlanNode::Parallel { nodes } => {
-            // FIXME: first fill acc_variables and just track error instead of throw
-            // FIXME: BTree key => (first_file, last_file)
             let mut parallel = Vec::new();
             let mut sequence = BTreeMap::new();
+            let mut duplicate_variables = HashSet::new();
 
             for node in nodes.iter() {
                 let mut node_variables = HashMap::new();
-                let node =
-                    rearrange_plan_node(node, &mut node_variables, &files_order, map_per_variable)?;
+                let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
                 if node_variables.is_empty() {
                     parallel.push(node);
                     continue;
@@ -537,18 +542,29 @@ fn rearrange_plan_node<'a>(
 
                 let mut first_file = None;
                 let mut last_file = None;
-                for (variable, map) in node_variables.into_iter() {
-                    acc_variables.insert(variable, map);
-                    for file in map.keys() {
-                        let index = files_order.get_index_of(file);
-                        first_file = match first_file {
-                            None => index,
-                            Some(first_file) => cmp::min(Some(first_file), index),
-                        };
-                        last_file = cmp::max(last_file, index);
+                for (variable, range) in node_variables.into_iter() {
+                    if acc_variables.insert(variable, range).is_some() {
+                        duplicate_variables.insert(variable);
+                        continue;
                     }
+
+                    let (first, last) = range;
+                    first_file = match first_file {
+                        None => *first,
+                        Some(first_file) => cmp::min(Some(first_file), *first),
+                    };
+                    last_file = cmp::max(last_file, *last);
                 }
                 sequence.insert(first_file, (node, last_file));
+            }
+
+            if !duplicate_variables.is_empty() {
+                return Err(FileUploadError::DuplicateVariableUsages(
+                    duplicate_variables
+                        .iter()
+                        .map(|name| format!("${}", name))
+                        .join(", "),
+                ));
             }
 
             if !sequence.is_empty() {
