@@ -1681,19 +1681,19 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql\r\n"
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql"
         );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&second).unwrap(),
-        "content-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql\r\n"
+        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql"
         );
 
     let third = response.chunk().await.unwrap().unwrap();
     assert_eq!(
         std::str::from_utf8(&third).unwrap(),
-        "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
+        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
     );
 
     server.shutdown().await
