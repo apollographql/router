@@ -88,7 +88,7 @@ impl PluginPrivate for FileUploadsPlugin {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             router::Response::error_builder()
-                                .errors(vec![err.into()])
+                                .error(err)
                                 .context(context)
                                 .build()?,
                         ),
@@ -112,7 +112,7 @@ impl PluginPrivate for FileUploadsPlugin {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             supergraph::Response::error_builder()
-                                .errors(vec![err.into()])
+                                .error(err)
                                 .context(context)
                                 .build()?,
                         ),
@@ -397,6 +397,7 @@ const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 pub(crate) async fn http_request_wrapper(
     mut req: http::Request<hyper::Body>,
 ) -> http::Request<hyper::Body> {
+    // This is a noop if the file upload extensions are not present.
     let supergraph_result = req.extensions_mut().remove();
     if let Some(supergraph_result) = supergraph_result {
         let SubgraphHttpRequestExtensions {
