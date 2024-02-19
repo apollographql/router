@@ -4,7 +4,7 @@ use crate::graphql;
 
 /// Errors that may occur during file upload
 #[derive(Debug, Error)]
-pub(crate) enum FileUploadError {
+pub(super) enum FileUploadError {
     /// Represents an invalid request, wrapping the context as a string
     #[error("invalid multipart request: {0}")]
     InvalidMultipartRequest(#[from] multer::Error),

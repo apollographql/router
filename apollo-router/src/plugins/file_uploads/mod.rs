@@ -1,5 +1,3 @@
-use std::cmp;
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
@@ -43,19 +41,17 @@ use self::config::MultipartRequestLimits;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::plugins::file_uploads::error::FileUploadError;
-use crate::query_planner::DeferredNode;
-use crate::query_planner::FlattenNode;
-use crate::query_planner::PlanNode;
+use self::error::FileUploadError;
+use self::rearange_query_plan::rearange_query_plan;
 use crate::register_private_plugin;
 use crate::services::execution;
-use crate::services::execution::QueryPlan;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
 mod config;
 mod error;
+mod rearange_query_plan;
 
 type UploadResult<T> = Result<T, error::FileUploadError>;
 
@@ -88,7 +84,7 @@ impl PluginPrivate for FileUploadsPlugin {
             .oneshot_checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
-                    Ok(match extract_operations(req, max_file_size).await {
+                    Ok(match router_layer(req, max_file_size).await {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             router::Response::error_builder()
@@ -113,7 +109,7 @@ impl PluginPrivate for FileUploadsPlugin {
             .oneshot_checkpoint_async(move |req: supergraph::Request| {
                 async move {
                     let context = req.context.clone();
-                    Ok(match extract_map(req, max_files).await {
+                    Ok(match supergraph_layer(req, max_files).await {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             supergraph::Response::error_builder()
@@ -136,7 +132,7 @@ impl PluginPrivate for FileUploadsPlugin {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 let context = req.context.clone();
-                Ok(match rearange_execution_plan(req) {
+                Ok(match execution_layer(req) {
                     Ok(req) => ControlFlow::Continue(req),
                     Err(err) => ControlFlow::Break(
                         execution::Response::error_builder()
@@ -160,7 +156,7 @@ impl PluginPrivate for FileUploadsPlugin {
         }
         ServiceBuilder::new()
             .oneshot_checkpoint_async(|req: subgraph::Request| {
-                call_subgraph(req)
+                subgraph_layer(req)
                     .boxed()
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
@@ -180,7 +176,7 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
-async fn extract_operations(
+async fn router_layer(
     req: router::Request,
     max_file_size: u64,
 ) -> UploadResult<router::Request> {
@@ -212,7 +208,7 @@ async fn extract_operations(
         req.context
             .extensions()
             .lock()
-            .insert(ServiceLayerResult { multipart });
+            .insert(RouterLayerResult { multipart });
 
         let content_type = operations_field
             .headers()
@@ -234,11 +230,11 @@ async fn extract_operations(
     Ok(req)
 }
 
-struct ServiceLayerResult {
+struct RouterLayerResult {
     multipart: Multipart<'static>,
 }
 
-async fn extract_map(
+async fn supergraph_layer(
     mut req: supergraph::Request,
     max_files: usize,
 ) -> UploadResult<supergraph::Request> {
@@ -246,9 +242,9 @@ async fn extract_map(
         .context
         .extensions()
         .lock()
-        .remove::<ServiceLayerResult>();
+        .remove::<RouterLayerResult>();
 
-    if let Some(ServiceLayerResult { mut multipart }) = service_layer_result {
+    if let Some(RouterLayerResult { mut multipart }) = service_layer_result {
         let map_field = multipart
             .next_field()
             .await?
@@ -282,7 +278,7 @@ async fn extract_map(
                 let variable_name = segments.next().ok_or_else(|| {
                     FileUploadError::MissingVariableNameInsideMapField(path.clone())
                 })?;
-                let variable_path: Vec<String> = segments.map(|str| str.to_owned()).collect();
+                let variable_path: Vec<String> = segments.map(str::to_owned).collect();
 
                 // patch variables to pass validation
                 let json_value = variables
@@ -343,7 +339,7 @@ struct SupergraphLayerResult {
     map_per_variable: MapPerVariable,
 }
 
-fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::Request> {
+fn execution_layer(req: execution::Request) -> UploadResult<execution::Request> {
     let supergraph_result = req
         .context
         .extensions()
@@ -357,236 +353,18 @@ fn rearange_execution_plan(req: execution::Request) -> UploadResult<execution::R
             ..
         } = supergraph_result;
 
-        let root = &req.query_plan.root;
-        let mut variable_ranges = HashMap::new();
-        for (name, map) in map_per_variable.iter() {
-            variable_ranges.insert(
-                name.as_str(),
-                map.keys()
-                    .map(|file| files_order.get_index_of(file))
-                    .minmax()
-                    .into_option()
-                    .expect("map always have keys"),
-            );
-        }
-
-        let root = rearrange_plan_node(root, &mut HashMap::new(), &variable_ranges)?;
-        return Ok(execution::Request {
-            query_plan: Arc::new(QueryPlan {
-                root,
-                usage_reporting: req.query_plan.usage_reporting.clone(),
-                formatted_query_plan: req.query_plan.formatted_query_plan.clone(),
-                query: req.query_plan.query.clone(),
-            }),
-            ..req
-        });
+        let query_plan = Arc::new(rearange_query_plan(
+            &req.query_plan,
+            &files_order,
+            &map_per_variable,
+        )?);
+        return Ok(execution::Request { query_plan, ..req });
     }
     Ok(req)
 }
 
-// Recursive, and recursion is safe here since query plan is executed recursively.
-fn rearrange_plan_node<'a>(
-    node: &PlanNode,
-    acc_variables: &mut HashMap<&'a str, &'a (Option<usize>, Option<usize>)>,
-    variable_ranges: &'a HashMap<&str, (Option<usize>, Option<usize>)>,
-) -> UploadResult<PlanNode> {
-    Ok(match node {
-        PlanNode::Condition {
-            condition,
-            if_clause,
-            else_clause,
-        } => {
-            let if_clause = if_clause
-                .as_ref()
-                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
-                .transpose();
 
-            let else_clause = else_clause
-                .as_ref()
-                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
-                .transpose();
-
-            PlanNode::Condition {
-                condition: condition.clone(),
-                if_clause: if_clause?.map(Box::new),
-                else_clause: else_clause?.map(Box::new),
-            }
-        }
-        PlanNode::Fetch(fetch) => {
-            for variable in fetch.variable_usages.iter() {
-                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
-                    acc_variables.entry(name).or_insert(range);
-                }
-            }
-            PlanNode::Fetch(fetch.clone())
-        }
-        PlanNode::Subscription { primary, rest } => {
-            for variable in primary.variable_usages.iter() {
-                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
-                    acc_variables.entry(name).or_insert(range);
-                }
-            }
-
-            if let Some(rest) = rest {
-                let mut rest_variables = HashMap::new();
-                // ignore result use it just to collect variables
-                drop(rearrange_plan_node(
-                    rest,
-                    &mut rest_variables,
-                    variable_ranges,
-                ));
-                if !rest_variables.is_empty() {
-                    return Err(FileUploadError::VariblesForbiddenInsideSubscription(
-                        rest_variables
-                            .into_keys()
-                            .map(|name| format!("${}", name))
-                            .join(", "),
-                    ));
-                }
-            }
-
-            PlanNode::Subscription {
-                primary: primary.clone(),
-                rest: rest.clone(),
-            }
-        }
-        PlanNode::Defer { primary, deferred } => {
-            let mut primary = primary.clone();
-            let deferred = deferred.clone();
-
-            let primary_node = primary
-                .node
-                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
-                .transpose();
-
-            let mut deferred_variables = HashMap::new();
-            for DeferredNode { node, .. } in deferred.iter() {
-                if let Some(node) = node {
-                    // ignore result use it just to collect variables
-                    drop(rearrange_plan_node(
-                        node,
-                        &mut deferred_variables,
-                        variable_ranges,
-                    ));
-                }
-            }
-            if !deferred_variables.is_empty() {
-                return Err(FileUploadError::VariblesForbiddenInsideDeffer(
-                    deferred_variables
-                        .into_keys()
-                        .map(|name| format!("${}", name))
-                        .join(", "),
-                ));
-            }
-
-            primary.node = primary_node?.map(Box::new);
-            PlanNode::Defer { primary, deferred }
-        }
-        PlanNode::Flatten(flatten_node) => {
-            let node = rearrange_plan_node(&flatten_node.node, acc_variables, variable_ranges)?;
-            PlanNode::Flatten(FlattenNode {
-                node: Box::new(node),
-                path: flatten_node.path.clone(),
-            })
-        }
-        PlanNode::Sequence { nodes } => {
-            let mut sequence = Vec::new();
-            let mut sequence_last = None;
-
-            let mut has_overlap = false;
-            let mut duplicate_variables = HashSet::new();
-            for node in nodes.iter() {
-                let mut node_variables = HashMap::new();
-                let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
-                sequence.push(node);
-
-                for (variable, range) in node_variables.into_iter() {
-                    if acc_variables.insert(variable, range).is_some() {
-                        duplicate_variables.insert(variable);
-                        continue;
-                    }
-
-                    let (first, last) = range;
-                    if *first <= sequence_last {
-                        has_overlap = true;
-                    }
-                    sequence_last = *last;
-                }
-            }
-
-            if !duplicate_variables.is_empty() {
-                return Err(FileUploadError::DuplicateVariableUsages(
-                    duplicate_variables
-                        .iter()
-                        .map(|name| format!("${}", name))
-                        .join(", "),
-                ));
-            }
-            if has_overlap {
-                return Err(FileUploadError::MisorderedVariables);
-            }
-            PlanNode::Sequence { nodes: sequence }
-        }
-        PlanNode::Parallel { nodes } => {
-            let mut parallel = Vec::new();
-            let mut sequence = BTreeMap::new();
-            let mut duplicate_variables = HashSet::new();
-
-            for node in nodes.iter() {
-                let mut node_variables = HashMap::new();
-                let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
-                if node_variables.is_empty() {
-                    parallel.push(node);
-                    continue;
-                }
-
-                let mut first_file = None;
-                let mut last_file = None;
-                for (variable, range) in node_variables.into_iter() {
-                    if acc_variables.insert(variable, range).is_some() {
-                        duplicate_variables.insert(variable);
-                        continue;
-                    }
-
-                    let (first, last) = range;
-                    first_file = match first_file {
-                        None => *first,
-                        Some(first_file) => cmp::min(Some(first_file), *first),
-                    };
-                    last_file = cmp::max(last_file, *last);
-                }
-                sequence.insert(first_file, (node, last_file));
-            }
-
-            if !duplicate_variables.is_empty() {
-                return Err(FileUploadError::DuplicateVariableUsages(
-                    duplicate_variables
-                        .iter()
-                        .map(|name| format!("${}", name))
-                        .join(", "),
-                ));
-            }
-
-            if !sequence.is_empty() {
-                let mut nodes = Vec::new();
-                let mut sequence_last_file = None;
-                for (first_file, (node, last_file)) in sequence.into_iter() {
-                    if first_file <= sequence_last_file {
-                        return Err(FileUploadError::MisorderedVariables);
-                    }
-                    sequence_last_file = last_file;
-                    nodes.push(node);
-                }
-
-                parallel.push(PlanNode::Sequence { nodes });
-            }
-
-            PlanNode::Parallel { nodes: parallel }
-        }
-    })
-}
-
-async fn call_subgraph(mut req: subgraph::Request) -> subgraph::Request {
+async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
     let supergraph_result = req
         .context
         .extensions()
