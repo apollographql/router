@@ -32,7 +32,7 @@ reqwest = { version = "0.11", default-features = false, features = [
     "rustls-tls",
     "rustls-tls-native-roots",
 ] }
-serde = { version = "1.0.196", features = ["derive"] }
+serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1"
 tar = "0.4"
 tempfile = "3"
@@ -46,4 +46,4 @@ base64 = "0.21"
 zip = { version = "0.6", default-features = false }
 
 [dev-dependencies]
-insta = { version = "1.34.0", features = ["json", "redactions", "yaml"] }
+insta = { version = "1.35.1", features = ["json", "redactions", "yaml"] }

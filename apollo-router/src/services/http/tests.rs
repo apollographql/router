@@ -3,6 +3,7 @@ use std::io;
 use std::net::TcpListener;
 use std::str::FromStr;
 
+use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
 use axum::Server;
 use http::header::CONTENT_ENCODING;
@@ -365,20 +366,17 @@ async fn test_subgraph_h2c() {
 // starts a local server emulating a subgraph returning compressed response
 async fn emulate_subgraph_compressed_response(listener: TcpListener) {
     async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-        // Check the compression of the body
-        let mut encoder = GzipEncoder::new(Vec::new());
-        encoder
-            .write_all(r#"{"query":"{ me { name username } }"#.as_bytes())
+        let body = hyper::body::to_bytes(request.into_body())
             .await
-            .unwrap();
-        encoder.shutdown().await.unwrap();
-        let compressed_body = encoder.into_inner();
+            .unwrap()
+            .to_vec();
+        let mut decoder = GzipDecoder::new(Vec::new());
+        decoder.write_all(&body).await.unwrap();
+        decoder.shutdown().await.unwrap();
+        let body = decoder.into_inner();
         assert_eq!(
-            compressed_body,
-            hyper::body::to_bytes(request.into_body())
-                .await
-                .unwrap()
-                .to_vec()
+            r#"{"query":"{ me { name username } }"#,
+            std::str::from_utf8(&body).unwrap()
         );
 
         let original_body = Response {
