@@ -192,9 +192,9 @@ checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2f12a04dc5164646affc9ef40f519741321b59d3503d0ca06719ce750741594"
+checksum = "e779ed0ba21149a5ffc7266aedd34779da85405da2b2b4f4bc326b85375439a6"
 dependencies = [
  "apollo-parser",
  "ariadne",
@@ -202,6 +202,7 @@ dependencies = [
  "rowan",
  "salsa",
  "serde",
+ "serde_json_bytes",
  "sptr",
  "thiserror",
  "triomphe",
@@ -220,9 +221,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e1f1a447ab0e78b150b076fa53fd0ac0a58563a493c9e588f447db842c18486"
+checksum = "f8e029d74a3c5f5b5ceeb0450aa95df15b49bb71e962e7c22872afd6f5b5e631"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -230,17 +231,18 @@ dependencies = [
  "lazy_static",
  "petgraph",
  "salsa",
+ "serde_json",
  "strum",
- "strum_macros",
+ "strum_macros 0.26.1",
  "thiserror",
  "url",
 ]
 
 [[package]]
 name = "apollo-parser"
-version = "0.7.4"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db2953239e146be68f42333c2eaff528884fd300d0d1ed306b374f2a619a7d85"
+checksum = "5e8111fa921e363466724e8cc80ef703ffbdfc5db64f826c604f7378641b12da"
 dependencies = [
  "memchr",
  "rowan",
@@ -249,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.40.0"
+version = "1.40.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -348,6 +350,7 @@ dependencies = [
  "rstack",
  "rust-embed",
  "rustls",
+ "rustls-native-certs",
  "rustls-pemfile",
  "schemars",
  "semver 1.0.21",
@@ -363,7 +366,7 @@ dependencies = [
  "shellexpand",
  "similar",
  "static_assertions",
- "strum_macros",
+ "strum_macros 0.25.3",
  "sys-info",
  "tempfile",
  "test-log",
@@ -404,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.40.0"
+version = "1.40.1"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -420,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.40.0"
+version = "1.40.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -462,9 +465,9 @@ checksum = "bddcadddf5e9015d310179a59bb28c4d4b9920ad0f11e8e14dbadf654890c9a6"
 
 [[package]]
 name = "ariadne"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72fe02fc62033df9ba41cba57ee19acf5e742511a140c7dbc3a873e19a19a1bd"
+checksum = "dd002a6223f12c7a95cdd4b1cb3a0149d22d37f7a9ecdb2cb691a071fe236c29"
 dependencies = [
  "concolor",
  "unicode-width",
@@ -945,9 +948,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-async"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "426a5bc369ca7c8d3686439e46edc727f397a47ab3696b13f3ae8c81b3b36132"
+checksum = "8ec441341e019c441aa78472ed6d206cfe198026c495277a95ac5bebda520742"
 dependencies = [
  "futures-util",
  "pin-project-lite",
@@ -1020,14 +1023,15 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-runtime-api"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23165433e80c04e8c09cee66d171292ae7234bae05fa9d5636e33095eae416b2"
+checksum = "180898ed701a773fb3fadbd94b9e9559125cf88eeb1815ab99e35d4f5f34f7fb"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-types",
  "bytes",
  "http 0.2.11",
+ "http 1.0.0",
  "pin-project-lite",
  "tokio",
  "tracing",
@@ -1036,9 +1040,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-types"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c94a5bec34850b92c9a054dad57b95c1d47f25125f55973e19f6ad788f0381ff"
+checksum = "897f1db4020ad91f2c2421945ec49b7e3eb81cc3fea99e8b5dd5be721e697fed"
 dependencies = [
  "base64-simd",
  "bytes",
@@ -2076,7 +2080,7 @@ dependencies = [
  "quote 1.0.35",
  "regex",
  "strum",
- "strum_macros",
+ "strum_macros 0.25.3",
  "syn 1.0.109",
  "syn 2.0.48",
  "thiserror",
@@ -4108,14 +4112,14 @@ dependencies = [
 
 [[package]]
 name = "multer"
-version = "2.1.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01acbdc23469fd8fe07ab135923371d5f5a422fbf9c522158677c8eb15bc51c2"
+checksum = "a15d522be0a9c3e46fd2632e272d178f56387bdb5c9fbb3a36c649062e9b5219"
 dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
- "http 0.2.11",
+ "http 1.0.0",
  "httparse",
  "log",
  "memchr",
@@ -6426,7 +6430,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.25.3",
 ]
 
 [[package]]
@@ -6434,6 +6438,19 @@ name = "strum_macros"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23dc1fa9ac9c169a78ba62f0b841814b7abae11bdd047b9c58f893439e309ea0"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2 1.0.76",
+ "quote 1.0.35",
+ "rustversion",
+ "syn 2.0.48",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a3417fc93d76740d974a01654a09777cb500428cc874ca9f45edfe0c4d4cd18"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2 1.0.76",
