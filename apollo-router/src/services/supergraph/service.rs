@@ -24,7 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
-use crate::batching::BatchDetails;
+use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
@@ -621,7 +621,7 @@ async fn plan_query(
         ))
         .await?;
 
-    if let Some(batching) = context.extensions().lock().get::<BatchDetails>() {
+    if let Some(batching) = context.extensions().lock().get::<BatchQuery>() {
         if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
             let no_requires_fetches = plan.root.subgraph_fetches(false);
             batching.set_subgraph_fetches(no_requires_fetches);

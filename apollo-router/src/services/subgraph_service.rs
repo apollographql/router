@@ -43,7 +43,7 @@ use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
-use crate::batching::BatchDetails;
+use crate::batching::BatchQuery;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
@@ -661,7 +661,7 @@ async fn call_batched_http(
         tokio::sync::oneshot::Receiver<Result<SubgraphResponse, BoxError>>,
     > = None;
     let mut waiters_opt = None;
-    if let Some(batching) = context.extensions().lock().get_mut::<BatchDetails>() {
+    if let Some(batching) = context.extensions().lock().get_mut::<BatchQuery>() {
         if !batching.finished() {
             tracing::info!("in subgraph we have batching: {batching}, service: {service_name}");
             batching.increment_subgraph_seen();

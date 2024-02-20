@@ -1,8 +1,8 @@
 //! An assembly of utility functions and core structures used to implement batching support within
 //! the router.
 //!
-//! Apart from the core batching functionality, as expressed in `BatchDetails` and
-//! `SharedBatchDetails`, there are a series of utility functions for efficiently converting
+//! Apart from the core batching functionality, as expressed in `BatchQuery` and
+//! `Batch`, there are a series of utility functions for efficiently converting
 //! graphql Requests to/from batch representation in a variety of formats: JSON, bytes
 
 use std::collections::HashMap;
@@ -19,30 +19,30 @@ use crate::services::SubgraphResponse;
 use crate::Context;
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct BatchDetails {
+pub(crate) struct BatchQuery {
     index: usize,
-    // Shared Request Details
-    shared: Arc<Mutex<SharedBatchDetails>>,
+    // Shared Batch
+    shared: Arc<Mutex<Batch>>,
 }
 
-impl fmt::Display for BatchDetails {
+impl fmt::Display for BatchQuery {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "index: {}, ", self.index)?;
-        // Use try_lock. If the shared details are locked, we won't display them.
+        // Use try_lock. If the shared batch is locked, we won't display it.
         // TODO: Maybe improve to handle the error...?
         let guard = self.shared.try_lock().ok_or(fmt::Error)?;
         write!(f, "size: {}, ", guard.size)?;
         write!(f, "expected: {:?}, ", guard.expected)?;
         write!(f, "seen: {:?}", guard.seen)?;
-        for (service, details) in guard.waiters.iter() {
-            write!(f, ", service: {}, waiters: {}", service, details.len())?;
+        for (service, waiters) in guard.waiters.iter() {
+            write!(f, ", service: {}, waiters: {}", service, waiters.len())?;
         }
         Ok(())
     }
 }
 
-impl BatchDetails {
-    pub(crate) fn new(index: usize, shared: Arc<Mutex<SharedBatchDetails>>) -> Self {
+impl BatchQuery {
+    pub(crate) fn new(index: usize, shared: Arc<Mutex<Batch>>) -> Self {
         Self {
             index,
             shared,
@@ -101,7 +101,7 @@ impl BatchDetails {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SharedBatchDetails {
+pub(crate) struct Batch {
     size: usize,
     expected: HashMap<usize, usize>,
     seen: HashMap<usize, usize>,
@@ -117,7 +117,7 @@ pub(crate) struct SharedBatchDetails {
     finished: bool,
 }
 
-impl SharedBatchDetails {
+impl Batch {
     pub(crate) fn new(size: usize) -> Self {
         Self {
             size,

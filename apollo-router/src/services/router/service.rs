@@ -36,8 +36,8 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::ClientRequestAccepts;
-use crate::batching::BatchDetails;
-use crate::batching::SharedBatchDetails;
+use crate::batching::Batch;
+use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -614,12 +614,12 @@ impl RouterService {
         let mut results = Vec::with_capacity(ok_results.len());
         let batch_size = ok_results.len();
 
-        let shared_batch_details: Option<Arc<Mutex<SharedBatchDetails>>> = if ok_results.len() > 1 {
+        let shared_batch_details: Option<Arc<Mutex<Batch>>> = if ok_results.len() > 1 {
             context
                 .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
-            Some(Arc::new(Mutex::new(SharedBatchDetails::new(batch_size))))
+            Some(Arc::new(Mutex::new(Batch::new(batch_size))))
         } else {
             None
         };
@@ -666,7 +666,7 @@ impl RouterService {
                 new_context_guard.insert(self.experimental_batching.clone());
                 if let Some(shared_batch_details) = &shared_batch_details {
                     new_context_guard
-                        .insert(BatchDetails::new(index + 1, shared_batch_details.clone()));
+                        .insert(BatchQuery::new(index + 1, shared_batch_details.clone()));
                 }
             }
 
@@ -681,7 +681,7 @@ impl RouterService {
             context
                 .extensions()
                 .lock()
-                .insert(BatchDetails::new(0, shared_batch_details));
+                .insert(BatchQuery::new(0, shared_batch_details));
         }
 
         results.insert(
