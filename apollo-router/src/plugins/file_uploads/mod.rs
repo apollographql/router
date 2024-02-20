@@ -425,7 +425,32 @@ struct MultipartRequestState {
     read_files_counter: usize,
     file_sizes: Vec<usize>,
     max_files_exceeded: bool,
-    max_files_size_exceeded: usize,
+    max_files_size_exceeded: bool,
+}
+
+impl Drop for MultipartRequestState {
+    fn drop(&mut self) {
+        u64_counter!(
+            "apollo.router.operations.file_uploads",
+            "file uploads",
+            1,
+            "file_uploads.limits.max_file_size.exceeded" = self.max_files_size_exceeded,
+            "file_uploads.limits.max_files.exceeded" = self.max_files_exceeded
+        );
+
+        for file_size in &self.file_sizes {
+            u64_histogram!(
+                "apollo.router.operations.file_uploads.file_size",
+                "file upload sizes",
+                (*file_size) as u64
+            );
+        }
+        u64_histogram!(
+            "apollo.router.operations.file_uploads.files",
+            "number of files per request",
+            self.read_files_counter as u64
+        );
+    }
 }
 
 impl MultipartRequest {
@@ -444,7 +469,7 @@ impl MultipartRequest {
                 read_files_counter: 0,
                 file_sizes: Vec::new(),
                 max_files_exceeded: false,
-                max_files_size_exceeded: 0,
+                max_files_size_exceeded: false,
             })),
         }
     }
@@ -555,7 +580,7 @@ where
                     let limit = self.state.limits.max_file_size;
                     if self.current_field_bytes > (limit.as_u64() as usize) {
                         self.current_field = None;
-                        self.state.max_files_size_exceeded += 1;
+                        self.state.max_files_size_exceeded = true;
                         Poll::Ready(Some(Err(FileUploadError::MaxFileSizeLimitExceeded {
                             limit,
                             filename,
