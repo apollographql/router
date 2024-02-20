@@ -693,11 +693,11 @@ async fn call_batched_http(
                 let first = requests_it
                     .next()
                     .expect("we should have at least one request");
-                let context = first.2; // XXX SHADOWING
-                txs.push(first.3);
+                let context = first.context; // XXX SHADOWING
+                txs.push(first.sender);
                 let SubgraphRequest {
                     subgraph_request, ..
-                } = first.0;
+                } = first.sg_request;
                 let operation_name = subgraph_request
                     .body()
                     .operation_name
@@ -705,15 +705,15 @@ async fn call_batched_http(
                     .unwrap_or_default();
 
                 let (parts, _) = subgraph_request.into_parts();
-                let body =
-                    serde_json::to_string(&first.1).expect("JSON serialization should not fail");
+                let body = serde_json::to_string(&first.gql_request)
+                    .expect("JSON serialization should not fail");
                 let mut bytes = BytesMut::new();
                 bytes.put_u8(b'[');
                 bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
                 for request in requests_it {
-                    txs.push(request.3);
+                    txs.push(request.sender);
                     bytes.put(&b", "[..]);
-                    let body = serde_json::to_string(&request.1)
+                    let body = serde_json::to_string(&request.gql_request)
                         .expect("JSON serialization should not fail");
                     bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
                 }
@@ -854,7 +854,7 @@ async fn call_batched_http(
                                         })
                                 })
                             }
-                            (content_type, body, _) => {
+                            (content_type, _body, _) => {
                                 // Something went wrong, compose a response with errors if they are present
                                 let mut graphql_response = graphql::Response::builder().build();
                                 if let Err(err) = content_type {

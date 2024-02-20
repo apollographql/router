@@ -96,6 +96,7 @@ impl Response {
     /// Create a Vec of [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return a Vec of response/errors (identifying the faulty service) if the input is invalid.
+    #[allow(dead_code)]
     pub(crate) fn array_from_bytes(
         service_name: &str,
         b: Bytes,

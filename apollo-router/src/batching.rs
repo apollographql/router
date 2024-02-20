@@ -43,11 +43,7 @@ impl fmt::Display for BatchQuery {
 
 impl BatchQuery {
     pub(crate) fn new(index: usize, shared: Arc<Mutex<Batch>>) -> Self {
-        Self {
-            index,
-            shared,
-            ..Default::default()
-        }
+        Self { index, shared }
     }
 
     pub(crate) fn ready(&self) -> bool {
@@ -71,17 +67,7 @@ impl BatchQuery {
             .get_waiter(request, body, context, service_name.to_string())
     }
 
-    pub(crate) fn get_waiters(
-        &self,
-    ) -> HashMap<
-        String,
-        Vec<(
-            SubgraphRequest,
-            graphql::Request,
-            Context,
-            oneshot::Sender<Result<SubgraphResponse, BoxError>>,
-        )>,
-    > {
+    pub(crate) fn get_waiters(&self) -> HashMap<String, Vec<Waiter>> {
         let mut guard = self.shared.lock();
         guard.finished = true;
         std::mem::take(&mut guard.waiters)
@@ -105,15 +91,7 @@ pub(crate) struct Batch {
     size: usize,
     expected: HashMap<usize, usize>,
     seen: HashMap<usize, usize>,
-    waiters: HashMap<
-        String,
-        Vec<(
-            SubgraphRequest,
-            graphql::Request,
-            Context,
-            oneshot::Sender<Result<SubgraphResponse, BoxError>>,
-        )>,
-    >,
+    waiters: HashMap<String, Vec<Waiter>>,
     finished: bool,
 }
 
@@ -145,7 +123,31 @@ impl Batch {
     ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
         let (tx, rx) = oneshot::channel();
         let value = self.waiters.entry(service).or_default();
-        value.push((request, body, context, tx));
+        value.push(Waiter::new(request, body, context, tx));
         rx
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Waiter {
+    pub(crate) sg_request: SubgraphRequest,
+    pub(crate) gql_request: graphql::Request,
+    pub(crate) context: Context,
+    pub(crate) sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+}
+
+impl Waiter {
+    fn new(
+        sg_request: SubgraphRequest,
+        gql_request: graphql::Request,
+        context: Context,
+        sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+    ) -> Self {
+        Self {
+            sg_request,
+            gql_request,
+            context,
+            sender,
+        }
     }
 }
