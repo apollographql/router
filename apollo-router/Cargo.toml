@@ -193,10 +193,10 @@ schemars = { version = "0.8.16", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.8"
 semver = "1.0.22"
-serde = { version = "1.0.196", features = ["derive", "rc"] }
+serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_derive_default = "0.1"
 serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
-serde_json = { version = "1.0.113", features = [
+serde_json = { version = "1.0.114", features = [
     "preserve_order",
     "float_roundtrip",
 ] }
@@ -329,7 +329,7 @@ rstack = { version = "0.3.3", features = ["dw"], default-features = false }
 [build-dependencies]
 tonic-build = "0.9.2"
 basic-toml = "0.1"
-serde_json = "1.0.113"
+serde_json = "1.0.114"
 
 [[test]]
 name = "integration_tests"
