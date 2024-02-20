@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
+use http::HeaderMap;
 use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
@@ -128,6 +129,10 @@ struct JWTConf {
     /// Header value prefix
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
+
+    /// Alternative sources to extract the JWT
+    #[serde(default)]
+    sources: Vec<Source>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -149,6 +154,32 @@ struct JwksConf {
     #[serde(default)]
     algorithms: Option<Vec<Algorithm>>,
 }
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+enum Source {
+    Header(HeaderSource),
+    Cookie(CookieSource),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
+#[serde(deny_unknown_fields)]
+struct HeaderSource {
+    /// HTTP header expected to contain JWT
+    #[serde(default = "default_header_name")]
+    name: String,
+    /// Header value prefix
+    #[serde(default = "default_header_value_prefix")]
+    value_prefix: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
+#[serde(deny_unknown_fields)]
+struct CookieSource {
+    /// Name of the cookie containing the JWT
+    name: String,
+}
+
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -385,7 +416,7 @@ impl Plugin for AuthenticationPlugin {
             None
         };
 
-        let router = if let Some(router_conf) = init.config.router {
+        let router = if let Some(mut router_conf) = init.config.router {
             if router_conf
                 .jwt
                 .header_value_prefix
@@ -395,6 +426,30 @@ impl Plugin for AuthenticationPlugin {
             {
                 return Err(Error::BadHeaderValuePrefix.into());
             }
+
+            for source in &router_conf.jwt.sources {
+                if let Source::Header(header) = source {
+                    if header
+                        .value_prefix
+                        .as_bytes()
+                        .iter()
+                        .any(u8::is_ascii_whitespace)
+                    {
+                        return Err(Error::BadHeaderValuePrefix.into());
+                    }
+                }
+            }
+
+            println!("sources before: {:?}", router_conf.jwt.sources);
+            router_conf.jwt.sources.insert(
+                0,
+                Source::Header(HeaderSource {
+                    name: router_conf.jwt.header_name.clone(),
+                    value_prefix: router_conf.jwt.header_value_prefix.clone(),
+                }),
+            );
+            println!("sources after: {:?}", router_conf.jwt.sources);
+
             let mut list = vec![];
             for jwks_conf in &router_conf.jwt.jwks {
                 let url: Url = Url::from_str(jwks_conf.url.as_str())?;
@@ -506,73 +561,24 @@ fn authenticate(
         ControlFlow::Break(response)
     }
 
-    // The http_request is stored in a `Router::Request` context.
-    // We are going to check the headers for the presence of the configured header
-    let jwt_value_result = match request.router_request.headers().get(&config.header_name) {
-        Some(value) => value.to_str(),
-        None => {
-            return ControlFlow::Continue(request);
+    println!("will extract with sources {:?}", config.sources);
+    let mut jwt = None;
+    for source in &config.sources {
+        match extract_jwt(&source, request.router_request.headers()) {
+            None => continue,
+            Some(Err(error)) => {
+                return failure_message(request.context, error, StatusCode::BAD_REQUEST)
+            }
+            Some(Ok(extracted_jwt)) => {
+                jwt = Some(extracted_jwt);
+                break;
+            }
         }
-    };
-
-    // If we find the header, but can't convert it to a string, let the client know
-    let jwt_value_untrimmed = match jwt_value_result {
-        Ok(value) => value,
-        Err(_not_a_string_error) => {
-            return failure_message(
-                request.context,
-                AuthenticationError::CannotConvertToString,
-                StatusCode::BAD_REQUEST,
-            );
-        }
-    };
-
-    // Let's trim out leading and trailing whitespace to be accommodating
-    let jwt_value = jwt_value_untrimmed.trim();
-
-    // Make sure the format of our message matches our expectations
-    // Technically, the spec is case sensitive, but let's accept
-    // case variations
-    //
-    let prefix_len = config.header_value_prefix.len();
-    if jwt_value.len() < prefix_len
-        || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix)
-    {
-        return failure_message(
-            request.context,
-            AuthenticationError::InvalidPrefix(jwt_value_untrimmed, &config.header_value_prefix),
-            StatusCode::BAD_REQUEST,
-        );
     }
 
-    // If there's no header prefix, we need to avoid splitting the header
-    let jwt = if config.header_value_prefix.is_empty() {
-        // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
-        if jwt_value.contains(' ') {
-            return failure_message(
-                request.context,
-                AuthenticationError::InvalidPrefix(
-                    jwt_value_untrimmed,
-                    &config.header_value_prefix,
-                ),
-                StatusCode::BAD_REQUEST,
-            );
-        }
-        // we can simply assign the jwt to the jwt_value; we'll validate down below
-        jwt_value
-    } else {
-        // Otherwise, we need to split our string in (at most 2) sections.
-        let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
-        if jwt_parts.len() != 2 {
-            return failure_message(
-                request.context,
-                AuthenticationError::MissingJWT(jwt_value),
-                StatusCode::BAD_REQUEST,
-            );
-        }
-
-        // We have our jwt
-        jwt_parts[1]
+    let jwt = match jwt {
+        Some(jwt) => jwt,
+        None => return ControlFlow::Continue(request),
     };
 
     // Try to create a valid header to work with
@@ -658,6 +664,95 @@ fn authenticate(
             AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
             StatusCode::UNAUTHORIZED,
         )
+    }
+}
+
+fn extract_jwt<'a, 'b: 'a>(
+    source: &'a Source,
+    headers: &'b HeaderMap,
+) -> Option<Result<&'b str, AuthenticationError<'a>>> {
+    println!("will extract with source: {source:?}");
+    println!("headers: {headers:?}");
+    match source {
+        Source::Header(header) => {
+            // The http_request is stored in a `Router::Request` context.
+            // We are going to check the headers for the presence of the configured header
+            let jwt_value_result = match headers.get(&header.name) {
+                Some(value) => value.to_str(),
+                None => return None,
+            };
+
+            // If we find the header, but can't convert it to a string, let the client know
+            let jwt_value_untrimmed = match jwt_value_result {
+                Ok(value) => value,
+                Err(_not_a_string_error) => {
+                    return Some(Err(AuthenticationError::CannotConvertToString));
+                }
+            };
+
+            // Let's trim out leading and trailing whitespace to be accommodating
+            let jwt_value = jwt_value_untrimmed.trim();
+
+            // Make sure the format of our message matches our expectations
+            // Technically, the spec is case sensitive, but let's accept
+            // case variations
+            //
+            let prefix_len = header.value_prefix.len();
+            if jwt_value.len() < prefix_len
+                || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&header.value_prefix)
+            {
+                return Some(Err(AuthenticationError::InvalidPrefix(
+                    jwt_value_untrimmed,
+                    &header.value_prefix,
+                )));
+            }
+            // If there's no header prefix, we need to avoid splitting the header
+            let jwt = if header.value_prefix.is_empty() {
+                // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
+                if jwt_value.contains(' ') {
+                    return Some(Err(AuthenticationError::InvalidPrefix(
+                        jwt_value_untrimmed,
+                        &header.value_prefix,
+                    )));
+                }
+                // we can simply assign the jwt to the jwt_value; we'll validate down below
+                jwt_value
+            } else {
+                // Otherwise, we need to split our string in (at most 2) sections.
+                let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
+                if jwt_parts.len() != 2 {
+                    return Some(Err(AuthenticationError::MissingJWT(jwt_value)));
+                }
+
+                // We have our jwt
+                jwt_parts[1]
+            };
+            Some(Ok(jwt))
+        }
+        Source::Cookie(cookie_source) => {
+            for header in headers.get_all("cookie") {
+                let value = match header.to_str() {
+                    Ok(value) => value,
+                    Err(_not_a_string_error) => {
+                        return Some(Err(AuthenticationError::CannotConvertToString));
+                    }
+                };
+                for cookie in cookie::Cookie::split_parse(value) {
+                    match cookie {
+                        Err(_) => continue,
+                        Ok(cookie) => {
+                            if cookie.name() == cookie_source.name {
+                                if let Some(value) = cookie.value_raw() {
+                                    return Some(Ok(value));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            None
+        }
     }
 }
 
