@@ -23,7 +23,7 @@ executors:
     docker:
       - image: cimg/base:stable
       - image: cimg/redis:7.2.4
-      - image: jaegertracing/all-in-one:1.53.0
+      - image: jaegertracing/all-in-one:1.54.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -58,12 +58,12 @@ executors:
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:stable"
+      image: "windows-server-2019-vs2019:2022.08.1"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:stable"
+      image: "windows-server-2019-vs2019:2022.08.1"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
@@ -333,6 +333,15 @@ commands:
                 name: Special case for Windows because of ssh-agent
                 command: |
                   printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for OSX x86_64 builds
+                command: |
+                  rustup target add x86_64-apple-darwin
 
   install_extra_tools:
     steps:
@@ -593,13 +602,28 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --target aarch64-apple-darwin
+            - run:
+                command: >
+                  cargo xtask dist --target x86_64-apple-darwin
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
                   cargo xtask package
+                  --target aarch64-apple-darwin
+                  --apple-team-id ${APPLE_TEAM_ID}
+                  --apple-username ${APPLE_USERNAME}
+                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
+                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
+                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
+                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
+                  --output artifacts/
+            - run:
+                command: >
+                  cargo xtask package
+                  --target x86_64-apple-darwin
                   --apple-team-id ${APPLE_TEAM_ID}
                   --apple-username ${APPLE_USERNAME}
                   --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}

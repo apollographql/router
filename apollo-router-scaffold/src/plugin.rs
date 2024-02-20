@@ -56,21 +56,19 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
 
     let version = get_router_version(cargo_toml);
 
-    let opts = cargo_scaffold::Opts::builder()
-        .template_path(template_path.as_ref().unwrap_or(&PathBuf::from(
-            "https://github.com/apollographql/router.git",
-        )))
-        .git_ref(version)
-        .repository_template_path(
-            PathBuf::from("apollo-router-scaffold")
-                .join("templates")
-                .join("plugin"),
-        )
-        .target_dir(".")
-        .project_name(name)
-        .parameter(format!("name={name}"))
-        .append(true)
-        .build();
+    let opts = cargo_scaffold::Opts::builder(template_path.as_ref().unwrap_or(&PathBuf::from(
+        "https://github.com/apollographql/router.git",
+    )))
+    .git_ref(version)
+    .repository_template_path(
+        PathBuf::from("apollo-router-scaffold")
+            .join("templates")
+            .join("plugin"),
+    )
+    .target_dir(".")
+    .project_name(name)
+    .parameters(vec![format!("name={name}")])
+    .append(true);
     let desc = ScaffoldDescription::new(opts)?;
     let mut params = desc.fetch_parameters_value()?;
     params.insert(
