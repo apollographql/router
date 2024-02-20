@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use bytes::Bytes;
+use http::header::CONTENT_ENCODING;
+use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use tower::BoxError;
@@ -247,6 +249,157 @@ async fn it_uploads_to_multiple_subgraphs() -> Result<(), BoxError> {
                 "file1": {
                   "filename": "file1",
                   "body": "file1 contents"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_supports_compression() -> Result<(), BoxError> {
+    use reqwest::multipart::Form;
+
+    const FILE_NAME: &str = "compressed.txt";
+    const FILE_CONTENTS: &str = "compression saves space sometimes!";
+
+    // We need to manually compress the body since reqwest does not yet support
+    // compressing the initial request.
+    // see: https://github.com/seanmonstar/reqwest/issues/1217
+    fn compress(req: reqwest::Request) -> reqwest::Request {
+        struct ManualRequest {
+            boundary: String,
+            body: Vec<u8>,
+        }
+        impl ManualRequest {
+            fn new() -> Self {
+                let boundary = Form::new().boundary().to_string();
+                Self {
+                    boundary: format!("---------------------------{boundary}"),
+                    body: Vec::new(),
+                }
+            }
+
+            fn add_boundary(&mut self) {
+                self.body
+                    .extend(format!("{}\r\n", self.boundary).as_bytes());
+            }
+
+            fn file(mut self, field_name: &str, file_name: &str, data: &str) -> Self {
+                self.add_boundary();
+
+                self.body.extend(format!("Content-Disposition: form-data; name=\"{field_name}\"; filename=\"{file_name}\"\r\n").as_bytes());
+                self.body
+                    .extend("Content-Type: text/plain\r\n\r\n".as_bytes());
+
+                self.body.extend(data.as_bytes());
+                self.body.extend("\r\n".as_bytes());
+
+                self
+            }
+
+            fn text(mut self, field_name: &str, data: &str) -> Self {
+                self.add_boundary();
+
+                self.body.extend(
+                    format!("Content-Disposition: form-data; name=\"{field_name}\"\r\n\r\n")
+                        .as_bytes(),
+                );
+
+                self.body.extend(data.as_bytes());
+                self.body.extend("\r\n".as_bytes());
+
+                self
+            }
+
+            fn compress(mut self) -> (String, bytes::Bytes) {
+                use std::io::Read;
+
+                // Make sure to end the multipart stream
+                self.body
+                    .extend(format!("{}--\r\n", self.boundary).as_bytes());
+
+                // Values below are from the examples
+                // see:
+                let mut reader = brotli::CompressorReader::new(&self.body[..], 4096, 11, 22);
+                let mut buf = Vec::new();
+
+                reader
+                    .read_to_end(&mut buf)
+                    .expect("could not compress body");
+
+                (self.boundary, bytes::Bytes::from(buf))
+            }
+        }
+
+        let (boundary, request) = ManualRequest::new()
+            .text(
+                "operations",
+                &serde_json::json!({
+                    "query": "mutation SomeMutation($file0: Upload) {
+                            file0: singleUpload(file: $file0) { filename body }
+                        }",
+                    "variables": {
+                        "file0": null,
+                    },
+                })
+                .to_string(),
+            )
+            .text(
+                "map",
+                &serde_json::json!({
+                    "0": ["variables.file0"],
+                })
+                .to_string(),
+            )
+            .file("0", FILE_NAME, FILE_CONTENTS)
+            .compress();
+
+        // Fix some headers to account for compression
+        let mut headers = req.headers().clone();
+        headers.remove(CONTENT_LENGTH);
+        headers.insert(
+            CONTENT_ENCODING,
+            reqwest::header::HeaderValue::from_static("br"),
+        );
+        headers.insert(
+            CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_str(&format!(
+                "multipart/form-data; boundary={boundary}"
+            ))
+            .unwrap(),
+        );
+
+        reqwest::Client::new()
+            .post(req.url().clone())
+            .headers(headers)
+            .body(request)
+            .build()
+            .unwrap()
+    }
+
+    // Run the test
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG)
+        .handler(make_handler!(helper::echo_single_file))
+        .request(Form::new()) // Gets overwritten by the `compress` transformer
+        .subgraph_mapping("uploads", "/")
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "file_upload",
+            "single_subgraph.graphql",
+        ]))
+        .transformer(compress)
+        .build()
+        .run_test(|request| {
+            insta::assert_json_snapshot!(request, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "compressed.txt",
+                  "body": "compression saves space sometimes!"
                 }
               }
             }
@@ -886,7 +1039,9 @@ mod helper {
         request
     }
 
-    /// Handler that echos back the contents of the files that it receives
+    /// Handler that echos back the contents of the file that it receives
+    ///
+    /// Note: This will error if more than one file is received
     pub async fn echo_single_file(
         mut request: Request<Body>,
     ) -> Result<Json<Value>, FileUploadError> {
@@ -1043,7 +1198,7 @@ mod helper {
         })))
     }
 
-    /// Extract a field from a mulitpart request and validate it
+    /// Extract a field from a multipart request and validate it
     async fn extract_field<'short, 'a: 'short, T: DeserializeOwned>(
         mp: &'short mut Multipart<'a>,
         field_name: &str,
