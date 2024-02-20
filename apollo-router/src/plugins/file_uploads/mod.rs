@@ -387,8 +387,7 @@ struct SubgraphHttpRequestExtensions {
     map_field: MapField,
 }
 
-const APOLLO_REQUIRE_PREFLIGHT: http::HeaderName =
-    HeaderName::from_static("apollo-require-preflight");
+const APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-require-preflight");
 const TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
 pub(crate) async fn http_request_wrapper(
