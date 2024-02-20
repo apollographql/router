@@ -26,7 +26,7 @@ impl Plugin for SupergraphSDL {
         Ok(SupergraphSDL {
             schema: Arc::new(
                 Schema::parse_and_validate(&*init.supergraph_sdl, "schema.graphql")
-                    .map_err(|invalid| invalid.errors.to_string_no_color())?,
+                    .map_err(|invalid| invalid.errors.to_string())?,
             ),
         })
     }
@@ -46,7 +46,7 @@ impl Plugin for SupergraphSDL {
                     // Parse our query against the schema
                     match ExecutableDocument::parse_and_validate(&schema, query, "query.graphql") {
                         Err(invalid) => {
-                            let diagnostics = invalid.errors.to_string_no_color();
+                            let diagnostics = invalid.errors.to_string();
                             tracing::warn!(%diagnostics, "validation diagnostics");
                         }
                         Ok(_doc) => {
