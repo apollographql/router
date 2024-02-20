@@ -2,6 +2,7 @@ use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures::stream::TryStreamExt;
 use futures::Stream;
+use http::HeaderMap;
 use http::HeaderValue;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
@@ -76,12 +77,12 @@ impl MultipartFormData {
         let map_field = field(&boundary, "map", tokio_stream::once(Ok(map_bytes)));
 
         let files = map.into_keys().collect();
-        let before_file = move |field: &multer::Field<'static>| {
+        let before_file = move |headers: &HeaderMap| {
             let mut prefix = Vec::new();
             prefix.extend_from_slice(b"--");
             prefix.extend_from_slice(boundary.as_bytes());
             prefix.extend_from_slice(b"\r\n");
-            for (k, v) in field.headers().iter() {
+            for (k, v) in headers.iter() {
                 prefix.extend_from_slice(k.as_str().as_bytes());
                 prefix.extend_from_slice(b": ");
                 prefix.extend_from_slice(v.as_bytes());

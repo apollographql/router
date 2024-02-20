@@ -10,6 +10,7 @@ use std::task::Poll;
 use bytes::Bytes;
 use futures::FutureExt;
 use futures::Stream;
+use http::HeaderMap;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use http::HeaderName;
@@ -515,7 +516,7 @@ impl MultipartRequest {
         after_bytes_fn: AfterFn,
     ) -> SubgraphFileProxyStream<BeforeFn, AfterFn>
     where
-        BeforeFn: Fn(&multer::Field<'static>) -> Bytes,
+        BeforeFn: Fn(&HeaderMap) -> Bytes,
         AfterFn: Fn() -> Bytes,
     {
         let state = self.state.clone().lock_owned().await;
@@ -537,7 +538,7 @@ pin_project! {
 
 impl<BeforeFn, AfterFn> SubgraphFileProxyStream<BeforeFn, AfterFn>
 where
-    BeforeFn: Fn(&multer::Field<'static>) -> Bytes,
+    BeforeFn: Fn(&HeaderMap) -> Bytes,
     AfterFn: Fn() -> Bytes,
 {
     fn new(
@@ -624,7 +625,7 @@ where
                             .join(", "),
                     ))));
                 }
-                Poll::Ready(Ok(Some(mut field))) => {
+                Poll::Ready(Ok(Some(field))) => {
                     let limit = self.state.limits.max_files;
                     if self.state.read_files_counter == limit {
                         self.state.max_files_exceeded = true;
@@ -636,7 +637,7 @@ where
 
                         if let Some(name) = field.name() {
                             if self.file_names.remove(name) {
-                                let prefix = (self.before_bytes_fn)(&mut field);
+                                let prefix = (self.before_bytes_fn)(field.headers());
                                 self.current_field = Some(field);
                                 return Poll::Ready(Some(Ok(prefix)));
                             }
@@ -655,7 +656,7 @@ where
 
 impl<BeforeFn, AfterFn> Stream for SubgraphFileProxyStream<BeforeFn, AfterFn>
 where
-    BeforeFn: Fn(&multer::Field<'static>) -> Bytes,
+    BeforeFn: Fn(&HeaderMap) -> Bytes,
     AfterFn: Fn() -> Bytes,
 {
     type Item = UploadResult<Bytes>;
