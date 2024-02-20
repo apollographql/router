@@ -253,10 +253,10 @@ brotli = "3.4.0"
 zstd = "0.13.0"
 zstd-safe = "7.0.0"
 # note: AWS dependencies should always use the same version
-aws-sigv4 = "1.1.5"
-aws-credential-types = "1.1.5"
+aws-sigv4 = "1.1.6"
+aws-credential-types = "1.1.6"
 aws-config = "1.1.5"
-aws-types = "1.1.5"
+aws-types = "1.1.6"
 aws-smithy-runtime-api = { version = "1.1.6", features = ["client"] }
 sha1 = "0.10.6"
 tracing-serde = "0.1.3"
