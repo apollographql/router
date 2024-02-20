@@ -368,12 +368,12 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
             {
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads': could not compress request: error reading a body from connection: Exceeded the limit of 512000 bytes on '0' file.",
+                  "message": "HTTP fetch failed from 'uploads': could not compress request: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
-                    "reason": "could not compress request: error reading a body from connection: Exceeded the limit of 512000 bytes on '0' file."
+                    "reason": "could not compress request: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file."
                   }
                 }
               ]
@@ -426,7 +426,7 @@ async fn it_fails_invalid_multipart_order() -> Result<(), BoxError> {
                 {
                   "message": "Missing multipart field 'operations', it should be a first field in request body.",
                   "extensions": {
-                    "code": "FILE_UPLOAD"
+                    "code": "FILE_UPLOADS_OPERATION_CANNOT_STREAM"
                   }
                 }
               ]
@@ -555,7 +555,7 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
                 {
                   "message": "invalid multipart request: multipart boundary not found in Content-Type",
                   "extensions": {
-                    "code": "FILE_UPLOAD"
+                    "code": "FILE_UPLOADS_OPERATION_CANNOT_STREAM"
                   }
                 }
               ]
@@ -627,7 +627,7 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
                 {
                   "message": "References to variables containing files are ordered in the way that prevent streaming of files.",
                   "extensions": {
-                    "code": "FILE_UPLOAD"
+                    "code": "FILE_UPLOADS_OPERATION_CANNOT_STREAM"
                   }
                 }
               ]

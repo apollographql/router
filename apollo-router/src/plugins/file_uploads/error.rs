@@ -1,3 +1,4 @@
+use bytesize::ByteSize;
 use thiserror::Error;
 
 use crate::graphql;
@@ -48,8 +49,8 @@ pub(super) enum FileUploadError {
     #[error("Exceeded the limit of {0} file uploads of files in a single request.")]
     MaxFilesLimitExceeded(usize),
 
-    #[error("Exceeded the limit of {limit} bytes on {file_name} file.")]
-    MaxFileSizeLimitExceeded { limit: u64, file_name: String },
+    #[error("Exceeded the limit of {limit} on {filename} file.")]
+    MaxFileSizeLimitExceeded { limit: ByteSize, filename: String },
 
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
