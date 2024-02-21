@@ -71,7 +71,7 @@ impl MultipartFormData {
         let boundary = self.boundary;
         let file_prefix = move |headers: &HeaderMap| {
             let mut prefix = BytesMut::new();
-            prefix.extend_from_slice(b"\r\n");
+            prefix.extend_from_slice(b"\r\n--");
             prefix.extend_from_slice(boundary.as_bytes());
             prefix.extend_from_slice(b"\r\n");
             for (k, v) in headers.iter() {
