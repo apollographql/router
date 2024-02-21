@@ -3,11 +3,10 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use indexmap::IndexSet;
 use itertools::Itertools;
 
 use super::error::FileUploadError;
-use super::MapPerVariable;
+use super::ParsedMap;
 use super::UploadResult;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::FlattenNode;
@@ -16,16 +15,16 @@ use crate::services::execution::QueryPlan;
 
 pub(super) fn rearange_query_plan(
     query_plan: &QueryPlan,
-    files_order: &IndexSet<String>,
-    map_per_variable: &MapPerVariable,
+    map: &ParsedMap,
 ) -> UploadResult<QueryPlan> {
     let root = &query_plan.root;
-    let mut variable_ranges = HashMap::with_capacity(map_per_variable.len());
-    for (name, map) in map_per_variable.iter() {
+    let variable_ranges = HashMap::with_capacity(map.map_per_variable.len());
+    for (name, submap) in map.map_per_variable.iter() {
+        let mut variable_ranges = HashMap::new();
         variable_ranges.insert(
             name.as_str(),
-            map.keys()
-                .map(|file| files_order.get_index_of(file))
+            submap.keys()
+                .map(|file| map.files_order.get_index_of(file))
                 .minmax()
                 .into_option()
                 .expect("map always have keys"),

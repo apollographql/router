@@ -224,56 +224,31 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
     if let Some(mut multipart) = multipart {
         let map_field = multipart.map_field().await?;
         let variables = &mut req.supergraph_request.body_mut().variables;
-        let mut files_order = IndexSet::new();
-        let mut map_per_variable: MapPerVariable = HashMap::new();
-        for (filename, paths) in map_field.into_iter() {
-            for path in paths.into_iter() {
-                let mut segments = path.split('.');
-                let first_segment = segments.next();
-                if first_segment != Some("variables") {
-                    if first_segment
-                        .and_then(|str| str.parse::<usize>().ok())
-                        .is_some()
-                    {
-                        return Err(FileUploadError::BatchRequestAreNotSupported);
+
+        // patch variables to pass validation
+        for (variable_name, map) in map_field.map_per_variable.iter() {
+            for (filename, paths) in map.iter() {
+                for variable_path in paths.iter() {
+                    let json_value = variables
+                        .get_mut(variable_name.as_str())
+                        .and_then(|root| try_path(root, variable_path));
+
+                    if let Some(json_value) = json_value {
+                        drop(core::mem::replace(
+                            json_value,
+                            serde_json_bytes::Value::String(
+                                format!("<Placeholder for file '{}'>", filename).into(),
+                            ),
+                        ));
+                    } else {
+                        let path = format!("{}.{}", variable_name, variable_path.join("."));
+                        return Err(FileUploadError::InputValueNotFound(path));
                     }
-                    return Err(FileUploadError::InvalidPathInsideMapField(path));
                 }
-                let variable_name = segments.next().ok_or_else(|| {
-                    FileUploadError::MissingVariableNameInsideMapField(path.clone())
-                })?;
-                let variable_path: Vec<String> = segments.map(str::to_owned).collect();
-
-                // patch variables to pass validation
-                let json_value = variables
-                    .get_mut(variable_name)
-                    .and_then(|root| try_path(root, &variable_path))
-                    .ok_or_else(|| FileUploadError::InputValueNotFound(path.clone()))?;
-                drop(core::mem::replace(
-                    json_value,
-                    serde_json_bytes::Value::String(
-                        format!("<Placeholder for file '{}'>", filename).into(),
-                    ),
-                ));
-
-                map_per_variable
-                    .entry(variable_name.to_owned())
-                    .or_default()
-                    .entry(filename.clone())
-                    .or_default()
-                    .push(variable_path);
             }
-            files_order.insert(filename);
         }
 
-        req.context
-            .extensions()
-            .lock()
-            .insert(SupergraphLayerResult {
-                multipart,
-                map_per_variable,
-                files_order,
-            });
+        req.context.extensions().lock().insert(multipart);
     }
     Ok(req)
 }
@@ -299,8 +274,7 @@ type MapPerFile = HashMap<String, Vec<Vec<String>>>;
 #[derive(Clone)]
 struct SupergraphLayerResult {
     multipart: MultipartRequest,
-    files_order: IndexSet<String>,
-    map_per_variable: MapPerVariable,
+    map: Arc<ParsedMap>,
 }
 
 fn execution_layer(req: execution::Request) -> UploadResult<execution::Request> {
@@ -311,17 +285,9 @@ fn execution_layer(req: execution::Request) -> UploadResult<execution::Request> 
         .get::<SupergraphLayerResult>()
         .cloned();
     if let Some(supergraph_result) = supergraph_result {
-        let SupergraphLayerResult {
-            files_order,
-            map_per_variable,
-            ..
-        } = supergraph_result;
+        let SupergraphLayerResult { map, .. } = supergraph_result;
 
-        let query_plan = Arc::new(rearange_query_plan(
-            &req.query_plan,
-            &files_order,
-            &map_per_variable,
-        )?);
+        let query_plan = Arc::new(rearange_query_plan(&req.query_plan, &map)?);
         return Ok(execution::Request { query_plan, ..req });
     }
     Ok(req)
@@ -337,15 +303,14 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult {
             multipart,
-            map_per_variable,
-            files_order,
+            map,
         } = supergraph_result;
 
         let variables = &mut req.subgraph_request.body_mut().variables;
         let mut map_field: MapField = IndexMap::new();
         for (variable_name, variable_value) in variables.iter_mut() {
             let variable_name = variable_name.as_str();
-            if let Some(variable_map) = map_per_variable.get(variable_name) {
+            if let Some(variable_map) = map.map_per_variable.get(variable_name) {
                 for (file, paths) in variable_map.iter() {
                     map_field.insert(
                         file.clone(),
@@ -369,7 +334,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
             }
         }
         if !map_field.is_empty() {
-            map_field.sort_by_cached_key(|file, _| files_order.get_index_of(file));
+            map_field.sort_by_cached_key(|file, _| map.files_order.get_index_of(file));
             req.subgraph_request
                 .extensions_mut()
                 .insert(SubgraphHttpRequestExtensions {
@@ -484,7 +449,7 @@ impl MultipartRequest {
             .ok_or_else(|| FileUploadError::MissingOperationsField)
     }
 
-    async fn map_field(&mut self) -> UploadResult<MapField> {
+    async fn map_field(&mut self) -> UploadResult<ParsedMap> {
         let mut state = self.state.lock().await;
         let bytes = state
             .multer
@@ -503,7 +468,7 @@ impl MultipartRequest {
             state.max_files_exceeded = true;
             return Err(FileUploadError::MaxFilesLimitExceeded(limit));
         }
-        Ok(map_field)
+        ParsedMap::new(map_field)
     }
 
     async fn subgraph_stream<FilePrefixFn>(
@@ -516,6 +481,50 @@ impl MultipartRequest {
     {
         let state = self.state.clone().lock_owned().await;
         SubgraphFileProxyStream::new(state, file_names, file_prefix_fn)
+    }
+}
+
+struct ParsedMap {
+    files_order: IndexSet<String>,
+    map_per_variable: MapPerVariable,
+}
+
+impl ParsedMap {
+    fn new(map_field: MapField) -> UploadResult<Self> {
+        let mut files_order = IndexSet::new();
+        let mut map_per_variable: MapPerVariable = HashMap::new();
+        for (filename, paths) in map_field.into_iter() {
+            for path in paths.into_iter() {
+                let mut segments = path.split('.');
+                let first_segment = segments.next();
+                if first_segment != Some("variables") {
+                    if first_segment
+                        .and_then(|str| str.parse::<usize>().ok())
+                        .is_some()
+                    {
+                        return Err(FileUploadError::BatchRequestAreNotSupported);
+                    }
+                    return Err(FileUploadError::InvalidPathInsideMapField(path));
+                }
+                let variable_name = segments.next().ok_or_else(|| {
+                    FileUploadError::MissingVariableNameInsideMapField(path.clone())
+                })?;
+                let variable_path: Vec<String> = segments.map(str::to_owned).collect();
+
+                map_per_variable
+                    .entry(variable_name.to_owned())
+                    .or_default()
+                    .entry(filename.clone())
+                    .or_default()
+                    .push(variable_path);
+            }
+            files_order.insert(filename);
+        }
+
+        Ok(Self {
+            files_order,
+            map_per_variable,
+        })
     }
 }
 
