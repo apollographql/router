@@ -23,9 +23,8 @@ pub(super) fn rearrange_query_plan(
     map: &MapField,
 ) -> UploadResult<QueryPlan> {
     let root = &query_plan.root;
-    let variable_ranges = HashMap::with_capacity(map.per_variable.len());
+    let mut variable_ranges = HashMap::with_capacity(map.per_variable.len());
     for (name, submap) in map.per_variable.iter() {
-        let mut variable_ranges = HashMap::new();
         variable_ranges.insert(
             name.as_str(),
             submap
