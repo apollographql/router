@@ -686,7 +686,7 @@ async fn call_http(
 
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
-    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4631
+    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
     let request = file_uploads::http_request_wrapper(request).await;
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
