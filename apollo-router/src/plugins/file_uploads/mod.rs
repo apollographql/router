@@ -226,7 +226,13 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
             }
         }
 
-        req.context.extensions().lock().insert(multipart);
+        req.context
+            .extensions()
+            .lock()
+            .insert(SupergraphLayerResult {
+                multipart,
+                map: Arc::new(map_field),
+            });
     }
     Ok(req)
 }
