@@ -214,7 +214,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
         for variable_map in map_field.per_variable.values() {
             for (filename, paths) in variable_map.iter() {
                 for variable_path in paths.iter() {
-                    if let Some(json_value) = try_path(variables, variable_path) {
+                    if let Some(json_value) = get_value_by_path(variables, variable_path) {
                         drop(core::mem::replace(
                             json_value,
                             serde_json_bytes::Value::String(
@@ -233,7 +233,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
     Ok(req)
 }
 
-fn try_path<'a>(
+fn get_value_by_path<'a>(
     variables: &'a mut json_ext::Object,
     path: &'a [String],
 ) -> Option<&'a mut serde_json_bytes::Value> {
@@ -293,7 +293,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
             for variable_map in map.per_variable.values() {
                 for paths in variable_map.values() {
                     for path in paths {
-                        if let Some(json_value) = try_path(variables, path) {
+                        if let Some(json_value) = get_value_by_path(variables, path) {
                             json_value.take();
                         }
                     }
