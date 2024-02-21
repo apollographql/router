@@ -183,6 +183,8 @@ async fn router_layer(
             .get(CONTENT_TYPE)
             .cloned()
             .unwrap_or_else(|| HeaderValue::from_static("application/json"));
+
+        // override Content-Type to content type of 'operations' field
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
@@ -212,7 +214,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
         for variable_map in map_field.per_variable.values() {
             for (filename, paths) in variable_map.iter() {
                 for variable_path in paths.iter() {
-                    if let Some(json_value) = try_path(variables, variable_path) {
+                    if let Some(json_value) = get_value_by_path(variables, variable_path) {
                         drop(core::mem::replace(
                             json_value,
                             serde_json_bytes::Value::String(
@@ -231,7 +233,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
     Ok(req)
 }
 
-fn try_path<'a>(
+fn get_value_by_path<'a>(
     variables: &'a mut json_ext::Object,
     path: &'a [String],
 ) -> Option<&'a mut serde_json_bytes::Value> {
@@ -291,7 +293,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
             for variable_map in map.per_variable.values() {
                 for paths in variable_map.values() {
                     for path in paths {
-                        if let Some(json_value) = try_path(variables, path) {
+                        if let Some(json_value) = get_value_by_path(variables, path) {
                             json_value.take();
                         }
                     }
@@ -317,10 +319,13 @@ pub(crate) async fn http_request_wrapper(
         let (mut request_parts, operations) = req.into_parts();
         request_parts
             .headers
-            .insert(CONTENT_TYPE, form.content_type());
+            .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
+
+        // override Content-Type to be 'multipart/form-data'
         request_parts
             .headers
-            .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
+            .insert(CONTENT_TYPE, form.content_type());
+        request_parts.headers.remove(CONTENT_LENGTH);
         return http::Request::from_parts(
             request_parts,
             hyper::Body::wrap_stream(form.into_stream(operations).await),

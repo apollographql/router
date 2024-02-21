@@ -13,6 +13,8 @@ use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
 use crate::services::execution::QueryPlan;
 
+/// Change order of nodes inside QueryPlan to follow order of files in clien's request
+//  If reordering is impossible than error.
 pub(super) fn rearange_query_plan(
     query_plan: &QueryPlan,
     map: &MapField,
@@ -41,7 +43,7 @@ pub(super) fn rearange_query_plan(
     })
 }
 
-// Recursive, and recursion is safe here since query plan is executed recursively.
+// Recursive, and recursion is safe here since query plan is also executed recursively.
 fn rearrange_plan_node<'a>(
     node: &PlanNode,
     acc_variables: &mut HashMap<&'a str, &'a (Option<usize>, Option<usize>)>,
@@ -53,11 +55,13 @@ fn rearrange_plan_node<'a>(
             if_clause,
             else_clause,
         } => {
+            // Rearrenge and validate nodes inside 'if_clause'
             let if_clause = if_clause
                 .as_ref()
                 .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges))
                 .transpose();
 
+            // Rearrenge and validate nodes inside 'if_clause'
             let else_clause = else_clause
                 .as_ref()
                 .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges))
@@ -70,6 +74,7 @@ fn rearrange_plan_node<'a>(
             }
         }
         PlanNode::Fetch(fetch) => {
+            // Extract variables used in this node.
             for variable in fetch.variable_usages.iter() {
                 if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
                     acc_variables.entry(name).or_insert(range);
@@ -78,12 +83,14 @@ fn rearrange_plan_node<'a>(
             PlanNode::Fetch(fetch.clone())
         }
         PlanNode::Subscription { primary, rest } => {
+            // Extract variables used in this node
             for variable in primary.variable_usages.iter() {
                 if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
                     acc_variables.entry(name).or_insert(range);
                 }
             }
 
+            // Error if 'rest' contains file variables
             if let Some(rest) = rest {
                 let mut rest_variables = HashMap::new();
                 // ignore result use it just to collect variables
@@ -111,11 +118,13 @@ fn rearrange_plan_node<'a>(
             let mut primary = primary.clone();
             let deferred = deferred.clone();
 
+            // Rearrenge and validate nodes inside 'primary'
             let primary_node = primary
                 .node
                 .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
                 .transpose();
 
+            // Error if 'deferred' contains file variables
             let mut deferred_variables = HashMap::new();
             for DeferredNode { node, .. } in deferred.iter() {
                 if let Some(node) = node {
@@ -140,6 +149,7 @@ fn rearrange_plan_node<'a>(
             PlanNode::Defer { primary, deferred }
         }
         PlanNode::Flatten(flatten_node) => {
+            // Rearrenge and validate nodes inside 'flatten_node'
             let node = rearrange_plan_node(&flatten_node.node, acc_variables, variable_ranges)?;
             PlanNode::Flatten(FlattenNode {
                 node: Box::new(node),
@@ -147,6 +157,7 @@ fn rearrange_plan_node<'a>(
             })
         }
         PlanNode::Sequence { nodes } => {
+            // We can't rearange nodes inside a Sequence so just error if "file ranges" of nodes overlaps.
             let mut sequence = Vec::new();
             let mut sequence_last = None;
 
@@ -159,6 +170,7 @@ fn rearrange_plan_node<'a>(
 
                 for (variable, range) in node_variables.into_iter() {
                     if acc_variables.insert(variable, range).is_some() {
+                        // To improve DX we also tracking duplicating variables as separate error. 
                         duplicate_variables.insert(variable);
                         continue;
                     }
@@ -185,6 +197,8 @@ fn rearrange_plan_node<'a>(
             PlanNode::Sequence { nodes: sequence }
         }
         PlanNode::Parallel { nodes } => {
+            // We can rearange nodes inside a Parallel, so we order all nodes based on the first file they use and wrap them into Sequence node.
+            // Note: we don't wrap or change order of nodes that don't use "file variables".
             let mut parallel = Vec::new();
             let mut sequence = BTreeMap::new();
             let mut duplicate_variables = HashSet::new();
@@ -201,6 +215,7 @@ fn rearrange_plan_node<'a>(
                 let mut last_file = None;
                 for (variable, range) in node_variables.into_iter() {
                     if acc_variables.insert(variable, range).is_some() {
+                        // To improve DX we also tracking duplicating variables as separate error. 
                         duplicate_variables.insert(variable);
                         continue;
                     }
@@ -212,6 +227,7 @@ fn rearrange_plan_node<'a>(
                     };
                     last_file = cmp::max(last_file, *last);
                 }
+                // Nodes are sorted inside 'sequence' based on the 'first_file'
                 sequence.insert(first_file, (node, last_file));
             }
 
