@@ -54,6 +54,10 @@ mod rearange_query_plan;
 
 type UploadResult<T> = Result<T, error::FileUploadError>;
 
+// The limit to set for the map field in the multipart request.
+// We don't expect this to ever be reached, but we can always add a config option if needed later.
+const MAP_SIZE_LIMIT: u64 = 10 * 1024;
+
 // FIXME: check if we need to hide docs
 #[doc(hidden)] // Only public for integration tests
 struct FileUploadsPlugin {
@@ -455,9 +459,7 @@ impl MultipartRequest {
         let multer = Multipart::with_constraints(
             request_body,
             boundary,
-            Constraints::new().size_limit(
-                SizeLimit::new().for_field("map", 10 * 1024), // hardcoded to 10kb
-            ),
+            Constraints::new().size_limit(SizeLimit::new().for_field("map", MAP_SIZE_LIMIT)),
         );
         Self {
             state: Arc::new(Mutex::new(MultipartRequestState {
