@@ -12,6 +12,7 @@ type MapPerFile = HashMap<String, Vec<Vec<String>>>;
 
 pub(super) type MapFieldRaw = IndexMap<String, Vec<String>>;
 
+#[derive(Debug)]
 pub(super) struct MapField {
     pub(super) files_order: IndexSet<String>,
     pub(super) per_variable: MapPerVariable,

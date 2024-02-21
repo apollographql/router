@@ -260,3 +260,55 @@ fn rearrange_plan_node<'a>(
         }
     })
 }
+
+#[test]
+fn test_rearrange_impossible_plan() {
+    let root = serde_json::from_str(r#"{
+        "kind": "Sequence",
+        "nodes": [
+          {
+            "kind": "Fetch",
+            "serviceName": "uploads1",
+            "variableUsages": [
+              "file1"
+            ],
+            "operation": "mutation SomeMutation__uploads1__0($file1:Upload1){file1:singleUpload1(file:$file1){filename}}",
+            "operationName": "SomeMutation__uploads1__0",
+            "operationKind": "mutation",
+            "id": null,
+            "inputRewrites": null,
+            "outputRewrites": null,
+            "schemaAwareHash": "0239133f4bf1e52ed2d84a06563d98d61a197ec417490a38b37aaeecd98b315c",
+            "authorization": {
+              "is_authenticated": false,
+              "scopes": [],
+              "policies": []
+            }
+          },
+          {
+            "kind": "Fetch",
+            "serviceName": "uploads2",
+            "variableUsages": [
+              "file0"
+            ],
+            "operation": "mutation SomeMutation__uploads2__1($file0:Upload2){file0:singleUpload2(file:$file0){filename}}",
+            "operationName": "SomeMutation__uploads2__1",
+            "operationKind": "mutation",
+            "id": null,
+            "inputRewrites": null,
+            "outputRewrites": null,
+            "schemaAwareHash": "41fda639a3b69227226d234fed29d63124e0a95ac9ff98c611e903d4b2adcd8c",
+            "authorization": {
+              "is_authenticated": false,
+              "scopes": [],
+              "policies": []
+            }
+          }
+        ]
+      }"#).unwrap();
+
+    let variable_ranges =
+        HashMap::from([("file1", (Some(1), Some(1))), ("file0", (Some(0), Some(0)))]);
+    let root = rearrange_plan_node(&root, &mut HashMap::new(), &variable_ranges).unwrap_err();
+    assert_eq!("References to variables containing files are ordered in the way that prevent streaming of files.".to_string(), root.to_string());
+}
