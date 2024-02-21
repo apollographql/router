@@ -15,7 +15,7 @@ use rand::RngCore;
 
 use super::map_field::MapFieldRaw;
 use super::MultipartRequest;
-use super::UploadResult;
+use super::Result as UploadResult;
 
 #[derive(Clone)]
 pub(super) struct MultipartFormData {
@@ -26,10 +26,7 @@ pub(super) struct MultipartFormData {
 
 impl MultipartFormData {
     pub(super) fn new(map: MapFieldRaw, multipart: MultipartRequest) -> Self {
-        let boundary = format!(
-            "------------------------{:016x}",
-            rand::thread_rng().next_u64()
-        );
+        let boundary = format!("{:016x}", rand::thread_rng().next_u64());
         Self {
             boundary,
             map: Arc::new(map),
@@ -51,27 +48,30 @@ impl MultipartFormData {
         mut self,
         operations: hyper::Body,
     ) -> impl Stream<Item = UploadResult<Bytes>> {
-        let map_bytes = serde_json::to_vec(&self.map).expect("map should be serializable to JSON");
+        let map_bytes =
+            serde_json::to_string(&self.map).expect("map should be serializable to JSON");
         let field_prefix = |name: &str| {
-            tokio_stream::once(Ok(Bytes::from(format!(
+            format!(
                 "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n",
                 self.boundary, name
-            ))))
+            )
         };
 
-        let static_part = field_prefix("operations")
+        let static_part = tokio_stream::once(Ok(Bytes::from(field_prefix("operations"))))
             .chain(operations.map_err(Into::into))
-            .chain(tokio_stream::once(Ok("\r\n".into())))
-            .chain(field_prefix("map"))
-            .chain(tokio_stream::once(Ok(Bytes::from(map_bytes))))
-            .chain(tokio_stream::once(Ok("\r\n".into())));
+            .chain(tokio_stream::once(Ok(Bytes::from(format!(
+                "\r\n{}{}\r\n",
+                field_prefix("map"),
+                map_bytes
+            )))));
+
         let last = tokio_stream::once(Ok(format!("\r\n--{}--\r\n", self.boundary).into()));
 
         let file_names = self.map.keys().cloned().collect();
         let boundary = self.boundary;
         let file_prefix = move |headers: &HeaderMap| {
             let mut prefix = BytesMut::new();
-            prefix.extend_from_slice(b"\r\n--");
+            prefix.extend_from_slice(b"\r\n");
             prefix.extend_from_slice(boundary.as_bytes());
             prefix.extend_from_slice(b"\r\n");
             for (k, v) in headers.iter() {
@@ -81,6 +81,7 @@ impl MultipartFormData {
                 prefix.extend_from_slice(b"\r\n");
             }
             prefix.extend_from_slice(b"\r\n");
+
             Bytes::from(prefix)
         };
 

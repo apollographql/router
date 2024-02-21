@@ -5,7 +5,7 @@ use indexmap::IndexSet;
 use serde_json_bytes::ByteString;
 
 use super::error::FileUploadError;
-use super::UploadResult;
+use super::Result as UploadResult;
 
 type MapPerVariable = HashMap<String, MapPerFile>;
 type MapPerFile = HashMap<String, Vec<Vec<String>>>;

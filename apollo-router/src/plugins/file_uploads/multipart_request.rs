@@ -20,7 +20,7 @@ use super::config::MultipartRequestLimits;
 use super::error::FileUploadError;
 use super::map_field::MapField;
 use super::map_field::MapFieldRaw;
-use super::UploadResult;
+use super::Result as UploadResult;
 
 // The limit to set for the map field in the multipart request.
 // We don't expect this to ever be reached, but we can always add a config option if needed later.
