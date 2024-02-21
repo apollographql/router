@@ -20,7 +20,7 @@ pub(super) fn rearange_query_plan(
     map_per_variable: &MapPerVariable,
 ) -> UploadResult<QueryPlan> {
     let root = &query_plan.root;
-    let mut variable_ranges = HashMap::new();
+    let mut variable_ranges = HashMap::with_capacity(map_per_variable.len());
     for (name, map) in map_per_variable.iter() {
         variable_ranges.insert(
             name.as_str(),
