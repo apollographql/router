@@ -70,7 +70,7 @@ pub(crate) struct SubscriptionConfig {
     /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
     /// (default: true)
     pub(crate) enable_deduplication: bool,
-    /// This is a limit to only have maximum X opened subscriptions at the same time. By default it's set to 8000. If you want to disable the limit, just override it to `null`
+    /// This is a limit to only have maximum X opened subscriptions at the same time. By default it's set to 8000. Set it to `disabled` to disable the limit.
     pub(crate) max_opened_subscriptions: SubscriptionLimit,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,

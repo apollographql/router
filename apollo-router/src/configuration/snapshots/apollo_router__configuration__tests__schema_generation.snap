@@ -2215,7 +2215,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "max_opened_subscriptions": {
-          "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default it's set to 8000. If you want to disable the limit, just override it to `null`",
+          "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default it's set to 8000. Set it to `disabled` to disable the limit.",
           "default": 8000,
           "anyOf": [
             {
