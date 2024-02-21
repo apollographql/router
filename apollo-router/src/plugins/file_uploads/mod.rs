@@ -254,9 +254,9 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
 
                 map_per_variable
                     .entry(variable_name.to_owned())
-                    .or_insert_with(|| HashMap::new())
+                    .or_default()
                     .entry(filename.clone())
-                    .or_insert_with(|| Vec::new())
+                    .or_default()
                     .push(variable_path);
             }
             files_order.insert(filename);
@@ -276,7 +276,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
 
 fn try_path<'a>(
     root: &'a mut serde_json_bytes::Value,
-    path: &'a Vec<String>,
+    path: &'a [String],
 ) -> Option<&'a mut serde_json_bytes::Value> {
     path.iter().try_fold(root, |parent, segment| match parent {
         serde_json_bytes::Value::Object(map) => map.get_mut(segment.as_str()),
@@ -382,8 +382,8 @@ struct SubgraphHttpRequestExtensions {
     map_field: MapField,
 }
 
-const APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-require-preflight");
-const TRUE: http::HeaderValue = HeaderValue::from_static("true");
+static APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-require-preflight");
+static TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
 pub(crate) async fn http_request_wrapper(
     mut req: http::Request<hyper::Body>,
@@ -400,7 +400,9 @@ pub(crate) async fn http_request_wrapper(
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
-        request_parts.headers.insert(APOLLO_REQUIRE_PREFLIGHT, TRUE);
+        request_parts
+            .headers
+            .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
         return http::Request::from_parts(
             request_parts,
             hyper::Body::wrap_stream(form.into_stream().await),
@@ -470,15 +472,14 @@ impl MultipartRequest {
     }
 
     async fn operations_field(&mut self) -> UploadResult<multer::Field<'static>> {
-        Ok(self
-            .state
+        self.state
             .lock()
             .await
             .multer
             .next_field()
             .await?
             .filter(|field| field.name() == Some("operations"))
-            .ok_or_else(|| FileUploadError::MissingOperationsField)?)
+            .ok_or_else(|| FileUploadError::MissingOperationsField)
     }
 
     async fn map_field(&mut self) -> UploadResult<MapField> {
@@ -492,8 +493,8 @@ impl MultipartRequest {
             .bytes()
             .await?;
 
-        let map_field: MapField = serde_json::from_slice(&bytes)
-            .map_err(|e| FileUploadError::InvalidJsonInMapField(e))?;
+        let map_field: MapField =
+            serde_json::from_slice(&bytes).map_err(FileUploadError::InvalidJsonInMapField)?;
 
         let limit = state.limits.max_files;
         if map_field.len() > limit {
@@ -603,7 +604,7 @@ where
                         return Poll::Ready(None);
                     }
 
-                    let files = mem::replace(&mut self.file_names, HashSet::new());
+                    let files = mem::take(&mut self.file_names);
                     return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
                         files
                             .into_iter()

@@ -55,12 +55,12 @@ fn rearrange_plan_node<'a>(
         } => {
             let if_clause = if_clause
                 .as_ref()
-                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
+                .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges))
                 .transpose();
 
             let else_clause = else_clause
                 .as_ref()
-                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
+                .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges))
                 .transpose();
 
             PlanNode::Condition {
