@@ -874,6 +874,15 @@ mod helper {
             self,
             validation_fn: impl Fn(apollo_router::graphql::Response),
         ) -> Result<(), BoxError> {
+            // Ensure that we have the test keys before running
+            // Note: The [IntegrationTest] ensures that these test credentials get
+            // set before running the router.
+            if std::env::var("TEST_APOLLO_KEY").is_err()
+                || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+            {
+                return Ok(());
+            };
+
             // Bind to the first available port
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
             let bound = TcpListener::bind(addr).await.unwrap();
