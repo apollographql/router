@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+use bytes::BufMut;
+use bytes::BytesMut;
+use hyper::Body;
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 use tower::BoxError;
@@ -149,5 +152,60 @@ impl Waiter {
             context,
             sender,
         }
+    }
+
+    // Form a batch from a collection of waiting requests. The first operation provides:
+    //  - operation name
+    //  - context
+    //  - parts
+    // This is ok, because when the batch was created, the parts and context were primarily created
+    // by extracting and duplicating information from the single batch request. Maybe we should use
+    // a different operation name, maybe chain them all together? TODO: Decide operation name
+    pub(crate) async fn assemble_batch(
+        service_waiters: Vec<Waiter>,
+    ) -> Result<
+        (
+            String,
+            Context,
+            http::Request<Body>,
+            Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
+        ),
+        BoxError,
+    > {
+        let mut txs = Vec::with_capacity(service_waiters.len());
+        let mut service_waiters_it = service_waiters.into_iter();
+        let first = service_waiters_it
+            .next()
+            .expect("we should have at least one request");
+        let context = first.context;
+        txs.push(first.sender);
+        let SubgraphRequest {
+            subgraph_request, ..
+        } = first.sg_request;
+        let operation_name = subgraph_request
+            .body()
+            .operation_name
+            .clone()
+            .unwrap_or_default();
+
+        let (parts, _) = subgraph_request.into_parts();
+        let body =
+            serde_json::to_string(&first.gql_request).expect("JSON serialization should not fail");
+        let mut bytes = BytesMut::new();
+        bytes.put_u8(b'[');
+        bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
+        for waiter in service_waiters_it {
+            txs.push(waiter.sender);
+            bytes.put(&b", "[..]);
+            let body = serde_json::to_string(&waiter.gql_request)
+                .expect("JSON serialization should not fail");
+            bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
+        }
+        bytes.put_u8(b']');
+        let body_bytes = bytes.freeze();
+        // Reverse txs to get them in the right order
+        txs.reverse();
+        let request = http::Request::from_parts(parts, Body::from(body_bytes));
+        Ok((operation_name, context, request, txs))
     }
 }

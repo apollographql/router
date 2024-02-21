@@ -6,9 +6,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::Poll;
 
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
 use futures::future::BoxFuture;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -44,6 +42,7 @@ use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::batching::BatchQuery;
+use crate::batching::Waiter;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
@@ -688,39 +687,8 @@ async fn call_batched_http(
                 // We need our own batch aware version of call_http which only makes one call to each
                 // subgraph, but is able to decode the responses. I'll probably need to break call_http
                 // down into sub-functions, that's a TODO for now.
-                let mut txs = Vec::with_capacity(service_waiters.len());
-                let mut service_waiters_it = service_waiters.into_iter();
-                let first = service_waiters_it
-                    .next()
-                    .expect("we should have at least one request");
-                let context = first.context; // XXX SHADOWING
-                txs.push(first.sender);
-                let SubgraphRequest {
-                    subgraph_request, ..
-                } = first.sg_request;
-                let operation_name = subgraph_request
-                    .body()
-                    .operation_name
-                    .clone()
-                    .unwrap_or_default();
-
-                let (parts, _) = subgraph_request.into_parts();
-                let body = serde_json::to_string(&first.gql_request)
-                    .expect("JSON serialization should not fail");
-                let mut bytes = BytesMut::new();
-                bytes.put_u8(b'[');
-                bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
-                for waiter in service_waiters_it {
-                    txs.push(waiter.sender);
-                    bytes.put(&b", "[..]);
-                    let body = serde_json::to_string(&waiter.gql_request)
-                        .expect("JSON serialization should not fail");
-                    bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
-                }
-                bytes.put_u8(b']');
-                let body_bytes = bytes.freeze();
-                tracing::info!("ABOUT TO CREATE BATCH: {:?}", body_bytes);
-                let mut request = http::Request::from_parts(parts, Body::from(body_bytes));
+                let (operation_name, context, mut request, mut txs) =
+                    Waiter::assemble_batch(service_waiters).await?;
 
                 request
                     .headers_mut()
@@ -892,8 +860,6 @@ async fn call_batched_http(
                 }
 
                 tracing::info!("we have a vec of graphql_responses: {graphql_responses:?}");
-                // Reverse txs to get things back in the right order
-                txs.reverse();
                 for graphql_response in graphql_responses {
                     // Build an http Response
                     let resp = http::Response::builder()
