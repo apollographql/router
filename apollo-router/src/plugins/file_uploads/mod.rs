@@ -183,6 +183,8 @@ async fn router_layer(
             .get(CONTENT_TYPE)
             .cloned()
             .unwrap_or_else(|| HeaderValue::from_static("application/json"));
+
+        // override Content-Type to content type of 'operations' field
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
@@ -317,10 +319,13 @@ pub(crate) async fn http_request_wrapper(
         let (mut request_parts, operations) = req.into_parts();
         request_parts
             .headers
-            .insert(CONTENT_TYPE, form.content_type());
+            .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
+
+        // override Content-Type to be 'multipart/form-data'
         request_parts
             .headers
-            .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
+            .insert(CONTENT_TYPE, form.content_type());
+        request_parts.headers.remove(CONTENT_LENGTH);
         return http::Request::from_parts(
             request_parts,
             hyper::Body::wrap_stream(form.into_stream(operations).await),
