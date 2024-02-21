@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::IsTerminal;
+use std::io::Write;
 use std::marker::PhantomData;
 
 use opentelemetry::Key;
@@ -182,7 +183,12 @@ where
             if self.fmt_event.format_event(&ctx, &mut buf, event).is_ok() {
                 let mut writer = self.make_writer.make_writer();
                 if let Err(err) = std::io::Write::write_all(&mut writer, buf.as_bytes()) {
-                    eprintln!("cannot flush the logging buffer, this is a bug: {err:?}");
+                    if err.kind() != std::io::ErrorKind::WouldBlock {
+                        let _ = std::io::stderr().write_all(
+                            format!("cannot flush the logging buffer, this is a bug: {err:?}")
+                                .as_bytes(),
+                        );
+                    }
                 }
             }
             buf.clear();
