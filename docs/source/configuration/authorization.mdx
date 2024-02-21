@@ -499,7 +499,7 @@ You can nest arrays and elements as needed to achieve your desired logic. For th
 
 #### Example `@policy` use case
 
-#### Usage with a coprocessor
+##### Usage with a coprocessor
 
 Diving even deeper into the [social media example](#example-requiresscopes-use-case): suppose you want only a user to have access to their own profile and credit card information. Of the available authorization directives, you use `@policy` instead of `@requiresScopes` because the validation logic relies on more than the scopes of an access token.
 
@@ -634,6 +634,10 @@ fn supergraph_service(service) {
   service.map_request(request_callback);
 }
 ```
+
+#### Special case for subscriptions
+
+When using subscriptions along with `@policy` authorization, subscription events restart from the execution service, which means that if the authorization status of the subscription session changed, then it cannot go through query planning again, and the session should be closed. To that end, the policies should be evaluated again at the execution service level, and if they changed, an error should be returned to stop the subscription.
 
 ## Composition and federation
 
