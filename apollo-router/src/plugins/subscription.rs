@@ -70,8 +70,8 @@ pub(crate) struct SubscriptionConfig {
     /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
     /// (default: true)
     pub(crate) enable_deduplication: bool,
-    /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
-    pub(crate) max_opened_subscriptions: Option<usize>,
+    /// This is a limit to only have maximum X opened subscriptions at the same time. By default it's set to 8000. If you want to disable the limit, just override it to `null`
+    pub(crate) max_opened_subscriptions: SubscriptionLimit,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
 }
@@ -82,9 +82,22 @@ impl Default for SubscriptionConfig {
             enabled: true,
             mode: Default::default(),
             enable_deduplication: true,
-            max_opened_subscriptions: None,
+            max_opened_subscriptions: SubscriptionLimit::default(),
             queue_capacity: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, untagged, rename_all = "snake_case")]
+pub(crate) enum SubscriptionLimit {
+    Disabled(Disabled),
+    Limit(usize),
+}
+
+impl Default for SubscriptionLimit {
+    fn default() -> Self {
+        Self::Limit(8000)
     }
 }
 
@@ -1338,7 +1351,33 @@ mod tests {
 
         assert!(sub_config.enabled);
         assert!(sub_config.enable_deduplication);
-        assert!(sub_config.max_opened_subscriptions.is_none());
+        assert!(matches!(
+            sub_config.max_opened_subscriptions,
+            SubscriptionLimit::Limit(8000)
+        ));
+        assert!(sub_config.queue_capacity.is_none());
+
+        let subgraph_cfg = config_without_mode.mode.get_subgraph_config("test");
+        assert_eq!(subgraph_cfg, None);
+
+        let sub_config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "callback": {
+                    "public_url": "http://localhost:4000/subscription/callback",
+                    "path": "/subscription/callback",
+                    "subgraphs": ["test"]
+                }
+            },
+            "max_opened_subscriptions": "disabled"
+        }))
+        .unwrap();
+
+        assert!(sub_config.enabled);
+        assert!(sub_config.enable_deduplication);
+        assert!(matches!(
+            sub_config.max_opened_subscriptions,
+            SubscriptionLimit::Disabled(Disabled::Disabled)
+        ));
         assert!(sub_config.queue_capacity.is_none());
     }
 }

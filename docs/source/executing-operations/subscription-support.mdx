@@ -130,6 +130,12 @@ After completing all [prerequisites](#prerequisites), in your router's [YAML con
 
 The Apollo Router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
 
+<Caution>
+
+By default we set a limit (8000) on number of simultaneous client subscription connections to the router. If you want to disable this limit you can just override the default limit with `subscription.max_opened_subscriptions` set to `disabled`.
+
+</Caution>
+
 ### WebSocket setup
 
 Here's an example router configuration snippet that sets up subgraph subscriptions over WebSocket:
@@ -496,7 +502,7 @@ Client subscriptions are [long-lived HTTP connections](#how-it-works), which mea
 subscription:
   enabled: true
   #highlight-start
-  max_opened_subscriptions: 150 # Only 150 simultaneous connections allowed
+  max_opened_subscriptions: 150 # (default: 8000) Only 150 simultaneous connections allowed
   #highlight-end
 ```
 

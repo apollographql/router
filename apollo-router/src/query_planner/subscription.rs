@@ -20,6 +20,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
 use crate::json_ext::Path;
+use crate::plugins::subscription::SubscriptionLimit;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::SubgraphRequest;
 use crate::services::SubscriptionTaskParams;
@@ -94,12 +95,12 @@ impl SubscriptionNode {
                     .build()]
             });
         };
-        if let Some(max_opened_subscriptions) = parameters
+        if let Some(SubscriptionLimit::Limit(max_opened_subscriptions)) = parameters
             .subscription_config
             .as_ref()
-            .and_then(|s| s.max_opened_subscriptions)
+            .map(|s| &s.max_opened_subscriptions)
         {
-            if OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions {
+            if OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= *max_opened_subscriptions {
                 return Box::pin(async {
                     vec![Error::builder()
                         .message("can't open new subscription, limit reached")

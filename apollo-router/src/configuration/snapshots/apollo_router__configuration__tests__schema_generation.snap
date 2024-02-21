@@ -2215,12 +2215,21 @@ expression: "&schema"
           "type": "boolean"
         },
         "max_opened_subscriptions": {
-          "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.",
-          "default": null,
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0,
-          "nullable": true
+          "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default it's set to 8000. If you want to disable the limit, just override it to `null`",
+          "default": 8000,
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "disabled"
+              ]
+            },
+            {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            }
+          ]
         },
         "mode": {
           "description": "Select a subscription mode (callback or passthrough)",

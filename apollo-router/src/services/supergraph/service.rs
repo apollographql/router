@@ -32,6 +32,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::SubscriptionLimit;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -390,7 +391,10 @@ async fn subscription_task(
         }
     };
 
-    let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
+    let limit_is_set = matches!(
+        subscription_config.max_opened_subscriptions,
+        SubscriptionLimit::Limit(_)
+    );
     let mut subscription_handle = subscription_handle.clone();
     let operation_signature = context
         .extensions()
