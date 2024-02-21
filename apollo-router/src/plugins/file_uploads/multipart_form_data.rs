@@ -17,7 +17,7 @@ use super::map_field::MapFieldRaw;
 use super::MultipartRequest;
 use super::Result as UploadResult;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct MultipartFormData {
     boundary: String,
     map: Arc<MapFieldRaw>,

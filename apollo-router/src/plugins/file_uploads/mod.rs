@@ -352,7 +352,7 @@ static TRUE: http::HeaderValue = HeaderValue::from_static("true");
 pub(crate) async fn http_request_wrapper(
     mut req: http::Request<hyper::Body>,
 ) -> http::Request<hyper::Body> {
-    let form: Option<MultipartFormData> = req.extensions_mut().get().cloned();
+    let form = req.extensions_mut().get::<MultipartFormData>().cloned();
     if let Some(form) = form {
         let (mut request_parts, operations) = req.into_parts();
         request_parts
@@ -363,11 +363,8 @@ pub(crate) async fn http_request_wrapper(
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
-        request_parts.headers.remove(CONTENT_LENGTH);
-        return http::Request::from_parts(
-            request_parts,
-            hyper::Body::wrap_stream(form.into_stream(operations).await),
-        );
+        let body = hyper::Body::wrap_stream(form.into_stream(operations).await);
+        return http::Request::from_parts(request_parts, body);
     }
     req
 }

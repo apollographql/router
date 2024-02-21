@@ -26,11 +26,12 @@ use super::Result as UploadResult;
 // We don't expect this to ever be reached, but we can always add a config option if needed later.
 const MAP_SIZE_LIMIT: u64 = 10 * 1024;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct MultipartRequest {
     state: Arc<Mutex<MultipartRequestState>>,
 }
 
+#[derive(Debug)]
 struct MultipartRequestState {
     multer: multer::Multipart<'static>,
     limits: MultipartRequestLimits,
