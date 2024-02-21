@@ -13,9 +13,9 @@ use mediatype::names::MULTIPART;
 use mediatype::MediaType;
 use rand::RngCore;
 
+use super::map_field::MapFieldRaw;
 use super::MultipartRequest;
 use super::UploadResult;
-use super::map_field::MapFieldRaw;
 
 #[derive(Clone)]
 pub(super) struct MultipartFormData {
@@ -47,7 +47,10 @@ impl MultipartFormData {
             .expect("mime should be valid header value")
     }
 
-    pub(super) async fn into_stream(mut self, operations: hyper::Body) -> impl Stream<Item = UploadResult<Bytes>> {
+    pub(super) async fn into_stream(
+        mut self,
+        operations: hyper::Body,
+    ) -> impl Stream<Item = UploadResult<Bytes>> {
         let map_bytes = serde_json::to_vec(&self.map).expect("map should be serializable to JSON");
         let field_prefix = |name: &str| {
             tokio_stream::once(Ok(Bytes::from(format!(

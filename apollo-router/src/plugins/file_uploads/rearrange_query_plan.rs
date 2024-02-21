@@ -23,7 +23,8 @@ pub(super) fn rearange_query_plan(
         let mut variable_ranges = HashMap::new();
         variable_ranges.insert(
             name.as_str(),
-            submap.keys()
+            submap
+                .keys()
                 .map(|file| map.files_order.get_index_of(file))
                 .minmax()
                 .into_option()

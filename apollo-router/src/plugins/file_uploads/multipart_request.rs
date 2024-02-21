@@ -1,20 +1,26 @@
 use core::task;
-use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, mem};
+use std::collections::HashSet;
+use std::mem;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::Poll;
 
 use bytes::Bytes;
 use futures::Stream;
 use http::HeaderMap;
 use itertools::Itertools;
-use multer::{Constraints, Multipart, SizeLimit};
+use multer::Constraints;
+use multer::Multipart;
+use multer::SizeLimit;
 use pin_project_lite::pin_project;
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::Mutex;
+use tokio::sync::OwnedMutexGuard;
 
-use super::{
-    config::MultipartRequestLimits,
-    error::FileUploadError,
-    map_field::{MapField, MapFieldRaw},
-    UploadResult,
-};
+use super::config::MultipartRequestLimits;
+use super::error::FileUploadError;
+use super::map_field::MapField;
+use super::map_field::MapFieldRaw;
+use super::UploadResult;
 
 // The limit to set for the map field in the multipart request.
 // We don't expect this to ever be reached, but we can always add a config option if needed later.
@@ -60,7 +66,11 @@ impl Drop for MultipartRequestState {
 }
 
 impl MultipartRequest {
-    pub(super) fn new(request_body: hyper::Body, boundary: String, limits: MultipartRequestLimits) -> Self {
+    pub(super) fn new(
+        request_body: hyper::Body,
+        boundary: String,
+        limits: MultipartRequestLimits,
+    ) -> Self {
         let multer = Multipart::with_constraints(
             request_body,
             boundary,
