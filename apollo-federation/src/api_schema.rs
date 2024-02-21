@@ -165,19 +165,7 @@ pub fn to_api_schema(
 
 fn defer_definition() -> Node<DirectiveDefinition> {
     Node::new(DirectiveDefinition {
-        description: Some(
-            r#"
-The `@defer` directive may be provided for fragment spreads and inline fragments
-to inform the executor to delay the execution of the current fragment to
-indicate deprioritization of the current fragment. A query with `@defer`
-directive will cause the request to potentially return multiple responses, where
-non-deferred data is delivered in the initial response and data deferred is
-delivered in a subsequent response. `@include` and `@skip` take precedence over
-`@defer`.
-        "#
-            .trim()
-            .into(),
-        ),
+        description: None,
         name: name!("defer"),
         arguments: vec![
             Node::new(InputValueDefinition {
@@ -196,22 +184,16 @@ delivered in a subsequent response. `@include` and `@skip` take precedence over
             }),
         ],
         repeatable: false,
-        locations: vec![DirectiveLocation::Field],
+        locations: vec![
+            DirectiveLocation::FragmentSpread,
+            DirectiveLocation::InlineFragment,
+        ],
     })
 }
 
 fn stream_definition() -> Node<DirectiveDefinition> {
     Node::new(DirectiveDefinition {
-        description: Some(
-            r#"
-The `@stream` directive may be provided for a field of `List` type so that the
-backend can leverage technology such as asynchronous iterators to provide a
-partial list in the initial response, and additional list items in subsequent
-responses. `@include` and `@skip` take precedence over `@stream`.
-        "#
-            .trim()
-            .into(),
-        ),
+        description: None,
         name: name!("stream"),
         arguments: vec![
             Node::new(InputValueDefinition {

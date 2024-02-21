@@ -2399,23 +2399,8 @@ fn include_supergraph_directives() -> Result<(), FederationError> {
     })?;
 
     insta::assert_display_snapshot!(api_schema, @r###"
-    """
-    The `@defer` directive may be provided for fragment spreads and inline fragments
-    to inform the executor to delay the execution of the current fragment to
-    indicate deprioritization of the current fragment. A query with `@defer`
-    directive will cause the request to potentially return multiple responses, where
-    non-deferred data is delivered in the initial response and data deferred is
-    delivered in a subsequent response. `@include` and `@skip` take precedence over
-    `@defer`.
-    """
-    directive @defer(label: String, if: Boolean! = true) on FIELD
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
-    """
-    The `@stream` directive may be provided for a field of `List` type so that the
-    backend can leverage technology such as asynchronous iterators to provide a
-    partial list in the initial response, and additional list items in subsequent
-    responses. `@include` and `@skip` take precedence over `@stream`.
-    """
     directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
 
     type Query {
