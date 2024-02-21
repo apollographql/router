@@ -644,6 +644,21 @@ async fn call_websocket(
     ))
 }
 
+fn get_uri_details(uri: &hyper::Uri) -> (&str, u16, &str) {
+    let port = uri.port_u16().unwrap_or_else(|| {
+        let scheme = uri.scheme_str();
+        if scheme == Some("https") {
+            443
+        } else if scheme == Some("http") {
+            80
+        } else {
+            0
+        }
+    });
+
+    (uri.host().unwrap_or_default(), port, uri.path())
+}
+
 async fn call_batched_http(
     request: SubgraphRequest,
     body: graphql::Request,
@@ -698,19 +713,7 @@ async fn call_batched_http(
                     .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
 
                 let schema_uri = request.uri();
-                let host = schema_uri.host().unwrap_or_default();
-                let port = schema_uri.port_u16().unwrap_or_else(|| {
-                    let scheme = schema_uri.scheme_str();
-                    if scheme == Some("https") {
-                        443
-                    } else if scheme == Some("http") {
-                        80
-                    } else {
-                        0
-                    }
-                });
-
-                let path = schema_uri.path();
+                let (host, port, path) = get_uri_details(schema_uri);
 
                 // TODO: We have multiple operation names but we are just using the first operation
                 // name in the span. Should we report all operation names?
@@ -930,19 +933,7 @@ pub(crate) async fn call_http(
         .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
 
     let schema_uri = request.uri();
-    let host = schema_uri.host().unwrap_or_default();
-    let port = schema_uri.port_u16().unwrap_or_else(|| {
-        let scheme = schema_uri.scheme_str();
-        if scheme == Some("https") {
-            443
-        } else if scheme == Some("http") {
-            80
-        } else {
-            0
-        }
-    });
-
-    let path = schema_uri.path();
+    let (host, port, path) = get_uri_details(schema_uri);
 
     let subgraph_req_span = tracing::info_span!("subgraph_request",
         "otel.kind" = "CLIENT",
