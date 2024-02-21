@@ -37,7 +37,7 @@ use self::config::FileUploadsConfig;
 use self::config::MultipartRequestLimits;
 use self::error::FileUploadError;
 use self::multipart_form_data::MultipartFormData;
-use self::rearange_query_plan::rearange_query_plan;
+use self::rearrange_query_plan::rearange_query_plan;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -50,7 +50,7 @@ use crate::services::supergraph;
 mod config;
 mod error;
 mod multipart_form_data;
-mod rearange_query_plan;
+mod rearrange_query_plan;
 
 type UploadResult<T> = Result<T, error::FileUploadError>;
 
