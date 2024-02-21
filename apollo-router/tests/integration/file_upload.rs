@@ -274,16 +274,15 @@ async fn it_supports_compression() -> Result<(), BoxError> {
         }
         impl ManualRequest {
             fn new() -> Self {
-                let boundary = Form::new().boundary().to_string();
                 Self {
-                    boundary: format!("---------------------------{boundary}"),
+                    boundary: Form::new().boundary().to_string(),
                     body: Vec::new(),
                 }
             }
 
             fn add_boundary(&mut self) {
                 self.body
-                    .extend(format!("{}\r\n", self.boundary).as_bytes());
+                    .extend(format!("--{}\r\n", self.boundary).as_bytes());
             }
 
             fn file(mut self, field_name: &str, file_name: &str, data: &str) -> Self {
@@ -318,7 +317,7 @@ async fn it_supports_compression() -> Result<(), BoxError> {
 
                 // Make sure to end the multipart stream
                 self.body
-                    .extend(format!("{}--\r\n", self.boundary).as_bytes());
+                    .extend(format!("--{}--\r\n", self.boundary).as_bytes());
 
                 // Values below are from the examples
                 // see: https://github.com/dropbox/rust-brotli/blob/343beb46b8fd7864b22e5d1de4761d5716a29fa5/examples/compress.rs#L12
