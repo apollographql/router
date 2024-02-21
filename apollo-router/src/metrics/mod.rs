@@ -506,7 +506,7 @@ macro_rules! f64_counter {
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(f64, counter, add, $name, $description, $value, &[]);
+        metric!(f64, counter, add, $name, $description, $value, []);
     }
 }
 
@@ -546,7 +546,7 @@ macro_rules! i64_up_down_counter {
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(i64, up_down_counter, add, $name, $description, $value, &[]);
+        metric!(i64, up_down_counter, add, $name, $description, $value, []);
     };
 }
 
@@ -585,7 +585,7 @@ macro_rules! f64_up_down_counter {
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(f64, up_down_counter, add, $name, $description, $value, &[]);
+        metric!(f64, up_down_counter, add, $name, $description, $value, []);
     };
 }
 
@@ -624,7 +624,7 @@ macro_rules! f64_histogram {
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(f64, histogram, record, $name, $description, $value, &[]);
+        metric!(f64, histogram, record, $name, $description, $value, []);
     };
 }
 
@@ -663,7 +663,7 @@ macro_rules! u64_histogram {
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(u64, histogram, record, $name, $description, $value, &[]);
+        metric!(u64, histogram, record, $name, $description, $value, []);
     };
 }
 
@@ -702,7 +702,7 @@ macro_rules! i64_histogram {
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, &[]);
+        metric!(i64, histogram, record, $name, $description, $value, []);
     };
 }
 
