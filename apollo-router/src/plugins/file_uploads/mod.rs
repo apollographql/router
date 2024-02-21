@@ -260,7 +260,7 @@ fn get_value_at_path<'a>(
     if let Some(variable_name) = variable_name {
         let root = variables.get_mut(variable_name.as_str());
         if let Some(root) = root {
-            return path.iter().try_fold(root, |parent, segment| match parent {
+            return iter.try_fold(root, |parent, segment| match parent {
                 serde_json_bytes::Value::Object(map) => map.get_mut(segment.as_str()),
                 serde_json_bytes::Value::Array(list) => segment
                     .parse::<usize>()
@@ -273,6 +273,22 @@ fn get_value_at_path<'a>(
     None
 }
 
+#[test]
+fn it_works_with_one_segment() {
+    let mut stuff = serde_json_bytes::json! {{
+        "file1": null,
+        "file2": null
+    }};
+
+    let variables = stuff.as_object_mut().unwrap();
+
+    let path = &["file1".to_string()];
+
+    assert_eq!(
+        &mut serde_json_bytes::Value::Null,
+        get_value_at_path(variables, path).unwrap()
+    );
+}
 #[derive(Clone)]
 struct SupergraphLayerResult {
     multipart: MultipartRequest,
