@@ -21,7 +21,7 @@ use self::error::FileUploadError;
 use self::map_field::MapField;
 use self::multipart_form_data::MultipartFormData;
 use self::multipart_request::MultipartRequest;
-use self::rearrange_query_plan::rearange_query_plan;
+use self::rearrange_query_plan::rearrange_query_plan;
 use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -39,7 +39,7 @@ mod multipart_form_data;
 mod multipart_request;
 mod rearrange_query_plan;
 
-type UploadResult<T> = Result<T, error::FileUploadError>;
+type Result<T> = std::result::Result<T, error::FileUploadError>;
 
 // FIXME: check if we need to hide docs
 #[doc(hidden)] // Only public for integration tests
@@ -54,7 +54,7 @@ register_private_plugin!("apollo", "preview_file_uploads", FileUploadsPlugin);
 impl PluginPrivate for FileUploadsPlugin {
     type Config = FileUploadsConfig;
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> std::result::Result<Self, BoxError> {
         let config = init.config;
         let enabled = config.enabled && config.protocols.multipart.enabled;
         let limits = config.protocols.multipart.limits;
@@ -164,7 +164,7 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
 async fn router_layer(
     req: router::Request,
     limits: MultipartRequestLimits,
-) -> UploadResult<router::Request> {
+) -> Result<router::Request> {
     if let Some(mime) = get_multipart_mime(&req) {
         let boundary = mime
             .get_param(BOUNDARY)
@@ -198,7 +198,7 @@ async fn router_layer(
     Ok(req)
 }
 
-async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergraph::Request> {
+async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Request> {
     let multipart = req
         .context
         .extensions()
@@ -214,16 +214,14 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
         for variable_map in map_field.per_variable.values() {
             for (filename, paths) in variable_map.iter() {
                 for variable_path in paths.iter() {
-                    if let Some(json_value) = get_value_by_path(variables, variable_path) {
-                        drop(core::mem::replace(
-                            json_value,
-                            serde_json_bytes::Value::String(
-                                format!("<Placeholder for file '{}'>", filename).into(),
-                            ),
-                        ));
-                    } else {
-                        return Err(FileUploadError::InputValueNotFound(variable_path.join(".")));
-                    }
+                    replace_value_at_path(
+                        variables,
+                        variable_path,
+                        serde_json_bytes::Value::String(
+                            format!("<Placeholder for file '{}'>", filename).into(),
+                        ),
+                    )
+                    .map_err(|path| FileUploadError::InputValueNotFound(path.join(".")))?;
                 }
             }
         }
@@ -233,7 +231,27 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
     Ok(req)
 }
 
-fn get_value_by_path<'a>(
+// Replaces value at path with the provided one.
+// Returns the provided path if the path is not valid for the given object
+fn replace_value_at_path<'a>(
+    variables: &'a mut json_ext::Object,
+    path: &'a [String],
+    value: serde_json_bytes::Value,
+) -> std::result::Result<(), &'a [String]> {
+    if let Some(v) = get_value_at_path(variables, path) {
+        *v = value;
+        Ok(())
+    } else {
+        Err(path)
+    }
+}
+
+// Removes value at path.
+fn remove_value_at_path<'a>(variables: &'a mut json_ext::Object, path: &'a [String]) {
+    let _ = get_value_at_path(variables, path).take();
+}
+
+fn get_value_at_path<'a>(
     variables: &'a mut json_ext::Object,
     path: &'a [String],
 ) -> Option<&'a mut serde_json_bytes::Value> {
@@ -242,7 +260,7 @@ fn get_value_by_path<'a>(
     if let Some(variable_name) = variable_name {
         let root = variables.get_mut(variable_name.as_str());
         if let Some(root) = root {
-            return path.iter().try_fold(root, |parent, segment| match parent {
+            return iter.try_fold(root, |parent, segment| match parent {
                 serde_json_bytes::Value::Object(map) => map.get_mut(segment.as_str()),
                 serde_json_bytes::Value::Array(list) => segment
                     .parse::<usize>()
@@ -255,13 +273,29 @@ fn get_value_by_path<'a>(
     None
 }
 
+#[test]
+fn it_works_with_one_segment() {
+    let mut stuff = serde_json_bytes::json! {{
+        "file1": null,
+        "file2": null
+    }};
+
+    let variables = stuff.as_object_mut().unwrap();
+
+    let path = &["file1".to_string()];
+
+    assert_eq!(
+        &mut serde_json_bytes::Value::Null,
+        get_value_at_path(variables, path).unwrap()
+    );
+}
 #[derive(Clone)]
 struct SupergraphLayerResult {
     multipart: MultipartRequest,
     map: Arc<MapField>,
 }
 
-fn execution_layer(req: execution::Request) -> UploadResult<execution::Request> {
+fn execution_layer(req: execution::Request) -> Result<execution::Request> {
     let supergraph_result = req
         .context
         .extensions()
@@ -271,7 +305,7 @@ fn execution_layer(req: execution::Request) -> UploadResult<execution::Request> 
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult { map, .. } = supergraph_result;
 
-        let query_plan = Arc::new(rearange_query_plan(&req.query_plan, &map)?);
+        let query_plan = Arc::new(rearrange_query_plan(&req.query_plan, &map)?);
         return Ok(execution::Request { query_plan, ..req });
     }
     Ok(req)
@@ -293,9 +327,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
             for variable_map in map.per_variable.values() {
                 for paths in variable_map.values() {
                     for path in paths {
-                        if let Some(json_value) = get_value_by_path(variables, path) {
-                            json_value.take();
-                        }
+                        remove_value_at_path(variables, path);
                     }
                 }
             }

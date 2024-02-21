@@ -7,6 +7,6 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.limits.max_file_size.: 1000
+          opt.limits.max_file_size.: 1mb
           opt.limits.max_files.: 10
 
