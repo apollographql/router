@@ -683,14 +683,14 @@ async fn call_batched_http(
     }
     if let Some(receiver) = batch_responder {
         if let Some(waiters) = waiters_opt {
-            for (service, requests) in waiters.into_iter() {
+            for (service, service_waiters) in waiters.into_iter() {
                 // Now we need to "batch up" our data and send it to our subgraphs
                 // We need our own batch aware version of call_http which only makes one call to each
                 // subgraph, but is able to decode the responses. I'll probably need to break call_http
                 // down into sub-functions, that's a TODO for now.
-                let mut txs = Vec::with_capacity(requests.len());
-                let mut requests_it = requests.into_iter();
-                let first = requests_it
+                let mut txs = Vec::with_capacity(service_waiters.len());
+                let mut service_waiters_it = service_waiters.into_iter();
+                let first = service_waiters_it
                     .next()
                     .expect("we should have at least one request");
                 let context = first.context; // XXX SHADOWING
@@ -710,10 +710,10 @@ async fn call_batched_http(
                 let mut bytes = BytesMut::new();
                 bytes.put_u8(b'[');
                 bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
-                for request in requests_it {
-                    txs.push(request.sender);
+                for waiter in service_waiters_it {
+                    txs.push(waiter.sender);
                     bytes.put(&b", "[..]);
-                    let body = serde_json::to_string(&request.gql_request)
+                    let body = serde_json::to_string(&waiter.gql_request)
                         .expect("JSON serialization should not fail");
                     bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
                 }
@@ -744,6 +744,8 @@ async fn call_batched_http(
 
                 let path = schema_uri.path();
 
+                // TODO: We have multiple operation names but we are just using the first operation
+                // name in the span. Should we report all operation names?
                 let subgraph_req_span = tracing::info_span!("subgraph_request",
                     "otel.kind" = "CLIENT",
                     "net.peer.name" = %host,
@@ -751,7 +753,7 @@ async fn call_batched_http(
                     "http.route" = %path,
                     "http.url" = %schema_uri,
                     "net.transport" = "ip_tcp",
-                    "apollo.subgraph.name" = %service_name,
+                    "apollo.subgraph.name" = %&service,
                     "graphql.operation.name" = %operation_name,
                 );
 
@@ -774,7 +776,7 @@ async fn call_batched_http(
                 let client = client_factory.create(&service);
                 // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
                 let (parts, content_type, body) =
-                    do_fetch(client, &context, service_name, request, display_body)
+                    do_fetch(client, &context, &service, request, display_body)
                         .instrument(subgraph_req_span)
                         .await?;
                 do_fetch_count += 1;
@@ -782,7 +784,7 @@ async fn call_batched_http(
                 if display_body {
                     if let Some(Ok(b)) = &body {
                         tracing::info!(
-                            response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                            response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %&service, "Raw response body from subgraph {service:?} received"
                         );
                     }
                 }
@@ -796,7 +798,7 @@ async fn call_batched_http(
 
                 let array = ensure_array!(value).map_err(|error| {
                     FetchError::SubrequestMalformedResponse {
-                        service: service_name.to_string(),
+                        service: service.to_string(),
                         reason: error.to_string(),
                     }
                 })?;
@@ -804,7 +806,7 @@ async fn call_batched_http(
                 for value in array {
                     let object = ensure_object!(value).map_err(|error| {
                         FetchError::SubrequestMalformedResponse {
-                            service: service_name.to_string(),
+                            service: service.to_string(),
                             reason: error.to_string(),
                         }
                     })?;
@@ -822,7 +824,7 @@ async fn call_batched_http(
                                 // Application json expects valid graphql response if 2xx
                                 tracing::debug_span!("parse_subgraph_response").in_scope(|| {
                                     // Application graphql json expects valid graphql response
-                                    graphql::Response::from_bytes(service_name, body.into())
+                                    graphql::Response::from_bytes(&service, body.into())
                                         .unwrap_or_else(|error| {
                                             graphql::Response::builder()
                                                 .error(error.to_graphql_error(None))
@@ -840,12 +842,12 @@ async fn call_batched_http(
                                     if original_response.is_empty() {
                                         original_response = "<empty response body>".into()
                                     }
-                                    graphql::Response::from_bytes(service_name, body.into())
+                                    graphql::Response::from_bytes(&service, body.into())
                                         .unwrap_or_else(|_error| {
                                             graphql::Response::builder()
                                                 .error(
                                                     FetchError::SubrequestMalformedResponse {
-                                                        service: service_name.to_string(),
+                                                        service: service.to_string(),
                                                         reason: original_response,
                                                     }
                                                     .to_graphql_error(None),
@@ -875,7 +877,7 @@ async fn call_batched_http(
                         graphql_response.errors.insert(
                             0,
                             FetchError::SubrequestHttpError {
-                                service: service_name.to_string(),
+                                service: service.to_string(),
                                 status_code: Some(status.as_u16()),
                                 reason: format!(
                                     "{}: {}",
@@ -908,7 +910,7 @@ async fn call_batched_http(
                         Some(tx) => {
                             tx.send(Ok(subgraph_response)).map_err(|_error| {
                                 FetchError::SubrequestMalformedResponse {
-                                    service: service_name.to_string(),
+                                    service: service.to_string(),
                                     reason: "tx send failed".to_string(),
                                 }
                             })?;
