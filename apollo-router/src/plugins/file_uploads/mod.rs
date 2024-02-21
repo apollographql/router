@@ -19,10 +19,10 @@ use self::config::FileUploadsConfig;
 use self::config::MultipartRequestLimits;
 use self::error::FileUploadError;
 use self::map_field::MapField;
-use self::map_field::MapFieldRaw;
 use self::multipart_form_data::MultipartFormData;
 use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearange_query_plan;
+use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -209,14 +209,10 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
         let variables = &mut req.supergraph_request.body_mut().variables;
 
         // patch variables to pass validation
-        for (variable_name, map) in map_field.map_per_variable.iter() {
-            for (filename, paths) in map.iter() {
+        for variable_map in map_field.per_variable.values() {
+            for (filename, paths) in variable_map.iter() {
                 for variable_path in paths.iter() {
-                    let json_value = variables
-                        .get_mut(variable_name.as_str())
-                        .and_then(|root| try_path(root, variable_path));
-
-                    if let Some(json_value) = json_value {
+                    if let Some(json_value) = try_path(variables, variable_path) {
                         drop(core::mem::replace(
                             json_value,
                             serde_json_bytes::Value::String(
@@ -224,8 +220,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
                             ),
                         ));
                     } else {
-                        let path = format!("{}.{}", variable_name, variable_path.join("."));
-                        return Err(FileUploadError::InputValueNotFound(path));
+                        return Err(FileUploadError::InputValueNotFound(variable_path.join(".")));
                     }
                 }
             }
@@ -237,17 +232,25 @@ async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergra
 }
 
 fn try_path<'a>(
-    root: &'a mut serde_json_bytes::Value,
+    variables: &'a mut json_ext::Object,
     path: &'a [String],
 ) -> Option<&'a mut serde_json_bytes::Value> {
-    path.iter().try_fold(root, |parent, segment| match parent {
-        serde_json_bytes::Value::Object(map) => map.get_mut(segment.as_str()),
-        serde_json_bytes::Value::Array(list) => segment
-            .parse::<usize>()
-            .ok()
-            .and_then(move |x| list.get_mut(x)),
-        _ => None,
-    })
+    let mut iter = path.iter();
+    let variable_name = iter.next();
+    if let Some(variable_name) = variable_name {
+        let root = variables.get_mut(variable_name.as_str());
+        if let Some(root) = root {
+            return path.iter().try_fold(root, |parent, segment| match parent {
+                serde_json_bytes::Value::Object(map) => map.get_mut(segment.as_str()),
+                serde_json_bytes::Value::Array(list) => segment
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(move |x| list.get_mut(x)),
+                _ => None,
+            });
+        }
+    }
+    None
 }
 
 #[derive(Clone)]
@@ -283,34 +286,24 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
         let SupergraphLayerResult { multipart, map } = supergraph_result;
 
         let variables = &mut req.subgraph_request.body_mut().variables;
-        for (variable_name, variable_value) in variables.iter_mut() {
-            if let Some(variable_map) = map.map_per_variable.get(variable_name.as_str()) {
+        let subgraph_map = map.sugraph_map(variables.keys());
+        if !subgraph_map.is_empty() {
+            for variable_map in map.per_variable.values() {
                 for paths in variable_map.values() {
                     for path in paths {
-                        if let Some(json_value) = try_path(variable_value, path) {
+                        if let Some(json_value) = try_path(variables, path) {
                             json_value.take();
                         }
                     }
                 }
             }
-        }
 
-        let subgraph_map = map.sugraph_map(variables.keys());
-        if !subgraph_map.is_empty() {
             req.subgraph_request
                 .extensions_mut()
-                .insert(SubgraphHttpRequestExtensions {
-                    multipart,
-                    map_field: subgraph_map,
-                });
+                .insert(MultipartFormData::new(subgraph_map, multipart));
         }
     }
     req
-}
-
-struct SubgraphHttpRequestExtensions {
-    multipart: MultipartRequest,
-    map_field: MapFieldRaw,
 }
 
 static APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-require-preflight");
@@ -319,15 +312,9 @@ static TRUE: http::HeaderValue = HeaderValue::from_static("true");
 pub(crate) async fn http_request_wrapper(
     mut req: http::Request<hyper::Body>,
 ) -> http::Request<hyper::Body> {
-    let supergraph_result = req.extensions_mut().remove();
-    if let Some(supergraph_result) = supergraph_result {
-        let SubgraphHttpRequestExtensions {
-            multipart,
-            map_field,
-        } = supergraph_result;
-
+    let form: Option<MultipartFormData> = req.extensions_mut().remove();
+    if let Some(form) = form {
         let (mut request_parts, operations) = req.into_parts();
-        let form = MultipartFormData::new(operations, map_field, multipart);
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
@@ -336,7 +323,7 @@ pub(crate) async fn http_request_wrapper(
             .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
         return http::Request::from_parts(
             request_parts,
-            hyper::Body::wrap_stream(form.into_stream().await),
+            hyper::Body::wrap_stream(form.into_stream(operations).await),
         );
     }
     req

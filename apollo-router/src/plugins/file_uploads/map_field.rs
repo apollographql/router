@@ -13,7 +13,7 @@ pub(super) type MapFieldRaw = IndexMap<String, Vec<String>>;
 
 pub(super) struct MapField {
     pub(super) files_order: IndexSet<String>,
-    pub(super) map_per_variable: MapPerVariable,
+    pub(super) per_variable: MapPerVariable,
 }
 
 impl MapField {
@@ -33,10 +33,10 @@ impl MapField {
                     }
                     return Err(FileUploadError::InvalidPathInsideMapField(path));
                 }
-                let variable_name = segments.next().ok_or_else(|| {
+                let variable_path: Vec<String> = segments.map(str::to_owned).collect();
+                let variable_name = variable_path.get(0).ok_or_else(|| {
                     FileUploadError::MissingVariableNameInsideMapField(path.clone())
                 })?;
-                let variable_path: Vec<String> = segments.map(str::to_owned).collect();
 
                 map_per_variable
                     .entry(variable_name.to_owned())
@@ -50,7 +50,7 @@ impl MapField {
 
         Ok(Self {
             files_order,
-            map_per_variable,
+            per_variable: map_per_variable,
         })
     }
 
@@ -61,19 +61,13 @@ impl MapField {
         let mut subgraph_map: MapFieldRaw = IndexMap::new();
         for variable_name in variable_names.into_iter() {
             let variable_name = variable_name.as_str();
-            if let Some(variable_map) = self.map_per_variable.get(variable_name) {
+            if let Some(variable_map) = self.per_variable.get(variable_name) {
                 for (file, paths) in variable_map.iter() {
                     subgraph_map.insert(
                         file.clone(),
                         paths
                             .iter()
-                            .map(|path| {
-                                if path.is_empty() {
-                                    format!("variables.{}", variable_name)
-                                } else {
-                                    format!("variables.{}.{}", variable_name, path.join("."))
-                                }
-                            })
+                            .map(|path| format!("variables.{}", path.join(".")))
                             .collect(),
                     );
                 }
