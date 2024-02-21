@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use itertools::Itertools;
 
 use super::error::FileUploadError;
-use super::ParsedMap;
+use super::MapField;
 use super::UploadResult;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::FlattenNode;
@@ -15,7 +15,7 @@ use crate::services::execution::QueryPlan;
 
 pub(super) fn rearange_query_plan(
     query_plan: &QueryPlan,
-    map: &ParsedMap,
+    map: &MapField,
 ) -> UploadResult<QueryPlan> {
     let root = &query_plan.root;
     let variable_ranges = HashMap::with_capacity(map.map_per_variable.len());

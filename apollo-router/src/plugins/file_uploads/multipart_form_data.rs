@@ -11,19 +11,19 @@ use mediatype::names::MULTIPART;
 use mediatype::MediaType;
 use rand::RngCore;
 
-use super::MapField;
 use super::MultipartRequest;
 use super::UploadResult;
+use super::map_field::MapFieldRaw;
 
 pub(super) struct MultipartFormData {
     boundary: String,
     operations: hyper::Body,
-    map: MapField,
+    map: MapFieldRaw,
     multipart: MultipartRequest,
 }
 
 impl MultipartFormData {
-    pub(super) fn new(operations: hyper::Body, map: MapField, multipart: MultipartRequest) -> Self {
+    pub(super) fn new(operations: hyper::Body, map: MapFieldRaw, multipart: MultipartRequest) -> Self {
         let boundary = format!(
             "------------------------{:016x}",
             rand::thread_rng().next_u64()
