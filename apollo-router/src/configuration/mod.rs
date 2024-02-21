@@ -222,10 +222,10 @@ pub(crate) enum ApiSchemaMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
+    #[default]
     Both,
 }
 
