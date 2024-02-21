@@ -321,7 +321,7 @@ async fn it_supports_compression() -> Result<(), BoxError> {
                     .extend(format!("{}--\r\n", self.boundary).as_bytes());
 
                 // Values below are from the examples
-                // see:
+                // see: https://github.com/dropbox/rust-brotli/blob/343beb46b8fd7864b22e5d1de4761d5716a29fa5/examples/compress.rs#L12
                 let mut reader = brotli::CompressorReader::new(&self.body[..], 4096, 11, 22);
                 let mut buf = Vec::new();
 
