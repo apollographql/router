@@ -8,9 +8,6 @@ use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use tower::BoxError;
 
-#[path = "../common.rs"]
-mod common;
-
 const FILE_CONFIG: &str = include_str!("../fixtures/file_upload/default.router.yaml");
 const FILE_CONFIG_LARGE_LIMITS: &str = include_str!("../fixtures/file_upload/large.router.yaml");
 
@@ -145,7 +142,7 @@ async fn it_uploads_multiple_files() -> Result<(), BoxError> {
 #[ignore]
 async fn it_uploads_a_massive_file() -> Result<(), BoxError> {
     // Upload a stream of 10GB
-    const ONE_MB: usize = 1 * 1024 * 1024;
+    const ONE_MB: usize = 1024 * 1024;
     const TEN_GB: usize = 10 * 1024 * ONE_MB;
     const FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
     const CHUNK_COUNT: usize = TEN_GB / ONE_MB;
@@ -491,7 +488,7 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
     // Create a file that passes the limit set in the config (512KB)
-    const ONE_MB: usize = 1 * 1024 * 1024;
+    const ONE_MB: usize = 1024 * 1024;
     const FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
 
     // Construct the parts of the multipart request as defined by the schema for multiple files
@@ -821,7 +818,7 @@ mod helper {
     use tokio::net::TcpListener;
     use tokio_stream::Stream;
 
-    use super::common::IntegrationTest;
+    use super::super::common::IntegrationTest;
 
     /// A helper server for testing multipart uploads.
     ///
@@ -1128,7 +1125,7 @@ mod helper {
             // TODO: This is a bit hard-coded, but it should be enough for testing the whole plugin stack
             // The shape of the variables list for tests should always be ["variables.<NAME_OF_FILE>"]
             let var_name = var_mapping.get(0).ok_or(FileUploadError::MissingMapping)?;
-            let var_name = var_name.split(".").skip(1).next().unwrap().to_string();
+            let var_name = var_name.split('.').nth(1).unwrap().to_string();
 
             files.insert(
                 var_name,
@@ -1236,9 +1233,9 @@ mod helper {
     /// Note: This performs validation checks as well.
     /// Note: The order of the mapping must correspond with the order in the request, so
     /// we use a [BTreeMap] here to keep the order when traversing the list of files.
-    async fn decode_request<'a>(
-        request: &'a mut Request<Body>,
-    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart<'a>), FileUploadError> {
+    async fn decode_request(
+        request: &mut Request<Body>,
+    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart), FileUploadError> {
         let content_type = request
             .headers()
             .get(CONTENT_TYPE)
