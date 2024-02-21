@@ -259,6 +259,29 @@ expression: "&schema"
                         },
                         "nullable": true
                       },
+                      "headers": {
+                        "description": "List of headers to add to the JWKS request",
+                        "type": "array",
+                        "items": {
+                          "description": "Insert a header",
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "value"
+                          ],
+                          "properties": {
+                            "name": {
+                              "description": "The name of the header",
+                              "type": "string"
+                            },
+                            "value": {
+                              "description": "The value for the header",
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
                       "issuer": {
                         "description": "Expected issuer for tokens verified by that JWKS",
                         "type": "string",
