@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::stream::StreamExt;
@@ -15,9 +17,10 @@ use super::MultipartRequest;
 use super::UploadResult;
 use super::map_field::MapFieldRaw;
 
+#[derive(Clone)]
 pub(super) struct MultipartFormData {
     boundary: String,
-    map: MapFieldRaw,
+    map: Arc<MapFieldRaw>,
     multipart: MultipartRequest,
 }
 
@@ -29,7 +32,7 @@ impl MultipartFormData {
         );
         Self {
             boundary,
-            map,
+            map: Arc::new(map),
             multipart,
         }
     }
@@ -61,7 +64,7 @@ impl MultipartFormData {
             .chain(tokio_stream::once(Ok("\r\n".into())));
         let last = tokio_stream::once(Ok(format!("\r\n--{}--\r\n", self.boundary).into()));
 
-        let file_names = self.map.into_keys().collect();
+        let file_names = self.map.keys().cloned().collect();
         let boundary = self.boundary;
         let file_prefix = move |headers: &HeaderMap| {
             let mut prefix = BytesMut::new();
