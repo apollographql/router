@@ -1,0 +1,9 @@
+supergraph:
+  introspection: true
+plugins:
+  # this plugin has one piece of configuration,
+  # the name of the entity you'd like to say hello to
+  example.file_upload:
+    max_file_size: 10
+include_subgraph_errors:
+  all: true

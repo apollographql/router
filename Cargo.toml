@@ -12,6 +12,7 @@ members = [
     "examples/cookies-to-headers/rhai",
     "examples/data-response-mutate/rhai",
     "examples/error-response-mutate/rhai",
+    "examples/file-uploads/rust",
     "examples/forbid-anonymous-operations/rhai",
     "examples/forbid-anonymous-operations/rust",
     "examples/hello-world/rust",
