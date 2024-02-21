@@ -189,10 +189,7 @@ async fn router_layer(
         let mut multipart = MultipartRequest::new(request_body, boundary, limits);
         let operations_stream = multipart.operations_field().await?;
 
-        req.context
-            .extensions()
-            .lock()
-            .insert(RouterLayerResult { multipart });
+        req.context.extensions().lock().insert(multipart);
 
         let content_type = operations_stream
             .headers()
@@ -212,18 +209,15 @@ async fn router_layer(
     Ok(req)
 }
 
-struct RouterLayerResult {
-    multipart: MultipartRequest,
-}
-
 async fn supergraph_layer(mut req: supergraph::Request) -> UploadResult<supergraph::Request> {
-    let service_layer_result = req
+    let multipart = req
         .context
         .extensions()
         .lock()
-        .remove::<RouterLayerResult>();
+        .get::<MultipartRequest>()
+        .cloned();
 
-    if let Some(RouterLayerResult { mut multipart }) = service_layer_result {
+    if let Some(mut multipart) = multipart {
         let map_field = multipart.map_field().await?;
         let variables = &mut req.supergraph_request.body_mut().variables;
         let mut files_order = IndexSet::new();
