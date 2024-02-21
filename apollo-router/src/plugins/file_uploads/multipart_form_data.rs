@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use bytes::BytesMut;
 use futures::stream::StreamExt;
 use futures::stream::TryStreamExt;
 use futures::Stream;
@@ -45,41 +46,28 @@ impl MultipartFormData {
             .expect("mime should be valid header value")
     }
 
-    pub(super) async fn into_stream(self) -> impl Stream<Item = UploadResult<Bytes>> {
-        fn field(
-            boundary: &str,
-            name: &str,
-            value_stream: impl Stream<Item = UploadResult<Bytes>>,
-        ) -> impl Stream<Item = UploadResult<Bytes>> {
-            let prefix = format!(
+    pub(super) async fn into_stream(mut self) -> impl Stream<Item = UploadResult<Bytes>> {
+        let map_bytes = serde_json::to_vec(&self.map).expect("map should be serializable to JSON");
+        let field_prefix = |name: &str| {
+            tokio_stream::once(Ok(Bytes::from(format!(
                 "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n",
-                boundary, name
-            )
-            .into();
+                self.boundary, name
+            ))))
+        };
 
-            tokio_stream::once(Ok(prefix))
-                .chain(value_stream)
-                .chain(tokio_stream::once(Ok("\r\n".into())))
-        }
+        let static_part = field_prefix("operations")
+            .chain(self.operations.map_err(Into::into))
+            .chain(tokio_stream::once(Ok("\r\n".into())))
+            .chain(field_prefix("map"))
+            .chain(tokio_stream::once(Ok(Bytes::from(map_bytes))))
+            .chain(tokio_stream::once(Ok("\r\n".into())));
+        let last = tokio_stream::once(Ok(format!("\r\n--{}--\r\n", self.boundary).into()));
 
-        let Self {
-            boundary,
-            operations,
-            map,
-            mut multipart,
-        } = self;
-        let last = tokio_stream::once(Ok(format!("--{}--\r\n", boundary).into()));
-
-        let operations_field = field(&boundary, "operations", operations.map_err(Into::into));
-        let map_bytes = serde_json::to_vec(&map)
-            .expect("map should be serializable to JSON")
-            .into();
-        let map_field = field(&boundary, "map", tokio_stream::once(Ok(map_bytes)));
-
-        let files = map.into_keys().collect();
-        let before_file = move |headers: &HeaderMap| {
-            let mut prefix = Vec::new();
-            prefix.extend_from_slice(b"--");
+        let file_names = self.map.into_keys().collect();
+        let boundary = self.boundary;
+        let file_prefix = move |headers: &HeaderMap| {
+            let mut prefix = BytesMut::new();
+            prefix.extend_from_slice(b"\r\n--");
             prefix.extend_from_slice(boundary.as_bytes());
             prefix.extend_from_slice(b"\r\n");
             for (k, v) in headers.iter() {
@@ -91,11 +79,11 @@ impl MultipartFormData {
             prefix.extend_from_slice(b"\r\n");
             Bytes::from(prefix)
         };
-        let after_file = || Bytes::from_static(b"\r\n");
-        let file_fields = multipart
-            .subgraph_stream(before_file, files, after_file)
-            .await;
 
-        operations_field.chain(map_field).chain(file_fields).chain(last)
+        let files_stream = self
+            .multipart
+            .subgraph_stream(file_names, file_prefix)
+            .await;
+        static_part.chain(files_stream).chain(last)
     }
 }

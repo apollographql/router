@@ -10,9 +10,9 @@ use std::task::Poll;
 use bytes::Bytes;
 use futures::FutureExt;
 use futures::Stream;
-use http::HeaderMap;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
+use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use indexmap::IndexMap;
@@ -509,49 +509,43 @@ impl MultipartRequest {
         Ok(map_field)
     }
 
-    async fn subgraph_stream<BeforeFn, AfterFn>(
+    async fn subgraph_stream<FilePrefixFn>(
         &mut self,
-        before_bytes_fn: BeforeFn,
         file_names: HashSet<String>,
-        after_bytes_fn: AfterFn,
-    ) -> SubgraphFileProxyStream<BeforeFn, AfterFn>
+        file_prefix_fn: FilePrefixFn,
+    ) -> SubgraphFileProxyStream<FilePrefixFn>
     where
-        BeforeFn: Fn(&HeaderMap) -> Bytes,
-        AfterFn: Fn() -> Bytes,
+        FilePrefixFn: Fn(&HeaderMap) -> Bytes,
     {
         let state = self.state.clone().lock_owned().await;
-        SubgraphFileProxyStream::new(state, before_bytes_fn, file_names, after_bytes_fn)
+        SubgraphFileProxyStream::new(state, file_names, file_prefix_fn)
     }
 }
 
 pin_project! {
-    struct SubgraphFileProxyStream<BeforeFn, AfterFn> {
+    struct SubgraphFileProxyStream<FilePrefixFn> {
         state: OwnedMutexGuard<MultipartRequestState>,
-        before_bytes_fn: BeforeFn,
         file_names: HashSet<String>,
-        after_bytes_fn: AfterFn,
+        file_prefix_fn: FilePrefixFn,
         #[pin]
         current_field: Option<multer::Field<'static>>,
         current_field_bytes: usize,
     }
 }
 
-impl<BeforeFn, AfterFn> SubgraphFileProxyStream<BeforeFn, AfterFn>
+impl<FilePrefixFn> SubgraphFileProxyStream<FilePrefixFn>
 where
-    BeforeFn: Fn(&HeaderMap) -> Bytes,
-    AfterFn: Fn() -> Bytes,
+    FilePrefixFn: Fn(&HeaderMap) -> Bytes,
 {
     fn new(
         state: OwnedMutexGuard<MultipartRequestState>,
-        before_bytes_fn: BeforeFn,
         file_names: HashSet<String>,
-        after_bytes_fn: AfterFn,
+        file_prefix_fn: FilePrefixFn,
     ) -> Self {
         Self {
             state,
-            before_bytes_fn,
             file_names,
-            after_bytes_fn,
+            file_prefix_fn,
             current_field: None,
             current_field_bytes: 0,
         }
@@ -560,7 +554,7 @@ where
     fn poll_current_field(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Option<Poll<Option<UploadResult<Bytes>>>> {
+    ) -> Poll<Option<UploadResult<Bytes>>> {
         if let Some(field) = &mut self.current_field {
             let filename = field
                 .file_name()
@@ -569,15 +563,13 @@ where
                 .unwrap_or_else(|| "unknown".to_owned());
 
             let field = Pin::new(field);
-            Some(match field.poll_next(cx) {
+            match field.poll_next(cx) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(None) => {
                     self.current_field = None;
                     let file_size = self.current_field_bytes;
                     self.state.file_sizes.push(file_size);
-
-                    let postfix = (self.after_bytes_fn)();
-                    Poll::Ready(Some(Ok(postfix)))
+                    Poll::Ready(None)
                 }
                 Poll::Ready(Some(Ok(bytes))) => {
                     self.current_field_bytes += bytes.len();
@@ -596,9 +588,9 @@ where
                 Poll::Ready(Some(Err(e))) => {
                     Poll::Ready(Some(Err(FileUploadError::InvalidMultipartRequest(e))))
                 }
-            })
+            }
         } else {
-            None
+            Poll::Ready(None)
         }
     }
 
@@ -637,7 +629,7 @@ where
 
                         if let Some(name) = field.name() {
                             if self.file_names.remove(name) {
-                                let prefix = (self.before_bytes_fn)(field.headers());
+                                let prefix = (self.file_prefix_fn)(field.headers());
                                 self.current_field = Some(field);
                                 return Poll::Ready(Some(Ok(prefix)));
                             }
@@ -654,18 +646,17 @@ where
     }
 }
 
-impl<BeforeFn, AfterFn> Stream for SubgraphFileProxyStream<BeforeFn, AfterFn>
+impl<FilePrefixFn> Stream for SubgraphFileProxyStream<FilePrefixFn>
 where
-    BeforeFn: Fn(&HeaderMap) -> Bytes,
-    AfterFn: Fn() -> Bytes,
+    FilePrefixFn: Fn(&HeaderMap) -> Bytes,
 {
     type Item = UploadResult<Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(field_result) = self.poll_current_field(cx) {
-            field_result
-        } else {
-            self.poll_next_field(cx)
+        let field_result = self.poll_current_field(cx);
+        match field_result {
+            Poll::Ready(None) => self.poll_next_field(cx),
+            _ => field_result,
         }
     }
 }
