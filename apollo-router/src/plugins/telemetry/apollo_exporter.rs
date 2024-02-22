@@ -123,6 +123,7 @@ impl ApolloExporter {
             batch_config: batch_config.clone(),
             apollo_key: apollo_key.to_string(),
             client: reqwest::Client::builder()
+                .no_gzip()
                 .timeout(batch_config.max_export_timeout)
                 .build()
                 .map_err(BoxError::from)?,

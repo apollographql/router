@@ -286,7 +286,7 @@ mod forbid_http_get_mutations_tests {
             .lock()
             .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
                 ast,
-                executable,
+                executable: Arc::new(executable),
                 parse_errors: None,
                 validation_errors: None,
             }));

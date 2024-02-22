@@ -98,13 +98,6 @@ pub(crate) enum FetchError {
 
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
-    /// could not compress request: {reason}
-    CompressionError {
-        /// The service that failed.
-        service: String,
-        /// The reason the compression failed.
-        reason: String,
-    },
 }
 
 impl FetchError {
@@ -133,8 +126,7 @@ impl FetchError {
                 }
                 FetchError::SubrequestMalformedResponse { service, .. }
                 | FetchError::SubrequestUnexpectedPatchResponse { service }
-                | FetchError::SubrequestWsError { service, .. }
-                | FetchError::CompressionError { service, .. } => {
+                | FetchError::SubrequestWsError { service, .. } => {
                     extensions
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
@@ -177,7 +169,6 @@ impl ErrorExtension for FetchError {
             FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
             FetchError::SubrequestWsError { .. } => "SUBREQUEST_WEBSOCKET_ERROR",
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
-            FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
