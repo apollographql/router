@@ -427,7 +427,6 @@ impl Plugin for AuthenticationPlugin {
                 }
             }
 
-            println!("sources before: {:?}", router_conf.jwt.sources);
             router_conf.jwt.sources.insert(
                 0,
                 Source::Header {
@@ -435,7 +434,6 @@ impl Plugin for AuthenticationPlugin {
                     value_prefix: router_conf.jwt.header_value_prefix.clone(),
                 },
             );
-            println!("sources after: {:?}", router_conf.jwt.sources);
 
             let mut list = vec![];
             for jwks_conf in &router_conf.jwt.jwks {
@@ -548,10 +546,9 @@ fn authenticate(
         ControlFlow::Break(response)
     }
 
-    println!("will extract with sources {:?}", config.sources);
     let mut jwt = None;
     for source in &config.sources {
-        match extract_jwt(&source, request.router_request.headers()) {
+        match extract_jwt(source, request.router_request.headers()) {
             None => continue,
             Some(Err(error)) => {
                 return failure_message(request.context, error, StatusCode::BAD_REQUEST)
@@ -658,8 +655,6 @@ fn extract_jwt<'a, 'b: 'a>(
     source: &'a Source,
     headers: &'b HeaderMap,
 ) -> Option<Result<&'b str, AuthenticationError<'a>>> {
-    println!("will extract with source: {source:?}");
-    println!("headers: {headers:?}");
     match source {
         Source::Header { name, value_prefix } => {
             // The http_request is stored in a `Router::Request` context.
@@ -686,11 +681,11 @@ fn extract_jwt<'a, 'b: 'a>(
             //
             let prefix_len = value_prefix.len();
             if jwt_value.len() < prefix_len
-                || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&value_prefix)
+                || !&jwt_value[..prefix_len].eq_ignore_ascii_case(value_prefix)
             {
                 return Some(Err(AuthenticationError::InvalidPrefix(
                     jwt_value_untrimmed,
-                    &value_prefix,
+                    value_prefix,
                 )));
             }
             // If there's no header prefix, we need to avoid splitting the header
@@ -699,9 +694,10 @@ fn extract_jwt<'a, 'b: 'a>(
                 if jwt_value.contains(' ') {
                     return Some(Err(AuthenticationError::InvalidPrefix(
                         jwt_value_untrimmed,
-                        &value_prefix,
+                        value_prefix,
                     )));
                 }
+
                 // we can simply assign the jwt to the jwt_value; we'll validate down below
                 jwt_value
             } else {
