@@ -8,6 +8,9 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use futures::future::BoxFuture;
+use opentelemetry_api::metrics::MeterProvider as _;
+use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::KeyValue;
 use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
@@ -30,6 +33,7 @@ use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::metrics::meter_provider;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
@@ -62,6 +66,23 @@ pub(crate) struct BridgeQueryPlanner {
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
+    _federation_instrument: ObservableGauge<u64>,
+}
+
+fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
+    meter_provider()
+        .meter("apollo/router")
+        .u64_observable_gauge("apollo.router.supergraph.federation")
+        .with_callback(move |observer| {
+            observer.observe(
+                1,
+                &[KeyValue::new(
+                    "federation.version",
+                    federation_version.unwrap_or(0),
+                )],
+            );
+        })
+        .init()
 }
 
 impl BridgeQueryPlanner {
@@ -70,14 +91,6 @@ impl BridgeQueryPlanner {
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
         let schema = Schema::parse(&sdl, &configuration)?;
-
-        let federation_version = schema.federation_version().unwrap_or(0);
-        u64_counter!(
-            "apollo.router.lifecycle.federation_version",
-            "The federation major version inferred from the supergraph schema",
-            1,
-            "version" = federation_version
-        );
 
         let planner = Planner::new(
             sdl,
@@ -238,12 +251,14 @@ impl BridgeQueryPlanner {
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
+        let federation_instrument = federation_version_instrument(schema.federation_version());
         Ok(Self {
             planner,
             schema,
             introspection,
             enable_authorization_directives,
             configuration,
+            _federation_instrument: federation_instrument,
         })
     }
 
@@ -294,12 +309,14 @@ impl BridgeQueryPlanner {
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
+        let federation_instrument = federation_version_instrument(schema.federation_version());
         Ok(Self {
             planner,
             schema,
             introspection,
             enable_authorization_directives,
             configuration,
+            _federation_instrument: federation_instrument,
         })
     }
 

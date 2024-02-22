@@ -40,6 +40,10 @@ async fn test_metrics_reloading() {
         router.assert_reloaded().await;
     }
 
+    router
+        .assert_metrics_contains(r#"apollo_router_supergraph_federation{federation_version="1",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+
     router.assert_metrics_contains(r#"apollo_router_cache_hit_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#, None).await;
     router.assert_metrics_contains(r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#, None).await;
     router.assert_metrics_contains(r#"apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="100"}"#, None).await;
