@@ -1,0 +1,18 @@
+# Simple config for testing file uploads, including large file uploads
+
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 15gb
+        max_files: 10
+include_subgraph_errors:
+  all: true
+
+# One of the tests uploads 10GB worth of data, so we need a long timeout here
+traffic_shaping:
+  router:
+    timeout: 300s

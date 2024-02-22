@@ -217,7 +217,7 @@ impl PersistedQueryManifestPoller {
                 freeform_graphql_behavior: FreeformGraphQLBehavior::DenyAll { log_unknown: false },
             }));
 
-            let http_client = Client::builder().timeout(uplink_config.timeout).build()
+            let http_client = Client::builder().timeout(uplink_config.timeout).gzip(true).build()
             .map_err(|e| -> BoxError {
                 format!(
                     "could not initialize HTTP client for fetching persisted queries manifest chunks: {}",

@@ -233,6 +233,7 @@ async fn init(
     );
 
     let client = reqwest::Client::builder()
+        .no_gzip()
         .default_headers(default_headers)
         .redirect(Policy::none())
         .build()
@@ -289,6 +290,7 @@ pub(super) async fn init_with_config(
     );
 
     let client = reqwest::Client::builder()
+        .no_gzip()
         .default_headers(default_headers)
         .redirect(Policy::none())
         .build()
