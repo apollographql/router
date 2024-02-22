@@ -376,23 +376,23 @@ impl Plugin for Telemetry {
                                     .on_response(response),
                             );
                             if expose_trace_id.enabled {
-                                if let Some(header_name) = &expose_trace_id.header_name {
-                                    let mut headers: HashMap<String, Vec<String>> =
-                                        HashMap::with_capacity(1);
-                                    if let Some(value) =
-                                        response.response.headers().get(header_name)
-                                    {
-                                        headers.insert(
-                                            header_name.to_string(),
-                                            vec![value.to_str().unwrap_or_default().to_string()],
-                                        );
-                                        let response_headers =
-                                            serde_json::to_string(&headers).unwrap_or_default();
-                                        span.record(
-                                            "apollo_private.http.response_headers",
-                                            &response_headers,
-                                        );
-                                    }
+                                let header_name = expose_trace_id
+                                    .header_name
+                                    .as_ref()
+                                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
+                                let mut headers: HashMap<String, Vec<String>> =
+                                    HashMap::with_capacity(1);
+                                if let Some(value) = response.response.headers().get(header_name) {
+                                    headers.insert(
+                                        header_name.to_string(),
+                                        vec![value.to_str().unwrap_or_default().to_string()],
+                                    );
+                                    let response_headers =
+                                        serde_json::to_string(&headers).unwrap_or_default();
+                                    span.record(
+                                        "apollo_private.http.response_headers",
+                                        &response_headers,
+                                    );
                                 }
                             }
 
