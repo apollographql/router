@@ -705,7 +705,7 @@ impl PluggableSupergraphServiceBuilder {
             &configuration,
             IndexMap::new(),
         )
-        .await;
+        .await?;
 
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.

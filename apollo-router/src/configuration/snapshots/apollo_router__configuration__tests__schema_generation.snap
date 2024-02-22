@@ -93,6 +93,11 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "required_to_start": {
+                      "description": "Prevents the router from starting if it cannot connect to Redis",
+                      "default": false,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -2073,6 +2078,11 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
+            "required_to_start": {
+              "description": "Prevents the router from starting if it cannot connect to Redis",
+              "default": false,
+              "type": "boolean"
+            },
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
               "default": null,
@@ -2551,6 +2561,11 @@ expression: "&schema"
                       "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
                       "nullable": true
+                    },
+                    "required_to_start": {
+                      "description": "Prevents the router from starting if it cannot connect to Redis",
+                      "default": false,
+                      "type": "boolean"
                     },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
