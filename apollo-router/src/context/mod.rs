@@ -335,10 +335,10 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        spec::{Query, Schema},
-        Configuration, Context,
-    };
+    use crate::spec::Query;
+    use crate::spec::Schema;
+    use crate::Configuration;
+    use crate::Context;
 
     #[test]
     fn test_context_insert() {
