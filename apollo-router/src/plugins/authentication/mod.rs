@@ -128,6 +128,9 @@ struct JWTConf {
     /// Header value prefix
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
+    /// Whether to ignore any mismatched prefixes
+    #[serde(default="default_ignore_other_prefixes")]
+    ignore_other_prefixes: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -179,6 +182,10 @@ fn default_header_value_prefix() -> String {
 
 fn default_poll_interval() -> Duration {
     DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
+}
+
+fn default_ignore_other_prefixes() -> bool {
+    false
 }
 
 #[derive(Debug, Default)]
@@ -406,6 +413,7 @@ impl Plugin for AuthenticationPlugin {
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
                     poll_interval: jwks_conf.poll_interval,
+                    
                 });
             }
 
@@ -532,17 +540,29 @@ fn authenticate(
 
     // Make sure the format of our message matches our expectations
     // Technically, the spec is case sensitive, but let's accept
-    // case variations
-    //
+    // case variations. Furthermore, if the user has configured to ignore 
+    // mismatched prefixes, we'll skip this check and instead do it in a 
+    // later step.
     let prefix_len = config.header_value_prefix.len();
-    if jwt_value.len() < prefix_len
-        || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix)
+    if !&config.ignore_other_prefixes && 
+        (jwt_value.len() < prefix_len
+        || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix))
     {
         return failure_message(
             request.context,
             AuthenticationError::InvalidPrefix(jwt_value_untrimmed, &config.header_value_prefix),
             StatusCode::BAD_REQUEST,
         );
+    }
+
+    // Here we'll check if the user has configured to ignore mismatched prefixes
+    // and if so, we'll skip any unknown prefixes and not validate the token.
+    if config.ignore_other_prefixes {
+        if jwt_value.len() < prefix_len
+            || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix)
+        {
+            return ControlFlow::Continue(request);
+        }
     }
 
     // If there's no header prefix, we need to avoid splitting the header

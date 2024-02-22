@@ -133,6 +133,23 @@ The default value is `Bearer`.
 </td>
 </tr>
 
+<tr>
+<td style="min-width: 150px;">
+
+##### `ignore_other_prefixes`
+
+</td>
+<td>
+
+Whether to ignore other prefixes in the `Authorization` header. If set to `false`, the router will only accept tokens with the prefix specified in `header_value_prefix`. If set to `true`, the router will ignore any requests that don't start with the prefix specified in `header_value_prefix`.
+
+If a header prefix is set to an empty string, this option is ignored.
+
+The default value is `false`.
+
+</td>
+</tr>
+
 </tbody>
 </table>
 
