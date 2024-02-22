@@ -25,7 +25,6 @@ use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use rustls::RootCertStore;
-use serde::de::Error;
 use serde::Serialize;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -364,8 +363,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 }
             }
 
-            let client = client_factory.create(&service_name);
-
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
@@ -374,7 +371,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     request,
                     body,
                     context,
-                    client,
                     client_factory.clone(),
                     &service_name,
                 )
@@ -412,7 +408,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 request.clone(),
                 apq_body.clone(),
                 context.clone(),
-                client_factory.create(&service_name),
                 client_factory.clone(),
                 &service_name,
             )
@@ -430,7 +425,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         request,
                         body,
                         context,
-                        client,
                         client_factory.clone(),
                         &service_name,
                     )
@@ -442,7 +436,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         request,
                         apq_body,
                         context,
-                        client,
                         client_factory.clone(),
                         &service_name,
                     )
@@ -664,7 +657,6 @@ async fn call_batched_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
-    client: crate::services::http::BoxService,
     client_factory: crate::services::http::HttpClientServiceFactory,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
@@ -678,9 +670,9 @@ async fn call_batched_http(
     let mut waiters_opt = None;
     if let Some(batching) = context.extensions().lock().get_mut::<BatchQuery>() {
         if !batching.finished() {
-            tracing::info!("in subgraph we have batching: {batching}, service: {service_name}");
+            tracing::debug!("in subgraph we have batching: {batching}, service: {service_name}");
             batching.increment_subgraph_seen();
-            tracing::info!("ready to process batch?: {}", batching.ready());
+            tracing::debug!("ready to process batch?: {}", batching.ready());
             batch_responder = Some(batching.get_waiter(
                 request.clone(),
                 body.clone(),
@@ -691,7 +683,7 @@ async fn call_batched_http(
                 // This is where we start processing our accumulated batch data.
                 // We can't do it whilst holding the context extensions lock, so signal we are
                 // ready to proceed by updating waiters_opt.
-                tracing::info!("Batch data: {batching}");
+                tracing::debug!("Batch data: {batching}");
                 waiters_opt = Some(batching.get_waiters());
             }
         }
@@ -761,12 +753,16 @@ async fn call_batched_http(
                     }
                 }
 
-                tracing::info!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
+                tracing::debug!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
 
-                let value = serde_json::from_slice(&body.unwrap().unwrap())
-                    .map_err(serde_json::Error::custom)?;
+                let value = serde_json::from_slice(&body.unwrap().unwrap()).map_err(|error| {
+                    FetchError::SubrequestMalformedResponse {
+                        service: service.to_string(),
+                        reason: error.to_string(),
+                    }
+                })?;
 
-                tracing::info!("JSON VALUE FROM BODY IS: {value:?}");
+                tracing::debug!("JSON VALUE FROM BODY IS: {value:?}");
 
                 let array = ensure_array!(value).map_err(|error| {
                     FetchError::SubrequestMalformedResponse {
@@ -863,7 +859,7 @@ async fn call_batched_http(
                     graphql_responses.push(graphql_response);
                 }
 
-                tracing::info!("we have a vec of graphql_responses: {graphql_responses:?}");
+                tracing::debug!("we have a vec of graphql_responses: {graphql_responses:?}");
                 for graphql_response in graphql_responses {
                     // Build an http Response
                     let resp = http::Response::builder()
@@ -873,20 +869,20 @@ async fn call_batched_http(
 
                     // *response.headers_mut() = headers.unwrap_or_default();
                     // let resp = http::Response::from_parts(parts, graphql_response);
-                    tracing::info!("we have a resp: {resp:?}");
+                    tracing::debug!("we have a resp: {resp:?}");
                     let subgraph_response =
                         SubgraphResponse::new_from_response(resp, context.clone());
                     match txs.pop() {
                         Some(tx) => {
-                            tx.send(Ok(subgraph_response)).map_err(|_error| {
-                                FetchError::SubrequestMalformedResponse {
+                            tx.send(Ok(subgraph_response)).map_err(|error| {
+                                FetchError::SubrequestBatchingError {
                                     service: service.to_string(),
-                                    reason: "tx send failed".to_string(),
+                                    reason: format!("tx send failed: {error:?}"),
                                 }
                             })?;
                         }
                         None => {
-                            tracing::info!(
+                            tracing::debug!(
                                 "TO PROCESS THIS BATCH WE ISSUE: {do_fetch_count} fetches"
                             );
                             return Ok(subgraph_response);
@@ -895,10 +891,17 @@ async fn call_batched_http(
                 }
             }
         }
-        tracing::info!("WE HAVE A WAITER");
-        receiver.await?
+        tracing::debug!("WE HAVE A WAITER");
+        // If we get an error whilst waiting, then something bad has happened
+        receiver
+            .await
+            .map_err(|err| FetchError::SubrequestBatchingError {
+                service: service_name.to_string(),
+                reason: format!("tx receive failed: {err}"),
+            })?
     } else {
-        tracing::info!("WE CALLED HTTP");
+        tracing::debug!("WE CALLED HTTP");
+        let client = client_factory.create(service_name);
         call_http(request, body, context, client, service_name).await
     }
 }
