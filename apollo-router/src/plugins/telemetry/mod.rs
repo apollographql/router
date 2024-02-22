@@ -379,7 +379,7 @@ impl Plugin for Telemetry {
                                 let header_name = expose_trace_id
                                     .header_name
                                     .as_ref()
-                                    .unwrap_or_else(|| &DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
+                                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
                                 let mut headers: HashMap<String, Vec<String>> =
                                     HashMap::with_capacity(1);
                                 if let Some(value) = response.response.headers().get(header_name) {

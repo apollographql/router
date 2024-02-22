@@ -12,4 +12,4 @@ telemetry:
         enabled: true
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4702
