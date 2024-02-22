@@ -408,7 +408,7 @@ impl From<InstrumentData> for Metrics {
                 .map(|(metric_name, (value, attributes))| {
                     let attributes: Vec<_> = attributes
                         .into_iter()
-                        .map(|(k, v)| KeyValue::new(k.replace("__", "."), v))
+                        .map(|(k, v)| KeyValue::new(k.trim_end_matches("__").replace("__", "."), v))
                         .collect();
                     data.meter
                         .u64_observable_gauge(metric_name)
