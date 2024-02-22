@@ -214,7 +214,7 @@ pub(crate) enum GraphQLValidationMode {
     Both,
 }
 
-/// GraphQL validation modes.
+/// API schema generation modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
@@ -935,9 +935,17 @@ pub(crate) struct RedisCache {
     /// TLS client configuration
     pub(crate) tls: Option<TlsClient>,
 
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
+
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+}
+
+fn default_required_to_start() -> bool {
+    false
 }
 
 fn default_reset_ttl() -> bool {

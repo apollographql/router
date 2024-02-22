@@ -54,7 +54,7 @@ Follow this guide to deploy the Apollo Router using Helm to install the basic ch
 
 Each router chart has a `values.yaml` file with router and deployment settings. The released, unedited file has a few explicit settings, including:
 
-* Default container ports for the router's [HTTP server](../configuration/overview/#listen-address), [health check endpoint](../configuration/health-checks), and [metrics endpoint](../configuration/metrics).
+* Default container ports for the router's [HTTP server](../configuration/overview/#listen-address), [health check endpoint](../configuration/health-checks), and [metrics endpoint](../configuration/telemetry/exporters/metrics/overview).
 * A command-line argument to enable [hot reloading of the router](../configuration/overview/#--hr----hot-reload).
 * A single replica.
 
@@ -146,7 +146,7 @@ helm list --namespace <router-namespace>
 
 ## Deploy with metrics endpoints 
 
-The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](../configuration/metrics). A [basic deployment](#basic-deployment) doesn't enable metrics endpoints, because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
+The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](../configuration/telemetry/exporters/metrics/overview). A [basic deployment](#basic-deployment) doesn't enable metrics endpoints, because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
 
 To enable metrics endpoints in your deployed router through a YAML configuration file:
 

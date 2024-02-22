@@ -46,7 +46,7 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
 pub(crate) struct EntityCache {
-    storage: RedisCacheStorage,
+    storage: Option<RedisCacheStorage>,
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
     metrics: Metrics,
@@ -112,10 +112,24 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
+        let required_to_start = init.config.redis.required_to_start;
         // we need to explicitely disable TTL reset because it is managed directly by this plugin
         let mut redis_config = init.config.redis.clone();
         redis_config.reset_ttl = false;
-        let storage = RedisCacheStorage::new(redis_config).await?;
+        let storage = match RedisCacheStorage::new(redis_config).await {
+            Ok(storage) => Some(storage),
+            Err(e) => {
+                tracing::error!(
+                    cache = "entity",
+                    e,
+                    "could not open connection to Redis for caching",
+                );
+                if required_to_start {
+                    return Err(e);
+                }
+                None
+            }
+        };
 
         Ok(Self {
             storage,
@@ -145,19 +159,18 @@ impl Plugin for EntityCache {
         name: &str,
         mut service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        let storage = self.storage.clone();
+        let storage = match self.storage.clone() {
+            Some(storage) => storage,
+            None => return service,
+        };
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
             (
-                config
-                    .ttl
-                    .clone()
-                    .map(|t| t.0)
-                    .or_else(|| self.storage.ttl()),
+                config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
                 config.enabled.or(self.enabled).unwrap_or(false),
             )
         } else {
-            (self.storage.ttl(), self.enabled.unwrap_or(false))
+            (storage.ttl(), self.enabled.unwrap_or(false))
         };
         let name = name.to_string();
 
@@ -193,7 +206,7 @@ impl EntityCache {
         Self: Sized,
     {
         Ok(Self {
-            storage,
+            storage: Some(storage),
             enabled: Some(true),
             subgraphs: Arc::new(subgraphs),
             metrics: Metrics::default(),

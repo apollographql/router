@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::Planner;
+use tower::BoxError;
 
 use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
@@ -23,14 +24,14 @@ impl Introspection {
     pub(crate) async fn with_capacity(
         planner: Arc<Planner<QueryPlanResult>>,
         capacity: NonZeroUsize,
-    ) -> Self {
-        Self {
-            cache: CacheStorage::new(capacity, None, "introspection").await,
+    ) -> Result<Self, BoxError> {
+        Ok(Self {
+            cache: CacheStorage::new(capacity, None, "introspection").await?,
             planner,
-        }
+        })
     }
 
-    pub(crate) async fn new(planner: Arc<Planner<QueryPlanResult>>) -> Self {
+    pub(crate) async fn new(planner: Arc<Planner<QueryPlanResult>>) -> Result<Self, BoxError> {
         Self::with_capacity(planner, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
     }
 
@@ -38,13 +39,13 @@ impl Introspection {
     pub(crate) async fn from_cache(
         planner: Arc<Planner<QueryPlanResult>>,
         cache: HashMap<String, Response>,
-    ) -> Self {
-        let this = Self::with_capacity(planner, cache.len().try_into().unwrap()).await;
+    ) -> Result<Self, BoxError> {
+        let this = Self::with_capacity(planner, cache.len().try_into().unwrap()).await?;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;
         }
-        this
+        Ok(this)
     }
 
     /// Execute an introspection and cache the response.
@@ -122,7 +123,7 @@ mod introspection_tests {
             .iter()
             .cloned()
             .collect();
-        let introspection = Introspection::from_cache(planner, cache).await;
+        let introspection = Introspection::from_cache(planner, cache).await.unwrap();
 
         assert_eq!(
             expected_data,

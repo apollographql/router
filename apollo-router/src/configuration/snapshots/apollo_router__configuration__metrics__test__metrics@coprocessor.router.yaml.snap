@@ -7,10 +7,9 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.router.request.: true
-          opt.router.response.: true
-          opt.subgraph.request.: true
-          opt.subgraph.response.: true
-          opt.supergraph.request.: true
-          opt.supergraph.response.: true
-
+          opt.router.request: true
+          opt.router.response: true
+          opt.subgraph.request: true
+          opt.subgraph.response: true
+          opt.supergraph.request: true
+          opt.supergraph.response: true
