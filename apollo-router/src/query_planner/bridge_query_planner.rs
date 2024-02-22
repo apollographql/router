@@ -562,12 +562,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
-                    let executable = modified_query
+                    let executable_document = modified_query
                         .to_executable(schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .unwrap_or_else(|invalid| invalid.partial);
                     doc = Arc::new(ParsedDocumentInner {
-                        executable,
+                        executable: Arc::new(executable_document),
                         ast: modified_query,
                         // Carry errors from previous ParsedDocument
                         // and assume transformation doesn’t introduce new errors.
@@ -682,12 +682,12 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
-            let executable = new_doc
+            let executable_document = new_doc
                 .to_executable(&self.schema.api_schema().definitions)
                 // Assume transformation creates a valid document: ignore conversion errors
                 .unwrap_or_else(|invalid| invalid.partial);
             doc = Arc::new(ParsedDocumentInner {
-                executable,
+                executable: Arc::new(executable_document),
                 ast: new_doc,
                 // Carry errors from previous ParsedDocument
                 // and assume transformation doesn’t introduce new errors.
