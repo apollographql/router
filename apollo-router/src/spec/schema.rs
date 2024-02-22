@@ -222,6 +222,41 @@ impl Schema {
         }
     }
 
+    /// Return the federation major version based on the @link or @core directives in the schema,
+    /// or None if there are no federation directives.
+    pub(crate) fn federation_version(&self) -> Option<i64> {
+        for directive in &self.definitions.schema_definition.directives {
+            let join_url = if directive.name == "core" {
+                let Some(feature) = directive
+                    .argument_by_name("feature")
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+
+                feature
+            } else if directive.name == "link" {
+                let Some(url) = directive
+                    .argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+
+                url
+            } else {
+                continue;
+            };
+
+            match join_url.rsplit_once("/v") {
+                Some(("https://specs.apollo.dev/join", "0.1")) => return Some(1),
+                Some(("https://specs.apollo.dev/join", _)) => return Some(2),
+                _ => {}
+            }
+        }
+        None
+    }
+
     pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
         self.definitions
             .schema_definition
@@ -488,6 +523,25 @@ mod tests {
         };
         assert!(has_in_stock_field(&schema));
         assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
+    }
+
+    #[test]
+    fn federation_version() {
+        // @core directive
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(schema.federation_version(), Some(1));
+
+        // @link directive
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(schema.federation_version(), Some(2));
     }
 
     #[test]

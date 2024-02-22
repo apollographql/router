@@ -64,7 +64,6 @@ use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
-use crate::services::SubgraphService;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -472,7 +471,7 @@ async fn subscription_task(
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
                     let plugins = match create_plugins(&conf, &execution_service_factory.schema, None, None).await {
-                        Ok(plugins) => plugins,
+                        Ok(plugins) => Arc::new(plugins),
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
                             break;
@@ -486,7 +485,6 @@ async fn subscription_task(
                         },
                     };
 
-                    let plugins = Arc::new(IndexMap::from_iter(plugins));
                     execution_service_factory = ExecutionServiceFactory {
                         schema: execution_service_factory.schema.clone(),
                         plugins: plugins.clone(),
@@ -651,7 +649,7 @@ fn clone_supergraph_request(
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
-    plugins: Plugins,
+    plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
     planner: BridgeQueryPlanner,
@@ -660,19 +658,18 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
 impl PluggableSupergraphServiceBuilder {
     pub(crate) fn new(planner: BridgeQueryPlanner) -> Self {
         Self {
-            plugins: Default::default(),
+            plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
             configuration: None,
             planner,
         }
     }
 
-    pub(crate) fn with_dyn_plugin(
+    pub(crate) fn with_plugins(
         mut self,
-        plugin_name: String,
-        plugin: Box<dyn DynPlugin>,
+        plugins: Arc<Plugins>,
     ) -> PluggableSupergraphServiceBuilder {
-        self.plugins.insert(plugin_name, plugin);
+        self.plugins = plugins;
         self
     }
 
@@ -697,9 +694,7 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) async fn build(
-        mut self,
-    ) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
+    pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
         let schema = self.planner.schema();
@@ -711,37 +706,35 @@ impl PluggableSupergraphServiceBuilder {
         )
         .await;
 
-        let mut plugins = self.plugins;
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
-        for (_, plugin) in plugins.iter_mut() {
-            if let Some(telemetry) = plugin.as_any_mut().downcast_mut::<Telemetry>() {
+        for (_, plugin) in self.plugins.iter() {
+            if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
                 telemetry.activate();
             }
         }
 
-        let plugins = Arc::new(plugins);
-        for (_, service) in self.subgraph_services.iter_mut() {
+        /*for (_, service) in self.subgraph_services.iter_mut() {
             if let Some(subgraph) =
                 (service as &mut dyn std::any::Any).downcast_mut::<SubgraphService>()
             {
                 subgraph.client_factory.plugins = plugins.clone();
             }
-        }
+        }*/
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services
                 .into_iter()
                 .map(|(name, service)| (name, service.into()))
                 .collect(),
-            plugins.clone(),
+            self.plugins.clone(),
         ));
 
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_service_factory,
             schema,
-            plugins,
+            plugins: self.plugins,
             config: configuration,
         })
     }

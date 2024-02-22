@@ -64,6 +64,14 @@ impl BridgeQueryPlanner {
     ) -> Result<Self, ServiceBuildError> {
         let schema = Schema::parse(&sdl)?;
 
+        let federation_version = schema.federation_version().unwrap_or(0);
+        u64_counter!(
+            "apollo.router.lifecycle.federation_version",
+            "The federation major version inferred from the supergraph schema",
+            1,
+            "version" = federation_version
+        );
+
         let planner = Planner::new(
             sdl,
             QueryPlannerConfig {

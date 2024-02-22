@@ -2,6 +2,9 @@ use std::convert::Infallible;
 use std::io;
 use std::net::TcpListener;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
@@ -26,6 +29,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
 use tower::service_fn;
+use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::configuration::load_certs;
@@ -33,11 +37,15 @@ use crate::configuration::load_key;
 use crate::configuration::TlsClient;
 use crate::configuration::TlsClientAuth;
 use crate::graphql::Response;
+use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
+use crate::services::supergraph;
 use crate::Configuration;
 use crate::Context;
+use crate::TestHarness;
 
 async fn tls_server(
     listener: tokio::net::TcpListener,
@@ -442,4 +450,103 @@ async fn test_compressed_request_response_body() {
         .unwrap(),
         r#"{"data":"test"}"#
     );
+}
+
+const SCHEMA: &str = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+         {
+        query: Query
+        subscription: Subscription
+   }
+   directive @core(feature: String!) repeatable on SCHEMA
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   scalar join__FieldSet
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+   type Query {
+       currentUser: User @join__field(graph: USER)
+   }
+
+   type Subscription @join__type(graph: USER) {
+        userWasCreated: User
+   }
+
+   type User
+   @join__owner(graph: USER)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id"){
+       id: ID!
+       name: String
+       activeOrganization: Organization
+   }
+   type Organization
+   @join__owner(graph: ORGA)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id") {
+       id: ID
+       creatorUser: User
+       name: String
+       nonNullId: ID!
+       suborga: [Organization]
+   }"#;
+
+struct TestPlugin {
+    started: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl PluginPrivate for TestPlugin {
+    type Config = ();
+
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        self.started.store(true, Ordering::Release);
+        service
+    }
+
+    async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Err("error".to_string().into())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_http_plugin_is_loaded() {
+    let started = Arc::new(AtomicBool::new(false));
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(TestPlugin {
+            started: started.clone(),
+        })
+        .with_subgraph_network_requests()
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(r#"query { currentUser { id } }"#)
+        .build()
+        .unwrap();
+    let _response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    assert!(started.load(Ordering::Acquire));
 }
