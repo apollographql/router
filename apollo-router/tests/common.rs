@@ -67,6 +67,8 @@ pub struct IntegrationTest {
     supergraph: PathBuf,
     _subgraphs: wiremock::MockServer,
     subscriber: Option<Dispatch>,
+
+    _bind_addr: SocketAddr,
 }
 
 struct TracedResponder(pub(crate) ResponseTemplate);
@@ -146,6 +148,38 @@ impl IntegrationTest {
             }
         }
 
+        // Bind to a random port
+        // Note: This might still fail if a different process binds to the port found here
+        // before the router is started.
+        // Note: We need the nested scope so that the listener gets dropped once its address
+        // is resolved.
+        let addr = {
+            let bound = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+            bound.local_addr().unwrap()
+        };
+        match config
+            .as_object_mut()
+            .and_then(|o| o.get_mut("supergraph"))
+            .and_then(|o| o.as_object_mut())
+        {
+            None => {
+                if let Some(o) = config.as_object_mut() {
+                    o.insert(
+                        "supergraph".to_string(),
+                        serde_json::json!({
+                            "listen": addr.to_string(),
+                        }),
+                    );
+                }
+            }
+            Some(supergraph_conf) => {
+                supergraph_conf.insert(
+                    "listen".to_string(),
+                    serde_json::Value::String(addr.to_string()),
+                );
+            }
+        }
+
         let config_str = serde_yaml::to_string(&config).unwrap();
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
@@ -186,6 +220,7 @@ impl IntegrationTest {
             supergraph,
             _subgraphs: subgraphs,
             subscriber,
+            _bind_addr: addr,
         }
     }
 
@@ -412,6 +447,8 @@ impl IntegrationTest {
         );
         let dispatch = self.subscriber.clone();
         let query = query.clone();
+        let url = format!("http://{}", self._bind_addr);
+
         async move {
             let span = info_span!("client_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
@@ -420,7 +457,7 @@ impl IntegrationTest {
                 let client = reqwest::Client::new();
 
                 let mut request = client
-                    .post("http://localhost:4000")
+                    .post(url)
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
                     .header("apollographql-client-name", "custom_name")
@@ -460,12 +497,13 @@ impl IntegrationTest {
         );
         let query = query.clone();
         let dispatch = self.subscriber.clone();
+        let url = format!("http://{}", self._bind_addr);
 
         async move {
             let client = reqwest::Client::new();
 
             let mut request = client
-                .post("http://localhost:4000")
+                .post(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
@@ -507,6 +545,7 @@ impl IntegrationTest {
         );
 
         let dispatch = self.subscriber.clone();
+        let url = format!("http://{}", self._bind_addr);
         async move {
             let span = info_span!("client_raw_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
@@ -521,7 +560,7 @@ impl IntegrationTest {
                 };
 
                 let mut request = client
-                    .post("http://localhost:4000")
+                    .post(url)
                     .header(CONTENT_TYPE, mime.to_string())
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
@@ -565,7 +604,7 @@ impl IntegrationTest {
         let _span_guard = span.enter();
 
         let mut request = client
-            .post("http://localhost:4000")
+            .post(format!("http://{}", self._bind_addr))
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
             .header("apollographql-client-name", "custom_name")
@@ -594,7 +633,7 @@ impl IntegrationTest {
         let client = reqwest::Client::new();
 
         let request = client
-            .get("http://localhost:4000/metrics")
+            .get(format!("http://{}/metrics", self._bind_addr))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .build()
