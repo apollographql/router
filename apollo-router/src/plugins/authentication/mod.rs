@@ -129,7 +129,7 @@ struct JWTConf {
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
     /// Whether to ignore any mismatched prefixes
-    #[serde(default="default_ignore_other_prefixes")]
+    #[serde(default = "default_ignore_other_prefixes")]
     ignore_other_prefixes: bool,
 }
 
@@ -413,7 +413,6 @@ impl Plugin for AuthenticationPlugin {
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
                     poll_interval: jwks_conf.poll_interval,
-                    
                 });
             }
 
@@ -540,13 +539,13 @@ fn authenticate(
 
     // Make sure the format of our message matches our expectations
     // Technically, the spec is case sensitive, but let's accept
-    // case variations. Furthermore, if the user has configured to ignore 
-    // mismatched prefixes, we'll skip this check and instead do it in a 
+    // case variations. Furthermore, if the user has configured to ignore
+    // mismatched prefixes, we'll skip this check and instead do it in a
     // later step.
     let prefix_len = config.header_value_prefix.len();
-    if !&config.ignore_other_prefixes && 
-        (jwt_value.len() < prefix_len
-        || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix))
+    if !&config.ignore_other_prefixes
+        && (jwt_value.len() < prefix_len
+            || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix))
     {
         return failure_message(
             request.context,

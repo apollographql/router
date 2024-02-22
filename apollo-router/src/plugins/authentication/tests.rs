@@ -43,7 +43,7 @@ async fn build_a_test_harness(
     header_name: Option<String>,
     header_value_prefix: Option<String>,
     multiple_jwks: bool,
-    ignore_other_prefixes: Option<bool>
+    ignore_other_prefixes: Option<bool>,
 ) -> router::BoxCloneService {
     // create a mock service we will use to test our plugin
     let mut mock_service = test::MockSupergraphService::new();
@@ -435,13 +435,10 @@ async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
     let test_harness = build_a_test_harness(None, None, true, Some(true)).await;
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
-            .header(
-                http::header::AUTHORIZATION,
-                "Basic dXNlcjpwYXNzd29yZA==",
-            )
-            .build()
-            .unwrap();
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
+        .build()
+        .unwrap();
 
     // ...And call our service stack with it
     let mut service_response = test_harness
@@ -627,7 +624,8 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-    let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false, None).await;
+    let _test_harness =
+        build_a_test_harness(None, Some("SOMET HING".to_string()), false, None).await;
 }
 
 #[tokio::test]
