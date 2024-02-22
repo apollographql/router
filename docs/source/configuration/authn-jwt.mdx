@@ -55,7 +55,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
             - type: header
               name: X-Authorization
               value_prefix: Bearer
-            - cookie:
+            - type: cookie
               name: authz
     ```
 
@@ -155,7 +155,7 @@ This is an array of possible token sources, as it could be provided in different
             - type: header
               name: X-Authorization
               value_prefix: Bearer
-            - cookie:
+            - type: cookie
               name: authz
 ```
 
