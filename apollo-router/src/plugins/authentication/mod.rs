@@ -156,28 +156,20 @@ struct JwksConf {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "lowercase", tag = "type")]
 enum Source {
-    Header(HeaderSource),
-    Cookie(CookieSource),
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
-#[serde(deny_unknown_fields)]
-struct HeaderSource {
-    /// HTTP header expected to contain JWT
-    #[serde(default = "default_header_name")]
-    name: String,
-    /// Header value prefix
-    #[serde(default = "default_header_value_prefix")]
-    value_prefix: String,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
-#[serde(deny_unknown_fields)]
-struct CookieSource {
-    /// Name of the cookie containing the JWT
-    name: String,
+    Header {
+        /// HTTP header expected to contain JWT
+        #[serde(default = "default_header_name")]
+        name: String,
+        /// Header value prefix
+        #[serde(default = "default_header_value_prefix")]
+        value_prefix: String,
+    },
+    Cookie {
+        /// Name of the cookie containing the JWT
+        name: String,
+    },
 }
 
 /// Authentication
@@ -428,13 +420,8 @@ impl Plugin for AuthenticationPlugin {
             }
 
             for source in &router_conf.jwt.sources {
-                if let Source::Header(header) = source {
-                    if header
-                        .value_prefix
-                        .as_bytes()
-                        .iter()
-                        .any(u8::is_ascii_whitespace)
-                    {
+                if let Source::Header { value_prefix, .. } = source {
+                    if value_prefix.as_bytes().iter().any(u8::is_ascii_whitespace) {
                         return Err(Error::BadHeaderValuePrefix.into());
                     }
                 }
@@ -443,10 +430,10 @@ impl Plugin for AuthenticationPlugin {
             println!("sources before: {:?}", router_conf.jwt.sources);
             router_conf.jwt.sources.insert(
                 0,
-                Source::Header(HeaderSource {
+                Source::Header {
                     name: router_conf.jwt.header_name.clone(),
                     value_prefix: router_conf.jwt.header_value_prefix.clone(),
-                }),
+                },
             );
             println!("sources after: {:?}", router_conf.jwt.sources);
 
@@ -674,10 +661,10 @@ fn extract_jwt<'a, 'b: 'a>(
     println!("will extract with source: {source:?}");
     println!("headers: {headers:?}");
     match source {
-        Source::Header(header) => {
+        Source::Header { name, value_prefix } => {
             // The http_request is stored in a `Router::Request` context.
             // We are going to check the headers for the presence of the configured header
-            let jwt_value_result = match headers.get(&header.name) {
+            let jwt_value_result = match headers.get(name) {
                 Some(value) => value.to_str(),
                 None => return None,
             };
@@ -697,22 +684,22 @@ fn extract_jwt<'a, 'b: 'a>(
             // Technically, the spec is case sensitive, but let's accept
             // case variations
             //
-            let prefix_len = header.value_prefix.len();
+            let prefix_len = value_prefix.len();
             if jwt_value.len() < prefix_len
-                || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&header.value_prefix)
+                || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&value_prefix)
             {
                 return Some(Err(AuthenticationError::InvalidPrefix(
                     jwt_value_untrimmed,
-                    &header.value_prefix,
+                    &value_prefix,
                 )));
             }
             // If there's no header prefix, we need to avoid splitting the header
-            let jwt = if header.value_prefix.is_empty() {
+            let jwt = if value_prefix.is_empty() {
                 // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
                 if jwt_value.contains(' ') {
                     return Some(Err(AuthenticationError::InvalidPrefix(
                         jwt_value_untrimmed,
-                        &header.value_prefix,
+                        &value_prefix,
                     )));
                 }
                 // we can simply assign the jwt to the jwt_value; we'll validate down below
@@ -729,7 +716,7 @@ fn extract_jwt<'a, 'b: 'a>(
             };
             Some(Ok(jwt))
         }
-        Source::Cookie(cookie_source) => {
+        Source::Cookie { name } => {
             for header in headers.get_all("cookie") {
                 let value = match header.to_str() {
                     Ok(value) => value,
@@ -741,7 +728,7 @@ fn extract_jwt<'a, 'b: 'a>(
                     match cookie {
                         Err(_) => continue,
                         Ok(cookie) => {
-                            if cookie.name() == cookie_source.name {
+                            if cookie.name() == name {
                                 if let Some(value) = cookie.value_raw() {
                                     return Some(Ok(value));
                                 }
