@@ -556,12 +556,11 @@ fn authenticate(
 
     // Here we'll check if the user has configured to ignore mismatched prefixes
     // and if so, we'll skip any unknown prefixes and not validate the token.
-    if config.ignore_other_prefixes {
-        if jwt_value.len() < prefix_len
-            || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix)
-        {
-            return ControlFlow::Continue(request);
-        }
+    if config.ignore_other_prefixes
+        && (jwt_value.len() < prefix_len
+            || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix))
+    {
+        return ControlFlow::Continue(request);
     }
 
     // If there's no header prefix, we need to avoid splitting the header
