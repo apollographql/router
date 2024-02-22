@@ -15,6 +15,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
@@ -254,7 +255,10 @@ impl InnerCacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
-                match cache_lookup_root(self.name, self.storage.clone(), request).await? {
+                match cache_lookup_root(self.name, self.storage.clone(), request)
+                    .instrument(tracing::info_span!("cache_lookup"))
+                    .await?
+                {
                     ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, root_cache_key)) => {
                         let response = self.service.call(request).await?;
@@ -279,7 +283,10 @@ impl InnerCacheService {
                 self.service.call(request).await
             }
         } else {
-            match cache_lookup_entities(self.name, self.storage.clone(), request).await? {
+            match cache_lookup_entities(self.name, self.storage.clone(), request)
+                .instrument(tracing::info_span!("cache_lookup"))
+                .await?
+            {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
@@ -428,16 +435,21 @@ async fn cache_store_root_from_response(
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            cache
-                .insert(
-                    RedisKey(cache_key),
-                    RedisValue(CacheEntry {
-                        control: cache_control,
-                        data: data.clone(),
-                    }),
-                    ttl,
-                )
-                .await;
+            let span = tracing::info_span!("cache_store");
+            let data = data.clone();
+            tokio::spawn(async move {
+                cache
+                    .insert(
+                        RedisKey(cache_key),
+                        RedisValue(CacheEntry {
+                            control: cache_control,
+                            data,
+                        }),
+                        ttl,
+                    )
+                    .instrument(span)
+                    .await;
+            });
         }
     }
 
@@ -467,7 +479,7 @@ async fn cache_store_entities_from_response(
                     reason: "expected an array of entities".to_string(),
                 })?,
             &response.response.body().errors,
-            &cache,
+            cache,
             subgraph_ttl,
             cache_control,
             &mut result_from_cache,
@@ -719,7 +731,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: &RedisCacheStorage,
+    cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -801,7 +813,14 @@ async fn insert_entities_in_result(
     }
 
     if !to_insert.is_empty() {
-        cache.insert_multiple(&to_insert, ttl).await;
+        let span = tracing::info_span!("cache_store");
+
+        tokio::spawn(async move {
+            cache
+                .insert_multiple(&to_insert, ttl)
+                .instrument(span)
+                .await;
+        });
     }
 
     for (ty, nb) in inserted_types {
