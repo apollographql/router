@@ -1,6 +1,6 @@
 ---
-title: Configure subscription support
-subtitle: Enable clients to receive real-time updates whenever new data becomes available
+title: Configure GraphQL subscription support
+subtitle: Enable clients to receive real-time updates
 description: Configure your router to support GraphQL subscriptions, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
 minVersion: 1.22.0
 ---
@@ -9,7 +9,7 @@ minVersion: 1.22.0
 
 **For self-hosted routers, subscription support is an [Enterprise feature](../enterprise-features/).**
 
-Subscription support is also available for routers in cloud supergraphs with a GraphOS Serverless or Dedicated plan. For cloud supergraphs, refer to [the cloud-specific docs](/graphos/operations/subscriptions).
+Subscription support is also available for cloud routers with a GraphOS Serverless or Dedicated plan. For cloud router subscription information, refer to [the cloud-specific docs](/graphos/operations/subscriptions).
 
 </PremiumFeature>
 
@@ -34,59 +34,11 @@ type Subscription {
 
 ## What are subscriptions for?
 
-GraphQL subscriptions enable clients to receive continual, real-time updates whenever new data becomes available. Unlike queries and mutations, subscriptions are _long-lasting_. This means a client can receive multiple updates from a single subscription:
+<WhatSubscriptionsAreFor />
 
-```mermaid
-sequenceDiagram
-    participant Client as GraphQL Client
-    participant Router as Apollo Router
-    Client->>Router: Initiates subscription
-    Note over Router: New data available
-    Router->>Client: Sends new data
-    Note over Router: New data available
-    Router->>Client: Sends new data
-```
+## How subscriptions work
 
-Subscriptions are best suited to apps that rely on frequently-changing, time-sensitive data (such as stock prices, IoT sensor readings, live chat, or sports scores).
-
-## How it works
-
-```mermaid
-flowchart LR;
-  client(Client);
-  subgraph "<b>Your infrastructure</b>";
-  router(["Apollo<br/>Router"]);
-  subgraphA[Stocks<br/>subgraph];
-  subgraphB[Portfolios<br/>subgraph];
-  router-->|"Subscribes<br/>over WebSocket<br/>(or via callback)"|subgraphA;
-  router-.->|Can query for<br/>entity fields<br/>as needed|subgraphB;
-  end;
-  client-->|Subscribes<br/>over HTTP|router;
-  class client secondary;
-```
-
-1. A client executes a GraphQL subscription operation against your self-hosted router _over HTTP:_
-
-    ```graphql title="Example subscription"
-    subscription OnStockPricesChanged {
-      stockPricesChanged {
-        symbol
-        price
-      }
-    }
-    ```
-
-   - **The client does _not_ use a WebSocket protocol.** Instead, it receives updates via [multipart HTTP responses](./subscription-multipart-protocol/).
-   - By using HTTP for subscriptions, clients can execute _all_ GraphQL operation types over HTTP instead of using two different protocols.
-   - [Apollo Client](/react/data/subscriptions#http), [Apollo Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [Apollo iOS](/ios/fetching/subscriptions#http) all support GraphQL subscriptions over HTTP with minimal configuration. See each library's documentation for details. Apollo Client also provides network adapters for the [Relay](/react/data/subscriptions#relay) and [urql](/react/data/subscriptions#urql) libraries.
-
-2. When your router receives a subscription, it executes that _same_ subscription against whichever subgraph defines the requested field (`stockPricesChanged` in the example above).
-
-   - This communication usually _does_ use [a WebSocket subprotocol](#websocket-setup), for compatibility with most subgraph libraries.
-   - An HTTP-callback-based protocol is also available. See [HTTP callback setup](#http-callback-setup).
-
-3. The subgraph periodically sends new data to your router. Whenever it does, the router returns that data to the client in an additional HTTP response "chunk".
-   - A subscription can include federated entity fields that are defined in _other_ subgraphs. If it does, the router _first_ fetches those fields by querying the corresponding subgraphs (such as **Portfolios** in the diagram above). These queries use HTTP as usual.
+<HowSubscriptionsWork />
 
 > [Walk through an example.](#example-execution)
 
