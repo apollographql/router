@@ -150,6 +150,8 @@ This is an array of possible token sources, as it could be provided in different
 ```yaml title="router.yaml"
     authentication:
       router:
+        jwks:
+          - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
         jwt:
           sources:
             - type: header
