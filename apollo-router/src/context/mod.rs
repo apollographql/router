@@ -335,7 +335,10 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
-    use crate::Context;
+    use crate::{
+        spec::{Query, Schema},
+        Configuration, Context,
+    };
 
     #[test]
     fn test_context_insert() {
@@ -409,17 +412,34 @@ mod test {
         assert_eq!(v, Some(&1usize));
     }
 
-    /*fix this low effort test later
     #[test]
     fn test_executable_document_access() {
         let c = Context::new();
+        let schema = r#"
+        schema
+          @core(feature: "https://specs.apollo.dev/core/v0.1"),
+          @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+          query: Query
+        }
+        type Query {
+          me: String
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
+            INVENTORY
+              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
+            PRODUCTS
+            @join__graph(name: "products" url: "http://localhost:4003/graphql")
+            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
+        }"#;
+        let schema = Schema::parse_test(schema).unwrap();
+        let document = Query::parse_document("{ me }", &schema, &Configuration::default()).unwrap();
         assert!(c.unsupported_executable_document().is_none());
-        c.extensions().lock().insert(Arc::new(
-            crate::services::layers::query_analysis::ParsedDocumentInner {
-                ast: Default::default(),
-                executable: Default::default(),
-            },
-        ));
+        c.extensions().lock().insert(document);
         assert!(c.unsupported_executable_document().is_some());
-    }*/
+    }
 }

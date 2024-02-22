@@ -528,19 +528,14 @@ mod tests {
     #[test]
     fn federation_version() {
         // @core directive
-        let schema = Schema::parse_test(
-            include_str!("../testdata/minimal_supergraph.graphql"),
-            &Default::default(),
-        )
-        .unwrap();
+        let schema =
+            Schema::parse_test(include_str!("../testdata/minimal_supergraph.graphql")).unwrap();
         assert_eq!(schema.federation_version(), Some(1));
 
         // @link directive
-        let schema = Schema::parse_test(
-            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
-            &Default::default(),
-        )
-        .unwrap();
+        let schema =
+            Schema::parse_test(include_str!("../testdata/minimal_fed2_supergraph.graphql"))
+                .unwrap();
         assert_eq!(schema.federation_version(), Some(2));
     }
 
