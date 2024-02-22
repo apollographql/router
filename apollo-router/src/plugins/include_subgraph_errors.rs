@@ -195,18 +195,16 @@ mod test {
             .unwrap();
         let schema = planner.schema();
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(planner);
+        let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let plugins = create_plugins(&Configuration::default(), &schema, None, None)
+        let mut plugins = create_plugins(&Configuration::default(), &schema, None, None)
             .await
             .unwrap();
 
-        for (name, plugin) in plugins.into_iter() {
-            builder = builder.with_dyn_plugin(name, plugin);
-        }
+        plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
         let builder = builder
-            .with_dyn_plugin("apollo.include_subgraph_errors".to_string(), plugin)
+            .with_plugins(Arc::new(plugins))
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
