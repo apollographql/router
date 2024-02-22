@@ -921,6 +921,10 @@ pub(crate) struct QueryPlanRedisCache {
     #[serde(default)]
     /// TLS client configuration
     pub(crate) tls: Option<TlsClient>,
+
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
 }
 
 fn default_query_plan_cache_ttl() -> Duration {
@@ -1011,6 +1015,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             ttl: Some(value.ttl),
             namespace: value.namespace,
             tls: value.tls,
+            required_to_start: value.required_to_start,
         }
     }
 }
