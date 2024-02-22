@@ -5,7 +5,7 @@ description: Customize your router's behavior in any language
 
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-<EnterpriseFeature />
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 With **external coprocessing**, you can hook into the Apollo Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 
@@ -272,7 +272,8 @@ Properties of the JSON body are divided into two high-level categories:
   },
   "body": {
     "query": "query Long {\n  me {\n  name\n}\n}",
-    "operationName": "MyQuery"
+    "operationName": "MyQuery",
+    "variables": {}
   },
   "context": {
     "entries": {
@@ -1054,7 +1055,7 @@ If you return a successful response, make sure the structure of the `data` prope
 
 ### Failed responses
 
-Your router considers all of the following scenarios to be a **failed response** from your coprocessor:
+If a request to a coprocessor results in a **failed response**, which is seperate from a **control break**, the Router will return an error to the client making the supergraph request. The router considers all of the following scenarios to be a **failed response** from your coprocessor:
 
 - Your coprocessor doesn't respond within the amount of time specified by the `timeout` key in your [configuration](#typical-configuration) (default one second).
 - Your coprocessor responds with a non-`2xx` HTTP code.

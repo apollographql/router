@@ -38,6 +38,7 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
@@ -163,6 +164,10 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
 
+    activation: Mutex<TelemetryActivation>,
+}
+
+struct TelemetryActivation {
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
     public_meter_provider: Option<FilterMeterProvider>,
@@ -207,14 +212,17 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
+        let mut activation = self.activation.lock();
         let metrics_providers: [Option<FilterMeterProvider>; 3] = [
-            self.private_meter_provider.take(),
-            self.public_meter_provider.take(),
-            self.public_prometheus_meter_provider.take(),
+            activation.private_meter_provider.take(),
+            activation.public_meter_provider.take(),
+            activation.public_prometheus_meter_provider.take(),
         ];
-        Self::checked_meter_shutdown(metrics_providers);
+        let tracer_provider = activation.tracer_provider.take();
+        drop(activation);
+        TelemetryActivation::checked_meter_shutdown(metrics_providers);
 
-        if let Some(tracer_provider) = self.tracer_provider.take() {
+        if let Some(tracer_provider) = tracer_provider {
             Self::checked_tracer_shutdown(tracer_provider);
         }
     }
@@ -246,19 +254,21 @@ impl Plugin for Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
-            tracer_provider: Some(tracer_provider),
-            public_meter_provider: Some(FilterMeterProvider::public(
-                metrics_builder.public_meter_provider_builder.build(),
-            )),
-            private_meter_provider: Some(FilterMeterProvider::private(
-                metrics_builder.apollo_meter_provider_builder.build(),
-            )),
-            public_prometheus_meter_provider: metrics_builder
-                .prometheus_meter_provider
-                .map(FilterMeterProvider::public),
+            activation: Mutex::new(TelemetryActivation {
+                tracer_provider: Some(tracer_provider),
+                public_meter_provider: Some(FilterMeterProvider::public(
+                    metrics_builder.public_meter_provider_builder.build(),
+                )),
+                private_meter_provider: Some(FilterMeterProvider::private(
+                    metrics_builder.apollo_meter_provider_builder.build(),
+                )),
+                public_prometheus_meter_provider: metrics_builder
+                    .prometheus_meter_provider
+                    .map(FilterMeterProvider::public),
+                is_active: false,
+            }),
             sampling_filter_ratio,
             config: Arc::new(config),
-            is_active: false,
         })
     }
 
@@ -376,23 +386,23 @@ impl Plugin for Telemetry {
                                     .on_response(response),
                             );
                             if expose_trace_id.enabled {
-                                if let Some(header_name) = &expose_trace_id.header_name {
-                                    let mut headers: HashMap<String, Vec<String>> =
-                                        HashMap::with_capacity(1);
-                                    if let Some(value) =
-                                        response.response.headers().get(header_name)
-                                    {
-                                        headers.insert(
-                                            header_name.to_string(),
-                                            vec![value.to_str().unwrap_or_default().to_string()],
-                                        );
-                                        let response_headers =
-                                            serde_json::to_string(&headers).unwrap_or_default();
-                                        span.record(
-                                            "apollo_private.http.response_headers",
-                                            &response_headers,
-                                        );
-                                    }
+                                let header_name = expose_trace_id
+                                    .header_name
+                                    .as_ref()
+                                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
+                                let mut headers: HashMap<String, Vec<String>> =
+                                    HashMap::with_capacity(1);
+                                if let Some(value) = response.response.headers().get(header_name) {
+                                    headers.insert(
+                                        header_name.to_string(),
+                                        vec![value.to_str().unwrap_or_default().to_string()],
+                                    );
+                                    let response_headers =
+                                        serde_json::to_string(&headers).unwrap_or_default();
+                                    span.record(
+                                        "apollo_private.http.response_headers",
+                                        &response_headers,
+                                    );
                                 }
                             }
 
@@ -630,8 +640,9 @@ impl Plugin for Telemetry {
 }
 
 impl Telemetry {
-    pub(crate) fn activate(&mut self) {
-        if self.is_active {
+    pub(crate) fn activate(&self) {
+        let mut activation = self.activation.lock();
+        if activation.is_active {
             return;
         }
 
@@ -644,7 +655,7 @@ impl Telemetry {
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
             // activate is infallible, so if we get here we know the new pipeline is ready to go.
-            let tracer_provider = self
+            let tracer_provider = activation
                 .tracer_provider
                 .take()
                 .expect("must have new tracer_provider");
@@ -664,10 +675,10 @@ impl Telemetry {
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
 
-        self.reload_metrics();
+        activation.reload_metrics();
 
         reload_fmt(create_fmt_layer(&self.config));
-        self.is_active = true;
+        activation.is_active = true;
     }
 
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
@@ -1464,39 +1475,6 @@ impl Telemetry {
         }
     }
 
-    fn reload_metrics(&mut self) {
-        let meter_provider = meter_provider();
-        commit_prometheus();
-        let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
-
-        old_meter_providers[0] = meter_provider.set(
-            MeterProviderType::PublicPrometheus,
-            self.public_prometheus_meter_provider.take(),
-        );
-
-        old_meter_providers[1] = meter_provider.set(
-            MeterProviderType::Apollo,
-            self.private_meter_provider.take(),
-        );
-
-        old_meter_providers[2] =
-            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        metrics_layer().clear();
-
-        Self::checked_meter_shutdown(old_meter_providers);
-    }
-
-    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 3]) {
-        for meter_provider in meters.into_iter().flatten() {
-            Self::checked_spawn_task(Box::new(move || {
-                if let Err(e) = meter_provider.shutdown() {
-                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
-                }
-            }));
-        }
-    }
-
     fn checked_tracer_shutdown(tracer_provider: opentelemetry::sdk::trace::TracerProvider) {
         Self::checked_spawn_task(Box::new(move || {
             drop(tracer_provider);
@@ -1529,6 +1507,41 @@ impl Telemetry {
             Err(_err) => {
                 task();
             }
+        }
+    }
+}
+
+impl TelemetryActivation {
+    fn reload_metrics(&mut self) {
+        let meter_provider = meter_provider();
+        commit_prometheus();
+        let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
+
+        old_meter_providers[0] = meter_provider.set(
+            MeterProviderType::PublicPrometheus,
+            self.public_prometheus_meter_provider.take(),
+        );
+
+        old_meter_providers[1] = meter_provider.set(
+            MeterProviderType::Apollo,
+            self.private_meter_provider.take(),
+        );
+
+        old_meter_providers[2] =
+            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
+
+        metrics_layer().clear();
+
+        Self::checked_meter_shutdown(old_meter_providers);
+    }
+
+    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 3]) {
+        for meter_provider in meters.into_iter().flatten() {
+            Telemetry::checked_spawn_task(Box::new(move || {
+                if let Err(e) = meter_provider.shutdown() {
+                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
+                }
+            }));
         }
     }
 }
@@ -1850,6 +1863,8 @@ mod tests {
                 .as_any_mut()
                 .downcast_mut::<Telemetry>()
                 .unwrap()
+                .activation
+                .lock()
                 .reload_metrics();
         }
         plugin
@@ -2248,6 +2263,22 @@ mod tests {
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets.router.yaml"
+            ))
+            .await;
+            make_supergraph_request(plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
+
+            assert_snapshot!(prometheus_metrics);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_custom_buckets_for_specific_metrics() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;

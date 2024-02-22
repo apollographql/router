@@ -4,9 +4,6 @@ use std::task::Poll;
 use std::time::Duration;
 
 use ::serde::Deserialize;
-use async_compression::tokio::write::BrotliEncoder;
-use async_compression::tokio::write::GzipEncoder;
-use async_compression::tokio::write::ZlibEncoder;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::Stream;
@@ -14,19 +11,16 @@ use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
-use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
-use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
-use tokio::io::AsyncWriteExt;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -38,9 +32,11 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::HttpRequest;
 use super::HttpResponse;
+use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
@@ -94,7 +90,7 @@ impl HttpClientService {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &Configuration,
-        tls_root_store: &Option<RootCertStore>,
+        tls_root_store: &RootCertStore,
         http2: Http2Config,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
@@ -106,7 +102,7 @@ impl HttpClientService {
             .as_ref()
             .and_then(|subgraph| subgraph.create_certificate_store())
             .transpose()?
-            .or_else(|| tls_root_store.clone());
+            .unwrap_or_else(|| tls_root_store.clone());
         let client_cert_config = configuration
             .tls
             .subgraph
@@ -158,28 +154,49 @@ impl HttpClientService {
             service: Arc::new(service.into()),
         })
     }
+
+    pub(crate) fn native_roots_store() -> RootCertStore {
+        let mut roots = rustls::RootCertStore::empty();
+        let mut valid_count = 0;
+        let mut invalid_count = 0;
+
+        for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
+        {
+            let cert = rustls::Certificate(cert.0);
+            match roots.add(&cert) {
+                Ok(_) => valid_count += 1,
+                Err(err) => {
+                    tracing::trace!("invalid cert der {:?}", cert.0);
+                    tracing::debug!("certificate parsing failed: {:?}", err);
+                    invalid_count += 1
+                }
+            }
+        }
+        tracing::debug!(
+            "with_native_roots processed {} valid and {} invalid certs",
+            valid_count,
+            invalid_count
+        );
+        assert!(!roots.is_empty(), "no CA certificates found");
+        roots
+    }
 }
 
 pub(crate) fn generate_tls_client_config(
-    tls_cert_store: Option<RootCertStore>,
+    tls_cert_store: RootCertStore,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
     let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
-    Ok(match (tls_cert_store, client_cert_config) {
-        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
-        (Some(store), None) => tls_builder
-            .with_root_certificates(store)
-            .with_no_client_auth(),
-        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
-            client_auth_config.certificate_chain.clone(),
-            client_auth_config.key.clone(),
-        )?,
-        (Some(store), Some(client_auth_config)) => tls_builder
-            .with_root_certificates(store)
+    Ok(match client_cert_config {
+        Some(client_auth_config) => tls_builder
+            .with_root_certificates(tls_cert_store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
                 client_auth_config.key.clone(),
             )?,
+        None => tls_builder
+            .with_root_certificates(tls_cert_store)
+            .with_no_client_auth(),
     })
 }
 
@@ -227,7 +244,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
         );
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &http_req_span.context(),
+                &prepare_context(http_req_span.context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
@@ -236,26 +253,18 @@ impl tower::Service<HttpRequest> for HttpClientService {
         let service_name = self.service.clone();
         Box::pin(async move {
             let (parts, body) = http_request.into_parts();
-            let body = hyper::body::to_bytes(body).await.map_err(|err| {
-                tracing::error!(compress_error = format!("{err:?}").as_str());
 
-                FetchError::CompressionError {
-                    service: service_name.to_string(),
-                    reason: err.to_string(),
-                }
-            })?;
-            let compressed_body = compress(body, &parts.headers)
-                .instrument(tracing::debug_span!("body_compression"))
-                .await
-                .map_err(|err| {
-                    tracing::error!(compress_error = format!("{err:?}").as_str());
+            let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+            let opt_compressor = content_encoding
+                .as_ref()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
 
-                    FetchError::CompressionError {
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    }
-                })?;
-            let mut http_request = http::Request::from_parts(parts, Body::from(compressed_body));
+            let body = match opt_compressor {
+                None => body,
+                Some(compressor) => Body::wrap_stream(compressor.process(body)),
+            };
+            let mut http_request = http::Request::from_parts(parts, body);
 
             http_request
                 .headers_mut()
@@ -324,43 +333,6 @@ async fn do_fetch(
         parts,
         Body::wrap_stream(BodyStream { inner: body }),
     ))
-}
-
-pub(crate) async fn compress(body: Bytes, headers: &HeaderMap) -> Result<Bytes, BoxError> {
-    let content_encoding = headers.get(&CONTENT_ENCODING);
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str()? {
-            "br" => {
-                let mut br_encoder = BrotliEncoder::new(Vec::new());
-                br_encoder.write_all(&body).await?;
-                br_encoder.shutdown().await?;
-
-                Ok(br_encoder.into_inner().into())
-            }
-            "gzip" => {
-                let mut gzip_encoder = GzipEncoder::new(Vec::new());
-                gzip_encoder.write_all(&body).await?;
-                gzip_encoder.shutdown().await?;
-
-                Ok(gzip_encoder.into_inner().into())
-            }
-            "deflate" => {
-                let mut df_encoder = ZlibEncoder::new(Vec::new());
-                df_encoder.write_all(&body).await?;
-                df_encoder.shutdown().await?;
-
-                Ok(df_encoder.into_inner().into())
-            }
-            "identity" => Ok(body),
-            unknown => {
-                tracing::error!("unknown content-encoding value '{:?}'", unknown);
-                Err(BoxError::from(format!(
-                    "unknown content-encoding value '{unknown:?}'",
-                )))
-            }
-        },
-        None => Ok(body),
-    }
 }
 
 pin_project! {

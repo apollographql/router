@@ -4,6 +4,197 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.40.1] - 2024-02-16
+
+## 🐛 Fixes
+
+### Propagate tracing headers even when not sampling a trace ([Issue #4544](https://github.com/apollographql/router/issues/4544))
+
+When the router was configured to sample only a portion of the trace, either through a ratio or using parent based sampling, and when trace propagation was configured, if a trace was not sampled, the router did not send the propagation headers to the subgraph. The subgraph was then unable to decide whether to record the trace or not. Now we make sure that trace headers will be sent even when a trace is not sampled.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4609
+
+### Load TLS native certificate store  once ([Issue #4491](https://github.com/apollographql/router/issues/4491))
+
+When TLS was not configured for subgraphs, the OS-provided list of certificates was being parsed once _per subgraph_, which resulted in long loading times on macOS.  With this change, the native root store is generated once and then reused across subgraphs, resolving the long loading times.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4616
+
+### Apollo library dependency updates ([Issue #4525](https://github.com/apollographql/router/issues/4525), [Issue #413](https://github.com/apollographql/router/issues/4413))
+
+Updates to our own dependencies of `apollo-rs` and `apollo-federation` bring in upstream fixes for operation validation including adjustments to field merging and enum input values for Rust-based validation.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/4510
+
+# [1.40.0] - 2024-02-14
+
+## 🚀 Features
+
+### GraphOS entity caching ([Issue #4478](https://github.com/apollographql/router/issues/4478))
+
+> ⚠️ This is a preview for an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+>
+> If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
+
+The Apollo Router can now cache fine-grained subgraph responses at the entity level, which are reusable between requests.
+
+Caching federated GraphQL responses can be done at the HTTP level, but it's inefficient because a lot of data can be shared between different requests. The Apollo Router now contains an entity cache that works at the subgraph level: it caches subgraph responses, splits them by entities, and reuses entities across subgraph requests.
+Along with reducing the cache size, the router's entity cache brings more flexibility in how and what to cache. It allows the router to store different parts of a response with different expiration dates, and link the cache with the authorization context to avoid serving stale, unauthorized data.
+
+As a preview feature, it's subject to our [Preview launch stage](https://www.apollographql.com/docs/resources/product-launch-stages/#preview) expectations. It doesn't support cache invalidation. We're making it available to test and gather feedback.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4195
+
+
+### Graduate distributed query plan caching from experimental ([Issue #4575](https://github.com/apollographql/router/issues/4575))
+
+[Distributed query plan caching] (https://www.apollographql.com/docs/router/configuration/distributed-caching#distributed-query-plan-caching) has been validated in production deployments and is now a fully supported, non-experimental Enterprise feature of the Apollo Router.
+
+To migrate your router configuration, replace `supergraph.query_planning.experimental_cache` with `supergraph.query_planning.cache`.
+
+This release also adds improvements to the distributed cache:
+    1. The `.` separator is replaced with `:` in the Redis cache key to align with conventions.
+    2. The cache key length is reduced.
+    3. A federation version is added to the cache key to prevent confusion when routers with different federation versions (and potentially different ways to generate a query plan) target the same cache.
+    4. Cache insertion is moved to a parallel task. Once the query plan is created, this allows a request to be processed immediately instead of waiting for cache insertion to finish. This improvement has also been applied to the APQ cache.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4583
+
+### Replace selector to extract body elements from subgraph responses via JSONPath ([Issue #4443](https://github.com/apollographql/router/issues/4443))
+
+The `subgraph_response_body` [selector](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors/) has been deprecated and replaced with selectors for a response body's constituent elements: `subgraph_response_data` and `subgraph_response_errors`.
+
+When configuring `subgraph_response_data` and `subgraph_response_errors`, both use a JSONPath expression to fetch data or errors from a subgraph response. 
+
+An example configuration:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      subgraph:
+        attributes:
+          "my_attribute":
+            subgraph_response_data: "$.productName"
+            subgraph_response_errors: "$.[0].message"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4579
+
+### Add a `.remove` method for headers in Rhai
+
+The router supports a new `.remove` method that enables users to remove headers in a Rhai script. 
+
+For example:
+
+``` rust
+fn supergraph_service(service) {
+    print("registering callbacks for operation timing");
+
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+
+    const response_callback = Fn("process_response");
+    service.map_response(response_callback);
+}
+
+fn process_request(request) {
+    request.context["request_start"] = Router.APOLLO_START.elapsed;
+}
+
+fn process_response(response) {
+    response.headers.remove("x-custom-header")
+}
+```
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/4632
+
+### Helm update to allow a list of gateways to `VirtualService` ([Issue #4464](https://github.com/apollographql/router/issues/4464))
+
+Configuration of the router's Helm chart has been updated to allow multiple gateways. This enables configuration of multiple gateways in an Istio `VirtualService`.
+
+The previous configuration for a single `virtualservice.gatewayName` has been deprecated in favor of a configuration for an array of `virtualservice.gatewayNames`.
+
+By [@marcantoine-bibeau](https://github.com/marcantoine-bibeau) in https://github.com/apollographql/router/pull/4520
+
+### Configure logging format automatically based on terminal ([Issue #4369](https://github.com/apollographql/router/issues/4369))
+
+You can configure the logging output format when running with an interactive shell.
+
+If both `format` and `tty_format` are configured, then the format used depends on how the router is run:
+
+* If running with an interactive shell, then `tty_format` takes precedence.
+* If running with a non-interactive shell, then `format` takes precedence.
+
+You can explicitly set the format in `router.yaml` with `telemetry.exporters.logging.stdout.tty_format`:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     logging:
+       stdout:
+         enabled: true
+         format: json
+         tty_format: text
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4567
+
+### Add configurable histogram buckets per metric ([Issue #4543](https://github.com/apollographql/router/issues/4543))
+
+The router supports overriding instrument settings for metrics with [OpenTelemetry views](https://opentelemetry.io/docs/concepts/signals/metrics/#views). You can use views to override default histogram buckets.
+
+Configure views with the `views` option. For example:
+
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: apollo_router_http_request_duration_seconds # Instrument name you want to edit. You can use wildcard in names. If you want to target all instruments just use '*'
+            unit: "ms" # (Optional) override the unit
+            description: "my new description of this metric" # (Optional) override the description
+            aggregation: # (Optional)
+              histogram:
+                buckets: # Override default buckets configured for this histogram
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+            allowed_attribute_keys: # (Optional) Keep only listed attributes on the metric
+            - status
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4572
+
+## 🐛 Fixes
+
+### Fix `active_session_count` when future is dropped ([Issue #4601](https://github.com/apollographql/router/issues/4601))
+
+Fixes [an issue](https://github.com/apollographql/router/issues/4601) where `apollo_router_session_count_active` would increase indefinitely due
+to the request future getting dropped before a counter could be decremented.
+
+By [@xuorig](https://github.com/xuorig) in https://github.com/apollographql/router/pull/4619
+
+
+
+# [1.39.1] - 2024-02-08
+
+## 🐛 Fixes
+
+### Re-instate macOS Intel-based (x86_64) binary distribution ([Issue #4483](https://github.com/apollographql/router/issues/4483))
+
+We've re-instated the macOS Intel-based binary production and distribution that we had stopped in v1.38.0 on account of our CI provider shutting down their own Intel machines in upcoming months.  Rather than using an Intel-based machine, we will rely on the Xcode-supported cross-compilation to produce _two_ separate binaries, both created and tested only with an ARM-based Mac.
+
+We will likely have to re-visit this deprecation in the future as libaries and hardware continues to move on but, as of today, there are still just enough users who are still reliant on Intel-based laptops that it warrants continuing our investment in the architecture.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4605
+
+
+
 # [1.39.0] - 2024-02-05
 
 ## 🚀 Features

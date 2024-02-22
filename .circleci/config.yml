@@ -23,7 +23,7 @@ executors:
     docker:
       - image: cimg/base:stable
       - image: cimg/redis:7.2.4
-      - image: jaegertracing/all-in-one:1.53.0
+      - image: jaegertracing/all-in-one:1.54.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -58,12 +58,12 @@ executors:
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:stable"
+      image: "windows-server-2019-vs2019:2022.08.1"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:stable"
+      image: "windows-server-2019-vs2019:2022.08.1"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
@@ -333,6 +333,15 @@ commands:
                 name: Special case for Windows because of ssh-agent
                 command: |
                   printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for OSX x86_64 builds
+                command: |
+                  rustup target add x86_64-apple-darwin
 
   install_extra_tools:
     steps:
@@ -593,13 +602,28 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --target aarch64-apple-darwin
+            - run:
+                command: >
+                  cargo xtask dist --target x86_64-apple-darwin
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
                   cargo xtask package
+                  --target aarch64-apple-darwin
+                  --apple-team-id ${APPLE_TEAM_ID}
+                  --apple-username ${APPLE_USERNAME}
+                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
+                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
+                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
+                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
+                  --output artifacts/
+            - run:
+                command: >
+                  cargo xtask package
+                  --target x86_64-apple-darwin
                   --apple-team-id ${APPLE_TEAM_ID}
                   --apple-username ${APPLE_USERNAME}
                   --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
@@ -680,9 +704,20 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker push ${ROUTER_TAG}:${VERSION}
+                  # save containers for analysis
+                  mkdir built-containers
+                  docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
+                  docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}  
+                 
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - "built-containers/*.tar"
             - run:
                 name: Helm build
                 command: |
@@ -922,6 +957,25 @@ workflows:
             parameters:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+      - secops/wiz-docker:
+          context:
+            - platform-docker-ro
+            - wiz
+            - github-orb
+          requires:
+            - build_release
+          container-dir: /tmp/workspace/built-containers
+          # Disables all PR comments from this job
+          do-pr-comments: false
+          # Scan job will return 1 if findings violating the Wiz policy are found.
+          # Toggle off to prevent any CI failures OR 
+          # contact Apollo's Security team to adjust what violates the 
+          # Wiz policy used in this scan.
+          fail-on-findings: true
+          # Configure scan job to use a policy specific to apollo-router.
+          # This allows us to tailor the policy applied during the scans to router.
+          wiz-policies: Apollo-Router-Vulnerabilities-Policy
+
 
   release:
     when:

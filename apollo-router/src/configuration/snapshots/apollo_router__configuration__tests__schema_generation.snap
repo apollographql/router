@@ -93,6 +93,11 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "required_to_start": {
+                      "description": "Prevents the router from starting if it cannot connect to Redis",
+                      "default": false,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -2073,6 +2078,11 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
+            "required_to_start": {
+              "description": "Prevents the router from starting if it cannot connect to Redis",
+              "default": false,
+              "type": "boolean"
+            },
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
               "default": null,
@@ -2160,6 +2170,76 @@ expression: "&schema"
             },
             "additionalProperties": false
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "preview_file_uploads": {
+      "description": "Configuration for File Uploads plugin",
+      "type": "object",
+      "required": [
+        "enabled",
+        "protocols"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Whether the file upload plugin should be enabled (default: false)",
+          "type": "boolean"
+        },
+        "protocols": {
+          "description": "Supported protocol configurations for file uploads",
+          "type": "object",
+          "required": [
+            "multipart"
+          ],
+          "properties": {
+            "multipart": {
+              "description": "Configuration for multipart requests.\n\nThis protocol conforms to [jaydenseric's multipart spec](https://github.com/jaydenseric/graphql-multipart-request-spec)",
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "description": "Whether to enable the multipart protocol for file uploads (default: true)",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "limits": {
+                  "description": "Resource limits for multipart requests",
+                  "type": "object",
+                  "required": [
+                    "max_file_size",
+                    "max_files"
+                  ],
+                  "properties": {
+                    "max_file_size": {
+                      "description": "The maximum size of each file, in bytes (default: 5MB)",
+                      "type": "string"
+                    },
+                    "max_files": {
+                      "description": "The maximum amount of files allowed for a single query (default: 4)",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "mode": {
+                  "description": "The supported mode for the request (default: [MultipartRequestMode::Stream])",
+                  "oneOf": [
+                    {
+                      "description": "The multipart request will not be loaded into memory and instead will be streamed directly to the subgraph in the order received. This has some limitations, mainly that the query _must_ be able to be streamed directly to the subgraph without buffering.\n\nIn practice, this means that certain queries will fail due to ordering of the files.",
+                      "type": "string",
+                      "enum": [
+                        "stream"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -2481,6 +2561,11 @@ expression: "&schema"
                       "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
                       "nullable": true
+                    },
+                    "required_to_start": {
+                      "description": "Prevents the router from starting if it cannot connect to Redis",
+                      "default": false,
+                      "type": "boolean"
                     },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
@@ -5333,7 +5418,7 @@ expression: "&schema"
                       "additionalProperties": false
                     },
                     "buckets": {
-                      "description": "Custom buckets for histograms",
+                      "description": "Custom buckets for all histograms",
                       "default": [
                         0.001,
                         0.005,
@@ -5427,6 +5512,74 @@ expression: "&schema"
                       "default": null,
                       "type": "string",
                       "nullable": true
+                    },
+                    "views": {
+                      "description": "Views applied on metrics",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name"
+                        ],
+                        "properties": {
+                          "aggregation": {
+                            "description": "New aggregation settings to set",
+                            "oneOf": [
+                              {
+                                "description": "An aggregation that summarizes a set of measurements as an histogram with explicitly defined buckets.",
+                                "type": "object",
+                                "required": [
+                                  "histogram"
+                                ],
+                                "properties": {
+                                  "histogram": {
+                                    "type": "object",
+                                    "required": [
+                                      "buckets"
+                                    ],
+                                    "properties": {
+                                      "buckets": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ],
+                            "nullable": true
+                          },
+                          "allowed_attribute_keys": {
+                            "description": "An allow-list of attribute keys that will be preserved for the instrument.\n\nAny attribute recorded for the instrument with a key not in this set will be dropped. If the set is empty, all attributes will be dropped, if `None` all attributes will be kept.",
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "uniqueItems": true,
+                            "nullable": true
+                          },
+                          "description": {
+                            "description": "New description to set to the instrument",
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "name": {
+                            "description": "The instrument name you're targeting",
+                            "type": "string"
+                          },
+                          "unit": {
+                            "description": "New unit to set to the instrument",
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "additionalProperties": false

@@ -1,12 +1,12 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
@@ -31,7 +31,7 @@ pub(crate) struct Schema {
     /// Stored for comparison with the validation errors from query planning.
     diagnostics: Option<DiagnosticList>,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
+    pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
 }
@@ -150,10 +150,19 @@ impl Schema {
         format!("{:x}", hasher.finalize())
     }
 
-    pub(crate) fn create_api_schema(&self) -> String {
-        apollo_federation::Supergraph::from(self.definitions.clone())
-            .to_api_schema()
-            .to_string()
+    pub(crate) fn create_api_schema(
+        &self,
+        configuration: &Configuration,
+    ) -> Result<String, apollo_federation::error::FederationError> {
+        use apollo_federation::ApiSchemaOptions;
+        use apollo_federation::Supergraph;
+
+        let schema = Supergraph::from(self.definitions.clone());
+        let api_schema = schema.to_api_schema(ApiSchemaOptions {
+            include_defer: configuration.supergraph.defer_support,
+            ..Default::default()
+        })?;
+        Ok(api_schema.to_string())
     }
 
     pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
@@ -237,6 +246,41 @@ impl Schema {
 
     pub(crate) fn has_errors(&self) -> bool {
         self.diagnostics.is_some()
+    }
+
+    /// Return the federation major version based on the @link or @core directives in the schema,
+    /// or None if there are no federation directives.
+    pub(crate) fn federation_version(&self) -> Option<i64> {
+        for directive in &self.definitions.schema_definition.directives {
+            let join_url = if directive.name == "core" {
+                let Some(feature) = directive
+                    .argument_by_name("feature")
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+
+                feature
+            } else if directive.name == "link" {
+                let Some(url) = directive
+                    .argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+
+                url
+            } else {
+                continue;
+            };
+
+            match join_url.rsplit_once("/v") {
+                Some(("https://specs.apollo.dev/join", "0.1")) => return Some(1),
+                Some(("https://specs.apollo.dev/join", _)) => return Some(2),
+                _ => {}
+            }
+        }
+        None
     }
 
     pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
@@ -505,6 +549,25 @@ mod tests {
         };
         assert!(has_in_stock_field(&schema));
         assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
+    }
+
+    #[test]
+    fn federation_version() {
+        // @core directive
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(schema.federation_version(), Some(1));
+
+        // @link directive
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(schema.federation_version(), Some(2));
     }
 
     #[test]

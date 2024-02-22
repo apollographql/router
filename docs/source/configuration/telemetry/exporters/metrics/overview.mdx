@@ -22,9 +22,10 @@ In [`router.yaml`](../../../overview/#yaml-config-file), you configure router me
 Common metrics configuration contains global settings for all exporters:
 
 * [Service name](#service_name)
-* [Resource attributes](#resource-attribute)
-* [Custom historgram buckets](#custom-histogram-buckets)
+* [Resource attributes](#resource)
+* [Custom default histogram buckets](#buckets)
 * [`apollo_router_http_requests` attributes](#attributes)
+* [OpenTelemetry views](#views)
 
 ### `service_name`
 
@@ -179,9 +180,36 @@ telemetry:
 
 <Note>
 
-OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](../instrumentation/instruments). 
+OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use via custom [instruments](../instrumentation/instruments). 
 
 </Note>
+
+### `views`
+
+You can override default attributes and default buckets for specific metrics thanks to this configuration.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: apollo_router_http_request_duration_seconds # Instrument name you want to edit. You can use wildcard in names. If you want to target all instruments just use '*'
+            unit: "ms" # (Optional) override the unit
+            description: "my new description of this metric" # (Optional) override the description
+            aggregation: # (Optional)
+              histogram:
+                buckets: # Override default buckets configured for this histogram
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+            allowed_attribute_keys: # (Optional) Keep only listed attributes on the metric
+            - status
+
+```
 
 ## Metrics common reference
 

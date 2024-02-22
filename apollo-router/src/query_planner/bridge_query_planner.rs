@@ -71,6 +71,14 @@ impl BridgeQueryPlanner {
     ) -> Result<Self, ServiceBuildError> {
         let schema = Schema::parse(&sdl, &configuration)?;
 
+        let federation_version = schema.federation_version().unwrap_or(0);
+        u64_counter!(
+            "apollo.router.lifecycle.federation_version",
+            "The federation major version inferred from the supergraph schema",
+            1,
+            "version" = federation_version
+        );
+
         let planner = Planner::new(
             sdl,
             QueryPlannerConfig {
@@ -144,60 +152,86 @@ impl BridgeQueryPlanner {
                 let api_schema = planner.api_schema().await?;
                 api_schema.schema
             }
-            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(),
+            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(&configuration)?,
 
             crate::configuration::ApiSchemaMode::Both => {
-                let api_schema = planner.api_schema().await?;
-                let new_api_schema = schema.create_api_schema();
+                let api_schema = planner
+                    .api_schema()
+                    .await
+                    .map(|api_schema| api_schema.schema);
+                let new_api_schema = schema.create_api_schema(&configuration);
 
-                if api_schema.schema != new_api_schema {
-                    tracing::warn!(
-                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                        generation.is_matched = false,
-                        "API schema generation mismatch: apollo-federation and router-bridge write different schema"
-                    );
+                match (&api_schema, &new_api_schema) {
+                    (Err(js_error), Ok(_)) => {
+                        tracing::warn!("JS API schema error: {}", js_error);
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = false,
+                            "API schema generation mismatch: JS returns error but Rust does not"
+                        );
+                    }
+                    (Ok(_), Err(rs_error)) => {
+                        tracing::warn!("Rust API schema error: {}", rs_error);
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = false,
+                            "API schema generation mismatch: JS returns API schema but Rust errors out"
+                        );
+                    }
+                    (Ok(left), Ok(right)) if left != right => {
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = false,
+                            "API schema generation mismatch: apollo-federation and router-bridge write different schema"
+                        );
 
-                    let differences = diff::lines(&api_schema.schema, &new_api_schema);
-                    let mut output = String::new();
-                    for diff_line in differences {
-                        match diff_line {
-                            diff::Result::Left(l) => {
-                                let trimmed = l.trim();
-                                if !trimmed.starts_with('#') && !trimmed.is_empty() {
-                                    writeln!(&mut output, "-{l}").expect("write will never fail");
-                                } else {
+                        let differences = diff::lines(left, right);
+                        let mut output = String::new();
+                        for diff_line in differences {
+                            match diff_line {
+                                diff::Result::Left(l) => {
+                                    let trimmed = l.trim();
+                                    if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                                        writeln!(&mut output, "-{l}")
+                                            .expect("write will never fail");
+                                    } else {
+                                        writeln!(&mut output, " {l}")
+                                            .expect("write will never fail");
+                                    }
+                                }
+                                diff::Result::Both(l, _) => {
                                     writeln!(&mut output, " {l}").expect("write will never fail");
                                 }
-                            }
-                            diff::Result::Both(l, _) => {
-                                writeln!(&mut output, " {l}").expect("write will never fail");
-                            }
-                            diff::Result::Right(r) => {
-                                let trimmed = r.trim();
-                                if trimmed != "---" && !trimmed.is_empty() {
-                                    writeln!(&mut output, "+{r}").expect("write will never fail");
+                                diff::Result::Right(r) => {
+                                    let trimmed = r.trim();
+                                    if trimmed != "---" && !trimmed.is_empty() {
+                                        writeln!(&mut output, "+{r}")
+                                            .expect("write will never fail");
+                                    }
                                 }
                             }
                         }
+                        tracing::debug!(
+                            "different API schema between apollo-federation and router-bridge:\n{}",
+                            output
+                        );
                     }
-                    tracing::debug!(
-                        "different API schema between apollo-federation and router-bridge:\n{}",
-                        output
-                    );
-                } else {
-                    tracing::warn!(
-                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                        generation.is_matched = true,
-                    );
+                    (Err(_), Err(_)) | (Ok(_), Ok(_)) => {
+                        tracing::warn!(
+                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                            generation.is_matched = true,
+                        );
+                    }
                 }
-                api_schema.schema
+
+                api_schema?
             }
         };
         let api_schema = Schema::parse(&api_schema_string, &configuration)?;
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(planner.clone()).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
             None
         };
@@ -253,7 +287,7 @@ impl BridgeQueryPlanner {
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(planner.clone()).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
             None
         };
@@ -536,12 +570,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
-                    let executable = modified_query
+                    let executable_document = modified_query
                         .to_executable(schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .unwrap_or_else(|invalid| invalid.partial);
                     doc = Arc::new(ParsedDocumentInner {
-                        executable,
+                        executable: Arc::new(executable_document),
                         ast: modified_query,
                         // Carry errors from previous ParsedDocument
                         // and assume transformation doesn’t introduce new errors.
@@ -656,12 +690,12 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
-            let executable = new_doc
+            let executable_document = new_doc
                 .to_executable(&self.schema.api_schema().definitions)
                 // Assume transformation creates a valid document: ignore conversion errors
                 .unwrap_or_else(|invalid| invalid.partial);
             doc = Arc::new(ParsedDocumentInner {
-                executable,
+                executable: Arc::new(executable_document),
                 ast: new_doc,
                 // Carry errors from previous ParsedDocument
                 // and assume transformation doesn’t introduce new errors.

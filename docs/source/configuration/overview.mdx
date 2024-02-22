@@ -466,7 +466,7 @@ supergraph:
 
 ### Debugging
 
-- To configure logging, see [Logging in the Apollo Router](./logging).
+- To configure logging, see [Logging in the Apollo Router](./telemetry/exporters/logging/overview).
 
 - To configure the inclusion of subgraph errors, see [Subgraph error inclusion](./subgraph-error-inclusion).
 
@@ -540,7 +540,9 @@ By default, the Apollo Router stores the following data in its in-memory cache t
 
 You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-memory caching in the Apollo Router](./in-memory-caching/).
 
-**If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
+**If you have a GraphOS Enterprise plan:** 
+- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
+- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the Apollo Router](./entity-caching/).
 
 ### Safelisting with persisted queries
 
