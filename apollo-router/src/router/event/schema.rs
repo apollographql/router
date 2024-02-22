@@ -198,6 +198,7 @@ impl Fetcher {
     fn new(urls: Vec<Url>, period: Duration) -> Result<Self, FetcherError> {
         Ok(Self {
             client: reqwest::Client::builder()
+                .no_gzip()
                 .timeout(Duration::from_secs(10))
                 .build()
                 .map_err(FetcherError::InitializationError)?,

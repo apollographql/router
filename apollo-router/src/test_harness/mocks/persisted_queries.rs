@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use async_compression::tokio::write::GzipEncoder;
 use maplit::hashmap;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
+use tokio::io::AsyncWriteExt;
 use url::Url;
+use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::MockServer;
@@ -75,13 +78,23 @@ pub async fn mock_pq_uplink_one_endpoint(
 
     let mock_gcs_server = MockServer::start().await;
 
-    let gcs_response = ResponseTemplate::new(200).set_body_json(json!({
+    let body_json = serde_json::to_vec(&json!({
       "format": "apollo-persisted-query-manifest",
       "version": 1,
       "operations": operations
-    }));
+    }))
+    .expect("Failed to convert into body.");
+    let mut encoder = GzipEncoder::new(Vec::new());
+    encoder.write_all(&body_json).await.unwrap();
+    encoder.shutdown().await.unwrap();
+    let compressed_body = encoder.into_inner();
+
+    let gcs_response = ResponseTemplate::new(200)
+        .set_body_raw(compressed_body, "application/octet-stream")
+        .append_header("Content-Encoding", "gzip");
 
     Mock::given(method("GET"))
+        .and(header("Accept-Encoding", "gzip"))
         .respond_with(gcs_response)
         .mount(&mock_gcs_server)
         .await;
