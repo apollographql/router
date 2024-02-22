@@ -209,3 +209,15 @@ impl Waiter {
         Ok((operation_name, context, request, txs))
     }
 }
+
+// If a Batch is dropped and it still contains waiters, it's important to notify those waiters that
+// their calls have failed.
+//
+// TODO: Figure out the implications, but panic for now if waiters is not empty
+impl Drop for Batch {
+    fn drop(&mut self) {
+        if !self.waiters.is_empty() {
+            panic!("TODO: waiters must be empty when a Batch is dropped");
+        }
+    }
+}
