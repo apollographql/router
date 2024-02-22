@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::collections::LinkedList;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use http::header::CONTENT_LENGTH;
 use opentelemetry_api::metrics::Counter;
@@ -8,6 +10,7 @@ use opentelemetry_api::metrics::MeterProvider;
 use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::metrics::UpDownCounter;
 use opentelemetry_api::KeyValue;
+use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::time::Instant;
@@ -254,6 +257,15 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_error(&self, error: &BoxError, ctx: &Context);
+}
+
+pub(crate) trait InstrumentedMut {
+    type Request;
+    type Response;
+
+    fn on_request(&mut self, request: &Self::Request);
+    fn on_response(&mut self, response: &Self::Response);
+    fn on_error(&mut self, error: &BoxError, ctx: &Context);
 }
 
 impl Instrumented for RouterInstrumentsConfig {
@@ -601,21 +613,184 @@ impl Selectors for SubgraphInstrumentsConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-struct RouterInstruments {
-    /// Histogram of server request duration
-    http_server_request_duration: Histogram<f64>,
-    /// Gauge of active requests
-    http_server_active_requests: UpDownCounter<i64>,
-    /// Histogram of server request body size
-    http_server_request_body_size: Histogram<u64>,
-    /// Histogram of server response body size
-    http_server_response_body_size: Histogram<u64>,
-    /// Config
-    config: RouterInstrumentsConfig,
+pub(crate) struct RouterCustomInstruments {
+    counters:
+        Vec<CustomCounter<router::Request, router::Response, RouterAttributes, RouterSelector>>,
 }
 
-struct CustomInstruments {
-    counters: Vec<Counter<u64>>,
-    histograms: Vec<Histogram<f64>>,
+impl RouterCustomInstruments {
+    pub(crate) fn new(
+        config: &HashMap<String, Instrument<RouterAttributes, RouterSelector>>,
+    ) -> Self {
+        let mut counters = Vec::new();
+        for (instrument_name, instrument) in config {
+            // FIXME: I think we should not set the value
+            // let value = match instrument.value {
+            //     InstrumentValue::Standard(Standard::Unit) => Increment::Unit,
+            //     InstrumentValue::Standard(Standard::Duration) => {
+            //         Increment::Duration(Instant::now())
+            //     }
+            //     InstrumentValue::Custom(selector) => {
+            //         todo!()
+            //     }
+            // };
+
+            match instrument.ty {
+                InstrumentType::Counter => {
+                    // let counter = CustomCounter {
+                    //     increment: todo!(),
+                    //     counter: None,
+                    //     attributes: Vec::new(),
+                    // };
+                }
+                InstrumentType::Histogram => todo!(),
+            }
+        }
+
+        Self { counters }
+    }
+}
+
+impl Instrumented for RouterCustomInstruments {
+    type Request = router::Request;
+    type Response = router::Response;
+
+    fn on_request(&self, request: &Self::Request) {
+        for counter in &self.counters {
+            match counter.increment {
+                Increment::Unit => todo!(),
+                Increment::Duration(_) => todo!(),
+                Increment::Custom(_) => todo!(),
+            }
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        todo!()
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        todo!()
+    }
+}
+
+// Une struct qui wrap counter/histogram
+// Qui prend l'increment (unit/duration)
+// Qui prend les attributs
+// Qui implemente drop, si ça drop et que l'instrument est None donc on l'a take ça veut dire qu'il a été utilisé et donc on incremente pas au drop
+// Sinon on incremente et on met un label error_code="broken_pipe"
+
+struct CustomCounter<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
+}
+
+struct CustomCounterInner<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    increment: Increment,
+    selector: Option<Arc<T>>,
+    selectors: Extendable<A, T>,
+    counter: Option<Counter<f64>>,
+    attributes: Vec<opentelemetry_api::KeyValue>,
+}
+
+enum Increment {
+    Unit,
+    Duration(Instant),
+    Custom(Option<i64>),
+}
+
+impl<A, T, Request, Response> Instrumented for CustomCounter<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    type Request = Request;
+    type Response = Response;
+
+    fn on_request(&self, request: &Self::Request) {
+        let mut inner = self.inner.lock();
+        inner.attributes = inner.selectors.on_request(request).into_iter().collect();
+        if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
+            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        let mut inner = self.inner.lock();
+        let mut attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
+        attrs.extend(inner.attributes);
+
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response(response))
+        {
+            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+        }
+        // Call actual metric macros
+
+        let increment = match inner.increment {
+            Increment::Unit => 1f64,
+            Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
+            Increment::Custom(val) => match val {
+                Some(incr) => incr as f64,
+                None => 0f64,
+            },
+        };
+
+        if let Some(counter) = inner.counter.take() {
+            counter.add(increment, &attrs);
+        }
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        let mut inner = self.inner.lock();
+        let mut attrs: Vec<KeyValue> = inner.selectors.on_error(error).into_iter().collect();
+        attrs.extend(inner.attributes);
+
+        // Call actual metric macros
+
+        let increment = match inner.increment {
+            Increment::Unit => 1f64,
+            Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
+            Increment::Custom(val) => match val {
+                Some(incr) => incr as f64,
+                None => 0f64,
+            },
+        };
+
+        if let Some(counter) = inner.counter.take() {
+            counter.add(increment, &attrs);
+        }
+    }
+}
+
+impl<A, T, Request, Response> Drop for CustomCounter<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    fn drop(&mut self) {
+        let inner = self.inner.try_lock();
+        if let Some(inner) = inner {
+            if let Some(counter) = inner.counter.take() {
+                let incr: f64 = match &inner.increment {
+                    Increment::Unit => 1f64,
+                    Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
+                    Increment::Custom(val) => match val {
+                        Some(incr) => incr as f64,
+                        None => 0f64,
+                    },
+                };
+                counter.add(incr, &inner.attributes);
+            }
+        }
+    }
 }
