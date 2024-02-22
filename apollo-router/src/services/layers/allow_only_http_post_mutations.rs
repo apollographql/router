@@ -283,7 +283,7 @@ mod forbid_http_get_mutations_tests {
         context
             .extensions()
             .lock()
-            .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner { ast, executable }));
+            .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner { ast, executable: Arc::new(executable) }));
 
         SupergraphRequest::fake_builder()
             .method(method)

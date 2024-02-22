@@ -280,7 +280,7 @@ impl Query {
             }
         };
         let schema = &schema.api_schema().definitions;
-        let executable = match ast.to_executable_validate(schema) {
+        let executable_document = match ast.to_executable_validate(schema) {
             Ok(doc) => doc,
             Err(WithErrors { errors, .. }) => {
                 return Err(SpecError::ValidationError(ValidationErrors {
@@ -293,7 +293,10 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        Ok(Arc::new(ParsedDocumentInner { ast, executable }))
+        Ok(Arc::new(ParsedDocumentInner {
+            ast,
+            executable: Arc::new(executable_document),
+        }))
     }
 
     pub(crate) fn parse(

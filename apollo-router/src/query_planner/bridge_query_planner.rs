@@ -435,14 +435,14 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
-                    let executable =
+                    let executable_document =
                         modified_query.to_executable_validate(schema).map_err(|e| {
                             SpecError::ValidationError(ValidationErrors {
                                 errors: e.errors.iter().map(|e| e.to_json()).collect(),
                             })
                         })?;
                     doc = Arc::new(ParsedDocumentInner {
-                        executable,
+                        executable: Arc::new(executable_document),
                         ast: modified_query,
                     });
                     context
@@ -552,7 +552,7 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
-            let executable = new_doc
+            let executable_document = new_doc
                 .to_executable_validate(&self.schema.api_schema().definitions)
                 .map_err(|e| {
                     SpecError::ValidationError(ValidationErrors {
@@ -560,7 +560,7 @@ impl BridgeQueryPlanner {
                     })
                 })?;
             doc = Arc::new(ParsedDocumentInner {
-                executable,
+                executable: Arc::new(executable_document),
                 ast: new_doc,
             });
             selections.unauthorized.paths = unauthorized_paths;

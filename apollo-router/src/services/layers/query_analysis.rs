@@ -192,7 +192,7 @@ pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 #[derive(Debug)]
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
-    pub(crate) executable: Valid<ExecutableDocument>,
+    pub(crate) executable: Arc<Valid<ExecutableDocument>>,
 }
 
 impl Display for ParsedDocumentInner {
