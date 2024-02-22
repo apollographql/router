@@ -191,15 +191,15 @@ where
     type Response = Response;
 
     fn on_request(&self, request: &Self::Request) -> LinkedList<opentelemetry_api::KeyValue> {
-        todo!()
+        self.attributes.on_request(request)
     }
 
     fn on_response(&self, response: &Self::Response) -> LinkedList<opentelemetry_api::KeyValue> {
-        todo!()
+        self.attributes.on_response(response)
     }
 
     fn on_error(&self, error: &BoxError) -> LinkedList<opentelemetry_api::KeyValue> {
-        todo!()
+        self.attributes.on_error(error)
     }
 }
 
@@ -534,21 +534,14 @@ where
 
     fn on_request(&self, request: &Self::Request) {
         self.attributes.on_request(request);
-        // TODO custom
-        // for (key, instr) in &self.custom {
-        //     let attrs = instr.on_request(request);
-
-        // }
     }
 
     fn on_response(&self, response: &Self::Response) {
         self.attributes.on_response(response);
-        // TODO custom
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         self.attributes.on_error(error, ctx);
-        // TODO custom
     }
 }
 
@@ -616,6 +609,8 @@ impl Selectors for SubgraphInstrumentsConfig {
 pub(crate) struct RouterCustomInstruments {
     counters:
         Vec<CustomCounter<router::Request, router::Response, RouterAttributes, RouterSelector>>,
+    histograms:
+        Vec<CustomHistogram<router::Request, router::Response, RouterAttributes, RouterSelector>>,
 }
 
 impl RouterCustomInstruments {
@@ -623,31 +618,68 @@ impl RouterCustomInstruments {
         config: &HashMap<String, Instrument<RouterAttributes, RouterSelector>>,
     ) -> Self {
         let mut counters = Vec::new();
-        for (instrument_name, instrument) in config {
-            // FIXME: I think we should not set the value
-            // let value = match instrument.value {
-            //     InstrumentValue::Standard(Standard::Unit) => Increment::Unit,
-            //     InstrumentValue::Standard(Standard::Duration) => {
-            //         Increment::Duration(Instant::now())
-            //     }
-            //     InstrumentValue::Custom(selector) => {
-            //         todo!()
-            //     }
-            // };
+        let mut histograms = Vec::new();
+        let meter = metrics::meter_provider().meter("apollo/router");
 
+        for (instrument_name, instrument) in config {
             match instrument.ty {
                 InstrumentType::Counter => {
-                    // let counter = CustomCounter {
-                    //     increment: todo!(),
-                    //     counter: None,
-                    //     attributes: Vec::new(),
-                    // };
+                    let (selector, increment) = match &instrument.value {
+                        InstrumentValue::Standard(incr) => {
+                            let incr = match incr {
+                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Unit => Increment::Unit,
+                            };
+                            (None, incr)
+                        }
+                        InstrumentValue::Custom(selector) => {
+                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                        }
+                    };
+                    let counter = CustomCounterInner {
+                        increment,
+                        counter: Some(meter.f64_counter(instrument_name.clone()).init()),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: instrument.attributes.clone(),
+                    };
+
+                    counters.push(CustomCounter {
+                        inner: Mutex::new(counter),
+                    })
                 }
-                InstrumentType::Histogram => todo!(),
+                InstrumentType::Histogram => {
+                    let (selector, increment) = match &instrument.value {
+                        InstrumentValue::Standard(incr) => {
+                            let incr = match incr {
+                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Unit => Increment::Unit,
+                            };
+                            (None, incr)
+                        }
+                        InstrumentValue::Custom(selector) => {
+                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                        }
+                    };
+                    let histogram = CustomHistogramInner {
+                        increment,
+                        histogram: Some(meter.f64_histogram(instrument_name.clone()).init()),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: instrument.attributes.clone(),
+                    };
+
+                    histograms.push(CustomHistogram {
+                        inner: Mutex::new(histogram),
+                    })
+                }
             }
         }
 
-        Self { counters }
+        Self {
+            counters,
+            histograms,
+        }
     }
 }
 
@@ -657,28 +689,33 @@ impl Instrumented for RouterCustomInstruments {
 
     fn on_request(&self, request: &Self::Request) {
         for counter in &self.counters {
-            match counter.increment {
-                Increment::Unit => todo!(),
-                Increment::Duration(_) => todo!(),
-                Increment::Custom(_) => todo!(),
-            }
+            counter.on_request(request);
+        }
+        for histogram in &self.histograms {
+            histogram.on_request(request);
         }
     }
 
     fn on_response(&self, response: &Self::Response) {
-        todo!()
+        for counter in &self.counters {
+            counter.on_response(response);
+        }
+        for histogram in &self.histograms {
+            histogram.on_response(response);
+        }
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
-        todo!()
+        for counter in &self.counters {
+            counter.on_error(error, ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_error(error, ctx);
+        }
     }
 }
 
-// Une struct qui wrap counter/histogram
-// Qui prend l'increment (unit/duration)
-// Qui prend les attributs
-// Qui implemente drop, si ça drop et que l'instrument est None donc on l'a take ça veut dire qu'il a été utilisé et donc on incremente pas au drop
-// Sinon on incremente et on met un label error_code="broken_pipe"
+// ---------------- Counter -----------------------
 
 struct CustomCounter<Request, Response, A, T>
 where
@@ -725,7 +762,7 @@ where
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         let mut attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
-        attrs.extend(inner.attributes);
+        attrs.append(&mut inner.attributes);
 
         if let Some(selected_value) = inner
             .selector
@@ -734,7 +771,6 @@ where
         {
             inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
         }
-        // Call actual metric macros
 
         let increment = match inner.increment {
             Increment::Unit => 1f64,
@@ -750,10 +786,10 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
+    fn on_error(&self, error: &BoxError, _ctx: &Context) {
         let mut inner = self.inner.lock();
         let mut attrs: Vec<KeyValue> = inner.selectors.on_error(error).into_iter().collect();
-        attrs.extend(inner.attributes);
+        attrs.append(&mut inner.attributes);
 
         // Call actual metric macros
 
@@ -778,18 +814,122 @@ where
     T: Selector<Request = Request, Response = Response>,
 {
     fn drop(&mut self) {
+        // TODO add attribute error broken pipe ?
         let inner = self.inner.try_lock();
-        if let Some(inner) = inner {
+        if let Some(mut inner) = inner {
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
                     Increment::Unit => 1f64,
                     Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
                     Increment::Custom(val) => match val {
-                        Some(incr) => incr as f64,
+                        Some(incr) => *incr as f64,
                         None => 0f64,
                     },
                 };
                 counter.add(incr, &inner.attributes);
+            }
+        }
+    }
+}
+
+// ---------------- Histogram -----------------------
+
+struct CustomHistogram<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    inner: Mutex<CustomHistogramInner<Request, Response, A, T>>,
+}
+
+struct CustomHistogramInner<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    increment: Increment,
+    selector: Option<Arc<T>>,
+    selectors: Extendable<A, T>,
+    histogram: Option<Histogram<f64>>,
+    attributes: Vec<opentelemetry_api::KeyValue>,
+}
+
+impl<A, T, Request, Response> Instrumented for CustomHistogram<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    type Request = Request;
+    type Response = Response;
+
+    fn on_request(&self, request: &Self::Request) {
+        let mut inner = self.inner.lock();
+        inner.attributes = inner.selectors.on_request(request).into_iter().collect();
+        if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
+            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        let mut inner = self.inner.lock();
+        let mut attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
+        attrs.append(&mut inner.attributes);
+
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response(response))
+        {
+            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+        }
+
+        let increment = match inner.increment {
+            Increment::Unit => Some(1f64),
+            Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
+            Increment::Custom(val) => val.map(|incr| incr as f64),
+        };
+
+        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+            histogram.record(increment, &attrs);
+        }
+    }
+
+    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+        let mut inner = self.inner.lock();
+        let mut attrs: Vec<KeyValue> = inner.selectors.on_error(error).into_iter().collect();
+        attrs.append(&mut inner.attributes);
+
+        let increment = match inner.increment {
+            Increment::Unit => Some(1f64),
+            Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
+            Increment::Custom(val) => val.map(|incr| incr as f64),
+        };
+
+        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+            histogram.record(increment, &attrs);
+        }
+    }
+}
+
+impl<A, T, Request, Response> Drop for CustomHistogram<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response>,
+{
+    fn drop(&mut self) {
+        // TODO add attribute error broken pipe ?
+        let inner = self.inner.try_lock();
+        if let Some(mut inner) = inner {
+            if let Some(histogram) = inner.histogram.take() {
+                let increment = match &inner.increment {
+                    Increment::Unit => Some(1f64),
+                    Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
+                    Increment::Custom(val) => val.map(|incr| incr as f64),
+                };
+
+                if let Some(increment) = increment {
+                    histogram.record(increment, &inner.attributes);
+                }
             }
         }
     }

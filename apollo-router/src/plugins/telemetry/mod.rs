@@ -61,6 +61,7 @@ use self::config::Sampler;
 use self::config::SamplerOption;
 use self::config::TraceIdFormat;
 use self::config_new::instruments::Instrumented;
+use self::config_new::instruments::RouterCustomInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -357,9 +358,23 @@ impl Plugin for Telemetry {
                         ),
                     ]);
 
-                    (custom_attributes, request.context.clone())
+                    let custom_instruments: RouterCustomInstruments = RouterCustomInstruments::new(
+                        &config_request.instrumentation.instruments.router.custom,
+                    );
+                    custom_instruments.on_request(request);
+
+                    (
+                        custom_attributes,
+                        custom_instruments,
+                        request.context.clone(),
+                    )
                 },
-                move |(custom_attributes, ctx): (LinkedList<KeyValue>, Context), fut| {
+                move |(custom_attributes, custom_instruments, ctx): (
+                    LinkedList<KeyValue>,
+                    RouterCustomInstruments,
+                    Context,
+                ),
+                      fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
 
@@ -390,6 +405,8 @@ impl Plugin for Telemetry {
                                 .instruments
                                 .router
                                 .on_response(response);
+                            custom_instruments.on_response(response);
+
                             if expose_trace_id.enabled {
                                 if let Some(header_name) = &expose_trace_id.header_name {
                                     let mut headers: HashMap<String, Vec<String>> =
@@ -426,6 +443,7 @@ impl Plugin for Telemetry {
                                 .instruments
                                 .router
                                 .on_error(err, &ctx);
+                            custom_instruments.on_error(err, &ctx);
                         }
 
                         response
