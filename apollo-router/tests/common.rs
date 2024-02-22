@@ -140,7 +140,7 @@ impl IntegrationTest {
         };
 
         // Insert the overrides into the config
-        let config_str = merge_overrides(&config, &subgraph_overrides, &addr);
+        let config_str = merge_overrides(config, &subgraph_overrides, &addr);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -353,9 +353,12 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn update_config(&self, yaml: &str) {
-        tokio::fs::write(&self.test_config_location, &merge_overrides(yaml, &self._subgraph_overrides, &self.bind_addr))
-            .await
-            .expect("must be able to write config");
+        tokio::fs::write(
+            &self.test_config_location,
+            &merge_overrides(yaml, &self._subgraph_overrides, &self.bind_addr),
+        )
+        .await
+        .expect("must be able to write config");
     }
 
     #[allow(dead_code)]
@@ -804,7 +807,11 @@ impl ValueExt for Value {
 ///
 /// The test harness needs some options to be present for it to work, so this
 /// function allows patching any config to include the needed values.
-fn merge_overrides(yaml: &str, subgraph_overrides: &HashMap<String, String>, bind_addr: &SocketAddr) -> String {
+fn merge_overrides(
+    yaml: &str,
+    subgraph_overrides: &HashMap<String, String>,
+    bind_addr: &SocketAddr,
+) -> String {
     // Parse the config as yaml
     let mut config: Value = serde_yaml::from_str(yaml).unwrap();
 
