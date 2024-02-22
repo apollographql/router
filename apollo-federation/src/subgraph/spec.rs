@@ -634,7 +634,7 @@ impl LinkSpecDefinitions {
         }
     }
 
-    ///   directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+    ///   directive @link(url: String!, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
     pub fn link_directive_definition(&self) -> Result<DirectiveDefinition, FederationSpecError> {
         Ok(DirectiveDefinition {
             description: None,
@@ -643,7 +643,6 @@ impl LinkSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("url"),
-                    // TODO: doc-comment disagrees with non-null here
                     ty: ty!(String!).into(),
                     default_value: None,
                     directives: Default::default(),
