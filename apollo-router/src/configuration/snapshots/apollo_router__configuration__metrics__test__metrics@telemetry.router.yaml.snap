@@ -7,19 +7,18 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.events.: false
-          opt.instruments.: false
-          opt.logging.experimental_when_header.: true
-          opt.metrics.otlp.: true
-          opt.metrics.prometheus.: true
-          opt.spans.: true
-          opt.spans.default_attribute_requirement_level.: recommended
-          opt.spans.mode.: spec_compliant
-          opt.spans.router.: true
-          opt.spans.subgraph.: true
-          opt.spans.supergraph.: true
-          opt.tracing.datadog.: true
-          opt.tracing.jaeger.: true
-          opt.tracing.otlp.: true
-          opt.tracing.zipkin.: true
-
+          opt.events: false
+          opt.instruments: false
+          opt.logging.experimental_when_header: true
+          opt.metrics.otlp: true
+          opt.metrics.prometheus: true
+          opt.spans: true
+          opt.spans.default_attribute_requirement_level: recommended
+          opt.spans.mode: spec_compliant
+          opt.spans.router: true
+          opt.spans.subgraph: true
+          opt.spans.supergraph: true
+          opt.tracing.datadog: true
+          opt.tracing.jaeger: true
+          opt.tracing.otlp: true
+          opt.tracing.zipkin: true
