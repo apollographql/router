@@ -945,7 +945,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ amd_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -1042,7 +1042,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ amd_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
             branches:
               ignore: /.*/
