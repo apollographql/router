@@ -594,7 +594,10 @@ jobs:
           platform: << parameters.platform >>
       - when:
           condition:
-            equal: [ *macos_build_executor, << parameters.platform >> ]
+            or:
+              - equal: [ *amd_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+
           steps:
             - when:
                 condition:
