@@ -174,13 +174,12 @@ pub(crate) type OpGraphPath = GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
 pub(crate) enum OpGraphPathTrigger {
-    Field(NormalizedField),
-    InlineFragment(NormalizedInlineFragment),
+    OpPathElement(OpPathElement),
     Context(OpGraphPathContext),
 }
 
 /// A path of operation elements within a GraphQL operation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
@@ -201,6 +200,20 @@ impl OpPathElement {
         match self {
             OpPathElement::Field(field) => field.data().is_leaf(),
             OpPathElement::InlineFragment(_) => Ok(false),
+        }
+    }
+
+    pub(crate) fn sibling_typename(&self) -> Option<&Name> {
+        match self {
+            OpPathElement::Field(field) => field.sibling_typename(),
+            OpPathElement::InlineFragment(_) => None,
+        }
+    }
+
+    pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
+        match self {
+            OpPathElement::Field(field) => field.data().field_position.parent(),
+            OpPathElement::InlineFragment(inline) => inline.data().parent_type_position.clone(),
         }
     }
 
@@ -248,6 +261,18 @@ impl Display for OpPathElement {
             OpPathElement::Field(field) => field.fmt(f),
             OpPathElement::InlineFragment(inline_fragment) => inline_fragment.fmt(f),
         }
+    }
+}
+
+impl From<NormalizedField> for OpGraphPathTrigger {
+    fn from(value: NormalizedField) -> Self {
+        OpPathElement::from(value).into()
+    }
+}
+
+impl From<NormalizedInlineFragment> for OpGraphPathTrigger {
+    fn from(value: NormalizedInlineFragment) -> Self {
+        OpPathElement::from(value).into()
     }
 }
 
@@ -540,8 +565,9 @@ where
                 if let GraphPathTrigger::Op(last_operation_element) =
                     last_edge_trigger.clone().into()
                 {
-                    if let OpGraphPathTrigger::InlineFragment(last_operation_element) =
-                        last_operation_element.as_ref()
+                    if let OpGraphPathTrigger::OpPathElement(OpPathElement::InlineFragment(
+                        last_operation_element,
+                    )) = last_operation_element.as_ref()
                     {
                         if last_operation_element.data().directives.is_empty() {
                             // This mean we have 2 typecasts back-to-back, and that means the
@@ -2406,6 +2432,24 @@ impl ClosedBranch {
                 .map(|(option, _)| option)
                 .collect(),
         ))
+    }
+}
+
+impl OpPath {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn strip_prefix(&self, maybe_prefix: &Self) -> Option<Self> {
+        self.0
+            .strip_prefix(&*maybe_prefix.0)
+            .map(|slice| Self(slice.to_vec()))
+    }
+
+    pub(crate) fn with_pushed(&self, element: Arc<OpPathElement>) -> Self {
+        let mut new = self.0.clone();
+        new.push(element);
+        Self(new)
     }
 }
 

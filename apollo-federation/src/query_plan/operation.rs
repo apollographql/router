@@ -1,5 +1,6 @@
 use crate::error::FederationError;
 use crate::error::SingleFederationError::Internal;
+use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::operation::normalized_field_selection::{
@@ -31,7 +32,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::sync::{atomic, Arc};
 
-const TYPENAME_FIELD: Name = name!("__typename");
+pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
 // Global storage for the counter used to uniquely identify selections
 static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
@@ -640,6 +641,10 @@ pub(crate) mod normalized_field_selection {
             &self.data
         }
 
+        pub(crate) fn sibling_typename(&self) -> Option<&Name> {
+            self.data.sibling_typename.as_ref()
+        }
+
         pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<Name> {
             &mut self.data.sibling_typename
         }
@@ -803,6 +808,15 @@ pub(crate) mod normalized_inline_fragment_selection {
 
         pub(crate) fn data(&self) -> &NormalizedInlineFragmentData {
             &self.data
+        }
+
+        pub(crate) fn with_updated_type_condition(
+            &self,
+            new: Option<CompositeTypeDefinitionPosition>,
+        ) -> Self {
+            let mut data = self.data().clone();
+            data.type_condition_position = new;
+            Self::new(data)
         }
     }
 
@@ -1368,6 +1382,42 @@ impl NormalizedSelectionSet {
     ) -> Result<NormalizedSelectionSet, FederationError> {
         todo!()
     }
+
+    pub(crate) fn add_at_path(
+        &mut self,
+        path: &OpPath,
+        selection_set: Option<&Arc<NormalizedSelectionSet>>,
+    ) {
+        Arc::make_mut(&mut self.selections).add_at_path(path, selection_set)
+    }
+
+    pub(crate) fn add(&mut self, _selections: &NormalizedSelectionSet) {
+        todo!()
+    }
+}
+
+impl NormalizedSelectionMap {
+    /// Adds a path, and optional some selections following that path, to those updates.
+    ///
+    /// The final selections are optional (for instance, if `path` ends on a leaf field,
+    /// then no followup selections would make sense),
+    /// but when some are provided, uncesssary fragments will be automaticaly removed
+    /// at the junction between the path and those final selections.
+    /// For instance, suppose that we have:
+    ///  - a `path` argument that is `a::b::c`,
+    ///    where the type of the last field `c` is some object type `C`.
+    ///  - a `selections` argument that is `{ ... on C { d } }`.
+    /// Then the resulting built selection set will be: `{ a { b { c { d } } }`,
+    /// and in particular the `... on C` fragment will be eliminated since it is unecesasry
+    /// (since again, `c` is of type `C`).
+    pub(crate) fn add_at_path(
+        &mut self,
+        _path: &OpPath,
+        _selection_set: Option<&Arc<NormalizedSelectionSet>>,
+    ) {
+        // TODO: port a `SelectionSetUpdates` data structure or mutate directly?
+        todo!()
+    }
 }
 
 impl NormalizedFieldSelection {
@@ -1624,6 +1674,13 @@ impl NormalizedInlineFragmentSelection {
                 normalize_fragment_spread_option,
             )?,
         })
+    }
+
+    pub(crate) fn casted_type(&self) -> &CompositeTypeDefinitionPosition {
+        let data = self.inline_fragment.data();
+        data.type_condition_position
+            .as_ref()
+            .unwrap_or(&data.parent_type_position)
     }
 }
 

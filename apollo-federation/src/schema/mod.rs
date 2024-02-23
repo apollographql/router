@@ -1,4 +1,5 @@
 use crate::error::{FederationError, SingleFederationError};
+use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::LinksMetadata;
 use crate::schema::position::{
     CompositeTypeDefinitionPosition, DirectiveDefinitionPosition, EnumTypeDefinitionPosition,
@@ -139,6 +140,26 @@ impl FederationSchema {
                 directive_name: name.clone(),
             })
     }
+
+    /// Note that a subgraph may have no "entities" and so no `_Entity` type.
+    pub(crate) fn entity_type(
+        &self,
+    ) -> Result<Option<UnionTypeDefinitionPosition>, FederationError> {
+        // Note that the _Entity type is special in that:
+        // 1. Spec renaming doesn't take place for it (there's no prefixing or importing needed),
+        //    in order to maintain backwards compatibility with Fed 1.
+        // 2. Its presence is optional; if absent, it means the subgraph has no resolvable keys.
+        match self.schema.types.get(&FEDERATION_ENTITY_TYPE_NAME_IN_SPEC) {
+            Some(ExtendedType::Union(_)) => Ok(Some(UnionTypeDefinitionPosition {
+                type_name: FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
+            })),
+            Some(_) => Err(FederationError::internal(format!(
+                "Unexpectedly found non-union for federation spec's `{}` type definition",
+                FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
+            ))),
+            None => Ok(None),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +173,10 @@ impl ValidFederationSchema {
 
     pub(crate) fn schema(&self) -> &Valid<Schema> {
         Valid::assume_valid_ref(&self.schema)
+    }
+
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 

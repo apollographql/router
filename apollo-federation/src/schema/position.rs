@@ -1,6 +1,7 @@
 use crate::error::{FederationError, SingleFederationError};
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
+use crate::query_graph::QueryGraphNodeType;
 use crate::schema::referencer::{
     DirectiveReferencers, EnumTypeReferencers, InputObjectTypeReferencers,
     InterfaceTypeReferencers, ObjectTypeReferencers, Referencers, ScalarTypeReferencers,
@@ -229,10 +230,22 @@ impl TryFrom<OutputTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
             OutputTypeDefinitionPosition::Union(value) => {
                 Ok(CompositeTypeDefinitionPosition::Union(value))
             }
-            _ => Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" was unexpectedly not a composite type", value,),
-            }
-            .into()),
+            _ => Err(FederationError::internal(format!(
+                "Type `{value}` was unexpectedly not a composite type"
+            ))),
+        }
+    }
+}
+
+impl TryFrom<OutputTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            OutputTypeDefinitionPosition::Object(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                "Type `{value}` was unexpectedly not an object type"
+            ))),
         }
     }
 }
@@ -251,6 +264,32 @@ impl From<ObjectOrInterfaceTypeDefinitionPosition> for CompositeTypeDefinitionPo
         match value {
             ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
             ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
+        }
+    }
+}
+
+impl TryFrom<QueryGraphNodeType> for CompositeTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
+        match value {
+            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
+            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
+                "Type `{value}` was unexpectedly not a composite type"
+            ))),
+        }
+    }
+}
+
+impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
+        match value {
+            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
+            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
+                "Type `{value}` was unexpectedly not a composite type"
+            ))),
         }
     }
 }

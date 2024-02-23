@@ -569,8 +569,8 @@ impl QueryPlanningTraversal {
                     fetch_dependency_node,
                     Default::default(),
                     Default::default(),
-                    Default::default(),
-                );
+                    &Default::default(),
+                )?;
             }
         } else {
             let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
@@ -594,8 +594,8 @@ impl QueryPlanningTraversal {
                 fetch_dependency_node,
                 Default::default(),
                 Default::default(),
-                Default::default(),
-            );
+                &Default::default(),
+            )?;
         }
         Ok(())
     }

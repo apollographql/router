@@ -90,6 +90,10 @@ impl OpPathTree {
         )
     }
 
+    pub(crate) fn is_leaf(&self) -> bool {
+        self.childs.is_empty()
+    }
+
     pub(crate) fn is_all_in_same_subgraph(&self) -> Result<bool, FederationError> {
         let node_weight = self.graph.node_weight(self.node)?;
         self.is_all_in_same_subgraph_internal(&node_weight.source)

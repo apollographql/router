@@ -208,7 +208,7 @@ pub struct FetchDataKeyRenamer {
 /// Note that the `@` is currently optional in some contexts, as query plan execution may assume
 /// upon encountering array data in a path that it should match the remaining path to the array's
 /// elements.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FetchDataPathElement {
     Key(NodeStr),
     AnyIndex,
