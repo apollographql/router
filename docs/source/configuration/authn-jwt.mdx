@@ -141,7 +141,7 @@ The default value is `Bearer`.
 </td>
 <td>
 
-Whether to ignore other prefixes in the `Authorization` header. If set to `false`, the router will only accept tokens with the prefix specified in `header_value_prefix`. If set to `true`, the router will ignore any requests that don't start with the prefix specified in `header_value_prefix`.
+Whether to ignore other prefixes in the `Authorization` header. If set to `false`, or unspecified, the router will only accept tokens with the prefix specified in `header_value_prefix`. If set to `true`, the router will ignore any requests that don't start with the prefix specified in `header_value_prefix`.
 
 If a header prefix is set to an empty string, this option is ignored.
 

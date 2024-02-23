@@ -129,7 +129,7 @@ struct JWTConf {
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
     /// Whether to ignore any mismatched prefixes
-    #[serde(default = "default_ignore_other_prefixes")]
+    #[serde(default)]
     ignore_other_prefixes: bool,
 }
 

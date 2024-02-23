@@ -1,6 +1,6 @@
 ### Ability to ignore other auth prefixes in the JWT plugin
 
-You can now ignore whether to ignore other header prefixes with the JWT plugin. As many applications will use the format of `Authorization: <scheme> <token>`, this will enable the use other schemes within the `Authorization` header. 
+You can now choose whether to ignore other header prefixes with the JWT plugin. Many applications will use the format of `Authorization: <scheme> <token>` and this will enable the use of other schemes within the `Authorization` header. 
 
 If the header prefix is an empty string, this option will be ignored. 
 
