@@ -42,7 +42,7 @@ executors:
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
- arm_macos_build: &arm_macos_build_executor
+  arm_macos_build: &arm_macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
