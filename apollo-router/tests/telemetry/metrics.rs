@@ -68,23 +68,6 @@ async fn test_metrics_reloading() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_metrics_fed_version() {
-    let mut router = IntegrationTest::builder()
-        .config(PROMETHEUS_CONFIG)
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-    // Make sure the planner is initialized
-    router.execute_default_query().await;
-
-    router
-        .assert_metrics_contains(r#"apollo_router_supergraph_federation{federation_version="1",otel_scope_name="apollo/router"} 1"#, None)
-        .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_auth_metrics() {
     let mut router = IntegrationTest::builder()
         .config(SUBGRAPH_AUTH_CONFIG)

@@ -23,7 +23,6 @@ scalar join__FieldSet
 
 enum join__Graph {
   SUBGRAPH_A @join__graph(name: "subgraph-a", url: "http://graphql.subgraph-a.svc.cluster.local:4000")
-  SUBGRAPH_B @join__graph(name: "subgraph-b", url: "http://localhost:4002")
 }
 
 scalar link__Import
@@ -40,6 +39,6 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Query {
-  me: String
+type Query @join__type(graph: SUBGRAPH_A) {
+  me: String @join__field(graph: SUBGRAPH_A)
 }

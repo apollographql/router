@@ -829,6 +829,7 @@ mod tests {
 
     use super::*;
     use crate::json_ext::Path;
+    use crate::metrics::FutureMetricsExt as _;
     use crate::spec::query::subselections::SubSelectionKey;
     use crate::spec::query::subselections::SubSelectionValue;
 
@@ -884,6 +885,43 @@ mod tests {
             "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
                  Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
         );
+    }
+
+    #[test(tokio::test)]
+    async fn federation_versions() {
+        async {
+            let _planner = BridgeQueryPlanner::new(
+                include_str!("../testdata/minimal_supergraph.graphql").into(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_gauge!(
+                "apollo.router.supergraph.federation",
+                1,
+                federation.version = 1
+            );
+        }
+        .with_metrics()
+        .await;
+
+        async {
+            let _planner = BridgeQueryPlanner::new(
+                include_str!("../testdata/minimal_fed2_supergraph.graphql").into(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_gauge!(
+                "apollo.router.supergraph.federation",
+                1,
+                federation.version = 2
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[test(tokio::test)]
