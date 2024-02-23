@@ -40,10 +40,6 @@ async fn test_metrics_reloading() {
         router.assert_reloaded().await;
     }
 
-    router
-        .assert_metrics_contains(r#"apollo_router_supergraph_federation{federation_version="1",otel_scope_name="apollo/router"} 1"#, None)
-        .await;
-
     router.assert_metrics_contains(r#"apollo_router_cache_hit_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#, None).await;
     router.assert_metrics_contains(r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#, None).await;
     router.assert_metrics_contains(r#"apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="100"}"#, None).await;
@@ -69,6 +65,23 @@ async fn test_metrics_reloading() {
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(120))).await;
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(1))).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_fed_version() {
+    let mut router = IntegrationTest::builder()
+        .config(PROMETHEUS_CONFIG)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    // Make sure the planner is initialized
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(r#"apollo_router_supergraph_federation{federation_version="1",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
