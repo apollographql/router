@@ -166,7 +166,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *amd_acos_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_macos_build_executor, << parameters.platform >> ]
               - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
