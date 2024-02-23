@@ -1,10 +1,10 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::io::Write;
 use std::marker::PhantomData;
 
+use bytes::BytesMut;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tracing::field;
@@ -30,6 +30,8 @@ use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
+
+const WRITER_BUF_SIZE: usize = 8_192;
 
 pub(crate) fn create_fmt_layer(
     config: &config::Conf,
@@ -162,37 +164,58 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        thread_local! {
-            static BUF: RefCell<String> = RefCell::new(String::new());
-        }
+        let mut buf = BytesMut::with_capacity(WRITER_BUF_SIZE);
 
-        BUF.with(|buf| {
-            let borrow = buf.try_borrow_mut();
-            let mut a;
-            let mut b;
-            let mut buf = match borrow {
-                Ok(buf) => {
-                    a = buf;
-                    &mut *a
-                }
-                _ => {
-                    b = String::new();
-                    &mut b
-                }
-            };
-            if self.fmt_event.format_event(&ctx, &mut buf, event).is_ok() {
+        match self.fmt_event.format_event(&ctx, &mut buf, event) {
+            Ok(()) => {
                 let mut writer = self.make_writer.make_writer();
-                if let Err(err) = std::io::Write::write_all(&mut writer, buf.as_bytes()) {
+                let limit = buf.len();
+                let mut index = 0;
+                let mut carry_on = true;
+                while index < limit {
+                    // NOTE: Do not raise this limit about 1_024 for macOS without testing it works
+                    // correctly. This figure was determined experimentally by observing pauses in
+                    // logging during startup. If the figure goes above 1_024, you will get a 5s
+                    // pause during logging at startup on macOS. This may change in the future or
+                    // depending on your version of macOS, so we'll need to verify it a couple of
+                    // times a year to see if anything has changed.
+                    #[cfg(target_os = "macos")]
+                    let upper = index + std::cmp::min(limit - index, 1_024);
+                    #[cfg(not(target_os = "macos"))]
+                    let upper = index + std::cmp::min(limit - index, WRITER_BUF_SIZE);
+
+                    match writer.write(&buf[index..upper]) {
+                        Ok(written) => {
+                            carry_on = true;
+                            index += written;
+                        }
+                        Err(err) => {
+                            if !carry_on || err.kind() == std::io::ErrorKind::BrokenPipe {
+                                break;
+                            }
+                            if err.kind() != std::io::ErrorKind::WouldBlock {
+                                carry_on = false;
+                                let _ = std::io::stderr()
+                                    .write_all(format!("error during write: {err:?}\n").as_bytes());
+                                let _ = std::io::stderr().flush();
+                            }
+                        }
+                    }
+                }
+                if let Err(err) = writer.flush() {
                     if err.kind() != std::io::ErrorKind::WouldBlock {
-                        let _ = std::io::stderr().write_all(
-                            format!("cannot flush the logging buffer, this is a bug: {err:?}")
-                                .as_bytes(),
-                        );
+                        let _ = std::io::stderr()
+                            .write_all(format!("error during flush: {err:?}\n").as_bytes());
+                        let _ = std::io::stderr().flush();
                     }
                 }
             }
-            buf.clear();
-        });
+            Err(err) => {
+                let _ = std::io::stderr()
+                    .write_all(format!("error during format_event: {err:?}\n").as_bytes());
+                let _ = std::io::stderr().flush();
+            }
+        }
     }
 }
 
