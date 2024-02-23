@@ -7,5 +7,4 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.mode.: batch_http_link
-
+          opt.mode: batch_http_link

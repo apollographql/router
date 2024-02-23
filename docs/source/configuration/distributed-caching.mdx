@@ -95,10 +95,6 @@ supergraph:
     cache:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
-        username: admin/123 # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the username in the URL
-        password: admin # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the password in the URL
-        timeout: 5ms # Optional, by default: 2ms
-        ttl: 24h # Optional, by default no expiration
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
@@ -115,10 +111,48 @@ apq:
     cache:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
-        timeout: 5ms # Optional, by default: 2ms
-        ttl: 24h # Optional, by default no expiration
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
 
 All APQ cache entries will be prefixed with `apq` followed by a null byte character (referenced by the escape sequence `\0` in most programming languages) within the distributed cache.
+
+### Common Redis configuration
+
+Redis configuration is done in the same way for APQ caching, query plan caching and [entity caching](./entity-caching).
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    cache:
+      redis: #highlight-line
+        urls: ["redis://..."] #highlight-line
+        username: admin/123 # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the username in the URL
+        password: admin # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the password in the URL
+        timeout: 5ms # Optional, by default: 2ms
+        ttl: 24h # Optional, by default no expiration
+        namespace: "prefix"  # Optional
+        #tls:
+        required_to_start: false # Optional, defaults to false
+```
+
+#### Timeout
+
+Connecting and sending commands to Redis are subject to a timeout, set by default to 2ms, that can be overriden.
+
+
+#### TTL
+
+The `ttl` option defines the default global expiration for Redis entries.
+
+### Namespace
+
+When using the same Redis instance for multiple puposes, the `namespace` option defines a prefix for all the keys defined by the router.
+
+### TLS
+
+TLS for Redis connections can be configured in the same way as subgraphs, to [override the list of certificate authorities](./overview/#overriding-certificate-authorities-for-subgraphs) or [set up client authentication](./overview/#tls-client-authentication-for-subgraph-requests).
+
+### Required to start
+
+When active, the `required_to_start` option will prevent the Router from starting if it cannot connect to Redis. By default, the Router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ and query planning, and entity caching sending the requestsz to subgraphs undisturbed.

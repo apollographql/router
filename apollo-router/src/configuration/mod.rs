@@ -934,6 +934,14 @@ pub(crate) struct RedisCache {
     #[serde(default)]
     /// TLS client configuration
     pub(crate) tls: Option<TlsClient>,
+
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
+}
+
+fn default_required_to_start() -> bool {
+    false
 }
 
 /// TLS related configuration options.

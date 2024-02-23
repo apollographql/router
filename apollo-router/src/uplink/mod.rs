@@ -213,6 +213,7 @@ where
     let query = query_name::<Query>();
     let (sender, receiver) = channel(2);
     let client = match reqwest::Client::builder()
+        .no_gzip()
         .timeout(uplink_config.timeout)
         .build()
     {
