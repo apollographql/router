@@ -3,7 +3,6 @@ source: apollo-router/src/plugins/authorization/tests.rs
 expression: response
 ---
 {
-  "data": {},
   "errors": [
     {
       "message": "Unauthorized field or type",
@@ -15,5 +14,6 @@ expression: response
         "code": "UNAUTHORIZED_FIELD_OR_TYPE"
       }
     }
-  ]
+  ],
+  "data": {}
 }

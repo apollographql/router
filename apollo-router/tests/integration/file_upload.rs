@@ -641,13 +641,6 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
             {
-              "data": {
-                "file0": {
-                  "filename": "file0",
-                  "body": "file0 contents"
-                },
-                "file1": null
-              },
               "errors": [
                 {
                   "message": "HTTP fetch failed from 'uploads2': HTTP fetch failed from 'uploads2': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'.",
@@ -658,7 +651,14 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
                     "reason": "HTTP fetch failed from 'uploads2': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'."
                   }
                 }
-              ]
+              ],
+              "data": {
+                "file0": {
+                  "filename": "file0",
+                  "body": "file0 contents"
+                },
+                "file1": null
+              }
             }
             "###);
         })

@@ -42,7 +42,6 @@ expression: yaml
       name: supergraph
       otel.kind: INTERNAL
 - fields:
-    http.response.body: "Response { label: None, data: Some(Object({\"data\": String(\"res\")})), path: None, errors: [], extensions: {}, has_next: None, subscribed: None, created_at: None, incremental: [] }"
+    http.response.body: "Response { label: None, errors: [], data: Some(Object({\"data\": String(\"res\")})), path: None, extensions: {}, has_next: None, subscribed: None, created_at: None, incremental: [] }"
   level: INFO
   message: Supergraph GraphQL response
-
