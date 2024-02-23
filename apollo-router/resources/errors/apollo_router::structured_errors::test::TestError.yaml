@@ -1,0 +1,23 @@
+- code: TEST_ERROR__BAD_REQUEST
+  level: error
+  component: subgraph
+  detail: "The request was invalid or cannot be otherwise served."
+  actions:
+    - "Do something"
+  attributes:
+    name:
+        type: string
+        description: "The name of the entity."
+
+- code: TEST_ERROR__NOT_FOUND
+  level: error
+  component: subgraph
+  detail: "The requested resource could not be found but may be available in the future."
+  actions:
+    - "Do something"
+  attributes:
+    attr:
+      type: string
+      description: "Some attribute"
+
+

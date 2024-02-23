@@ -232,7 +232,7 @@ dependencies = [
  "petgraph",
  "salsa",
  "serde_json",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.26.1",
  "thiserror",
  "url",
@@ -334,6 +334,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry-zipkin",
  "opentelemetry_api",
+ "ordinalizer",
  "p256 0.13.2",
  "parking_lot 0.12.1",
  "paste",
@@ -367,7 +368,8 @@ dependencies = [
  "shellexpand",
  "similar",
  "static_assertions",
- "strum_macros 0.25.3",
+ "strum 0.26.1",
+ "strum_macros 0.26.1",
  "sys-info",
  "tempfile",
  "test-log",
@@ -2089,7 +2091,7 @@ dependencies = [
  "proc-macro2 1.0.76",
  "quote 1.0.35",
  "regex",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.3",
  "syn 1.0.109",
  "syn 2.0.48",
@@ -4621,6 +4623,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ordinalizer"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f631c9219be3de11edcff6a906b344dcab3e927e13506a366ddaa8ec49ad7c41"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2 1.0.76",
+ "quote 1.0.35",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "outref"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5059,6 +5073,30 @@ checksum = "7f4c021e1093a56626774e81216a4ce732a735e5bad4868a03f3ed65ca0c3919"
 dependencies = [
  "once_cell",
  "toml_edit 0.19.14",
+]
+
+[[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2 1.0.76",
+ "quote 1.0.35",
+ "syn 1.0.109",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2 1.0.76",
+ "quote 1.0.35",
+ "version_check",
 ]
 
 [[package]]
@@ -6444,6 +6482,12 @@ checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
  "strum_macros 0.25.3",
 ]
+
+[[package]]
+name = "strum"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723b93e8addf9aa965ebe2d11da6d7540fa2283fcea14b3371ff055f7ba13f5f"
 
 [[package]]
 name = "strum_macros"

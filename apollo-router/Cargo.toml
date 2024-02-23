@@ -168,6 +168,7 @@ opentelemetry-zipkin = { version = "0.18.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.13.0"
+ordinalizer = "0.1.0"
 paste = "1.0.14"
 pin-project-lite = "0.2.13"
 prometheus = "0.13"
@@ -204,7 +205,8 @@ serde_json = { version = "1.0.114", features = [
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
-strum_macros = "0.25.3"
+strum = "0.26.1"
+strum_macros = "0.26.1"
 sys-info = "0.9.1"
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["full"] }

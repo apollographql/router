@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apollographql.com/errors.schema.json",
+  "title": "Error definitions",
+  "description": "Error definitions for Apollo Router",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "level",
+      "code",
+      "component",
+      "detail"
+    ],
+    "properties": {
+      "level": {
+        "description": "The error level",
+        "type": "string",
+        "enum": [
+          "info",
+          "warn",
+          "error"
+        ]
+      },
+      "code": {
+        "description": "The error code",
+        "type": "string"
+      },
+      "component": {
+        "description": "The source component of the error, e.g. router, redis, subgraph",
+        "type": "string",
+        "anyOf": [
+          {
+            "enum": [
+              "router",
+              "redis",
+              "subgraph"
+            ]
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "detail": {
+        "description": "The detailed error message of containing when and why this error happens",
+        "type": "string"
+      },
+      "actions": {
+        "description": "The error description",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "attributes": {
+        "description": "The error attributes",
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "description": "The type of the attribute",
+              "type": "string",
+                "enum": [
+                    "string",
+                    "number",
+                    "boolean"
+                ]
+            },
+            "description": {
+              "description": "The description of the attribute",
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

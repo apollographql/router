@@ -1,0 +1,11 @@
+- code: TEST_NESTED_ERROR__NESTED
+  level: error
+  component: subgraph
+  detail: "The request was invalid or cannot be otherwise served."
+  actions:
+    - "Do something"
+  attributes:
+    name:
+        type: string
+        description: "The name of the entity."
+
