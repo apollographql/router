@@ -184,10 +184,6 @@ fn default_poll_interval() -> Duration {
     DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
 }
 
-fn default_ignore_other_prefixes() -> bool {
-    false
-}
-
 #[derive(Debug, Default)]
 struct JWTCriteria {
     alg: Algorithm,
@@ -543,24 +539,17 @@ fn authenticate(
     // mismatched prefixes, we'll skip this check and instead do it in a
     // later step.
     let prefix_len = config.header_value_prefix.len();
-    if !&config.ignore_other_prefixes
-        && (jwt_value.len() < prefix_len
-            || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix))
+    if jwt_value.len() < prefix_len
+        || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix)
     {
+        if config.ignore_other_prefixes {
+            return ControlFlow::Continue(request);
+        }
         return failure_message(
             request.context,
             AuthenticationError::InvalidPrefix(jwt_value_untrimmed, &config.header_value_prefix),
             StatusCode::BAD_REQUEST,
         );
-    }
-
-    // Here we'll check if the user has configured to ignore mismatched prefixes
-    // and if so, we'll skip any unknown prefixes and not validate the token.
-    if config.ignore_other_prefixes
-        && (jwt_value.len() < prefix_len
-            || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix))
-    {
-        return ControlFlow::Continue(request);
     }
 
     // If there's no header prefix, we need to avoid splitting the header

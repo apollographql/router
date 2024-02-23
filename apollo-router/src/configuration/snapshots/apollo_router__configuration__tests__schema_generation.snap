@@ -246,6 +246,11 @@ expression: "&schema"
                   "default": "Bearer",
                   "type": "string"
                 },
+                "ignore_other_prefixes": {
+                  "description": "Whether to ignore any mismatched prefixes",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "jwks": {
                   "description": "List of JWKS used to verify tokens",
                   "type": "array",
