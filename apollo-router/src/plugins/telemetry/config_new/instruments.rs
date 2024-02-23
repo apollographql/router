@@ -30,6 +30,7 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::services::supergraph;
 use crate::Context;
 
 #[allow(dead_code)]
@@ -43,7 +44,7 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) router:
         Extendable<RouterInstrumentsConfig, Instrument<RouterAttributes, RouterSelector>>,
     /// Supergraph service instruments. For more information see documentation on Router lifecycle.
-    supergraph:
+    pub(crate) supergraph:
         Extendable<SupergraphInstruments, Instrument<SupergraphAttributes, SupergraphSelector>>,
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
     pub(crate) subgraph:
@@ -130,7 +131,7 @@ where
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-struct SupergraphInstruments {}
+pub(crate) struct SupergraphInstruments {}
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
@@ -686,6 +687,243 @@ impl RouterCustomInstruments {
 impl Instrumented for RouterCustomInstruments {
     type Request = router::Request;
     type Response = router::Response;
+
+    fn on_request(&self, request: &Self::Request) {
+        for counter in &self.counters {
+            counter.on_request(request);
+        }
+        for histogram in &self.histograms {
+            histogram.on_request(request);
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        for counter in &self.counters {
+            counter.on_response(response);
+        }
+        for histogram in &self.histograms {
+            histogram.on_response(response);
+        }
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        for counter in &self.counters {
+            counter.on_error(error, ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_error(error, ctx);
+        }
+    }
+}
+
+pub(crate) struct SupergraphCustomInstruments {
+    counters: Vec<
+        CustomCounter<
+            supergraph::Request,
+            supergraph::Response,
+            SupergraphAttributes,
+            SupergraphSelector,
+        >,
+    >,
+    histograms: Vec<
+        CustomHistogram<
+            supergraph::Request,
+            supergraph::Response,
+            SupergraphAttributes,
+            SupergraphSelector,
+        >,
+    >,
+}
+
+impl SupergraphCustomInstruments {
+    pub(crate) fn new(
+        config: &HashMap<String, Instrument<SupergraphAttributes, SupergraphSelector>>,
+    ) -> Self {
+        let mut counters = Vec::new();
+        let mut histograms = Vec::new();
+        let meter = metrics::meter_provider().meter("apollo/router");
+
+        for (instrument_name, instrument) in config {
+            match instrument.ty {
+                InstrumentType::Counter => {
+                    let (selector, increment) = match &instrument.value {
+                        InstrumentValue::Standard(incr) => {
+                            let incr = match incr {
+                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Unit => Increment::Unit,
+                            };
+                            (None, incr)
+                        }
+                        InstrumentValue::Custom(selector) => {
+                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                        }
+                    };
+                    let counter = CustomCounterInner {
+                        increment,
+                        counter: Some(meter.f64_counter(instrument_name.clone()).init()),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: instrument.attributes.clone(),
+                    };
+
+                    counters.push(CustomCounter {
+                        inner: Mutex::new(counter),
+                    })
+                }
+                InstrumentType::Histogram => {
+                    let (selector, increment) = match &instrument.value {
+                        InstrumentValue::Standard(incr) => {
+                            let incr = match incr {
+                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Unit => Increment::Unit,
+                            };
+                            (None, incr)
+                        }
+                        InstrumentValue::Custom(selector) => {
+                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                        }
+                    };
+                    let histogram = CustomHistogramInner {
+                        increment,
+                        histogram: Some(meter.f64_histogram(instrument_name.clone()).init()),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: instrument.attributes.clone(),
+                    };
+
+                    histograms.push(CustomHistogram {
+                        inner: Mutex::new(histogram),
+                    })
+                }
+            }
+        }
+
+        Self {
+            counters,
+            histograms,
+        }
+    }
+}
+
+impl Instrumented for SupergraphCustomInstruments {
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+
+    fn on_request(&self, request: &Self::Request) {
+        for counter in &self.counters {
+            counter.on_request(request);
+        }
+        for histogram in &self.histograms {
+            histogram.on_request(request);
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        for counter in &self.counters {
+            counter.on_response(response);
+        }
+        for histogram in &self.histograms {
+            histogram.on_response(response);
+        }
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        for counter in &self.counters {
+            counter.on_error(error, ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_error(error, ctx);
+        }
+    }
+}
+
+pub(crate) struct SubgraphCustomInstruments {
+    counters: Vec<
+        CustomCounter<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>,
+    >,
+    histograms: Vec<
+        CustomHistogram<
+            subgraph::Request,
+            subgraph::Response,
+            SubgraphAttributes,
+            SubgraphSelector,
+        >,
+    >,
+}
+
+impl SubgraphCustomInstruments {
+    pub(crate) fn new(
+        config: &HashMap<String, Instrument<SubgraphAttributes, SubgraphSelector>>,
+    ) -> Self {
+        let mut counters = Vec::new();
+        let mut histograms = Vec::new();
+        let meter = metrics::meter_provider().meter("apollo/router");
+
+        for (instrument_name, instrument) in config {
+            match instrument.ty {
+                InstrumentType::Counter => {
+                    let (selector, increment) = match &instrument.value {
+                        InstrumentValue::Standard(incr) => {
+                            let incr = match incr {
+                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Unit => Increment::Unit,
+                            };
+                            (None, incr)
+                        }
+                        InstrumentValue::Custom(selector) => {
+                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                        }
+                    };
+                    let counter = CustomCounterInner {
+                        increment,
+                        counter: Some(meter.f64_counter(instrument_name.clone()).init()),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: instrument.attributes.clone(),
+                    };
+
+                    counters.push(CustomCounter {
+                        inner: Mutex::new(counter),
+                    })
+                }
+                InstrumentType::Histogram => {
+                    let (selector, increment) = match &instrument.value {
+                        InstrumentValue::Standard(incr) => {
+                            let incr = match incr {
+                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Unit => Increment::Unit,
+                            };
+                            (None, incr)
+                        }
+                        InstrumentValue::Custom(selector) => {
+                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                        }
+                    };
+                    let histogram = CustomHistogramInner {
+                        increment,
+                        histogram: Some(meter.f64_histogram(instrument_name.clone()).init()),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: instrument.attributes.clone(),
+                    };
+
+                    histograms.push(CustomHistogram {
+                        inner: Mutex::new(histogram),
+                    })
+                }
+            }
+        }
+
+        Self {
+            counters,
+            histograms,
+        }
+    }
+}
+
+impl Instrumented for SubgraphCustomInstruments {
+    type Request = subgraph::Request;
+    type Response = subgraph::Response;
 
     fn on_request(&self, request: &Self::Request) {
         for counter in &self.counters {

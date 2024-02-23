@@ -62,6 +62,8 @@ use self::config::SamplerOption;
 use self::config::TraceIdFormat;
 use self::config_new::instruments::Instrumented;
 use self::config_new::instruments::RouterCustomInstruments;
+use self::config_new::instruments::SubgraphCustomInstruments;
+use self::config_new::instruments::SupergraphCustomInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -524,9 +526,14 @@ impl Plugin for Telemetry {
                 move |req: &SupergraphRequest| {
                     let custom_attributes = config.instrumentation.spans.supergraph.attributes.on_request(req);
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
-                    (req.context.clone(), custom_attributes)
+                    let custom_instruments = SupergraphCustomInstruments::new(
+                        &config.instrumentation.instruments.supergraph.custom,
+                    );
+                    custom_instruments.on_request(req);
+
+                    (req.context.clone(), custom_instruments, custom_attributes)
                 },
-                move |(ctx, custom_attributes): (Context, LinkedList<KeyValue>), fut| {
+                move |(ctx, custom_instruments, custom_attributes): (Context, SupergraphCustomInstruments, LinkedList<KeyValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -536,8 +543,14 @@ impl Plugin for Telemetry {
                         span.set_dyn_attributes(custom_attributes);
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         match &result {
-                            Ok(resp) => span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp)),
-                            Err(err) => span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err)),
+                            Ok(resp) => {
+                                span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
+                                custom_instruments.on_response(resp);
+                            },
+                            Err(err) => {
+                                span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
+                                custom_instruments.on_error(err, &ctx);
+                            },
                         }
                         result = Self::update_otel_metrics(
                             config.clone(),
@@ -613,10 +626,22 @@ impl Plugin for Telemetry {
                         .instruments
                         .subgraph
                         .on_request(sub_request);
+                    let custom_instruments = SubgraphCustomInstruments::new(
+                        &config.instrumentation.instruments.subgraph.custom,
+                    );
+                    custom_instruments.on_request(sub_request);
 
-                    (sub_request.context.clone(), custom_attributes)
+                    (
+                        sub_request.context.clone(),
+                        custom_instruments,
+                        custom_attributes,
+                    )
                 },
-                move |(context, custom_attributes): (Context, LinkedList<KeyValue>),
+                move |(context, custom_instruments, custom_attributes): (
+                    Context,
+                    SubgraphCustomInstruments,
+                    LinkedList<KeyValue>,
+                ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
@@ -643,6 +668,7 @@ impl Plugin for Telemetry {
                                         .on_response(resp),
                                 );
                                 conf.instrumentation.instruments.subgraph.on_response(resp);
+                                custom_instruments.on_response(resp);
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, "Error");
@@ -654,6 +680,7 @@ impl Plugin for Telemetry {
                                     .instruments
                                     .subgraph
                                     .on_error(err, &context);
+                                custom_instruments.on_error(err, &context);
                             }
                         }
 
