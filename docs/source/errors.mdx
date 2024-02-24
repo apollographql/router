@@ -1,0 +1,46 @@
+---
+title: Errors
+subtitle: Error and status codes returned by the Apollo Router
+description: Error codes and response status codes returned by the Apollo Router
+---
+
+Learn about error codes and HTTP response status codes returned by the Apollo Router.
+
+## Status codes
+
+<PropertyList kind="errCodes">
+<Property name="400" short="Bad request">
+
+A problem when validating GraphQL or parsing an HTTP request.
+
+</Property>
+<Property name="401" short="Unauthorized">
+
+Sent an event to a non-existent subscription or used an invalid hash. Returned by either the authorization plugin to clients or the subscription endpoint.
+
+</Property>
+<Property name="405" short="Method not allowed">
+
+Used an unallowed HTTP method. Both mutations and subscriptions must use POST.
+
+</Property>
+<Property name="406" short="Not acceptable">
+
+A query's Accept header doesn't match one of the supported content types: 
+- `application/json`
+- `application/graphql-response+json`
+- `multipart/mixed;deferSpec=20220824`
+- `multipart/mixed;subscriptionSpec=1.0`.
+
+</Property>
+<Property name="429" short="Too many requests">
+
+Exceeded configured rate limits. See [client side traffic shaping](/configuration/traffic-shaping/#client-side-traffic-shaping).
+
+</Property>
+<Property name="500" short="Internal server error">
+
+An unexpected issue. Report this [possible bug](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) to the router team.
+
+</Property>
+</PropertyList>
