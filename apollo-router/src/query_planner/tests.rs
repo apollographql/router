@@ -82,7 +82,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }.into(),
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
@@ -133,7 +133,7 @@ async fn fetch_includes_operation_name() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }.into(),
         query: Arc::new(Query::empty()),
     };
 
@@ -190,7 +190,7 @@ async fn fetch_makes_post_requests() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }.into(),
         query: Arc::new(Query::empty()),
     };
 
@@ -314,7 +314,7 @@ async fn defer() {
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
-            },
+            }.into(),
             query: Arc::new(Query::empty()),
         };
 
@@ -427,7 +427,7 @@ async fn defer_if_condition() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }.into(),
         query: Arc::new(
             Query::parse(
                 query,
@@ -612,7 +612,7 @@ async fn dependent_mutations() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }.into(),
         query: Arc::new(Query::empty()),
     };
 
