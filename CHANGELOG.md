@@ -18,7 +18,7 @@ By [@glasser](https://github.com/glasser) in https://github.com/apollographql/ro
 
 ### Implement streaming compression for subgraph requests ([Issue #4648](https://github.com/apollographql/router/issues/4648))
 
-This fixe subgraph HTTP requests to compress the body in streaming instead of loading it entirely in the compression engine before sending everything at once. This reuses the compression layer that the router uses to compress client responses.
+The router now compresses the body of subgraph HTTP requests in streaming instead of loading them entirely in the compression engine before sending everything at once. This fix reuses the compression layer that compresses client responses.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4672
 
@@ -28,13 +28,17 @@ Cross compiling the router from ARM to x86 encounters issues with deno snapshots
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4723
 
-### use a non blocking stdout and stderr ([Issue #4612](https://github.com/apollographql/router/issues/4612))
+### Unblock router when output piped to stdout or stderr ([Issue #4612](https://github.com/apollographql/router/issues/4612))
 
-If the router's output was piped into another process, and that process did not consume that output, it could entirely lock up the router. New connections were accepted, but requests never got an answer.
-This is due to Rust protecting stdout and stderr access by a lock, to prevent multiple threads from interleaving their writes. When the process receiving the output from the router does not consume, then the logger's writes to the stream start to block, which means the current thread is blocked while holding the lock. And then any other thread that might want to log something will end up blocked too, waiting for that lock to be released.
+The router no longer gets blocked from handling requests when its output is piped to another process that doesn't consume that output.
 
-This is fixed by  marking stdout and stderr as non blocking, which means that logs will be dropped silently when the buffer is full. This has another side effect that should be pointed out:
-**if we write to stdout or sdtderr directly without handling errors (example: using `println!` or `eprintln!`) while the output is not consumed, then the router will panic. While that may look concerning, we consider that panicking, which will immediately reject the in flight requests and may trigger a restart of the router, is a better outcome than the router amking requests hang indefinitely.**
+The blocking behavior was due to Rust using a lock to protect access to stdout and stderr. The router takes the lock when its logger writes to a stream (stdout or stderr). If the router pipes its log output to another process, it holds that lock until the process consumes the output. Any other thread that tries to write log output concurrently would be blocked waiting for the lock to be released.
+
+This release fixes the unwanted blocking by marking stdout and stderr as non-blocking. Consequently, the router can concurrently pipe its log output and handle requests. 
+
+Implications of this fix:
+- Router logs are now dropped silently when the buffer is full.
+- If we write to stdout or stderr directly without handling errors (for example, using `println!` or `eprintln!`), if the output is not consumed then the router will panic. While that may look concerning, we consider that panicking—and immediately rejecting the in-flight requests that may trigger a restart of the router—as a better outcome than making requests that hang indefinitely.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4625
 
