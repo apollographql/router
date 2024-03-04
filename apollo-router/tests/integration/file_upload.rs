@@ -40,12 +40,6 @@ async fn it_uploads_a_single_file() -> Result<(), BoxError> {
         .handler(make_handler!(helper::echo_single_file))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -100,12 +94,6 @@ async fn it_uploads_multiple_files() -> Result<(), BoxError> {
         .handler(make_handler!(helper::echo_files))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .build()
         .run_test(move |response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -160,12 +148,6 @@ async fn it_uploads_a_massive_file() -> Result<(), BoxError> {
         .handler(make_handler!(helper::verify_stream).with_state((TEN_GB, 0xAA)))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -193,9 +175,9 @@ async fn it_uploads_to_multiple_subgraphs() -> Result<(), BoxError> {
             "operations",
             Part::text(
                 serde_json::json!({
-                    "query": "mutation SomeMutation($file0: Upload1, $file1: Upload2) {
-                        file0: singleUpload1(file: $file0) { filename body }
-                        file1: singleUpload2(file: $file1) { filename body }
+                    "query": "mutation SomeMutation($file0: Upload, $file1: UploadClone) {
+                        file0: singleUpload(file: $file0) { filename body }
+                        file1: singleUploadClone(file: $file1) { filename body }
                     }",
                     "variables": {
                         "file0": null,
@@ -226,14 +208,8 @@ async fn it_uploads_to_multiple_subgraphs() -> Result<(), BoxError> {
             "/s2" => helper::echo_single_file
         ))
         .request(request)
-        .subgraph_mapping("uploads1", "/s1")
-        .subgraph_mapping("uploads2", "/s2")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "multiple_subgraph.graphql",
-        ]))
+        .subgraph_mapping("uploads", "/s1")
+        .subgraph_mapping("uploads_clone", "/s2")
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -381,12 +357,6 @@ async fn it_supports_compression() -> Result<(), BoxError> {
         .handler(make_handler!(helper::echo_single_file))
         .request(Form::new()) // Gets overwritten by the `compress` transformer
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .transformer(compress)
         .build()
         .run_test(|request| {
@@ -415,12 +385,6 @@ async fn it_fails_upload_without_file() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -461,12 +425,6 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -505,12 +463,6 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -561,12 +513,6 @@ async fn it_fails_invalid_multipart_order() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -596,9 +542,9 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
             "operations",
             Part::text(
                 serde_json::json!({
-                    "query": "mutation ($file0: Upload1, $file1: Upload2) {
-                        file0: singleUpload1(file: $file0) { filename body }
-                        file1: singleUpload2(file: $file1) { filename body }
+                    "query": "mutation ($file0: Upload, $file1: UploadClone) {
+                        file0: singleUpload(file: $file0) { filename body }
+                        file1: singleUploadClone(file: $file1) { filename body }
                     }",
                     "variables": {
                         "file0": null,
@@ -629,14 +575,8 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
             "/s2" => helper::always_fail
         ))
         .request(request)
-        .subgraph_mapping("uploads1", "/s1")
-        .subgraph_mapping("uploads2", "/s2")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "multiple_subgraph.graphql",
-        ]))
+        .subgraph_mapping("uploads", "/s1")
+        .subgraph_mapping("uploads_clone", "/s2")
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -650,12 +590,12 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
               },
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads2': HTTP fetch failed from 'uploads2': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'.",
+                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
-                    "service": "uploads2",
-                    "reason": "HTTP fetch failed from 'uploads2': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'."
+                    "service": "uploads_clone",
+                    "reason": "HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'."
                   }
                 }
               ]
@@ -689,12 +629,6 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "single_subgraph.graphql",
-        ]))
         .transformer(strip_boundary)
         .build()
         .run_test(|response| {
@@ -727,9 +661,9 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
             "operations",
             Part::text(
                 serde_json::json!({
-                    "query": "mutation SomeMutation($file0: Upload2, $file1: Upload1) {
-                        file1: singleUpload1(file: $file1) { filename }
-                        file0: singleUpload2(file: $file0) { filename }
+                    "query": "mutation SomeMutation($file0: UploadClone, $file1: Upload) {
+                        file1: singleUpload(file: $file1) { filename }
+                        file0: singleUploadClone(file: $file0) { filename }
                     }",
                     "variables": {
                         "file0": null,
@@ -760,14 +694,8 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
             "/s2" => helper::always_fail
         ))
         .request(request)
-        .subgraph_mapping("uploads1", "/s1")
-        .subgraph_mapping("uploads2", "/s2")
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "file_upload",
-            "multiple_subgraph.graphql",
-        ]))
+        .subgraph_mapping("uploads", "/s1")
+        .subgraph_mapping("uploads_clone", "/s2")
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -834,7 +762,6 @@ mod helper {
         handler: Router,
         request: Form,
         subgraph_mappings: HashMap<String, String>,
-        supergraph: PathBuf,
         transformer: Option<fn(reqwest::Request) -> reqwest::Request>,
     }
 
@@ -851,7 +778,6 @@ mod helper {
             handler: Router,
             subgraph_mappings: HashMap<String, String>,
             request: Form,
-            supergraph: PathBuf,
             transformer: Option<fn(reqwest::Request) -> reqwest::Request>,
         ) -> Self {
             Self {
@@ -859,7 +785,6 @@ mod helper {
                 handler,
                 request,
                 subgraph_mappings,
-                supergraph,
                 transformer,
             }
         }
@@ -894,7 +819,12 @@ mod helper {
                         .map(|(name, path)| (name, format!("{bound_url}{path}")))
                         .collect(),
                 )
-                .supergraph(self.supergraph)
+                .supergraph(PathBuf::from_iter([
+                    "tests",
+                    "fixtures",
+                    "file_upload",
+                    "schema.graphql",
+                ]))
                 .build()
                 .await;
 
