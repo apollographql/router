@@ -1,11 +1,10 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
-use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use clap::CommandFactory;
+use clap::Parser;
 use http::header::CONTENT_TYPE;
 use http::header::USER_AGENT;
 use jsonschema::output::BasicOutput;
@@ -23,6 +22,9 @@ use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::YamlRouterFactory;
+use crate::services::router::service::RouterCreator;
+use crate::services::HasSchema;
 use crate::spec::Schema;
 use crate::Configuration;
 
@@ -52,8 +54,8 @@ struct UsageReport {
     usage: Map<String, Value>,
 }
 
-impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
-    pub(crate) fn new(delegate: T) -> OrbiterRouterSuperServiceFactory<T> {
+impl OrbiterRouterSuperServiceFactory {
+    pub(crate) fn new(delegate: YamlRouterFactory) -> OrbiterRouterSuperServiceFactory {
         OrbiterRouterSuperServiceFactory { delegate }
     }
 }
@@ -84,20 +86,18 @@ impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
 /// }
 /// ```
 #[derive(Default)]
-pub(crate) struct OrbiterRouterSuperServiceFactory<T: RouterSuperServiceFactory> {
-    delegate: T,
+pub(crate) struct OrbiterRouterSuperServiceFactory {
+    delegate: YamlRouterFactory,
 }
 
 #[async_trait]
-impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
-    for OrbiterRouterSuperServiceFactory<T>
-{
-    type RouterFactory = T::RouterFactory;
+impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
+    type RouterFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
+        schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
@@ -110,8 +110,13 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
             )
             .await
             .map(|factory| {
-                if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
-                    tokio::task::spawn(async {
+                // TODO: We should have a way to access the original CLI args here so that we can just see what the
+                // value of `anonymous_telemetry_disabled` really is instead of parsing it twice.
+                let telemetry_disabled = Opt::parse().is_telemetry_disabled();
+                if !telemetry_disabled {
+                    let schema = factory.supergraph_creator.schema();
+
+                    tokio::task::spawn(async move {
                         tracing::debug!("sending anonymous usage data to Apollo");
                         let report = create_report(configuration, schema);
                         if let Err(e) = send(report).await {
@@ -160,7 +165,7 @@ fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> Usa
     // Check the command line options. This encapsulates both env and command line functionality
     // This won't work in tests so we have separate test code.
     #[cfg(not(test))]
-    visit_args(&mut usage, env::args().collect());
+    visit_args(&mut usage, std::env::args().collect());
 
     UsageReport {
         session_id: *SESSION_ID.get_or_init(Uuid::new_v4),

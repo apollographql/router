@@ -1,5 +1,4 @@
 //! Cross Origin Resource Sharing (CORS configuration)
-// This entire file is license key functionality
 
 use std::str::FromStr;
 use std::time::Duration;

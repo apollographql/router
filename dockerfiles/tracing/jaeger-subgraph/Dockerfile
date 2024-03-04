@@ -1,4 +1,4 @@
-FROM node:16-bullseye
+FROM node:20-bullseye
 
 WORKDIR /src
 

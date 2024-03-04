@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 default-members = ["apollo-router"]
 members = [
     "apollo-router",
@@ -6,15 +7,14 @@ members = [
     "apollo-router-scaffold",
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
+    "examples/cache-control/rhai",
     "examples/context/rust",
     "examples/cookies-to-headers/rhai",
     "examples/data-response-mutate/rhai",
-    "examples/embedded/rust",
     "examples/error-response-mutate/rhai",
     "examples/forbid-anonymous-operations/rhai",
     "examples/forbid-anonymous-operations/rust",
     "examples/hello-world/rust",
-    "examples/jwt-auth/rust",
     "examples/jwt-claims/rhai",
     "examples/logging/rhai",
     "examples/op-name-to-header/rhai",
@@ -22,6 +22,8 @@ members = [
     "examples/subgraph-request-log/rhai",
     "examples/supergraph-sdl/rust",
     "examples/surrogate-cache-key/rhai",
+    "examples/coprocessor-subgraph/rust",
+    "examples/throw-error/rhai",
     "fuzz",
     # Note that xtask is not in the workspace member because it relies on dependencies that are incompatible with the router. Notably hyperx but there are others.
 ]
@@ -34,16 +36,8 @@ strip = "debuginfo"
 incremental = false
 
 # If building a dhat feature, you must use this profile
-# e.g. heap allocation tracing: cargo build --profile release-dhat --features dhat-heap 
+# e.g. heap allocation tracing: cargo build --profile release-dhat --features dhat-heap
 # e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
 [profile.release-dhat]
 inherits = "release"
 debug = 1
-
-# TODO: to delete
-# [patch.crates-io]
-# opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-http = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-zipkin = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-datadog = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}

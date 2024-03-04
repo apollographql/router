@@ -22,3 +22,10 @@ include_subgraph_errors:
 ```
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, subgraph errors are included from all subgraphs _except_ the `products` subgraph.
+
+## Sending errors to GraphOS
+To report the subgraph errors to GraphOS that is a separate configuration that is not affected by client subgraph error inclusion, see the [GraphOS reporting docs](./telemetry/apollo-telemetry).
+
+## Logging GraphQL request errors
+To log the GraphQL error responses (i.e. messages returned in the GraphQL `errors` array) from the router, see the [logging configuration documentation](./telemetry/exporters/logging/overview).
+

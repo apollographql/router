@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "userWasCreated": null
+  },
+  "errors": [
+    {
+      "message": "cannot fetch the name",
+      "extensions": {
+        "code": "INVALID"
+      }
+    }
+  ]
+}

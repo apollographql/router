@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/plugins/authorization/policy.rs
+expression: doc
+---
+{
+  test
+  itf {
+    ... on A {
+      id
+    }
+  }
+}
+

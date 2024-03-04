@@ -3,11 +3,13 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use futures::prelude::*;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
 use super::log;
+use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
@@ -17,6 +19,7 @@ use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
@@ -29,12 +32,14 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Context;
 
 impl QueryPlan {
+    #[allow(clippy::too_many_arguments)]
     /// Execute the plan and return a [`Response`].
     pub(crate) async fn execute<'a>(
         &self,
@@ -42,13 +47,17 @@ impl QueryPlan {
         service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
-        sender: futures::channel::mpsc::Sender<Response>,
+        sender: mpsc::Sender<Response>,
+        subscription_handle: Option<SubscriptionHandle>,
+        subscription_config: &'a Option<SubscriptionConfig>,
+        initial_value: Option<Value>,
     ) -> Response {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
         let deferred_fetches = HashMap::new();
-        let (value, subselection, errors) = self
+
+        let (value, errors) = self
             .root
             .execute_recursively(
                 &ExecutionParameters {
@@ -58,22 +67,28 @@ impl QueryPlan {
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
                     query: &self.query,
+                    root_node: &self.root,
+                    subscription_handle: &subscription_handle,
+                    subscription_config,
                 },
                 &root,
-                &Value::default(),
+                &initial_value.unwrap_or_default(),
                 sender,
             )
             .await;
+        if !deferred_fetches.is_empty() {
+            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1u64);
+        }
 
-        Response::builder()
-            .data(value)
-            .and_subselection(subselection)
-            .errors(errors)
-            .build()
+        Response::builder().data(value).errors(errors).build()
     }
 
     pub fn contains_mutations(&self) -> bool {
         self.root.contains_mutations()
+    }
+
+    pub fn subgraph_fetches(&self) -> usize {
+        self.root.subgraph_fetches()
     }
 }
 
@@ -83,23 +98,25 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
-    pub(crate) deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
+    pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
+    pub(crate) root_node: &'a PlanNode,
+    pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
+    pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
 }
 
 impl PlanNode {
-    fn execute_recursively<'a>(
+    pub(super) fn execute_recursively<'a>(
         &'a self,
         parameters: &'a ExecutionParameters<'a>,
         current_dir: &'a Path,
         parent_value: &'a Value,
-        sender: futures::channel::mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)> {
+        sender: mpsc::Sender<Response>,
+    ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
             let mut errors;
-            let mut subselection = None;
 
             match self {
                 PlanNode::Sequence { nodes } => {
@@ -107,7 +124,7 @@ impl PlanNode {
                     errors = Vec::new();
                     async {
                         for node in nodes {
-                            let (v, subselect, err) = node
+                            let (v, err) = node
                                 .execute_recursively(
                                     parameters,
                                     current_dir,
@@ -118,7 +135,6 @@ impl PlanNode {
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
-                            subselection = subselect;
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -144,8 +160,7 @@ impl PlanNode {
                             })
                             .collect();
 
-                        while let Some((v, _subselect, err)) = stream.next().in_current_span().await
-                        {
+                        while let Some((v, err)) = stream.next().in_current_span().await {
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
                         }
@@ -159,7 +174,7 @@ impl PlanNode {
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
                     let current_dir = current_dir.join(path);
-                    let (v, subselect, err) = node
+                    let (v, err) = node
                         .execute_recursively(
                             parameters,
                             // this is the only command that actually changes the "current dir"
@@ -167,17 +182,43 @@ impl PlanNode {
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, "graphql.path" = %current_dir, "otel.kind" = "INTERNAL"))
+                        .instrument(tracing::info_span!(
+                            FLATTEN_SPAN_NAME,
+                            "graphql.path" = %current_dir,
+                            "otel.kind" = "INTERNAL"
+                        ))
                         .await;
 
                     value = v;
                     errors = err;
-                    subselection = subselect;
+                }
+                PlanNode::Subscription { primary, .. } => {
+                    if parameters.subscription_handle.is_some() {
+                        let fetch_time_offset =
+                            parameters.context.created_at.elapsed().as_nanos() as i64;
+                        errors = primary
+                            .execute_recursively(parameters, current_dir, parent_value, sender)
+                            .instrument(tracing::info_span!(
+                                SUBSCRIBE_SPAN_NAME,
+                                "otel.kind" = "INTERNAL",
+                                "apollo.subgraph.name" = primary.service_name.as_str(),
+                                "apollo_private.sent_time_offset" = fetch_time_offset
+                            ))
+                            .await;
+                    } else {
+                        tracing::error!("No subscription handle provided for a subscription");
+                        errors = vec![Error::builder()
+                            .message("no subscription handle provided for a subscription")
+                            .extension_code("NO_SUBSCRIPTION_HANDLE")
+                            .build()];
+                    };
+
+                    value = Value::default();
                 }
                 PlanNode::Fetch(fetch_node) => {
                     let fetch_time_offset =
                         parameters.context.created_at.elapsed().as_nanos() as i64;
-                    match fetch_node
+                    let (v, e) = fetch_node
                         .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
                             FETCH_SPAN_NAME,
@@ -185,33 +226,26 @@ impl PlanNode {
                             "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                             "apollo_private.sent_time_offset" = fetch_time_offset
                         ))
-                        .await
-                    {
-                        Ok((v, e)) => {
-                            value = v;
-                            errors = e;
-                        }
-                        Err(err) => {
-                            failfast_error!("Fetch error: {}", err);
-                            errors = vec![err.to_graphql_error(Some(current_dir.to_owned()))];
-                            value = Value::default();
-                        }
-                    }
+                        .await;
+                    value = v;
+                    errors = e;
                 }
                 PlanNode::Defer {
                     primary:
                         Primary {
                             path: _primary_path,
-                            subselection: primary_subselection,
                             node,
+                            ..
                         },
                     deferred,
                 } => {
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {
-                        let mut deferred_fetches: HashMap<String, Sender<(Value, Vec<Error>)>> =
-                            HashMap::new();
+                        let mut deferred_fetches: HashMap<
+                            String,
+                            broadcast::Sender<(Value, Vec<Error>)>,
+                        > = HashMap::new();
                         let mut futures = Vec::new();
 
                         let (primary_sender, _) =
@@ -236,7 +270,7 @@ impl PlanNode {
                         });
 
                         if let Some(node) = node {
-                            let (v, _subselect, err) = node
+                            let (v, err) = node
                                 .execute_recursively(
                                     &ExecutionParameters {
                                         context: parameters.context,
@@ -245,6 +279,9 @@ impl PlanNode {
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
                                         query: parameters.query,
+                                        root_node: parameters.root_node,
+                                        subscription_handle: parameters.subscription_handle,
+                                        subscription_config: parameters.subscription_config,
                                     },
                                     current_dir,
                                     &value,
@@ -257,11 +294,9 @@ impl PlanNode {
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
-                            subselection = primary_subselection.clone();
 
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         } else {
-                            subselection = primary_subselection.clone();
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         }
                     }
@@ -296,7 +331,7 @@ impl PlanNode {
                         if let &Value::Bool(true) = v {
                             //FIXME: should we show an error if the if_node was not present?
                             if let Some(node) = if_clause {
-                                let (v, subselect, err) = node
+                                let (v, err) = node
                                     .execute_recursively(
                                         parameters,
                                         current_dir,
@@ -310,10 +345,13 @@ impl PlanNode {
                                     .await;
                                 value.deep_merge(v);
                                 errors.extend(err.into_iter());
-                                subselection = subselect;
+                            } else if current_dir.is_empty() {
+                                // If the condition is on the root selection set and it's the only one
+                                // For queries like {get @skip(if: true) {id name}}
+                                value.deep_merge(Value::Object(Default::default()));
                             }
                         } else if let Some(node) = else_clause {
-                            let (v, subselect, err) = node
+                            let (v, err) = node
                                 .execute_recursively(
                                     parameters,
                                     current_dir,
@@ -327,7 +365,10 @@ impl PlanNode {
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
-                            subselection = subselect;
+                        } else if current_dir.is_empty() {
+                            // If the condition is on the root selection set and it's the only one
+                            // For queries like {get @include(if: false) {id name}}
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -339,7 +380,7 @@ impl PlanNode {
                 }
             }
 
-            (value, subselection, errors)
+            (value, errors)
         })
     }
 }
@@ -349,9 +390,9 @@ impl DeferredNode {
         &self,
         parameters: &'a ExecutionParameters<'a>,
         parent_value: &Value,
-        sender: futures::channel::mpsc::Sender<Response>,
-        primary_sender: &Sender<(Value, Vec<Error>)>,
-        deferred_fetches: &mut HashMap<String, Sender<(Value, Vec<Error>)>>,
+        sender: mpsc::Sender<Response>,
+        primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
+        deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> impl Future<Output = ()> {
         let mut deferred_receivers = Vec::new();
 
@@ -380,14 +421,16 @@ impl DeferredNode {
         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
         let deferred_inner = self.node.clone();
         let deferred_path = self.query_path.clone();
-        let subselection = self.subselection();
         let label = self.label.clone();
-        let mut tx = sender;
+        let tx = sender;
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
+        let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
         let query = parameters.query.clone();
+        let subscription_handle = parameters.subscription_handle.clone();
+        let subscription_config = parameters.subscription_config.clone();
         let mut primary_receiver = primary_sender.subscribe();
         let mut value = parent_value.clone();
         let depends_json = serde_json::to_string(&self.depends).unwrap_or_default();
@@ -398,7 +441,7 @@ impl DeferredNode {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
-                errors.extend(primary_errors.into_iter())
+                errors.extend(primary_errors)
             } else {
                 while let Some((v, _remaining)) = stream.next().await {
                     // a Err(RecvError) means either that the fetch was not performed and the
@@ -415,7 +458,7 @@ impl DeferredNode {
             let deferred_fetches = HashMap::new();
 
             if let Some(node) = deferred_inner {
-                let (mut v, node_subselection, err) = node
+                let (mut v, err) = node
                     .execute_recursively(
                         &ExecutionParameters {
                             context: &ctx,
@@ -424,6 +467,9 @@ impl DeferredNode {
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,
                             query: &query,
+                            root_node: &root_node,
+                            subscription_handle: &subscription_handle,
+                            subscription_config: &subscription_config,
                         },
                         &Path::default(),
                         &value,
@@ -442,7 +488,7 @@ impl DeferredNode {
                     let (primary_value, primary_errors) =
                         primary_receiver.recv().await.unwrap_or_default();
                     v.deep_merge(primary_value);
-                    errors.extend(primary_errors.into_iter())
+                    errors.extend(primary_errors)
                 }
 
                 if let Err(e) = tx
@@ -451,7 +497,6 @@ impl DeferredNode {
                             .data(v)
                             .errors(err)
                             .and_path(Some(deferred_path.clone()))
-                            .and_subselection(subselection.or(node_subselection))
                             .and_label(label)
                             .build(),
                     )
@@ -463,12 +508,12 @@ impl DeferredNode {
                         e
                     );
                 };
-                tx.disconnect();
+                drop(tx);
             } else {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
-                errors.extend(primary_errors.into_iter());
+                errors.extend(primary_errors);
 
                 if let Err(e) = tx
                     .send(
@@ -476,7 +521,6 @@ impl DeferredNode {
                             .data(value)
                             .errors(errors)
                             .and_path(Some(deferred_path.clone()))
-                            .and_subselection(subselection)
                             .and_label(label)
                             .build(),
                     )
@@ -488,7 +532,7 @@ impl DeferredNode {
                         e
                     );
                 }
-                tx.disconnect();
+                drop(tx);
             };
         }
     }

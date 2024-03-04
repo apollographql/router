@@ -18,10 +18,10 @@ directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 scalar join__FieldSet
 
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-  INVENTORY @join__graph(name: "inventory" url: "http://localhost:4004/graphql")
-  PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
-  REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
+  ACCOUNTS @join__graph(name: "accounts" url: "https://accounts.demo.starstuff.dev/")
+  INVENTORY @join__graph(name: "inventory" url: "https://inventory.demo.starstuff.dev/")
+  PRODUCTS @join__graph(name: "products" url: "https://products.demo.starstuff.dev/")
+  REVIEWS @join__graph(name: "reviews" url: "https://reviews.demo.starstuff.dev/")
 }
 
 type Product

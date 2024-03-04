@@ -1,16 +1,23 @@
 schema
-  @core(feature: "https://specs.apollo.dev/core/v0.1"),
-  @core(feature: "https://specs.apollo.dev/join/v0.1")
-{
+  @core(feature: "https://specs.apollo.dev/core/v0.1")
+  @core(feature: "https://specs.apollo.dev/join/v0.1") {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 
 directive @core(feature: String!) repeatable on SCHEMA
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+) on FIELD_DEFINITION
 
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+) repeatable on OBJECT | INTERFACE
 
 directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
 
@@ -19,23 +26,28 @@ directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 scalar join__FieldSet
 
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001")
-  INVENTORY @join__graph(name: "inventory" url: "http://localhost:4004")
-  PRODUCTS @join__graph(name: "products" url: "http://localhost:4003")
-  REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002")
+  ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001")
+  INVENTORY @join__graph(name: "inventory", url: "http://localhost:4004")
+  PRODUCTS @join__graph(name: "products", url: "http://localhost:4003")
+  REVIEWS @join__graph(name: "reviews", url: "http://localhost:4002")
 }
 
 type Mutation {
   createProduct(name: String, upc: ID!): Product @join__field(graph: PRODUCTS)
-  createReview(body: String, id: ID!, upc: ID!): Review @join__field(graph: REVIEWS)
+  createReview(body: String, id: ID!, upc: ID!): Review
+    @join__field(graph: REVIEWS)
+}
+
+type Subscription {
+  userWasCreated(intervalMs: Int, nbEvents: Int): User
+    @join__field(graph: ACCOUNTS)
 }
 
 type Product
   @join__owner(graph: PRODUCTS)
   @join__type(graph: PRODUCTS, key: "upc")
   @join__type(graph: INVENTORY, key: "upc")
-  @join__type(graph: REVIEWS, key: "upc")
-{
+  @join__type(graph: REVIEWS, key: "upc") {
   inStock: Boolean @join__field(graph: INVENTORY)
   name: String @join__field(graph: PRODUCTS)
   price: Int @join__field(graph: PRODUCTS)
@@ -53,8 +65,7 @@ type Query {
 
 type Review
   @join__owner(graph: REVIEWS)
-  @join__type(graph: REVIEWS, key: "id")
-{
+  @join__type(graph: REVIEWS, key: "id") {
   author: User @join__field(graph: REVIEWS, provides: "username")
   body: String @join__field(graph: REVIEWS)
   id: ID! @join__field(graph: REVIEWS)
@@ -64,10 +75,10 @@ type Review
 type User
   @join__owner(graph: ACCOUNTS)
   @join__type(graph: ACCOUNTS, key: "id")
-  @join__type(graph: REVIEWS, key: "id")
-{
+  @join__type(graph: REVIEWS, key: "id") {
   id: ID! @join__field(graph: ACCOUNTS)
   name: String @join__field(graph: ACCOUNTS)
+  createdAt: String @join__field(graph: ACCOUNTS)
   reviews: [Review] @join__field(graph: REVIEWS)
   username: String @join__field(graph: ACCOUNTS)
 }

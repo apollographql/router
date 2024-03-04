@@ -25,6 +25,8 @@ mod scalars;
 
 use std::fmt;
 use std::fs;
+use std::fs::remove_file;
+use std::fs::DirEntry;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -37,14 +39,11 @@ use dialoguer::Confirm;
 use dialoguer::Editor;
 use dialoguer::Input;
 use dialoguer::Select;
-use git2;
 use itertools::Itertools;
 use matching_pull_request::matching_pull_request::ResponseData;
 use matching_pull_request::matching_pull_request::Variables;
 use matching_pull_request::MatchingPullRequest;
-use memorable_wordlist;
 use serde::Serialize;
-use structopt::StructOpt;
 use tinytemplate::format_unescaped;
 use tinytemplate::TinyTemplate;
 use xtask::PKG_PROJECT_ROOT;
@@ -64,17 +63,31 @@ struct TemplateContext {
     author: String,
 }
 
-const REPO_WITH_OWNER: &'static str = "apollographql/router";
+const REPO_WITH_OWNER: &str = "apollographql/router";
 
-const EXAMPLE_TEMPLATE: &'static str = "### {title} {{ for issue in issues -}}
-([Issue #{issue.number}]({issue.url})){{ if not @last }}, {{ endif }}
-{{- endfor }}
+const EXAMPLE_TEMPLATE: &str = "### { title }
+{{- if issues -}}
+  {{- if issues }} {{ endif -}}
+  {{- for issue in issues -}}
+    ([Issue #{issue.number}]({issue.url}))
+    {{- if not @last }}, {{ endif -}}
+  {{- endfor -}}
+{{ else -}}
+  {{- if pulls -}}
+    {{- if pulls }} {{ endif -}}
+    {{- for pull in pulls -}}
+      ([PR #{pull.number}]({pull.url}))
+      {{- if not @last }}, {{ endif -}}
+    {{- endfor -}}
+  {{- else -}}
+  {{- endif -}}
+{{- endif }}
 
 {body}
 
-By [@{author}](https://github.com/{author}) in {{ for pull in pulls -}}
+By [@{author}](https://github.com/{author}){{ if pulls }} in {{ for pull in pulls -}}
 {pull.url}{{ if not @last }}, {{ endif }}
-{{- endfor }}
+{{- endfor }}{{ endif }}
 ";
 
 impl Command {
@@ -85,13 +98,14 @@ impl Command {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Subcommand)]
 pub enum Command {
     /// Add a new changeset
     Create(Create),
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[allow(clippy::derive_ord_xor_partial_ord)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord)]
 enum Classification {
     Breaking,
     Feature,
@@ -130,20 +144,42 @@ impl Classification {
     ];
 }
 
+impl std::cmp::PartialOrd for Classification {
+    fn partial_cmp(&self, other: &Classification) -> Option<std::cmp::Ordering> {
+        Self::ORDERED_ALL
+            .iter()
+            .position(|item| item == self)
+            .partial_cmp(&Self::ORDERED_ALL.iter().position(|item| item == other))
+    }
+}
+
 type ParseError = &'static str;
 impl FromStr for Classification {
     type Err = ParseError;
     fn from_str(classification: &str) -> Result<Self, Self::Err> {
-        match classification {
-            "break" => Ok(Classification::Breaking),
-            "feat" => Ok(Classification::Feature),
-            "fix" => Ok(Classification::Fix),
-            "config" => Ok(Classification::Configuration),
-            "maint" => Ok(Classification::Maintenance),
-            "docs" => Ok(Classification::Documentation),
-            "exp" => Ok(Classification::Experimental),
-            &_ => Err("unknown classification"),
+        if classification.starts_with("break") {
+            return Ok(Classification::Breaking);
         }
+        if classification.starts_with("feat") {
+            return Ok(Classification::Feature);
+        }
+        if classification.starts_with("fix") {
+            return Ok(Classification::Fix);
+        }
+        if classification.starts_with("config") {
+            return Ok(Classification::Configuration);
+        }
+        if classification.starts_with("maint") {
+            return Ok(Classification::Maintenance);
+        }
+        if classification.starts_with("docs") {
+            return Ok(Classification::Documentation);
+        }
+        if classification.starts_with("exp") {
+            return Ok(Classification::Experimental);
+        }
+
+        Err("unknown classification")
     }
 }
 
@@ -162,14 +198,14 @@ impl fmt::Display for Classification {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Create {
     /// Use the current branch as the file name
-    #[structopt(short = "b", long = "--with-branch-name")]
+    #[clap(short = 'b', long = "with-branch-name")]
     with_branch_name: bool,
 
     /// The classification of the changeset
-    #[structopt(short = "c", long = "--class")]
+    #[clap(short = 'c', long = "class")]
     classification: Option<Classification>,
 }
 
@@ -194,9 +230,13 @@ async fn github_graphql_post_request(
     Ok(response_body)
 }
 
+fn get_changesets_dir() -> camino::Utf8PathBuf {
+    PKG_PROJECT_ROOT.join(".changesets")
+}
+
 impl Create {
     pub fn run(&self) -> Result<()> {
-        let changesets_dir_path = PKG_PROJECT_ROOT.join(".changesets");
+        let changesets_dir_path = get_changesets_dir();
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -215,10 +255,10 @@ impl Create {
                 } else {
                     let selection = Select::with_theme(&ColorfulTheme::default())
                         .with_prompt("What is the classification?")
-                        .items(&items)
+                        .items(items)
                         .interact_on_opt(&Term::stderr())?
                         .expect("no classification was selected");
-                    items[selection].clone()
+                    items[selection]
                 };
 
                 let gh_cli_path = which::which("gh");
@@ -226,8 +266,7 @@ impl Create {
                     println!("{}", style("If you install and authorize the GitHub CLI, we can use information from the PR!").underlined().on_blue().yellow().bright().bold());
                     println!("  Find more details at: {}", style("https://cli.github.com/").bold());
                     false
-                } else {
-                    if Confirm::new()
+                } else if Confirm::new()
                         .default(true)
                         .with_prompt(format!(
                             "{}",
@@ -240,14 +279,7 @@ impl Create {
                     } else {
                         println!("Ok! We won't talk to GitHub, so you'll be on your own.");
                         false
-                    }
-                };
-
-                // TODO: Get existing files somewhere.  This does the trick.
-                // let changeset_files = fs::read_dir(&changesets_dir_path).unwrap();
-                // for path in changeset_files {
-                //     println!("Name: {}", path.unwrap().path().display())
-                // }
+                    };
 
                 let use_branch_name = if self.with_branch_name {
                     true
@@ -263,12 +295,16 @@ impl Create {
                     selection == 0
                 };
 
-                let branch_name: Option<String> = match git2::Repository::open_from_env() {
-                    Ok(repo) => {
-                        let refr = repo.head().unwrap();
-                        if refr.is_branch() {
-                            Some(refr.shorthand()
-                            .expect("no shorthand Git branch name available").to_string())
+                // Get the branch name, optionally, using `git rev-parse --abbrev-ref HEAD`.
+                let branch_name: Option<String> = match std::process::Command::new("git")
+                    .arg("rev-parse")
+                    .arg("--abbrev-ref")
+                    .arg("HEAD")
+                    .output()
+                {
+                    Ok(output) => {
+                        if output.status.success() {
+                            Some(String::from_utf8(output.stdout).unwrap().trim().to_string())
                         } else {
                             None
                         }
@@ -280,7 +316,7 @@ impl Create {
                 let initial_text = if use_branch_name && branch_name.is_some() {
                     let branch_regex = regex::Regex::new(r"[^a-z0-9]")?;
                     branch_regex.replace_all(
-                        &branch_name
+                        branch_name
                         .clone()
                         .unwrap()
                         .to_lowercase()
@@ -336,69 +372,69 @@ impl Create {
                             // There's only ever one query because the operation only asks for the `first: 1`.
                             let all_prs_info = pr_info_from_response(response.data.expect("no data"));
 
-                            let pr_info = all_prs_info.first();
+                            let pr_info_opt = all_prs_info.first();
 
-                            if pr_info.is_some() {
-                                let pr_info = pr_info.expect("some PR info expected");
-                                let issues= pr_info.closing_issues_references.as_ref().map(|i| {
-                                    i.nodes.as_ref().unwrap().into_iter().map(|j| {
-                                        j.as_ref().unwrap()
-                                    })
-                                }).unwrap().filter(|p| {
-                                    p.repository.name_with_owner == REPO_WITH_OWNER
-                                }).map(|p| {
-                                    TemplateResource {
-                                        number: p.number.to_string(),
-                                        url: p.url.to_string(),
+                            match pr_info_opt {
+                                Some(pr_info) => {
+                                    let issues= pr_info.closing_issues_references.as_ref().map(|i| {
+                                        i.nodes.as_ref().unwrap().iter().map(|j| {
+                                            j.as_ref().unwrap()
+                                        })
+                                    }).unwrap().filter(|p| {
+                                        p.repository.name_with_owner == REPO_WITH_OWNER
+                                    }).map(|p| {
+                                        TemplateResource {
+                                            number: p.number.to_string(),
+                                            url: p.url.to_string(),
+                                        }
+                                    });
+
+                                    let pr_body = pr_info.body.clone().replace("\r\n", "\n");
+
+                                    // Remove the trailing part of the checklist from the PR body.
+                                    let pr_body_meta_regex = regex::Regex::new(
+                                        r"(?m)<!-- start metadata -->\n---",
+                                        )?;
+
+                                    // Remove all the "Fixes" references, since we're already going to reference
+                                    // those in the course of generating the template.
+                                    let pr_body_fixes_regex = regex::Regex::new(
+                                        r"(?m)^(- )?Fix(es)? #.*$",
+                                    )?;
+
+                                    let index = pr_body_meta_regex.find(&pr_body).map(|mat| mat.start()).unwrap_or(pr_body.len());
+                                    // Run the above Regex and trim the blurb.
+                                    let clean_pr_body = pr_body_fixes_regex
+                                        .replace_all(&pr_body[..index].trim(), "")
+                                        .trim()
+                                        .to_string();
+
+
+                                    TemplateContext {
+                                        title: pr_info.title.clone(),
+                                        issues: issues.collect_vec(),
+                                        pulls: vec!(TemplateResource {
+                                            number: pr_info.number.to_string(),
+                                            url: pr_info.url.to_string(),
+                                        }),
+                                        body: clean_pr_body,
+                                        author: pr_info.author.as_ref().unwrap().login.to_string(),
                                     }
-                                });
-
-                                let pr_body = pr_info.body.clone().replace("\r\n", "\n");
-
-                                // Remove the trailing part of the checklist from the PR body.
-                                // In the future, we will use the "start metadata" HTML tag, but for now,
-                                // we support both.
-                                let pr_body_trailer_regex = regex::Regex::new(
-                                r"(?ms)(^<!-- start metadata -->\n$\n)?^\*\*Checklist\*\*$[\s\S]*",
-                                )?;
-
-                                // Remove all the "Fixes" references, since we're already going to reference
-                                // those in the course of generating the template.
-                                let pr_body_fixes_regex = regex::Regex::new(
-                                    r"(?m)^(- )?Fix(es)? #.*$",
-                                )?;
-
-                                // Run the above Regexes and trim the blurb.
-                                let clean_pr_body = pr_body_fixes_regex
-                                    .replace_all(pr_body_trailer_regex
-                                    .replace(&pr_body, "")
-                                    .trim(), "")
-                                    .trim()
-                                    .to_string();
-
-                                TemplateContext {
-                                    title: pr_info.title.clone(),
-                                    issues: issues.collect_vec(),
-                                    pulls: vec!(TemplateResource {
-                                        number: pr_info.number.to_string(),
-                                        url: pr_info.url.to_string(),
-                                    }),
-                                    body: clean_pr_body,
-                                    author: pr_info.author.as_ref().unwrap().login.to_string(),
+                                },
+                                None => {
+                                    // TODO In a follow-up we should figure out how forks work with the GitHub API.
+                                    println!(
+                                        "{} {} {} {} {}",
+                                        style("The changeset will be").magenta(),
+                                        style("generic").red().bold(),
+                                        style("as we didn't find any PRs on GitHub for").magenta(),
+                                        style(&branch_name.as_ref().unwrap()).green(),
+                                        style("! (We don't support forks right now.)")
+                                    );
+                                    default_context
                                 }
-                            } else {
-                                // TODO In a follow-up we should figure out how forks work with the GitHub API.
-                                println!(
-                                    "{} {} {} {} {}",
-                                    style("The changeset will be").magenta(),
-                                    style("generic").red().bold(),
-                                    style("as we didn't find any PRs on GitHub for").magenta(),
-                                    style(&branch_name.as_ref().unwrap()).green(),
-                                    style("! (We don't support forks right now.)")
-                                );
-                                default_context
                             }
-                        },
+                        }
                     }
                 } else {
                     default_context
@@ -494,4 +530,310 @@ fn pr_info_from_response(
             }
         }).collect()
     }).unwrap_or_default()
+}
+
+fn get_changeset_files() -> Vec<Changeset> {
+    fs::read_dir(get_changesets_dir())
+        .unwrap()
+        .collect::<std::io::Result<Vec<_>>>()
+        .unwrap()
+        .iter()
+        .filter_map(|file_entry| file_entry.try_into().ok())
+        .collect::<Vec<Changeset>>()
+}
+
+fn generate_content_from_changeset_files(changelog_entries: &[Changeset]) -> String {
+    let mut changelog_entries = changelog_entries.to_owned();
+    changelog_entries.sort();
+
+    let mut output: String = String::from("");
+
+    // We'll use this to track the classification, and print it one per change.
+    let mut last_kind = None;
+
+    for entry in changelog_entries {
+        // For each classification change, print the heading.
+        if last_kind.is_none() || Some(entry.classification) != last_kind {
+            let new_header = format!("## {}\n\n", entry.classification);
+            output += &*new_header;
+        }
+        last_kind = Some(entry.classification);
+
+        // Add the entry's content to the block of text!
+        let entry = format!("{}\n\n", entry.content);
+        output += &*entry;
+    }
+    output
+}
+
+fn remove_changeset_files(changesets: &Vec<Changeset>) -> bool {
+    let mut failure: bool = false;
+    for changeset in changesets {
+        if remove_file(&changeset.path).is_ok() {
+            println!("Deleted {:?}", changeset.path);
+        } else {
+            eprintln!("Could not delete {:?}", changeset.path);
+            failure = true;
+        }
+    }
+    !failure
+}
+
+pub fn slurp_and_remove_changesets() -> String {
+    let changesets = get_changeset_files();
+    let content = generate_content_from_changeset_files(&changesets);
+    remove_changeset_files(&changesets);
+    content
+}
+
+#[allow(clippy::derive_ord_xor_partial_ord)]
+#[derive(Clone, Debug, Eq, Ord)]
+struct Changeset {
+    classification: Classification,
+    content: String,
+    path: PathBuf,
+}
+
+impl std::cmp::PartialEq for Changeset {
+    fn eq(&self, other: &Self) -> bool {
+        self.classification == other.classification
+    }
+}
+
+impl std::cmp::PartialOrd for Changeset {
+    fn partial_cmp(&self, other: &Changeset) -> Option<std::cmp::Ordering> {
+        self.classification.partial_cmp(&other.classification)
+    }
+}
+
+impl TryFrom<&DirEntry> for Changeset {
+    type Error = String;
+    fn try_from(entry: &DirEntry) -> std::result::Result<Self, Self::Error> {
+        let path = entry.path();
+        let content = fs::read_to_string(&path).unwrap().trim().to_string();
+        Ok(Changeset {
+            classification: entry
+                .file_name()
+                .to_string_lossy()
+                .parse()
+                .map_err(|e: &str| e.to_string())?,
+            content,
+            path,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_templatizes_with_multiple_issues_in_title_and_multiple_prs_in_footer() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER2"),
+                },
+            ],
+            pulls: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER2"),
+                },
+            ],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_multiple_prs_in_footer() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/issues/ISSUE_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("ISSUE_NUMBER"),
+            }],
+            pulls: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER2"),
+                },
+            ],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_multiple_issues_in_title() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER2"),
+                },
+            ],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("PULL_NUMBER"),
+            }],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_prs_in_title_when_empty_issues() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("PULL_NUMBER"),
+            }],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_without_prs_in_title_when_issues_present() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/ISSUE_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("ISSUE_NUMBER"),
+            }],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("PULL_NUMBER"),
+            }],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_neither_issues_or_prs() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![],
+            pulls: vec![],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
 }

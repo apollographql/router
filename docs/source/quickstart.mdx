@@ -3,13 +3,17 @@ title: Apollo Router quickstart
 description: Run the Apollo Router with Apollo-hosted subgraphs
 ---
 
+import ElasticNotice from '../shared/elastic-notice.mdx';
+
 Hello! This tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
 
-> If you're just getting started with GraphOS, we recommend instead [creating a cloud supergraph](/graphos/quickstart/cloud/), which provisions and hosts routing capabilities for you.
+> **This quickstart helps you run a _self-hosted_ instance of the Apollo Router.** If you [create a cloud supergraph](/graphos/quickstart/cloud/) with Apollo GraphOS, Apollo provisions and hosts your supergraph's router for you.
+>
+> Cloud supergraphs are recommended for organizations that don't need to host their router in their own infrastructure.
 
 ## 1. Download and extract the Apollo Router binary
 
-> The Apollo Router is made available under the Elastic License v2.0 (ELv2).  For details, see our [licensing page](/resources/elastic-license-v2-faq/).
+<ElasticNotice />
 
 
 ### Download options
@@ -28,10 +32,11 @@ curl -sSL https://router.apollo.dev/download/nix/latest | sh
 Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographql/router/releases) and download the latest `.tar.gz` file that matches your system. Currently, tarballs are available for the following:
 
 * Linux (x86_64)
-* macOS (x86_64)
+* Linux (aarch64)
+* macOS (Apple Silicon)
 * Windows (x86_64)
 
-> If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1).  You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) to request the addition of new architectures.
+If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1).  You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) to request the addition of new architectures.
 
 After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
 
@@ -39,7 +44,7 @@ After downloading, extract the file by running the following from a new project 
 tar -xf path/to/file.tar.gz --strip-components=1
 ```
 
-> If you omit the `--strip-components=1` option, the `router` executable is installed in a `dist` subdirectory.
+If you omit the `--strip-components=1` option, the `router` executable is installed in a `dist` subdirectory.
 
 ### Running the binary
 
@@ -62,13 +67,13 @@ Apollo Router <version> // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://g
 
       $ ./router --supergraph <file_path>
 
-  * Fetch a registered schema from Apollo Studio by setting
+  * Fetch a registered schema from GraphOS by setting
     these environment variables:
 
       $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
       For details, see the Apollo docs:
-      https://www.apollographql.com/docs/router/managed-federation/setup
+      https://www.apollographql.com/docs/federation/managed-federation/setup
 
 🔬 TESTING THINGS OUT?
 
@@ -193,34 +198,22 @@ The console output should look like the following:
 2022-06-29T22:23:25.774334Z  INFO apollo_router::axum_http_server_factory: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
 ```
 
-That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/studio/explorer/sandbox/) so you can run queries against the Apollo Router. This flag also relaxes some defaults to provide a better development experience (e.g., it exposes subgraph error messages), so you should always _exclude_ this flag when running the router in a non-development environment.
+That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/graphos/explorer/sandbox/) so you can run queries against the Apollo Router.
+
+<Caution>
+
+**Do not use the `--dev` flag in a non-development environment.** It relaxes certain default configuration options to provide an improved local development experience (e.g., it exposes subgraph error messages to clients).
+
+[Learn more about dev mode defaults.](./configuration/overview#dev-mode-defaults)
+
+</Caution>
 
 Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect your entire supergraph, and run your first queries!
 
-<blockquote>
-
-
-**⚠️ Do not use the `--dev` flag in production!** If you want to replicate any development mode functionality in production, modify your YAML configuration file instead.
-
-Using `--dev` is equivalent to running `./router --hot-reload` with the following configuration:
-
-```yaml
-sandbox:
-  enabled: true
-supergraph:
-  introspection: true
-include_subgraph_errors:
-  all: true
-plugins:
-  experimental.expose_query_plan: true
-```
-
-
-</blockquote>
-
 ## Next steps
 
-Now that you know how to run Apollo Router with a supergraph schema, you can:
+Now that you know how to run the Apollo Router with a supergraph schema, you can:
 
-* Set up [managed federation](./managed-federation/overview)
+* Set up [managed federation](/federation/managed-federation/overview)
 * Learn about [additional configuration options](./configuration/overview)
+* [Estimate the system resources needed to deploy the router](/technotes/TN0045-router_resource_estimator/).

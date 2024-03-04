@@ -20,14 +20,20 @@ macro_rules! schemar_fn {
     };
 }
 
-mod authentication;
+pub(crate) mod authentication;
+pub(crate) mod authorization;
+pub(crate) mod cache;
+mod coprocessor;
 pub(crate) mod csrf;
 mod expose_query_plan;
-mod external;
+pub(crate) mod file_uploads;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;
 pub(crate) mod override_url;
+pub(crate) mod progressive_override;
+mod record_replay;
 pub(crate) mod rhai;
+pub(crate) mod subscription;
 pub(crate) mod telemetry;
 pub(crate) mod traffic_shaping;

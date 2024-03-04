@@ -1,0 +1,21 @@
+---
+source: apollo-router/src/plugins/authorization/scopes.rs
+expression: "TestResult {\n    query: QUERY,\n    extracted_scopes: &extracted_scopes,\n    scopes: [\"itf\".to_string()].into_iter().collect(),\n    result: doc,\n    paths,\n}"
+---
+query:
+
+        query {
+            test
+            itf {
+                id
+            }
+        }
+        
+extracted_scopes: {"itf"}
+request scopes: ["itf"]
+filtered:
+{
+  test
+}
+
+paths: ["/itf"]

@@ -1,0 +1,10 @@
+---
+source: src/commands/changeset/mod.rs
+expression: rendered_template
+---
+### TITLE ([Issue #ISSUE_NUMBER](https://github.com/REPO_WITH_OWNER/pull/ISSUE_NUMBER))
+
+BODY
+
+By [@AUTHOR](https://github.com/AUTHOR) in https://github.com/REPO_WITH_OWNER/pull/PULL_NUMBER
+

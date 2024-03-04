@@ -12,6 +12,9 @@ accepted = [
     "Unicode-DFS-2016"
 ]
 
+# See https://github.com/EmbarkStudios/cargo-about/pull/216
+filter-noassertion = true
+
 # Ignore non plublished crates, such as xtask for example
 private = { ignore = true }
 # Ignore dependencies used in tests only, test-log for example

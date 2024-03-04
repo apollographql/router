@@ -1,26 +1,30 @@
-use std::collections::HashMap;
-use std::fmt::Write;
 use std::sync::Arc;
 
+use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
-use crate::error::QueryPlannerError;
-use crate::json_ext;
+use super::subscription::SubscriptionNode;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::spec::query::SubSelection;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::spec::Query;
-use crate::spec::Schema;
 
 /// A planner key.
 ///
-/// This type consists of a query string and an optional operation string
-pub(crate) type QueryKey = (String, Option<String>);
+/// This type contains everything needed to separate query plan cache entries
+#[derive(Clone)]
+pub(crate) struct QueryKey {
+    pub(crate) filtered_query: String,
+    pub(crate) original_query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) metadata: CacheKeyMetadata,
+    pub(crate) plan_options: PlanOptions,
+}
 
 /// A plan for a given GraphQL query
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,7 +52,7 @@ impl QueryPlan {
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
-            query: Arc::new(Query::default()),
+            query: Arc::new(Query::empty()),
         }
     }
 }
@@ -56,6 +60,13 @@ impl QueryPlan {
 impl QueryPlan {
     pub(crate) fn is_deferred(&self, operation: Option<&str>, variables: &Object) -> bool {
         self.root.is_deferred(operation, variables, &self.query)
+    }
+
+    pub(crate) fn is_subscription(&self, operation: Option<&str>) -> bool {
+        match self.query.operation(operation) {
+            Some(op) => matches!(op.kind(), OperationKind::Subscription),
+            None => false,
+        }
     }
 }
 
@@ -86,6 +97,11 @@ pub(crate) enum PlanNode {
         deferred: Vec<DeferredNode>,
     },
 
+    Subscription {
+        primary: SubscriptionNode,
+        rest: Option<Box<PlanNode>>,
+    },
+
     #[serde(rename_all = "camelCase")]
     Condition {
         condition: String,
@@ -105,6 +121,7 @@ impl PlanNode {
                 .as_ref()
                 .map(|n| n.contains_mutations())
                 .unwrap_or(false),
+            Self::Subscription { .. } => false,
             Self::Flatten(_) => false,
             Self::Condition {
                 if_clause,
@@ -142,6 +159,7 @@ impl PlanNode {
             Self::Flatten(node) => node.node.is_deferred(operation, variables, query),
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
+            Self::Subscription { .. } => false,
             Self::Condition {
                 if_clause,
                 else_clause,
@@ -170,112 +188,86 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn parse_subselections(
-        &self,
-        schema: &Schema,
-    ) -> Result<HashMap<SubSelection, Query>, QueryPlannerError> {
-        // re-create full query with the right path
-        // parse the subselection
-        let mut subselections = HashMap::new();
-
-        let operation_kind = if self.contains_mutations() {
-            OperationKind::Mutation
-        } else {
-            OperationKind::Query
-        };
-
-        self.collect_subselections(
-            schema,
-            &Path::default(),
-            &operation_kind,
-            &mut subselections,
-        )?;
-
-        Ok(subselections)
-    }
-
-    fn collect_subselections(
-        &self,
-        schema: &Schema,
-        initial_path: &Path,
-        kind: &OperationKind,
-        subselections: &mut HashMap<SubSelection, Query>,
-    ) -> Result<(), QueryPlannerError> {
-        // re-create full query with the right path
-        // parse the subselection
+    pub(crate) fn subgraph_fetches(&self) -> usize {
         match self {
-            Self::Sequence { nodes } | Self::Parallel { nodes } => {
-                nodes.iter().try_fold(subselections, |subs, current| {
-                    current.collect_subselections(schema, initial_path, kind, subs)?;
-
-                    Ok::<_, QueryPlannerError>(subs)
-                })?;
-                Ok(())
+            PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Fetch(_) => 1,
+            PlanNode::Flatten(node) => node.node.subgraph_fetches(),
+            PlanNode::Defer { primary, deferred } => {
+                primary.node.as_ref().map_or(0, |n| n.subgraph_fetches())
+                    + deferred
+                        .iter()
+                        .map(|n| n.node.as_ref().map_or(0, |n| n.subgraph_fetches()))
+                        .sum::<usize>()
             }
-            Self::Flatten(node) => {
-                node.node
-                    .collect_subselections(schema, initial_path, kind, subselections)
+            // A `SubscriptionNode` makes a request to a subgraph, so counting it as 1
+            PlanNode::Subscription { rest, .. } => {
+                rest.as_ref().map_or(0, |n| n.subgraph_fetches()) + 1
             }
-            Self::Defer { primary, deferred } => {
-                let primary_path = initial_path.join(primary.path.clone().unwrap_or_default());
-                if let Some(primary_subselection) = &primary.subselection {
-                    let query = reconstruct_full_query(&primary_path, kind, primary_subselection);
-
-                    // ----------------------- Parse ---------------------------------
-                    let sub_selection = Query::parse(query, schema, &Default::default())?;
-                    // ----------------------- END Parse ---------------------------------
-
-                    subselections.insert(
-                        SubSelection {
-                            path: primary_path,
-                            subselection: primary_subselection.clone(),
-                        },
-                        sub_selection,
-                    );
-                }
-
-                deferred.iter().try_fold(subselections, |subs, current| {
-                    if let Some(subselection) = &current.subselection {
-                        let query = reconstruct_full_query(&current.query_path, kind, subselection);
-
-                        // ----------------------- Parse ---------------------------------
-                        let sub_selection = Query::parse(query, schema, &Default::default())?;
-                        // ----------------------- END Parse ---------------------------------
-
-                        subs.insert(
-                            SubSelection {
-                                path: current.query_path.clone(),
-                                subselection: subselection.clone(),
-                            },
-                            sub_selection,
-                        );
-                    }
-                    if let Some(current_node) = &current.node {
-                        current_node.collect_subselections(
-                            schema,
-                            &initial_path.join(&current.query_path),
-                            kind,
-                            subs,
-                        )?;
-                    }
-
-                    Ok::<_, QueryPlannerError>(subs)
-                })?;
-                Ok(())
-            }
-            Self::Fetch(..) => Ok(()),
-            Self::Condition {
+            // Compute the highest possible value for condition nodes
+            PlanNode::Condition {
                 if_clause,
                 else_clause,
                 ..
+            } => std::cmp::max(
+                if_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches())
+                    .unwrap_or(0),
+                else_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches())
+                    .unwrap_or(0),
+            ),
+        }
+    }
+
+    pub(crate) fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+        match self {
+            PlanNode::Fetch(fetch_node) => {
+                fetch_node.hash_subquery(schema);
+            }
+
+            PlanNode::Sequence { nodes } => {
+                for node in nodes {
+                    node.hash_subqueries(schema);
+                }
+            }
+            PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    node.hash_subqueries(schema);
+                }
+            }
+            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(schema),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.hash_subqueries(schema);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.hash_subqueries(schema);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Subscription { primary: _, rest } => {
+                if let Some(node) = rest.as_mut() {
+                    node.hash_subqueries(schema);
+                }
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
             } => {
-                if let Some(node) = if_clause {
-                    node.collect_subselections(schema, initial_path, kind, subselections)?;
+                if let Some(node) = if_clause.as_mut() {
+                    node.hash_subqueries(schema);
                 }
-                if let Some(node) = else_clause {
-                    node.collect_subselections(schema, initial_path, kind, subselections)?;
+                if let Some(node) = else_clause.as_mut() {
+                    node.hash_subqueries(schema);
                 }
-                Ok(())
             }
         }
     }
@@ -290,6 +282,13 @@ impl PlanNode {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
+            Self::Subscription { primary, rest } => match rest {
+                Some(rest) => Box::new(
+                    rest.service_usage()
+                        .chain(Some(primary.service_name.as_str())),
+                ) as Box<dyn Iterator<Item = &'a str> + 'a>,
+                None => Box::new(Some(primary.service_name.as_str()).into_iter()),
+            },
             Self::Flatten(flatten) => flatten.node.service_usage(),
             Self::Defer { primary, deferred } => primary
                 .node
@@ -321,36 +320,59 @@ impl PlanNode {
             },
         }
     }
-}
 
-fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str) -> String {
-    let mut len = 0;
-    let mut query = match kind {
-        OperationKind::Query => "query",
-        OperationKind::Mutation => "mutation",
-        OperationKind::Subscription => "subscription",
-    }
-    .to_string();
-    for path_elt in path.iter() {
-        match path_elt {
-            json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => {}
-            json_ext::PathElement::Key(key) => {
-                write!(&mut query, "{{ {key}")
-                    .expect("writing to a String should not fail because it can reallocate");
-                len += 1;
+    pub(crate) fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        key: &CacheKeyMetadata,
+    ) {
+        match self {
+            PlanNode::Fetch(fetch_node) => {
+                fetch_node.extract_authorization_metadata(schema, key);
             }
-            json_ext::PathElement::Fragment(name) => {
-                write!(&mut query, "{{ ... on {name}")
-                    .expect("writing to a String should not fail because it can reallocate");
-                len += 1;
+
+            PlanNode::Sequence { nodes } => {
+                for node in nodes {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Flatten(flatten) => flatten.node.extract_authorization_metadata(schema, key),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.extract_authorization_metadata(schema, key);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Subscription { primary: _, rest } => {
+                if let Some(node) = rest.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => {
+                if let Some(node) = if_clause.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+                if let Some(node) = else_clause.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
             }
         }
     }
-
-    query.push_str(subselection);
-    query.push_str(&" }".repeat(len));
-
-    query
 }
 
 /// A flatten node.
@@ -401,17 +423,6 @@ pub(crate) struct DeferredNode {
     pub(crate) subselection: Option<String>,
     /// The plan to get all the data for that deferred part
     pub(crate) node: Option<Arc<PlanNode>>,
-}
-
-impl DeferredNode {
-    pub(crate) fn subselection(&self) -> Option<String> {
-        self.subselection.clone().or_else(|| {
-            self.node.as_ref().and_then(|node| match node.as_ref() {
-                PlanNode::Defer { primary, .. } => primary.subselection.clone(),
-                _ => None,
-            })
-        })
-    }
 }
 
 /// A deferred node.

@@ -103,6 +103,9 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn is_valid_int_input(&self) -> bool;
 
+    #[track_caller]
+    fn is_valid_id_input(&self) -> bool;
+
     /// Returns whether this value is an object that matches the provided type.
     ///
     /// More precisely, this checks that this value is an object, looks at
@@ -144,7 +147,7 @@ impl ValueExt for Value {
                     a_value.deep_merge(b_value);
                 }
 
-                a.extend(b.into_iter());
+                a.extend(b);
             }
             (_, Value::Null) => {}
             (Value::Object(_), Value::Array(_)) => {
@@ -395,6 +398,17 @@ impl ValueExt for Value {
     }
 
     #[track_caller]
+    fn is_valid_id_input(&self) -> bool {
+        // https://spec.graphql.org/October2021/#sec-ID.Input-Coercion
+        match self {
+            // Any string and integer values are accepted
+            Value::String(_) => true,
+            Value::Number(n) => n.is_i64() || n.is_u64(),
+            _ => false,
+        }
+    }
+
+    #[track_caller]
     fn is_valid_float_input(&self) -> bool {
         // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
         match self {
@@ -577,6 +591,15 @@ pub enum PathElement {
     Key(String),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResponsePathElement<'a> {
+    /// An index path element.
+    Index(usize),
+
+    /// A key path element.
+    Key(&'a str),
+}
+
 fn deserialize_flatten<'de, D>(deserializer: D) -> Result<(), D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -671,6 +694,17 @@ impl Path {
                             |name| PathElement::Fragment(name.to_string()),
                         )
                     }
+                })
+                .collect(),
+        )
+    }
+
+    pub fn from_response_slice(s: &[ResponsePathElement]) -> Self {
+        Self(
+            s.iter()
+                .map(|x| match x {
+                    ResponsePathElement::Index(index) => PathElement::Index(*index),
+                    ResponsePathElement::Key(s) => PathElement::Key(s.to_string()),
                 })
                 .collect(),
         )
@@ -806,7 +840,7 @@ mod tests {
     /// the path, and so we use the following simple schema for tests. Note however that tests that
     /// don't use fragments in the path essentially ignore this schema.
     fn test_schema() -> Schema {
-        Schema::parse(
+        Schema::parse_test(
             r#"
            schema
              @core(feature: "https://specs.apollo.dev/core/v0.1"),

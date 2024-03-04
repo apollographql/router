@@ -1,0 +1,5 @@
+description: Operation limits are no longer preview, `preview_operation_limits` is renamed `limits`
+actions:
+  - type: move
+    from: preview_operation_limits
+    to: limits

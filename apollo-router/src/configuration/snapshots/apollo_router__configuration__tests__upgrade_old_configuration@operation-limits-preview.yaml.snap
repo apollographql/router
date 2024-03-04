@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+limits:
+  parser_max_recursion: 1000
+

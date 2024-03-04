@@ -10,6 +10,6 @@ configuration had errors:
     # The socket address and port to listen on
     # Defaults to 127.0.0.1:4000
     listen: true
-            ^----- true is not valid under any of the given schemas
+            ^----- true is not valid under any of the schemas listed in the 'anyOf' keyword
 
 

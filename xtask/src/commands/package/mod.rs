@@ -9,40 +9,40 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use structopt::StructOpt;
 use xtask::*;
 
 const INCLUDE: &[&str] = &["README.md", "LICENSE", "licenses.html"];
+
 pub(crate) const TARGET_X86_64_MUSL_LINUX: &str = "x86_64-unknown-linux-musl";
 pub(crate) const TARGET_X86_64_GNU_LINUX: &str = "x86_64-unknown-linux-gnu";
 pub(crate) const TARGET_AARCH64_GNU_LINUX: &str = "aarch64-unknown-linux-gnu";
 pub(crate) const TARGET_X86_64_WINDOWS: &str = "x86_64-pc-windows-msvc";
 pub(crate) const TARGET_X86_64_MACOS: &str = "x86_64-apple-darwin";
-pub(crate) const POSSIBLE_TARGETS: [&str; 5] = [
-    TARGET_X86_64_MUSL_LINUX,
-    TARGET_X86_64_GNU_LINUX,
-    TARGET_AARCH64_GNU_LINUX,
-    TARGET_X86_64_WINDOWS,
-    TARGET_X86_64_MACOS,
-];
+pub(crate) const TARGET_ARM64_MACOS: &str = "aarch64-apple-darwin";
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Package {
     /// Output tarball.
-    #[structopt(long)]
+    #[clap(long)]
     output: Utf8PathBuf,
 
     #[cfg(target_os = "macos")]
-    #[structopt(flatten)]
+    #[clap(flatten)]
     macos: macos::PackageMacos,
 
-    #[structopt(long, default_value, possible_values = &POSSIBLE_TARGETS)]
-    target: Target,
+    #[clap(long)]
+    target: Option<Target>,
 }
 
 impl Package {
     pub fn run(&self) -> Result<()> {
-        let release_path = TARGET_DIR.join("release").join(RELEASE_BIN);
+        let release_path = match &self.target {
+            None => TARGET_DIR.join("release").join(RELEASE_BIN),
+            Some(target) => TARGET_DIR
+                .join(target.to_string())
+                .join("release")
+                .join(RELEASE_BIN),
+        };
 
         ensure!(
             release_path.exists(),
@@ -59,8 +59,11 @@ impl Package {
             }
             self.output.to_owned()
         } else if self.output.is_dir() {
-            self.output
-                .join(format!("router-v{}-{}.tar.gz", *PKG_VERSION, self.target))
+            self.output.join(format!(
+                "router-v{}-{}.tar.gz",
+                *PKG_VERSION,
+                self.target.clone().unwrap_or_default()
+            ))
         } else {
             self.output.to_owned()
         };
@@ -95,13 +98,21 @@ impl Package {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, clap::ValueEnum)]
 pub(crate) enum Target {
+    #[value(name = "x86_64-unknown-linux-musl")]
     MuslLinux,
+    #[value(name = "x86_64-unknown-linux-gnu")]
     GnuLinux,
+    #[value(name = "aarch64-unknown-linux-gnu")]
     ArmLinux,
+    #[value(name = "x86_64-pc-windows-msvc")]
     Windows,
+    #[value(name = "x86_64-apple-darwin")]
     MacOS,
+    #[value(name = "aarch64-apple-darwin")]
+    ArmMacOS,
+    #[value(skip)]
     Other,
 }
 
@@ -123,11 +134,14 @@ impl Default for Target {
             } else {
                 Target::Other
             }
-        } else if cfg!(target_arch = "aarch64")
-            && cfg!(target_os = "linux")
-            && cfg!(target_env = "gnu")
-        {
-            Target::ArmLinux
+        } else if cfg!(target_arch = "aarch64") {
+            if cfg!(target_os = "linux") || cfg!(target_env = "gnu") {
+                Target::ArmLinux
+            } else if cfg!(target_os = "macos") {
+                Target::ArmMacOS
+            } else {
+                Target::Other
+            }
         } else {
             Target::Other
         }
@@ -144,6 +158,7 @@ impl FromStr for Target {
             TARGET_AARCH64_GNU_LINUX => Ok(Self::ArmLinux),
             TARGET_X86_64_WINDOWS => Ok(Self::Windows),
             TARGET_X86_64_MACOS => Ok(Self::MacOS),
+            TARGET_ARM64_MACOS => Ok(Self::ArmMacOS),
             _ => Ok(Self::Other),
         }
     }
@@ -157,6 +172,7 @@ impl fmt::Display for Target {
             Target::ArmLinux => TARGET_AARCH64_GNU_LINUX,
             Target::Windows => TARGET_X86_64_WINDOWS,
             Target::MacOS => TARGET_X86_64_MACOS,
+            Target::ArmMacOS => TARGET_ARM64_MACOS,
             Target::Other => "unknown-target",
         };
         write!(f, "{msg}")

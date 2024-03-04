@@ -4,7 +4,6 @@
 use std::fmt;
 
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry::trace::TraceId as OtelTraceId;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::Span;
@@ -15,15 +14,16 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 pub struct TraceId([u8; 16]);
 
 impl TraceId {
-    /// Create a TraceId. If called from an invalid context
-    /// (e.g.: not in a span, or in a disabled span), then
-    /// None is returned.
+    /// Create a TraceId. If the span is not sampled then return None.
     pub fn maybe_new() -> Option<Self> {
-        let trace_id = Span::current().context().span().span_context().trace_id();
-        if trace_id == OtelTraceId::INVALID {
-            None
+        let span = Span::current();
+        let context = span.context();
+        let span_ref = context.span();
+        let span_context = span_ref.span_context();
+        if span_context.is_sampled() {
+            Some(Self(span_context.trace_id().to_bytes()))
         } else {
-            Some(Self(trace_id.to_bytes()))
+            None
         }
     }
 
@@ -54,7 +54,7 @@ mod test {
     use std::sync::Mutex;
 
     use once_cell::sync::Lazy;
-    use opentelemetry::sdk::export::trace::stdout;
+    use opentelemetry::trace::TracerProvider;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::Registry;
 
@@ -85,13 +85,22 @@ mod test {
         assert!(other_id == my_id);
     }
 
-    #[test]
-    fn it_returns_valid_trace_id() {
+    #[tokio::test]
+    async fn it_returns_valid_trace_id() {
         let _guard = TRACING_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Create a tracing layer with the configured tracer
-        let tracer = stdout::new_pipeline().install_simple();
+
+        let provider = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_simple_exporter(
+                opentelemetry_stdout::SpanExporter::builder()
+                    .with_writer(std::io::stdout())
+                    .build(),
+            )
+            .build();
+        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
+
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -112,7 +121,10 @@ mod test {
         let my_id = TraceId::maybe_new();
         assert!(my_id.is_none());
         // Create a tracing layer with the configured tracer
-        let tracer = stdout::new_pipeline().install_simple();
+        let provider = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
+            .build();
+        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -134,7 +146,10 @@ mod test {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Create a tracing layer with the configured tracer
-        let tracer = stdout::new_pipeline().install_simple();
+        let provider = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
+            .build();
+        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`

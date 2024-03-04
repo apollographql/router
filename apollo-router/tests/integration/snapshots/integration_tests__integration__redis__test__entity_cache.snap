@@ -1,0 +1,29 @@
+---
+source: apollo-router/tests/integration/redis.rs
+expression: response
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "name": "chair",
+        "reviews": [
+          {
+            "body": "I can sit on it"
+          }
+        ]
+      },
+      {
+        "name": "table",
+        "reviews": [
+          {
+            "body": "I can sit on it"
+          },
+          {
+            "body": "I can eat on it"
+          }
+        ]
+      }
+    ]
+  }
+}

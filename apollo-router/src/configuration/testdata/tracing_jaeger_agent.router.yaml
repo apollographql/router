@@ -1,7 +1,9 @@
 supergraph:
   listen: 1.2.3.4:5
 telemetry:
-  tracing:
-    jaeger:
-      agent:
-        endpoint: default
+  exporters:
+    tracing:
+      jaeger:
+        enabled: true
+        agent:
+          endpoint: default

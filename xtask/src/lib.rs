@@ -1,5 +1,4 @@
 mod federation_demo;
-mod jaeger;
 
 use std::convert::TryFrom;
 use std::env;
@@ -13,7 +12,6 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use cargo_metadata::MetadataCommand;
 pub use federation_demo::*;
-pub use jaeger::*;
 use once_cell::sync::Lazy;
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");

@@ -121,10 +121,6 @@ register_plugin!("experimental", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use once_cell::sync::Lazy;
-    use serde_json::Value as jValue;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::Service;
@@ -133,26 +129,11 @@ mod tests {
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugin::DynPlugin;
-    use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::spec::Schema;
-
-    static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(include_str!(
-            "../../tests/fixtures/expected_response_with_queryplan.json"
-        ))
-        .unwrap()
-    });
-    static EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(include_str!(
-            "../../tests/fixtures/expected_response_without_queryplan.json"
-        ))
-        .unwrap()
-    });
+    use crate::MockedSubgraphs;
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    async fn build_mock_supergraph(plugin: Box<dyn DynPlugin>) -> supergraph::BoxService {
+    async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -185,34 +166,32 @@ mod tests {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
-        let schema =
-            include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+        let subgraphs = MockedSubgraphs(
+            [
+                ("accounts", account_service),
+                ("reviews", review_service),
+                ("products", product_service),
+            ]
+            .into_iter()
+            .collect(),
+        );
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
-        let builder = builder
-            .with_dyn_plugin("experimental.expose_query_plan".to_string(), plugin)
-            .with_subgraph_service("accounts", account_service.clone())
-            .with_subgraph_service("reviews", review_service.clone())
-            .with_subgraph_service("products", product_service.clone());
-
-        builder.build().await.expect("should build").make().boxed()
-    }
-
-    async fn get_plugin(config: &jValue) -> Box<dyn DynPlugin> {
-        crate::plugin::plugins()
-            .find(|factory| factory.name == "experimental.expose_query_plan")
-            .expect("Plugin not found")
-            .create_instance_without_schema(config)
+        crate::TestHarness::builder()
+            .schema(include_str!(
+                "../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql"
+            ))
+            .extra_plugin(subgraphs)
+            .configuration_json(config)
+            .unwrap()
+            .build_supergraph()
             .await
-            .expect("Plugin not created")
+            .unwrap()
     }
 
     async fn execute_supergraph_test(
         query: &str,
-        body: &Response,
-        mut supergraph_service: supergraph::BoxService,
-    ) {
+        mut supergraph_service: supergraph::BoxCloneService,
+    ) -> Response {
         let request = supergraph::Request::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
@@ -220,7 +199,7 @@ mod tests {
             .build()
             .expect("expecting valid request");
 
-        let response = supergraph_service
+        supergraph_service
             .ready()
             .await
             .unwrap()
@@ -229,39 +208,48 @@ mod tests {
             .unwrap()
             .next_response()
             .await
-            .unwrap();
-
-        assert_eq!(response, *body);
+            .unwrap()
     }
 
     #[tokio::test]
     async fn it_expose_query_plan() {
-        let plugin = get_plugin(&serde_json::json!(true)).await;
-        execute_supergraph_test(
+        let response = execute_supergraph_test(
             VALID_QUERY,
-            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
-            build_mock_supergraph(plugin).await,
+            build_mock_supergraph(serde_json::json! {{
+                "plugins": {
+                    "experimental.expose_query_plan": true
+                }
+            }})
+            .await,
         )
         .await;
+        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
+
         // let's try that again
-        let plugin = get_plugin(&serde_json::json!(true)).await;
-        execute_supergraph_test(
+        let response = execute_supergraph_test(
             VALID_QUERY,
-            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
-            build_mock_supergraph(plugin).await,
+            build_mock_supergraph(serde_json::json! {{
+                "plugins": {
+                    "experimental.expose_query_plan": true
+                }
+            }})
+            .await,
         )
         .await;
+
+        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
     }
 
     #[tokio::test]
     async fn it_doesnt_expose_query_plan() {
-        let plugin = get_plugin(&serde_json::json!(false)).await;
-        let supergraph = build_mock_supergraph(plugin).await;
-        execute_supergraph_test(
-            VALID_QUERY,
-            &EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
-            supergraph,
-        )
+        let supergraph = build_mock_supergraph(serde_json::json! {{
+            "plugins": {
+                "experimental.expose_query_plan": false
+            }
+        }})
         .await;
+        let response = execute_supergraph_test(VALID_QUERY, supergraph).await;
+
+        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
     }
 }

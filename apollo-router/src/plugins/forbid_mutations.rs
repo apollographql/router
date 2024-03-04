@@ -93,7 +93,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(
+        let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
         ))
@@ -120,7 +120,7 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
-        let service_stack = ForbidMutations::new(PluginInit::new(
+        let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
         ))
@@ -144,7 +144,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(
+        let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(false),
             Default::default(),
         ))

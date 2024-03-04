@@ -119,11 +119,11 @@ impl Plugin for Csrf {
                             ))
                             .extension_code("CSRF_ERROR")
                             .build();
-                        let res = SupergraphResponse::builder()
+                        let res = SupergraphResponse::infallible_builder()
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
-                            .build()?;
+                            .build();
                         Ok(ControlFlow::Break(res))
                     }
                 })
@@ -299,7 +299,7 @@ mod csrf_tests {
                 .unwrap())
         });
 
-        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
+        let service_stack = Csrf::new(PluginInit::fake_new(config, Default::default()))
             .await
             .unwrap()
             .supergraph_service(mock_service.boxed());
@@ -316,7 +316,7 @@ mod csrf_tests {
     }
 
     async fn assert_rejected(config: CSRFConfig, request: supergraph::Request) {
-        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
+        let service_stack = Csrf::new(PluginInit::fake_new(config, Default::default()))
             .await
             .unwrap()
             .supergraph_service(MockSupergraphService::new().boxed());

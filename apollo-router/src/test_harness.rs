@@ -1,4 +1,8 @@
+//! Test harness and mocks for the Apollo Router.
+
 use std::collections::HashMap;
+use std::default::Default;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use tower::BoxError;
@@ -7,22 +11,32 @@ use tower::ServiceExt;
 use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
+use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
+use crate::plugin::PluginUnstable;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
-use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseState;
+
+/// Mocks for services the Apollo Router must integrate with.
+pub mod mocks;
 
 #[cfg(test)]
 pub(crate) mod http_client;
@@ -90,14 +104,18 @@ impl<'a> TestHarness<'a> {
     /// Specifies the logging level. Note that this function may not be called more than once.
     /// log_level is in RUST_LOG format.
     pub fn log_level(self, log_level: &'a str) -> Self {
-        init_telemetry(log_level).expect("failed to setup logging");
+        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
+        let log_level = format!("{log_level},salsa=error");
+        init_telemetry(&log_level).expect("failed to setup logging");
         self
     }
 
     /// Specifies the logging level. Note that this function will silently fail if called more than once.
     /// log_level is in RUST_LOG format.
     pub fn try_log_level(self, log_level: &'a str) -> Self {
-        let _ = init_telemetry(log_level);
+        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
+        let log_level = format!("{log_level},salsa=error");
+        let _ = init_telemetry(&log_level);
         self
     }
 
@@ -130,7 +148,15 @@ impl<'a> TestHarness<'a> {
         self,
         configuration: serde_json::Value,
     ) -> Result<Self, serde_json::Error> {
-        Ok(self.configuration(serde_json::from_value(configuration)?))
+        let configuration: Configuration = serde_json::from_value(configuration)?;
+        Ok(self.configuration(Arc::new(configuration)))
+    }
+
+    /// Specifies the (static) router configuration as a YAML string,
+    /// such as from the `serde_json::json!` macro.
+    pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
+        let configuration: Configuration = Configuration::from_str(configuration)?;
+        Ok(self.configuration(Arc::new(configuration)))
     }
 
     /// Adds an extra, already instanciated plugin.
@@ -138,6 +164,45 @@ impl<'a> TestHarness<'a> {
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.
     pub fn extra_plugin<P: Plugin>(mut self, plugin: P) -> Self {
+        let type_id = std::any::TypeId::of::<P>();
+        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
+            Some(factory) => factory.name.clone(),
+            None => format!(
+                "extra_plugins.{}.{}",
+                self.extra_plugins.len(),
+                std::any::type_name::<P>(),
+            ),
+        };
+
+        self.extra_plugins.push((name, Box::new(plugin)));
+        self
+    }
+
+    /// Adds an extra, already instantiated unstable plugin.
+    ///
+    /// May be called multiple times.
+    /// These extra plugins are added after plugins specified in configuration.
+    pub fn extra_unstable_plugin<P: PluginUnstable>(mut self, plugin: P) -> Self {
+        let type_id = std::any::TypeId::of::<P>();
+        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
+            Some(factory) => factory.name.clone(),
+            None => format!(
+                "extra_plugins.{}.{}",
+                self.extra_plugins.len(),
+                std::any::type_name::<P>(),
+            ),
+        };
+
+        self.extra_plugins.push((name, Box::new(plugin)));
+        self
+    }
+
+    /// Adds an extra, already instantiated private plugin.
+    ///
+    /// May be called multiple times.
+    /// These extra plugins are added after plugins specified in configuration.
+    #[allow(dead_code)]
+    pub(crate) fn extra_private_plugin<P: PluginPrivate>(mut self, plugin: P) -> Self {
         let type_id = std::any::TypeId::of::<P>();
         let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
             Some(factory) => factory.name.clone(),
@@ -195,7 +260,9 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    async fn build_common(self) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
+    pub(crate) async fn build_common(
+        self,
+    ) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -223,9 +290,14 @@ impl<'a> TestHarness<'a> {
         let config = builder.configuration.unwrap_or_default();
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
-        let schema = Arc::new(Schema::parse(schema, &config)?);
         let supergraph_creator = YamlRouterFactory
-            .create_supergraph(config.clone(), schema, None, Some(builder.extra_plugins))
+            .inner_create_supergraph(
+                config.clone(),
+                schema.to_string(),
+                None,
+                None,
+                Some(builder.extra_plugins),
+            )
             .await?;
 
         Ok((config, supergraph_creator))
@@ -252,11 +324,22 @@ impl<'a> TestHarness<'a> {
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
+        let router_creator = RouterCreator::new(
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
+            Arc::new(supergraph_creator),
+            config.clone(),
+        )
+        .await
+        .unwrap();
 
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
-            let span = PropagatingMakeSpan::default().make_span(&request.router_request);
+            let span = PropagatingMakeSpan {
+                license: LicenseState::default(),
+                span_mode: span_mode(&config),
+            }
+            .make_span(&request.router_request);
             async move { router.oneshot(request).await }.instrument(span)
         })
         .boxed_clone())
@@ -269,10 +352,26 @@ impl<'a> TestHarness<'a> {
         use crate::router_factory::RouterFactory;
 
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
+        let router_creator = RouterCreator::new(
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
+            Arc::new(supergraph_creator),
+            config.clone(),
+        )
+        .await?;
+
         let web_endpoints = router_creator.web_endpoints();
 
-        let routers = make_axum_router(router_creator, &config, web_endpoints)?;
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let routers = make_axum_router(
+            live,
+            ready,
+            router_creator,
+            &config,
+            web_endpoints,
+            LicenseState::Unlicensed,
+        )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
     }

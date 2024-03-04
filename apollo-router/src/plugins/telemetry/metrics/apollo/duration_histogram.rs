@@ -8,7 +8,7 @@ use serde::Serialize;
 /// It can be either `u64` for exact counts (where the `value` parameter
 /// of `increment_duration` is typically `1`), or `f64` for estimations
 /// that compensate for a sampling rate.
-#[derive(Serialize, Debug)]
+#[derive(Clone, Serialize, Debug)]
 pub(crate) struct DurationHistogram<T = u64> {
     /// `Vec` indices represents a duration bucket.
     /// `Vec` items are the sums of values in each bucket.
@@ -87,11 +87,21 @@ impl<T: Copy + Default + AddAssign> DurationHistogram<T> {
         }
         self.buckets[bucket] += value;
     }
+
+    pub(crate) fn trim_trailing_zeroes(&mut self)
+    where
+        T: PartialEq,
+    {
+        let zero = T::default();
+        let last_non_zero = self.buckets.iter().rposition(|b| *b != zero).unwrap_or(0);
+        self.buckets.truncate(last_non_zero + 1);
+    }
 }
 
 impl DurationHistogram<u64> {
     /// Convert to the type expected by the Protobuf-generated struct for `repeated sint64`.
-    pub(crate) fn buckets_to_i64(self) -> Vec<i64> {
+    pub(crate) fn buckets_to_i64(mut self) -> Vec<i64> {
+        self.trim_trailing_zeroes();
         // This optimizes to nothing: https://rust.godbolt.org/z/YMh8e55de
         self.buckets.into_iter().map(|x| x as i64).collect()
     }
@@ -102,7 +112,8 @@ impl DurationHistogram<f64> {
     ///
     /// When estimating, rounding to integer values is only done after aggregating in memory
     /// a number data points by summing floating-point values.
-    pub(crate) fn buckets_to_i64(self) -> Vec<i64> {
+    pub(crate) fn buckets_to_i64(mut self) -> Vec<i64> {
+        self.trim_trailing_zeroes();
         self.buckets.into_iter().map(|x| x as i64).collect()
     }
 }
@@ -207,5 +218,18 @@ mod test {
         h1 += h2;
         assert_eq!(h1.buckets, [0, 0, 0, 0, 0, 1, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1]);
         assert_eq!(h1.total, 5);
+    }
+
+    #[test]
+    fn trim() {
+        let mut h = DurationHistogram::new(None);
+        assert_eq!(h.buckets.len(), DEFAULT_SIZE);
+        h.increment_duration(Some(Duration::from_nanos(1500)), 1);
+        h.increment_duration(Some(Duration::from_nanos(2020)), 1);
+        h.increment_duration(Some(Duration::from_nanos(1500)), 1);
+        assert_eq!(h.buckets.len(), DEFAULT_SIZE);
+        h.trim_trailing_zeroes();
+        assert_eq!(h.buckets, [0, 0, 0, 0, 0, 2, 0, 0, 1]);
+        assert_eq!(h.total, 3);
     }
 }

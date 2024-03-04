@@ -1,0 +1,28 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "userWasCreated": {
+      "name": "test",
+      "activeOrganization": {
+        "id": "0",
+        "suborga": [
+          {
+            "id": "1",
+            "name": "A"
+          },
+          {
+            "id": "2",
+            "name": "B"
+          },
+          {
+            "id": "3",
+            "name": "C"
+          }
+        ]
+      }
+    }
+  }
+}

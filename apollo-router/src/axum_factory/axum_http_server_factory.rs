@@ -1,32 +1,38 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware;
+use axum::middleware::Next;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use futures::channel::oneshot;
-use futures::future::join;
 use futures::future::join_all;
 use futures::prelude::*;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
+use http::HeaderValue;
 use http::Request;
+use http_body::combinators::UnsyncBoxBody;
 use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
-use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
+use tokio::sync::mpsc;
+use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower_http::compression::predicate::NotForContentType;
-use tower_http::compression::CompressionLayer;
-use tower_http::compression::DefaultPredicate;
-use tower_http::compression::Predicate;
 use tower_http::trace::TraceLayer;
 
 use super::listeners::ensure_endpoints_consistency;
@@ -36,6 +42,8 @@ use super::listeners::ListenersAndRouters;
 use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
+use super::ENDPOINT_CALLBACK;
+use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
 use crate::configuration::Configuration;
@@ -43,21 +51,49 @@ use crate::configuration::ListenAddr;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::plugins::telemetry::SpanMode;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+
+static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+
+struct SessionCountGuard;
+
+impl SessionCountGuard {
+    fn start() -> Self {
+        let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
+        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        Self
+    }
+}
+
+impl Drop for SessionCountGuard {
+    fn drop(&mut self) {
+        let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
+        tracing::info!(value.apollo_router_session_count_active = session_count,);
+    }
+}
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
-#[derive(Debug)]
-pub(crate) struct AxumHttpServerFactory;
+#[derive(Debug, Default)]
+pub(crate) struct AxumHttpServerFactory {
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            ..Default::default()
+        }
     }
 }
 
@@ -75,9 +111,12 @@ struct Health {
 }
 
 pub(crate) fn make_axum_router<RF>(
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
+    license: LicenseState,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -86,23 +125,59 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "Health check endpoint exposed at {}/health",
-            configuration.health_check.listen
+            "Health check exposed at {}{}",
+            configuration.health_check.listen,
+            configuration.health_check.path
         );
         endpoints.insert(
             configuration.health_check.listen.clone(),
             Endpoint::from_router_service(
-                "/health".to_string(),
+                configuration.health_check.path.clone(),
                 service_fn(move |req: router::Request| {
-                    let health = Health {
-                        status: HealthStatus::Up,
+                    let mut status_code = StatusCode::OK;
+                    let health = if let Some(query) = req.router_request.uri().query() {
+                        let query_upper = query.to_ascii_uppercase();
+                        // Could be more precise, but sloppy match is fine for this use case
+                        if query_upper.starts_with("READY") {
+                            let status = if ready.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else if query_upper.starts_with("LIVE") {
+                            let status = if live.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else {
+                            Health {
+                                status: HealthStatus::Up,
+                            }
+                        }
+                    } else {
+                        Health {
+                            status: HealthStatus::Up,
+                        }
                     };
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder().body::<hyper::Body>(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?,
+                            response: http::Response::builder()
+                                .status(status_code)
+                                .body::<hyper::Body>(
+                                    serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                                )?,
                             context: req.context,
                         })
                     }
@@ -120,6 +195,7 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
+        license,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -146,33 +222,53 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        license: LicenseState,
+        all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory,
     {
+        let live = self.live.clone();
+        let ready = self.ready.clone();
         Box::pin(async move {
-            let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
+            let all_routers = make_axum_router(
+                live.clone(),
+                ready.clone(),
+                service_factory,
+                &configuration,
+                extra_endpoints,
+                license,
+            )?;
 
             // serve main router
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             let main_listener = match all_routers.main.0.clone() {
                 ListenAddr::SocketAddr(addr) => {
-                    match main_listener.take().and_then(|listener| {
-                        listener.local_addr().ok().and_then(|l| {
-                            if l == ListenAddr::SocketAddr(addr) {
-                                Some(listener)
+                    let tls_config = configuration
+                        .tls
+                        .supergraph
+                        .as_ref()
+                        .map(|tls| tls.tls_config())
+                        .transpose()?;
+                    let tls_acceptor = tls_config.clone().map(TlsAcceptor::from);
+
+                    match main_listener.take() {
+                        Some(Listener::Tcp(listener)) => {
+                            if listener.local_addr().ok() == Some(addr) {
+                                Listener::new_from_listener(listener, tls_acceptor)
                             } else {
-                                None
+                                Listener::new_from_socket_addr(addr, tls_acceptor).await?
                             }
-                        })
-                    }) {
-                        Some(listener) => listener,
-                        None => Listener::Tcp(
-                            TcpListener::bind(addr)
-                                .await
-                                .map_err(ApolloRouterError::ServerCreationError)?,
-                        ),
+                        }
+                        Some(Listener::Tls { listener, .. }) => {
+                            if listener.local_addr().ok() == Some(addr) {
+                                Listener::new_from_listener(listener, tls_acceptor)
+                            } else {
+                                Listener::new_from_socket_addr(addr, tls_acceptor).await?
+                            }
+                        }
+                        _ => Listener::new_from_socket_addr(addr, tls_acceptor).await?,
                     }
                 }
                 #[cfg(unix)]
@@ -202,6 +298,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
+                all_connections_stopped_sender.clone(),
             );
 
             tracing::info!(
@@ -235,22 +332,42 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 listeners_and_routers
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
-                        let (server, shutdown_sender) =
-                            serve_router_on_listen_addr(listener, listen_addr.clone(), router);
+                        let (server, shutdown_sender) = serve_router_on_listen_addr(
+                            listener,
+                            listen_addr.clone(),
+                            router,
+                            all_connections_stopped_sender.clone(),
+                        );
                         (
                             server.map(|listener| (listen_addr, listener)),
                             shutdown_sender,
                         )
                     });
 
-            let (servers, mut shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
-            shutdowns.push(main_shutdown_sender);
+            let (servers, shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
 
             // graceful shutdown mechanism:
-            // we will fan out to all of the servers once we receive a signal
-            let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
+            // create two shutdown channels. One for the main (GraphQL) server and the other for
+            // the extra servers (health, metrics, etc...)
+            // We spawn a task for each server which just waits to propagate the message to:
+            //  - main
+            //  - all extras
+            // We have two separate channels because we want to ensure that main is notified
+            // separately from all other servers and we wait for main to shutdown before we notify
+            // extra servers.
+            let (outer_main_shutdown_sender, outer_main_shutdown_receiver) =
+                oneshot::channel::<()>();
             tokio::task::spawn(async move {
-                let _ = outer_shutdown_receiver.await;
+                let _ = outer_main_shutdown_receiver.await;
+                if let Err(_err) = main_shutdown_sender.send(()) {
+                    tracing::error!("Failed to notify http thread of shutdown");
+                }
+            });
+
+            let (outer_extra_shutdown_sender, outer_extra_shutdown_receiver) =
+                oneshot::channel::<()>();
+            tokio::task::spawn(async move {
+                let _ = outer_extra_shutdown_receiver.await;
                 shutdowns.into_iter().for_each(|sender| {
                     if let Err(_err) = sender.send(()) {
                         tracing::error!("Failed to notify http thread of shutdown")
@@ -258,25 +375,58 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 })
             });
 
-            // Spawn the server into a runtime
-            let server_future = tokio::task::spawn(join(main_server, join_all(servers)))
+            // Spawn the main (GraphQL) server into a task
+            let main_future = tokio::task::spawn(main_server)
+                .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
+                .boxed();
+
+            // Spawn all other servers (health, metrics, etc...) into a task
+            let extra_futures = tokio::task::spawn(join_all(servers))
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             Ok(HttpServerHandle::new(
-                outer_shutdown_sender,
-                server_future,
+                outer_main_shutdown_sender,
+                outer_extra_shutdown_sender,
+                main_future,
+                extra_futures,
                 Some(actual_main_listen_address),
                 actual_extra_listen_adresses,
+                all_connections_stopped_sender,
             ))
         })
     }
+
+    fn live(&self, live: bool) {
+        self.live.store(live, Ordering::SeqCst);
+    }
+
+    fn ready(&self, ready: bool) {
+        self.ready.store(ready, Ordering::SeqCst);
+    }
+}
+
+// This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
+pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
+    configuration
+        .apollo_plugins
+        .plugins
+        .iter()
+        .find(|(s, _)| s.as_str() == "telemetry")
+        .and_then(|(_, v)| v.get("instrumentation").and_then(|v| v.as_object()))
+        .and_then(|v| v.get("spans").and_then(|v| v.as_object()))
+        .and_then(|v| {
+            v.get("mode")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        })
+        .unwrap_or_default()
 }
 
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
+    license: LicenseState,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -284,24 +434,100 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
+    let span_mode = span_mode(configuration);
 
-    let main_route = main_router::<RF>(configuration)
+    let mut main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan::default()))
+        .layer(middleware::from_fn_with_state(
+            (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+            license_handler,
+        ))
         .layer(Extension(service_factory))
         .layer(cors)
-        // Compress the response body, except for multipart responses such as with `@defer`.
-        // This is a work-around for https://github.com/apollographql/router/issues/1572
-        .layer(CompressionLayer::new().compress_when(
-            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
-        ));
+        // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
+        // Adding layers after telemetry will cause us to lose metrics and spans.
+        .layer(
+            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
+        )
+        .layer(middleware::from_fn(metrics_handler));
+
+    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+        main_route = main_endpoint_layer(main_route);
+    }
 
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+        .fold(main_route, |acc, r| {
+            let mut router = r.into_router();
+            if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+                router = main_endpoint_layer(router);
+            }
+
+            acc.merge(router)
+        });
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
+    let resp = next.run(request).await;
+    u64_counter!(
+        "apollo.router.operations",
+        "The number of graphql operations performed by the Router",
+        1,
+        "http.response.status_code" = resp.status().as_u16() as i64
+    );
+    resp
+}
+
+async fn license_handler<B>(
+    State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
+    request: Request<B>,
+    next: Next<B>,
+) -> Response {
+    if matches!(
+        license,
+        LicenseState::LicensedHalt | LicenseState::LicensedWarn
+    ) {
+        u64_counter!(
+            "apollo_router_http_requests_total",
+            "Total number of HTTP requests made.",
+            1,
+            status = StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
+            error = LICENSE_EXPIRED_SHORT_MESSAGE
+        );
+        // This will rate limit logs about license to 1 a second.
+        // The way it works is storing the delta in seconds from a starting instant.
+        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
+        // If not successful some other thread will have logged.
+        let last_elapsed_seconds = delta.load(Ordering::SeqCst);
+        let elapsed_seconds = start.elapsed().as_secs();
+        if elapsed_seconds > last_elapsed_seconds
+            && delta
+                .compare_exchange(
+                    last_elapsed_seconds,
+                    elapsed_seconds,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+        {
+            ::tracing::error!(
+                code = APOLLO_ROUTER_LICENSE_EXPIRED,
+                LICENSE_EXPIRED_SHORT_MESSAGE
+            );
+        }
+    }
+
+    if matches!(license, LicenseState::LicensedHalt) {
+        http::Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(UnsyncBoxBody::default())
+            .expect("canned response must be valid")
+    } else {
+        next.run(request).await
+    }
 }
 
 pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
@@ -345,20 +571,24 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1,);
+    let _guard = SessionCountGuard::start();
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
+    let accept_encoding = request
+        .router_request
+        .headers()
+        .get(ACCEPT_ENCODING)
+        .cloned();
 
     let res = service.oneshot(request).await;
-    let dur = context.busy_time().await;
+    let dur = context.busy_time();
     let processing_seconds = dur.as_secs_f64();
 
     tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1,);
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -381,8 +611,59 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1,);
-            response.response.into_response()
+            let (mut parts, body) = response.response.into_parts();
+
+            let opt_compressor = accept_encoding
+                .as_ref()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+            let body = match opt_compressor {
+                None => body,
+                Some(compressor) => {
+                    parts.headers.insert(
+                        CONTENT_ENCODING,
+                        HeaderValue::from_static(compressor.content_encoding()),
+                    );
+                    Body::wrap_stream(compressor.process(body))
+                }
+            };
+
+            http::Response::from_parts(parts, body).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_span_mode_default() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
+    }
+
+    #[test]
+    fn test_span_mode_spec_compliant() {
+        let config = Configuration::from_str(include_str!(
+            "testdata/span_mode_spec_compliant.router.yaml"
+        ))
+        .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::SpecCompliant);
+    }
+
+    #[test]
+    fn test_span_mode_deprecated() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_deprecated.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
     }
 }

@@ -3,15 +3,14 @@ title: Rhai script API reference
 description: For Apollo Router customizations
 ---
 
-> Before consulting this reference, make sure you've read [Rhai scripts for the Apollo Router](./rhai/).
-
-This article documents symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the Apollo Router. To learn the basics of the Rhai scripting language, see [the Rhai documentation](https://rhai.rs/book/index.html).
+This reference documents the symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the Apollo Router.
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
+fn router_service(service) {}
 fn supergraph_service(service) {}
 fn execution_service(service) {}
 fn subgraph_service(service, subgraph) {}
@@ -89,30 +88,57 @@ fn supergraph_service(service) {
 }
 ```
 
-If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+You can also `throw` a valid GraphQL response, which will be deserialized and dealt with by the router.
 
-Returning a `200` "error" is not currently supported. If encountered, it will be silently converted into a `500` error. We may relax this restriction in the future.
+For example:
+```rhai
+fn supergraph_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something goes wrong during request processing...
+        throw #{
+            status: 403,
+            body: #{
+                errors: [#{
+                    message: `I have raised a 403`,
+                    extensions: #{
+                        code: "ACCESS_DENIED"
+                    }
+                }]
+            }
+        };
+    };
+    // Map our request using our closure
+    service.map_request(f);
+}
+```
+
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](./coprocessor/#terminating-a-client-request).
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 
 ## Timing execution
 
 Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
-fn supergraph_service(service) {
-    // Define a closure to process our response
-    let f = |response| {
-        // highlight-start
-        let start = Router.APOLLO_START.elapsed;
-        // Do some processing here...
-        let duration = Router.APOLLO_START.elapsed - start;
-        print(`response processing took: ${duration}`);
-        // highlight-end
+// Define a closure to process our response
+// Note: We can't use a closure in this example because we are referencing our global Router during function execution
+fn process_response(response) {
+    // highlight-start
+    let start = Router.APOLLO_START.elapsed;
+    // Do some processing here...
+    let duration = Router.APOLLO_START.elapsed - start;
+    print(`response processing took: ${duration}`);
+    // highlight-end
 
-        // Log out any errors we may have
-        print(response.body.errors);
-    };
-    // Map our response using our closure
-    service.map_response(f);
+    // Log out any errors we may have
+    print(response.body.errors);
+}
+
+fn supergraph_service(service) {
+    const response_callback = Fn("process_request");
+    service.map_response(response_callback);
 }
 ```
 
@@ -165,6 +191,31 @@ fn supergraph_service(service) {
 }
 ```
 
+## json encode/decode strings
+
+Your Rhai customization can use the functions `json::encode()` and `json::decode()` to convert Rhai objects to/from valid JSON encoded strings. Both functions can fail, so always handle exceptions when using them.
+
+```rhai
+fn router_service(service) {
+    let original = `{"valid":"object"}`;
+    try {
+        let encoded = json::decode(original);
+        // encoded is a Rhai object, with a property (or key) named valid with a String value of "object"
+        print(`encoded.valid: ${encoded.valid}`);
+        let and_back = json::encode(encoded);
+        // and_back will be a string == original.
+        if and_back != original {
+            throw "something has gone wrong";
+        }
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`json coding error: ${err}`);
+    }
+}
+```
+
 ## base64 encode/decode strings
 
 Your Rhai customization can use the functions `base64::encode()` and `base64::decode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
@@ -185,10 +236,40 @@ fn supergraph_service(service) {
     }
 }
 ```
+<Note>
 
-Note: You don't need to import the "base64" module. It is imported in the router.
+You don't need to import the "base64" module. It is imported in the router.
 
-### Headers with multiple values
+</Note>
+
+### Different alphabets
+
+Base64 supports multiple alphabets to encode data, depending on the supported characters where it is used. The router supports the following alphabets:
+* `STANDARD`: the "base64" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-4). This is the default when not specified
+* `STANDARD_NO_PAD`: the "base64" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-4) without the padding (`=` or `==` characters at the end)
+* `URL_SAFE`: the "base64url" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-5)
+* `URL_SAFE_NO_PAD`: the "base64url" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-5) without the padding (`=` or `==` characters at the end)
+
+To use them, we can add an argument to the `encode` and `decode` methods:
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = base64::encode(original, base64::URL_SAFE);
+    // encoded will be "YWxpY2UgYW5kIGJvYgo="
+    try {
+        let and_back = base64::decode(encoded, base64::URL_SAFE);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`base64::decode error: ${err}`);
+    }
+}
+```
+
+## Headers with multiple values
 
 The simple get/set api for dealing with single value headers is sufficient for most use cases. If you wish to set multiple values on a key then you should do this by supplying an array of values.
 
@@ -216,13 +297,37 @@ fn supergraph_service(service) {
 }
 ```
 
+## Environment Variables
+
+Your Rhai customization can access environment variables using the `env` module. Use the `env::get()` function.
+
+```rhai
+fn router_service(service) {
+    try {
+        print(`HOME: ${env::get("HOME")}`);
+        print(`LANG: ${env::get("LANG")}`);
+    } catch(err) {
+        print(`exception: ${err}`);
+    }
+}
+```
+
+<Note>
+
+* You don't need to import the "env" module. It is imported in the router.
+* `get()` may fail, so it's best to handle exceptions when using it.
+
+</Note>
+
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields:
 
 ```
 request.context
+request.id
 request.headers
+request.method
 request.body.query
 request.body.operation_name
 request.body.variables
@@ -231,7 +336,13 @@ request.uri.host
 request.uri.path
 ```
 
-**For `subgraph_service` callbacks only,** the `request` object provides _additional_ fields for interacting with the request that will be sent to the corresponding subgraph:
+<Note>
+
+These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`, the only modifiable field is `request.context`.
+
+</Note>
+
+**For `subgraph_service` callbacks only,** the `request` object provides _additional_ modifiable fields for interacting with the request that will be sent to the corresponding subgraph:
 
 ```
 request.subgraph.headers
@@ -243,15 +354,11 @@ request.subgraph.uri.host
 request.subgraph.uri.path
 ```
 
-These additional fields are shared across all subgraph invocations and are thus read-only.
-
 ### `request.context`
 
 The context is a generic key/value store that exists for the entire lifespan of a particular client request. You can use this to share information between multiple callbacks throughout the request's lifespan.
 
 Keys must be strings, but values can be any Rhai object.
-
-For more information, see [Define necessary context](./native#5-define-necessary-context).
 
 ```rhai
 // You can interact with request.context as an indexed variable
@@ -291,6 +398,14 @@ let resolver = |current| {
 response.context.upsert("surrogate-cache-key", resolver);
 ```
 
+### `request.id`
+
+The id is a string which uniquely identifies a request/response context for its entire lifespan. If you have a request (or a response) you can access the ID as follows.
+
+```rhai
+print(`request id is: ${request.id}`);
+```
+
 ### `request.headers`
 
 The headers of a request are accessible as a read/write indexed variable. The keys and values must be valid header name and value strings.
@@ -310,6 +425,14 @@ request.headers["set-cookie"] = [
 // You can also get multiple header values for a header using the values() fn
 // Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
 print(`${request.headers.values("set-cookie")}`);
+```
+
+### `request.method`
+
+This is the HTTP method of the client request.
+
+```rhai
+print(`${request.method}`); // Log the HTTP method
 ```
 
 ### `request.body.query`
@@ -398,6 +521,7 @@ The `response` object includes the following fields:
 
 ```
 response.context
+response.id
 response.headers
 response.body.label
 response.body.data
@@ -410,8 +534,22 @@ All of the above fields are read/write.
 The following fields are identical in behavior to their `request` counterparts:
 
 * [`context`](#requestcontext)
+* [`id`](#requestid)
 * [`headers`](#requestheaders)
+* [`body`](#requestbody)
 * [`body.extensions`](#requestbodyextensions)
+
+### `response.is_primary()`
+
+Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+
+```rhai
+    if response.is_primary() {
+        print(`all response headers: ${response.headers}`);
+    } else {
+        print(`don't try to access headers`);
+    }
+```
 
 Other fields are described below.
 

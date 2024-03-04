@@ -1,10 +1,14 @@
 ---
 title: Creating a custom Apollo Router binary
+description: Compile a custom router binary from source
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
+import NativePluginNotice from '../../shared/native-plugin-notice.mdx';
 
-To use [custom plugins](./native/) that aren't bundled with the default Apollo Router distribution, you need to compile your own custom router binary. This page walks you through creating that binary from scratch and adding a plugin to it.
+Learn how to compile a custom Apollo Router binary from source, which is required to create custom native Rust plugins for the router.
+
+<NativePluginNotice />
 
 <ElasticNotice />
 
@@ -13,8 +17,9 @@ To use [custom plugins](./native/) that aren't bundled with the default Apollo R
 To compile the Apollo Router, you need to have the following installed:
 
 <!-- renovate-automation: rustc version -->
-* [Rust 1.67.0 or later](https://www.rust-lang.org/tools/install)
+* [Rust 1.74.0 or later](https://www.rust-lang.org/tools/install)
 * [Node.js 16.9.1 or later](https://nodejs.org/en/download/)
+* [CMake 3.5.1 or later](https://cmake.org/download/)
 
 After you install the above, also install the `cargo-xtask` and `cargo-scaffold` crates:
 
@@ -94,7 +99,7 @@ Now you can test out your compiled router with an example supergraph schema.
 
    During development, it's helpful to use `cargo run` to run the router.
 
-> If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables instead of specifying the supergraph schema as a file. For details, see [this section](../managed-federation/setup#4-connect-the-router-to-studio).
+If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables instead of specifying the supergraph schema as a file. For details, see [this section](/federation/managed-federation/setup#4-connect-your-router-to-graphos).
 
 ## 4. Create a plugin
 
@@ -153,6 +158,24 @@ cargo router plugin remove hello_world
 
 Note that depending on the structure of your plugin, the command might fail to remove all of its associated files.
 
+## Memory allocator
+
+On Linux the `apollo-router` crate sets [jemalloc](http://jemalloc.net/) 
+as [the global memory allocator for Rust](https://doc.rust-lang.org/std/alloc/index.html#the-global_allocator-attribute)
+to reduce memory fragmentation.
+Future versions may do so on more platforms, or switch to yet a different allocator.
+This is enabled by default and controlled by a `global-allocator` Cargo feature flag.
+If you want to choose a different allocator, disable it in your `Cargo.toml`:
+
+```toml
+[dependencies]
+apollo-router = {version = "[…]", default-features = false}
+```
+
+If you make a library crate, also specify `default-features = false`
+in order to leave the choice open for the eventual executable crate.
+(Cargo default features are only disabled if *all* dependents specify `default-features = false`.)
+
 ## Docker
 
 You can use the provided [Dockerfile](https://github.com/apollographql/router/tree/main/apollo-router-scaffold/templates/base/Dockerfile) to build a release container.
@@ -184,3 +207,7 @@ COPY my_supergraph.graphql /dist/supergraph.graphql
 # Default executable is the router
 ENTRYPOINT ["/dist/router", "-s", "/dist/supergraph.graphql"]
 ```
+
+## Related topics
+
+* [Optimizing Custom Apollo Router Builds](/technotes/TN0030-optimizing-router-builds/)

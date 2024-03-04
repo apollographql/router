@@ -1,15 +1,15 @@
 #[cfg(test)]
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
-use router_bridge::introspect;
 use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::IncrementalDeliverySupport;
-use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::Planner;
+use tower::BoxError;
 
 use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
-use crate::Configuration;
+use crate::query_planner::QueryPlanResult;
 
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
@@ -17,76 +17,62 @@ const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
     cache: CacheStorage<String, Response>,
-    defer_support: bool,
+    planner: Arc<Planner<QueryPlanResult>>,
 }
 
 impl Introspection {
     pub(crate) async fn with_capacity(
-        configuration: &Configuration,
+        planner: Arc<Planner<QueryPlanResult>>,
         capacity: NonZeroUsize,
-    ) -> Self {
-        Self {
-            cache: CacheStorage::new(capacity, None, "introspection").await,
-            defer_support: configuration.supergraph.defer_support,
-        }
+    ) -> Result<Self, BoxError> {
+        Ok(Self {
+            cache: CacheStorage::new(capacity, None, "introspection").await?,
+            planner,
+        })
     }
 
-    pub(crate) async fn new(configuration: &Configuration) -> Self {
-        Self::with_capacity(configuration, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
+    pub(crate) async fn new(planner: Arc<Planner<QueryPlanResult>>) -> Result<Self, BoxError> {
+        Self::with_capacity(planner, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
     }
 
     #[cfg(test)]
     pub(crate) async fn from_cache(
-        configuration: &Configuration,
+        planner: Arc<Planner<QueryPlanResult>>,
         cache: HashMap<String, Response>,
-    ) -> Self {
-        let this = Self::with_capacity(configuration, cache.len().try_into().unwrap()).await;
+    ) -> Result<Self, BoxError> {
+        let this = Self::with_capacity(planner, cache.len().try_into().unwrap()).await?;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;
         }
-        this
+        Ok(this)
     }
 
     /// Execute an introspection and cache the response.
-    pub(crate) async fn execute(
-        &self,
-        schema_sdl: &str,
-        query: String,
-    ) -> Result<Response, IntrospectionError> {
+    pub(crate) async fn execute(&self, query: String) -> Result<Response, IntrospectionError> {
         if let Some(response) = self.cache.get(&query).await {
             return Ok(response);
         }
 
         // Do the introspection query and cache it
-        let mut response = introspect::batch_introspect(
-            schema_sdl,
-            vec![query.to_owned()],
-            QueryPlannerConfig {
-                incremental_delivery: Some(IncrementalDeliverySupport {
-                    enable_defer: Some(self.defer_support),
-                }),
-            },
-        )
-        .map_err(|err| IntrospectionError {
-            message: format!("Deno runtime error: {err:?}").into(),
-        })??;
-        let introspection_result = response
-            .pop()
-            .ok_or_else(|| IntrospectionError {
-                message: String::from("cannot find the introspection response").into(),
-            })?
-            .into_result()
-            .map_err(|err| IntrospectionError {
-                message: format!(
-                    "introspection error : {}",
-                    err.into_iter()
-                        .map(|err| err.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                )
-                .into(),
-            })?;
+        let response =
+            self.planner
+                .introspect(query.clone())
+                .await
+                .map_err(|_e| IntrospectionError {
+                    message: String::from("cannot find the introspection response").into(),
+                })?;
+
+        let introspection_result = response.into_result().map_err(|err| IntrospectionError {
+            message: format!(
+                "introspection error : {}",
+                err.into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            )
+            .into(),
+        })?;
 
         let response = Response::builder().data(introspection_result).build();
 
@@ -98,24 +84,51 @@ impl Introspection {
 
 #[cfg(test)]
 mod introspection_tests {
+    use std::sync::Arc;
+
+    use router_bridge::planner::IncrementalDeliverySupport;
+    use router_bridge::planner::QueryPlannerConfig;
+
     use super::*;
 
     #[tokio::test]
     async fn test_plan_cache() {
-        let query_to_test = "this is a test query";
-        let schema = " ";
+        let query_to_test = r#"{
+            __schema {
+              types {
+                name
+              }
+            }
+          }"#;
+        let schema = include_str!("../tests/fixtures/supergraph.graphql");
         let expected_data = Response::builder().data(42).build();
+
+        let planner = Arc::new(
+            Planner::new(
+                schema.to_string(),
+                QueryPlannerConfig {
+                    incremental_delivery: Some(IncrementalDeliverySupport {
+                        enable_defer: Some(true),
+                    }),
+                    graphql_validation: true,
+                    reuse_query_fragments: Some(false),
+                    debug: None,
+                },
+            )
+            .await
+            .unwrap(),
+        );
 
         let cache = [(query_to_test.to_string(), expected_data.clone())]
             .iter()
             .cloned()
             .collect();
-        let introspection = Introspection::from_cache(&Configuration::default(), cache).await;
+        let introspection = Introspection::from_cache(planner, cache).await.unwrap();
 
         assert_eq!(
             expected_data,
             introspection
-                .execute(schema, query_to_test.to_string())
+                .execute(query_to_test.to_string())
                 .await
                 .unwrap()
         );

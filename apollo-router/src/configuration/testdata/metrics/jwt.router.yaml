@@ -1,0 +1,7 @@
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://example.com
+
+

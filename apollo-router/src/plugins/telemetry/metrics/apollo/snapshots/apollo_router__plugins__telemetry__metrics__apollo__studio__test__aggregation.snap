@@ -10,12 +10,16 @@ expression: aggregated_metrics
         [
           {
             "client_name": "client_1",
-            "client_version": "version_1"
+            "client_version": "version_1",
+            "operation_type": "",
+            "operation_subtype": ""
           },
           {
             "context": {
               "client_name": "client_1",
-              "client_version": "version_1"
+              "client_version": "version_1",
+              "operation_type": "",
+              "operation_subtype": ""
             },
             "query_latency_stats": {
               "request_latencies": {
@@ -1298,5 +1302,11 @@ expression: aggregated_metrics
       }
     }
   },
-  "operation_count": 2
+  "licensed_operation_count_by_type": {
+    "query": {
+      "type": "query",
+      "subtype": null,
+      "licensed_operation_count": 2
+    }
+  }
 }

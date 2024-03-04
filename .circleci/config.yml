@@ -3,60 +3,81 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.2.0
+  gh: circleci/github-cli@2.3.0
+  slack: circleci/slack@4.12.6
+  secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
       - image: cimg/base:stable
-    resource_class: medium
+    resource_class: xlarge
+    environment:
+      CARGO_BUILD_JOBS: 4
+      RUST_TEST_THREADS: 6
+  amd_linux_helm: &amd_linux_helm_executor
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:6.2.6
+      - image: cimg/redis:7.2.4
+      - image: jaegertracing/all-in-one:1.54.0
     resource_class: xlarge
+    environment:
+      CARGO_BUILD_JOBS: 4
+      RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
-      image: ubuntu-2004:2022.04.1
+      image: ubuntu-2004:2024.01.1
     resource_class: arm.large
+    environment:
+      CARGO_BUILD_JOBS: 8
+      RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
-      image: ubuntu-2004:2022.04.1
+      image: ubuntu-2004:2024.01.1
     resource_class: arm.xlarge
+    environment:
+      CARGO_BUILD_JOBS: 8
+      RUST_TEST_THREADS: 8
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: 13.4
-    resource_class: macos.x86.medium.gen2
+      xcode: 14.2
+    resource_class: macos.m1.medium.gen1
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: 13.4
-    resource_class: macos.x86.medium.gen2
+      xcode: 14.2
+    resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:stable"
-    resource_class: windows.medium
-    shell: powershell.exe -ExecutionPolicy Bypass
+      image: "windows-server-2019-vs2019:2022.08.1"
+    resource_class: windows.xlarge
+    shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:stable"
+      image: "windows-server-2019-vs2019:2022.08.1"
     resource_class: windows.xlarge
-    shell: powershell.exe -ExecutionPolicy Bypass
+    shell: bash.exe --login -eo pipefail
 
+# We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
-  cache_version:
+  toolchain_version:
     type: string
-    # increment this to invalidate all the caches
-    default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
-  jaeger_version:
+    default: '{{ checksum ".circleci/config.yml" }}-v2-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+  xtask_version:
     type: string
-    # update this as new versions of jaeger become available
-    default: "1.33.0"
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
+  merge_version:
+    type: string
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
   protoc_version:
     type: string
     default: "21.8"
@@ -71,282 +92,402 @@ parameters:
 # forks of the project to run their own tests on their own CircleCI deployments with no
 # additional configuration.
 common_job_environment: &common_job_environment
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUST_BACKTRACE: full
-
+  CARGO_INCREMENTAL: 0
 commands:
-  linux_install_baseline:
-    steps:
-      - run:
-          name: Update and install dependencies
-          command: |
-            sudo apt-get update
-            sudo apt-get install -y libssl-dev libdw-dev cmake
-      - install_minimal_rust
-  linux_amd_install_baseline:
-    steps:
-      - linux_install_baseline
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
-      - run:
-          name: Install protoc
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-x86_64.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-  linux_arm_install_baseline:
-    steps:
-      - linux_install_baseline
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
-      - run:
-          name: Install protoc
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-  macos_install_baseline:
-    steps:
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
-      - install_minimal_rust
-      - run:
-          name: Install protoc
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-osx-universal_binary.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-  windows_install_baseline:
-    steps:
-      - run:
-          name: Download jaeger
-          shell: bash.exe
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
-      - run:
-          name: Install protoc
-          shell: bash.exe
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-      - run:
-          name: Add protoc to env
-          command: |
-            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
-            $newpath = "$oldpath;$HOME/.local/bin"
-            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
-  # This job makes sure everything is ready to run integration tests
-  macos_prepare_env:
+  setup_environment:
+    parameters:
+      platform:
+        type: executor
     steps:
-      - run:
-          # The jaeger exporter won't work without this
-          name: Increase udp packet size
-          command: |
-            sudo sysctl net.inet.udp.maxdgram=65536
-            sudo sysctl net.inet.udp.maxdgram
+      - unify_environment:
+          platform: << parameters.platform >>
+      - create_cache_keys
+      - restore_cache:
+          keys:
+            - "<< pipeline.parameters.toolchain_version >>"
+      - install_packages:
+          platform: << parameters.platform >>
+      - install_protoc:
+          platform: << parameters.platform >>
+      - install_rust:
+          platform: << parameters.platform >>
+      - install_extra_tools
+      - fetch_dependencies
+      - save_cache:
+          key: "<< pipeline.parameters.toolchain_version >>"
+          paths:
+            - ~/.deb
+            - ~/.cargo
+            - ~/.rustup
+            - ~/.local
+      - install_xtask
 
-  windows_prepare_env:
+  # Even though all executors use bash there are a number of differences that can be taken care of up front.
+  # Windows shell commands are found on the path before the linux subsystem commands, so use aliases to override.
+  # OSX doesn't seem to support aliases properly, so we use a symlink
+  unify_environment:
+    parameters:
+      platform:
+        type: executor
     steps:
       - run:
-          name: Install rustup
-          environment:
-            # Override auto-detection of RAM for Rustc install.
-            # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-            RUSTUP_UNPACK_RAM: "1073741824"
-          command: |
-            $installer_dir = "$Env:TEMP"
-            echo "Downloading rustup"
-            (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
-            echo "Installing rustup"
-            & $installer_dir\rustup-init.exe -y --default-toolchain none --profile minimal
-            exit $LASTEXITCODE
-      - run:
-          name: Special case for Windows because of ssh-agent
-          command: |
-            Add-Content -path "${Env:USERPROFILE}\.cargo\config.toml" @"
-            [net]
-            git-fetch-with-cli = true
-            "@
+          name: Setup path
+          command: echo 'export PATH="$HOME/.local/bin:$HOME/.local/aliases:$PATH"' >> "$BASH_ENV"
+      - when:
+          condition:
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Write arch
+                command: |
+                  echo 'amd_linux' >> ~/.arch
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Write arch
+                command: |
+                  echo 'arm_linux' >> ~/.arch
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Make link to md5
+                command: |
+                  mkdir -p ~/.local/aliases
+                  ln -s /sbin/md5 ~/.local/aliases/md5sum
+            - run:
+                name: Write arch
+                command: |
+                  echo 'osx' >> ~/.arch
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Create bash aliases
+                command: |
+                  echo 'alias find=/bin/find' >> "$BASH_ENV"
+                  echo 'alias sort=/bin/sort' >> "$BASH_ENV"
+                  echo 'export EXECUTABLE_SUFFIX=".exe"' >> "$BASH_ENV"
+            - run:
+                name: Write arch
+                command: |
+                  echo 'windows' >> ~/.arch
 
-  install_minimal_rust:
+  # Create files that are useful for cache keys
+  create_cache_keys:
     steps:
       - run:
-          # Install a minimal rust environment
-          name: Install minimal rust
+          name: Create cache keys
           command: |
-            curl https://sh.rustup.rs -sSf -o rustup.sh
-            chmod 755 ./rustup.sh
-            ./rustup.sh -y --default-toolchain none --profile minimal
+            # The Rust index takes time to download. Update this daily.
+            date +%j > ~/.daily_version
+            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild
+            find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
+            # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
+            git remote set-head origin -a
+            TARGET_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD)    
+            echo "Target branch is ${TARGET_BRANCH}"
+            COMMON_ANCESTOR_REF=$(git merge-base HEAD "${TARGET_BRANCH}")
+            echo "Common ancestor is ${COMMON_ANCESTOR_REF}"
+            echo "${CIRCLE_PROJECT_REPONAME}-${COMMON_ANCESTOR_REF}" > ~/.merge_version
+
+  # Linux specific step to install packages that are needed
+  install_packages:
+    parameters:
+      platform:
+        type: executor
+    steps:
+      - when:
+          condition:
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Update and install dependencies
+                command: |
+                  if [[ ! -d "$HOME/.deb" ]]; then
+                    mkdir $HOME/.deb
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
+                  fi
+                  sudo dpkg -i $HOME/.deb/*.deb
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install CMake
+                command: |
+                  choco install cmake -y
+                  echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
+                  exit $LASTEXITCODE
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install CMake
+                command: |
+                  brew install cmake
+  install_protoc:
+    parameters:
+      platform:
+        type: executor
+    steps:
+      - when:
+          condition:
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-x86_64.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-osx-universal_binary.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc$EXECUTABLE_SUFFIX" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+
+  install_rust:
+    parameters:
+      platform:
+        type: executor
+    steps:
+      - run:
+          name: Install Rust
+          command: |
+            if [[ ! -d "$HOME/.cargo" ]]; then
+              curl https://sh.rustup.rs -sSf -o rustup.sh
+              chmod 755 ./rustup.sh
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt
+            fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for Windows because of ssh-agent
+                command: |
+                  printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for OSX x86_64 builds
+                command: |
+                  rustup target add x86_64-apple-darwin
+
   install_extra_tools:
-    parameters:
-      os:
-        type: string
+    steps:
+      - run:
+          name: Install cargo deny, about, edit
+          command: |
+            if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked cargo-deny cargo-about cargo-edit
+            fi
+
+  fetch_dependencies:
+    steps:
+      - run:
+          name: Fetch dependencies
+          command: cargo fetch --locked
+  install_xtask:
     steps:
       - restore_cache:
           keys:
-            - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-
-      - when:
-          condition:
-            equal: [windows, << parameters.os >>]
-          steps:
-            - run:
-                name: Install cargo deny, about, edit
-                command: |
-                  cargo install --locked cargo-deny cargo-about cargo-edit
-            - save_cache:
-                name: Save .cargo
-                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-                paths:
-                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-about.exe
-                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-deny.exe
-                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-edit.exe
-      - when:
-          condition:
-            and:
-              - not:
-                  equal: [windows, << parameters.os >>]
-          steps:
-            - run:
-                name: Install cargo deny if not present
-                command: |
-                  set -e -o pipefail
-                  cargo deny --version || cargo install cargo-deny
-            - run:
-                name: Install cargo about if not present
-                command: |
-                  set -e -o pipefail
-                  cargo about --version || cargo install cargo-about
-            - run:
-                name: Install cargo edit if not present
-                command: |
-                  set -e -o pipefail
-                  cargo edit --version || cargo install cargo-edit
-            - save_cache:
-                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-                paths:
-                  - ~/.cargo/bin/cargo-deny
-                  - ~/.cargo/bin/cargo-about
-
-  xtask_lint:
-    parameters:
-      os:
-        type: string
-    steps:
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
+            - "<< pipeline.parameters.xtask_version >>"
       - run:
           name: Install xtask
           command: |
-              set -e -o pipefail
-              xtask help || { cd xtask && cargo install --path . && cd ..; }
-      - run: xtask lint
+            if [[ ! -f "$HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked --path xtask
+            fi
       - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+          key: "<< pipeline.parameters.xtask_version >>"
           paths:
-            - ~/.cargo
+            - ~/.cargo/bin/xtask
+            - ~/.cargo/bin/xtask.exe
+
+  xtask_lint:
+    steps:
+      - restore_cache:
+          keys:
+            - "<< pipeline.parameters.merge_version >>-lint"
+      - run: xtask lint
+      - when:
+          condition:
+            equal: [ "dev", "<< pipeline.git.branch >>" ]
+          steps:
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-lint"
+                paths:
+                  - target
+  xtask_release_preverify:
+    steps:
+      - run: xtask release pre-verify
+
+  xtask_check_helm:
+    steps:
+      - run:
+          name: Validate helm manifests
+          command: |
+            # Install Helm
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+            # Install kubeconform
+            KUBECONFORM_INSTALL=$(mktemp -d)
+            curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C "${KUBECONFORM_INSTALL}"
+
+            # Create list of kube versions
+            CURRENT_KUBE_VERSIONS=$(curl -s -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
+              | yq -o json '.' \
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[].release')
+
+            TEMPLATE_DIR=$(mktemp -d)
+            MINOR_VERSION="${kube_version%.*}"
+            SUCCEEDED=false
+
+            # For each k8s minor version (e.g.: 1.28) we will try to validate against the most recent patch release (e.g. 1.28.3)
+            # We use curl --head to check if support is available. If it isn't we then try the next most recent release.
+            # As soon as we find an available release we try to use it. If we don't find an available release for a minor version, then we will ignore that silently
+            for kube_version in ${CURRENT_KUBE_VERSIONS}; do
+              if [[ "${kube_version%.*}" == "${MINOR_VERSION}" ]]; then
+                if [[ ${SUCCEEDED} == true ]]; then
+                  continue
+                fi
+              else
+                MINOR_VERSION="${kube_version%.*}"
+                SUCCEEDED=false
+              fi
+
+              # Sometimes the database has not been updated with schema details. If that happens, just skip the kubeconform checks until the database is updated"
+              if ! curl --head --silent --output /dev/null  --fail "https://github.com/yannh/kubernetes-json-schema/tree/master/v${kube_version}"; then
+                echo "Skipping validation for kubernetes version: ${kube_version} until the schema database is updated."
+                continue
+              fi
+
+              echo "Validating against schema version: ${kube_version}"
+
+              # Use helm to template our chart against kube_version
+              helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
+
+              # Execute kubeconform on our templated charts to ensure they are good
+              "${KUBECONFORM_INSTALL}/kubeconform" \
+                --kubernetes-version "${kube_version}" \
+                --strict \
+                --schema-location default \
+                --verbose \
+                "${TEMPLATE_DIR}/router-${kube_version}.yaml"
+              SUCCEEDED=true
+            done
 
   xtask_check_compliance:
-    parameters:
-      os:
-        type: string
     steps:
       - restore_cache:
-          name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
-      - install_extra_tools:
-          os: << parameters.os >>
+            - "<< pipeline.parameters.merge_version >>-compliance"
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
-      - run: cargo xtask check-compliance
-
-  windows_test_workspace:
-    steps:
-      - run:
-          name: Start jaeger
-          background: true
-          command: jaeger\jaeger-all-in-one.exe
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo test --workspace --locked
-      - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
-          paths:
-            - C:\\Users\\circleci\.cargo
-
-  test_workspace:
+      - run: xtask check-compliance
+      - when:
+          condition:
+            equal: [ "dev", "<< pipeline.git.branch >>" ]
+          steps:
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-compliance"
+                paths:
+                  - target
+  xtask_test:
     parameters:
-      os:
+      variant:
         type: string
-      cargo_test_args:
-        type: string
-        default: "--"
-      # additional cache key to have a cache for test_updated
-      cache_key:
-        type: string
-        default: ""
+        default: "default"
     steps:
-      - run:
-          name: Start jaeger
-          background: true
-          command: ./jaeger/jaeger-all-in-one
       - restore_cache:
-          name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>
-
-      # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
+            - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+      - run:
+          name: Run tests
+          command: xtask test --workspace --locked
+      - run:
+          name: Delete large files from cache
+          command: |
+            find target/debug/deps -type f -size +50M -delete
+            rm target/debug/router*
       - when:
           condition:
-            equal: [linux_amd, << parameters.os >>]
+            equal: [ "dev", "<< pipeline.git.branch >>" ]
           steps:
-            - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=6
-      - when:
-          condition:
-            equal: [linux_arm, << parameters.os >>]
-          steps:
-            - run: cargo test --jobs 8 --workspace --locked << parameters.cargo_test_args >> --test-threads=8
-      - when:
-          condition:
-            equal: [macos, << parameters.os >>]
-          steps:
-            - run: cargo test --workspace --locked
-
-      - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-          paths:
-            - ~/.cargo
-
+          - save_cache:
+              key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+              paths:
+                - target
 jobs:
   lint:
     environment:
@@ -357,13 +498,25 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_lint
+
+  check_helm:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
       - when:
           condition:
-            equal: [*amd_linux_build_executor, << parameters.platform >>]
+            equal: [*amd_linux_helm_executor, << parameters.platform >>]
           steps:
-            - linux_amd_install_baseline
-            - xtask_lint:
-                os: linux_amd
+            - checkout
+            - xtask_check_helm
+
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -373,13 +526,9 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      - when:
-          condition:
-            equal: [*amd_linux_build_executor, << parameters.platform >>]
-          steps:
-            - linux_amd_install_baseline
-            - xtask_check_compliance:
-                os: linux_amd
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_check_compliance
 
   test:
     environment:
@@ -390,53 +539,40 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      - when:
-          condition:
-            equal: [*amd_linux_test_executor, << parameters.platform >>]
-          steps:
-            - linux_amd_install_baseline
-            - test_workspace:
-                os: linux_amd
-      - when:
-          condition:
-            equal: [*arm_linux_test_executor, << parameters.platform >>]
-          steps:
-            - linux_arm_install_baseline
-            - test_workspace:
-                os: linux_arm
-      - when:
-          condition:
-            equal: [*windows_test_executor, << parameters.platform >>]
-          steps:
-            - windows_install_baseline
-            - windows_prepare_env
-            - windows_test_workspace
-      - when:
-          condition:
-            equal: [*macos_test_executor, << parameters.platform >>]
-          steps:
-            - macos_install_baseline
-            - test_workspace:
-                os: macos
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_test
 
   test_updated:
     environment:
       <<: *common_job_environment
-    executor: amd_linux_test
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
     steps:
       - checkout
-      - linux_amd_install_baseline
+      - setup_environment:
+          platform: << parameters.platform >>
       - run:
           name: Update all Rust dependencies
           command: |
             rm Cargo.lock
             cargo fetch
-      - test_workspace:
-          os: linux_amd
-          # schema_generation test skipped because schemars changed its representation of enums:
-          # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
-          cargo_test_args: --no-fail-fast -- --skip schema_generation
-          cache_key: .test_updated
+      - xtask_test:
+          variant: "updated"
+  pre_verify_release:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_release_preverify
 
   build_release:
     parameters:
@@ -451,85 +587,81 @@ jobs:
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
-      MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
       - when:
           condition:
-            equal: [*macos_build_executor, << parameters.platform >>]
+            equal: [ *macos_build_executor, << parameters.platform >> ]
           steps:
-            - install_minimal_rust
-            - macos_install_baseline
             - when:
                 condition:
-                  equal: [true, << parameters.nightly >>]
+                  equal: [ true, << parameters.nightly >> ]
                 steps:
-                  - install_extra_tools:
-                      os: macos
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --target aarch64-apple-darwin
+            - run:
+                command: >
+                  cargo xtask dist --target x86_64-apple-darwin
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
                   cargo xtask package
+                  --target aarch64-apple-darwin
                   --apple-team-id ${APPLE_TEAM_ID}
                   --apple-username ${APPLE_USERNAME}
                   --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
                   --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
                   --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
                   --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
-                  --primary-bundle-id ${MACOS_PRIMARY_BUNDLE_ID}
+                  --output artifacts/
+            - run:
+                command: >
+                  cargo xtask package
+                  --target x86_64-apple-darwin
+                  --apple-team-id ${APPLE_TEAM_ID}
+                  --apple-username ${APPLE_USERNAME}
+                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
+                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
+                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
+                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
                   --output artifacts/
       - when:
           condition:
-            or:
-              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+            and:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ true, << parameters.nightly >> ]
           steps:
             - run:
-                name: Update and install dependencies
+                name: Helm install
                 command: |
-                  sudo apt-get update
-            - install_minimal_rust
-            - linux_amd_install_baseline
-            # This will set the version to inlude current date and commit hash
-            - when:
-                condition:
-                  equal: [true, << parameters.nightly >>]
-                steps:
-                  - install_extra_tools:
-                      os: linux_amd
-                  - run: cargo xtask release prepare nightly
+                  # Install Helm
+                  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
             - run:
-                command: >
-                  cargo xtask dist
-            - run:
-                command: >
-                  mkdir -p artifacts
-            - run:
-                command: >
-                  cargo xtask package --output artifacts/
+                name: helm-docs install
+                command: |
+                  # install golang (to ${HOME}/go)
+                  curl -OLs https://go.dev/dl/go1.21.3.linux-amd64.tar.gz
+                  tar -C "${HOME}" -xf go1.21.3.linux-amd64.tar.gz
+                  # install helm-docs
+                  PATH="${HOME}/go/bin" GOPATH="${HOME}/.local" GO111MODULE=on go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest
       - when:
           condition:
             or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
               - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
           steps:
-            - run:
-                name: Update and install dependencies
-                command: |
-                  sudo apt-get update
-            - install_minimal_rust
-            - linux_arm_install_baseline
-            # This will set the version to inlude current date and commit hash
+            # This will set the version to include current date and commit hash
             - when:
                 condition:
-                  equal: [true, << parameters.nightly >>]
+                  equal: [ true, << parameters.nightly >> ]
                 steps:
-                  - install_extra_tools:
-                      os: linux_arm
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
@@ -540,54 +672,123 @@ jobs:
             - run:
                 command: >
                   cargo xtask package --output artifacts/
-      - when:
-          condition:
-            equal: [*windows_build_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Install rustup
-                environment:
-                  # Override auto-detection of RAM for Rustc install.
-                  # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-                  RUSTUP_UNPACK_RAM: "1073741824"
-                command: |
-                  $installer_dir = "$Env:TEMP"
-                  echo "Downloading rustup"
-                  (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
-                  echo "Installing rustup"
-                  & $installer_dir\rustup-init.exe --profile minimal --component rustfmt,clippy -y
-                  exit $LASTEXITCODE
-            - run:
-                name: Special case for Windows because of ssh-agent
-                command: |
-                  Add-Content -path "${Env:USERPROFILE}\.cargo\config.toml" @"
-                  [net]
-                  git-fetch-with-cli = true
-                  "@
-            - windows_install_baseline
-            # This will set the version to inlude current date and commit hash
-            - when:
-                condition:
-                  equal: [true, << parameters.nightly >>]
-                steps:
-                  - install_extra_tools:
-                      os: windows
-                  - run: cargo xtask release prepare nightly
-            - run:
-                command: >
-                  cargo xtask dist
-            - run:
-                command: >
-                  mkdir -p artifacts
-            - run:
-                command: >
-                  cargo xtask package --output artifacts
       - persist_to_workspace:
           root: artifacts
           paths:
             - "*"
       - store_artifacts:
           path: artifacts/
+      - when:
+          condition:
+            and:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ true, << parameters.nightly >> ]
+              - equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+          steps:
+            - setup_remote_docker:
+                version: 20.10.11
+                docker_layer_caching: true
+            - run:
+                name: Docker build
+                command: |
+                  BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
+                  ROUTER_TAG=ghcr.io/apollographql/nightly/router
+                  # Create a multi-arch builder which works properly under qemu
+                  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+                  docker context create buildx-build
+                  docker buildx create --driver docker-container --use buildx-build
+                  docker buildx inspect --bootstrap
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+                  # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
+                  # Build and push debug image
+                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker push ${ROUTER_TAG}:${VERSION}-debug
+                  # Build and push release image
+                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker push ${ROUTER_TAG}:${VERSION}
+                  # save containers for analysis
+                  mkdir built-containers
+                  docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
+                  docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}  
+                 
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - "built-containers/*.tar"
+            - run:
+                name: Helm build
+                command: |
+                  # Package up the helm chart
+                  helm package helm/chart/router
+                  # Make sure we have the newest chart
+                  CHART=$(ls -t router*.tgz| head -1)
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
+                  # Push chart to repository
+                  helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
+      - when:
+          condition:
+            equal: [ true, << parameters.nightly >> ]
+          steps:
+            - slack/notify:
+                event: fail
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: A `nightly` release run has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+            - slack/notify:
+                event: pass
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":white_check_mark: A `nightly` build has completed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
 
   publish_github_release:
     docker:
@@ -597,70 +798,83 @@ jobs:
       <<: *common_job_environment
       VERSION: << pipeline.git.tag >>
     steps:
-      - checkout
-      - attach_workspace:
-          at: artifacts
-      - gh/setup
-      - run:
-          command: >
-            cd artifacts && sha256sum *.tar.gz > sha256sums.txt
-      - run:
-          command: >
-            cd artifacts && md5sum *.tar.gz > md5sums.txt
-      - run:
-          command: >
-            cd artifacts && sha1sum *.tar.gz > sha1sums.txt
-      - run:
-          command: >
-            gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/*
-      - setup_remote_docker:
-          version: 20.10.11
-          docker_layer_caching: true
-      - run:
-          name: Docker build
-          command: |
-            ROUTER_TAG=ghcr.io/apollographql/router
-            # Create a multi-arch builder which works properly under qemu
-            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-            docker context create buildx-build
-            docker buildx create --driver docker-container --use buildx-build
-            docker buildx inspect --bootstrap
-            # Note: GH Token owned by apollo-bot2, no expire
-            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
-            # Build and push debug image
-            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
-            # Build and push release image
-            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
-      - run:
-          name: Helm build
-          command: |
-            # Install Helm
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-            # Package up the helm chart
-            helm package helm/chart/router
-            # Make sure we have the newest chart
-            CHART=$(ls -t router*.tgz| head -1)
-            # Note: GH Token owned by apollo-bot2, no expire
-            echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
-            # Push chart to repository
-            helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
+      - when:
+          condition:
+            not:
+              equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+          steps:
+             - run:
+                command: >
+                  echo "Not publishing any github release."
+      - when:
+          condition:
+            equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+          steps:
+            - checkout
+            - setup_remote_docker:
+                version: 20.10.11
+                docker_layer_caching: true
+            - attach_workspace:
+                at: artifacts
+            - gh/setup
+            - run:
+                command: >
+                  cd artifacts && sha256sum *.tar.gz > sha256sums.txt
+            - run:
+                command: >
+                  cd artifacts && md5sum *.tar.gz > md5sums.txt
+            - run:
+                command: >
+                  cd artifacts && sha1sum *.tar.gz > sha1sums.txt
+            - run:
+                name: Create GitHub Release
+                command: >
+                  case "$VERSION" in
 
-  prepare_release:
-    parameters:
-      release_type:
-        type: string
-    docker:
-      - image: cimg/base:stable
-    resource_class: small
-    steps:
-      - checkout
-      - gh/setup
-      - linux_install_baseline
-      - install_extra_tools:
-          os: linux_amd
-      - run:
-          command: >
-            cargo xtask release prepare << parameters.release_type >>
+                    # If the VERSION contains a dash, consider it a pre-release version.
+                    # This is in-line with SemVer's expectations/designations!
+                    *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
+
+                    # In all other cases, publish it as the latest version.
+                    *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
+
+                  esac
+            - run:
+                name: Docker build
+                command: |
+                  ROUTER_TAG=ghcr.io/apollographql/router
+                  # Create a multi-arch builder which works properly under qemu
+                  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+                  docker context create buildx-build
+                  docker buildx create --driver docker-container --use buildx-build
+                  docker buildx inspect --bootstrap
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+                  # To prevent overwrite, check to see if our images already exists
+                  # If the manifest command succeeds, the images already exist
+                  docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
+                  docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
+                  # Build and push debug image
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  # Build and push release image
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+            - run:
+                name: Helm build
+                command: |
+                  # Install Helm
+                  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+                  # Package up the helm chart
+                  helm package helm/chart/router
+                  # Make sure we have the newest chart
+                  CHART=$(ls -t router*.tgz| head -1)
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
+                  # To prevent overwrite, check to see if our chart already exists
+                  # If the show all command succeeds, the chart already exists
+                  VERSION=$(basename ${CHART} .tgz)
+                  helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${VERSION} > /dev/null && exit 1
+                  # Push chart to repository
+                  helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
 workflows:
   ci_checks:
@@ -670,91 +884,201 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [amd_linux_build]
-
+              platform: [ amd_linux_build ]
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [ amd_linux_helm ]
       - check_compliance:
           matrix:
             parameters:
-              platform: [amd_linux_build]
+              platform: [ amd_linux_build ]
 
       - test_updated:
           requires:
             - lint
-      - test:
-          requires:
-            - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
-                [macos_test, windows_test, amd_linux_test, arm_linux_test]
-      - prepare_major_release_approval:
-          type: approval
+                [ amd_linux_test ]
+      - test:
           requires:
-            - test
-          filters:
-            branches:
-              only:
-                - dev
-      - prepare_minor_release_approval:
-          type: approval
-          requires:
-            - test
-          filters:
-            branches:
-              only:
-                - dev
-      - prepare_patch_release_approval:
-          type: approval
-          requires:
-            - test
-          filters:
-            branches:
-              only:
-                - dev
-      - prepare_release:
-          name: "Prepare major release"
-          release_type: "major"
-          requires:
-            - prepare_major_release_approval
-      - prepare_release:
-          name: "Prepare minor release"
-          release_type: "minor"
-          requires:
-            - prepare_minor_release_approval
-      - prepare_release:
-          name: "Prepare patch release"
-          release_type: "patch"
-          requires:
-            - prepare_patch_release_approval
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
 
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
-      - build_release:
-          nightly: true
+      - lint:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [ amd_linux_helm ]
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+
+      - test_updated:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
-                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+                [ amd_linux_test ]
+      - test:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+      - build_release:
+          requires:
+            - test
+            - test_updated
+          nightly: true
+          context: router
+          matrix:
+            parameters:
+              platform:
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+      - secops/wiz-docker:
+          context:
+            - platform-docker-ro
+            - wiz
+            - github-orb
+          requires:
+            - build_release
+          container-dir: /tmp/workspace/built-containers
+          # Disables all PR comments from this job
+          do-pr-comments: false
+          # Scan job will return 1 if findings violating the Wiz policy are found.
+          # Toggle off to prevent any CI failures OR 
+          # contact Apollo's Security team to adjust what violates the 
+          # Wiz policy used in this scan.
+          fail-on-findings: true
+          # Configure scan job to use a policy specific to apollo-router.
+          # This allows us to tailor the policy applied during the scans to router.
+          wiz-policies: Apollo-Router-Vulnerabilities-Policy
+
 
   release:
     when:
       not: << pipeline.parameters.nightly >>
     jobs:
-      - build_release:
+      - pre_verify_release:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - lint:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [ amd_linux_helm ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - test_updated:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
-                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+                [ amd_linux_test ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - test:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - build_release:
+          requires:
+            - pre_verify_release
+            - test
+            - test_updated
+          matrix:
+            parameters:
+              platform:
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
             branches:
               ignore: /.*/
             tags:
               only: /v.*/
       - publish_github_release:
-          requires: [build_release]
+          requires: [ build_release ]
           filters:
             branches:
               ignore: /.*/
             tags:
               only: /v.*/
+  
+  security-scans:
+    when:
+      not: << pipeline.parameters.nightly >>
+    jobs:
+      - secops/gitleaks:
+          context:
+            - secops-oidc
+            - github-orb
+          git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+          git-revision: << pipeline.git.revision >>
+      - secops/semgrep:
+          context:
+            - secops-oidc
+            - github-orb
+          git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>

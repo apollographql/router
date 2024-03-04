@@ -1,0 +1,11 @@
+description: telemetry.(tracing|metrics|logging) has been moved to to telemetry.exporters.(tracing|metrics|logging)
+actions:
+  - type: move
+    from: telemetry.tracing
+    to: telemetry.exporters.tracing
+  - type: move
+    from: telemetry.logging
+    to: telemetry.exporters.logging
+  - type: move
+    from: telemetry.metrics
+    to: telemetry.exporters.metrics

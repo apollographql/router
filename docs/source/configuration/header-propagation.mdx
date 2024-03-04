@@ -95,39 +95,40 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
     default: "UNKNOWN" # If no operationName has been specified
 ```
 
-> Example JSON path queries
->
-> Let's say you have a JSON request body with the following structure:
->
-> ```json
-> {
->   "query": "{ products { id name } }",
->   "extensions": {
->     "metadata": [
->       {
->         "app_name": "random_app_name"
->       }
->     ]
->   }
-> }
-> ```
->
-> To fetch the value of the field `app_name`, the corresponding path is `.extensions.metadata[0].app_name`.
->
-> JSON path queries always begin with a period `.`
->
-> With this configuration:
->
-> ```yaml
-> headers:
->   all:
->     request:
->       - insert:
->           name: from_app_name
->           path: .extensions.metadata[0].app_name
-> ```
->
-> You will pass a header to all your subgraphs: `"from_app_name": "random_app_name"`
+
+#### Example JSON path queries
+
+Let's say you have a JSON request body with the following structure:
+
+```json
+{
+  "query": "{ products { id name } }",
+  "extensions": {
+    "metadata": [
+      {
+        "app_name": "random_app_name"
+      }
+    ]
+  }
+}
+```
+
+To fetch the value of the field `app_name`, the corresponding path is `.extensions.metadata[0].app_name`.
+
+JSON path queries always begin with a period `.`
+
+With this configuration:
+
+```yaml
+headers:
+  all:
+    request:
+      - insert:
+          name: from_app_name
+          path: .extensions.metadata[0].app_name
+```
+
+You will pass a header to all your subgraphs: `"from_app_name": "random_app_name"`
 
 ## Rule ordering
 
@@ -140,9 +141,9 @@ headers:
   all:
     request:
       - remove:
-        named: "test"
+          named: "test"
       - propagate:
-        matching: .*
+          matching: .*
 ```
 
 In this example, first any header named `test` is removed from the list of headers to propagate. However, _the list of headers to propagate is currently empty!_ Next, the `propagate` rule adds _all_ headers to the propagation list, _including_ `test`.
@@ -156,9 +157,9 @@ headers:
   all:
     request:
       - propagate:
-        matching: .*
+          matching: .*
       - remove:
-        named: "test"
+          named: "test"
 ```
 
 With this ordering, first all headers are added to the propagation list, then the `test` header is removed.
@@ -208,31 +209,27 @@ headers:
 
 ## Response header propagation
 
-It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. It can however be achieved using [Rhai scripting]("../customizations/rhai").
+It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. However, you _can_ achieve this using [Rhai scripting](../customizations/rhai).
 
-This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
+This approach relies on the fact that each request has a `context` object that can store data for the duration of that request:
 
 1. For each subgraph response, copy header values into context.
 2. For the supergraph response, copy header values from the context onto the response.
 
-Example router.yaml that will use the Rhai script:
+Example `router.yaml` that will use the Rhai script:
 
 ```yaml title="router.yaml"
 rhai:
   main: "main.rhai"
 ```
 
-Example Rhai script that collects `set-cookie` headers from subgraphs and merges them into a single client response header.
+Example Rhai script that collects `set-cookie` headers from subgraphs and merges them into a single client response header:
 
 ```rhai title="./rhai/main.rhai"
-fn router_service(service) {
+fn supergraph_service(service) {
   let add_cookies_to_response = |response| {
     if response.context["set_cookie_headers"]?.len > 0 {
-      let cookie = "";
-      for header in response.context["set_cookie_headers"] {
-        cookie += header + "; ";
-      }
-      response.headers["set-cookie"] = cookie;
+      response.headers["set-cookie"] = response.context["set_cookie_headers"];
     }
   };
 
@@ -240,32 +237,36 @@ fn router_service(service) {
 }
 
 fn subgraph_service(service, subgraph) {
-    let store_cookies_from_subgraphs = |response| {
-      if response.headers["set-cookie"] != () {
-        if response.context["set_cookie_headers"] == () {
-          response.context.set_cookie_headers = []
-        }
-
-        response.context.set_cookie_headers += response.headers["set-cookie"]
+  let store_cookies_from_subgraphs = |response| {
+    if "set-cookie" in response.headers {
+      if response.context["set_cookie_headers"] == () {
+        response.context.set_cookie_headers = []
       }
-    };
 
-    service.map_response(store_cookies_from_subgraphs);
+      response.context.set_cookie_headers += response.headers.values("set-cookie");
+    }
+  };
+
+  service.map_response(store_cookies_from_subgraphs);
 }
 ```
 
-If you would like to see a YAML based solution then [please leave us a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
+<Note>
+
+If you require a configuration-based solution for response header propagation, [please leave a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
+
+</Note>
 
 ## Propagation between subgraphs
 
-It is not currently possible to propagate headers between subgraphs using yaml config alone. It can however be achieved using [Rhai scripting]("../customizations/rhai").
+It is not currently possible to propagate headers between subgraphs using YAML config alone. However, you _can_ achieve this using [Rhai scripting](../customizations/rhai).
 
-This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
+This approach relies on the fact that each request has a `context` object that can store data for the duration of that request:
 
 1. For each subgraph response, copy header values into context.
 2. For each subgraph request, copy header values from context into the subgraph request.
 
-Example router.yaml that will use the Rhai script:
+Example `router.yaml` that will use the Rhai script:
 
 ```yaml title="router.yaml"
 rhai:
@@ -302,5 +303,3 @@ fn subgraph_service(service, subgraph) {
     service.map_response(response_callback);
 }
 ```
-
-If you would like to see a YAML based solution then [please leave us a comment on our issue tracker](https://github.com/apollographql/router/issues/2444).

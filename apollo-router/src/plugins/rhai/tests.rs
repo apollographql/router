@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use http::HeaderMap;
+use http::Method;
 use http::StatusCode;
 use rhai::Engine;
 use rhai::EvalAltResult;
@@ -18,16 +19,18 @@ use uuid::Uuid;
 
 use super::process_error;
 use super::subgraph;
+use super::PathBuf;
 use super::Rhai;
-use super::RhaiExecutionDeferredResponse;
-use super::RhaiExecutionResponse;
-use super::RhaiSupergraphDeferredResponse;
-use super::RhaiSupergraphResponse;
+use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
+use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
+use crate::plugins::rhai::engine::RhaiExecutionResponse;
+use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
+use crate::plugins::rhai::engine::RhaiSupergraphResponse;
 use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
@@ -35,7 +38,7 @@ use crate::services::SupergraphResponse;
 use crate::Context;
 
 #[tokio::test]
-async fn rhai_plugin_router_service() -> Result<(), BoxError> {
+async fn rhai_plugin_supergraph_service() -> Result<(), BoxError> {
     let mut mock_service = MockSupergraphService::new();
     mock_service
         .expect_call()
@@ -153,7 +156,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
 // string.
 fn new_rhai_test_engine() -> Engine {
-    Rhai::new_rhai_engine(None, "".to_string())
+    Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new())
 }
 
 // Some of these tests rely extensively on internal implementation details of the tracing_test crate.
@@ -407,10 +410,26 @@ async fn it_can_process_supergraph_response() {
 }
 
 #[tokio::test]
+async fn it_can_process_supergraph_response_is_primary() {
+    gen_response_test!(
+        RhaiSupergraphResponse,
+        "process_supergraph_response_is_primary"
+    );
+}
+
+#[tokio::test]
 async fn it_can_process_supergraph_deferred_response() {
     gen_response_test!(
         RhaiSupergraphDeferredResponse,
         "process_supergraph_response"
+    );
+}
+
+#[tokio::test]
+async fn it_can_process_supergraph_deferred_response_is_not_primary() {
+    gen_response_test!(
+        RhaiSupergraphDeferredResponse,
+        "process_supergraph_deferred_response_is_not_primary"
     );
 }
 
@@ -420,8 +439,24 @@ async fn it_can_process_execution_response() {
 }
 
 #[tokio::test]
+async fn it_can_process_execution_response_is_primary() {
+    gen_response_test!(
+        RhaiExecutionResponse,
+        "process_execution_response_is_primary"
+    );
+}
+
+#[tokio::test]
 async fn it_can_process_execution_deferred_response() {
     gen_response_test!(RhaiExecutionDeferredResponse, "process_execution_response");
+}
+
+#[tokio::test]
+async fn it_can_process_execution_deferred_response_is_not_primary() {
+    gen_response_test!(
+        RhaiExecutionDeferredResponse,
+        "process_execution_deferred_response_is_not_primary"
+    );
 }
 
 #[tokio::test]
@@ -499,13 +534,39 @@ fn it_can_base64decode_string() {
 }
 
 #[test]
+fn it_can_base64encode_string_with_alphabet() {
+    let engine = new_rhai_test_engine();
+    let encoded: String = engine
+        .eval(r#"base64::encode("<<???>>", base64::STANDARD)"#)
+        .expect("can encode string");
+    assert_eq!(encoded, "PDw/Pz8+Pg==");
+    let encoded: String = engine
+        .eval(r#"base64::encode("<<???>>", base64::URL_SAFE)"#)
+        .expect("can encode string");
+    assert_eq!(encoded, "PDw_Pz8-Pg==");
+}
+
+#[test]
+fn it_can_base64decode_string_with_alphabet() {
+    let engine = new_rhai_test_engine();
+    let decoded: String = engine
+        .eval(r#"base64::decode("PDw/Pz8+Pg==", base64::STANDARD)"#)
+        .expect("can decode string");
+    assert_eq!(decoded, "<<???>>");
+    let decoded: String = engine
+        .eval(r#"base64::decode("PDw_Pz8-Pg==", base64::URL_SAFE)"#)
+        .expect("can decode string");
+    assert_eq!(decoded, "<<???>>");
+}
+
+#[test]
 fn it_can_create_unix_now() {
     let engine = new_rhai_test_engine();
     let st = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("can get system time")
-        .as_secs();
-    let unix_now: u64 = engine
+        .as_secs() as i64;
+    let unix_now: i64 = engine
         .eval(r#"unix_now()"#)
         .expect("can get unix_now() timestamp");
     // Always difficult to do timing tests. unix_now() should execute within a second of st,
@@ -597,11 +658,55 @@ async fn it_can_process_om_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_om_forbidden").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
-        assert_eq!(processed_error.message, "I have raised a 403");
+        assert_eq!(
+            processed_error.message,
+            Some("I have raised a 403".to_string())
+        );
     } else {
         // Test failed
         panic!("error processed incorrectly");
     }
+}
+
+#[tokio::test]
+async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
+    let error = base_process_function("process_subgraph_response_om_forbidden_graphql")
+        .await
+        .unwrap_err();
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        processed_error.body,
+        Some(
+            crate::response::Response::builder()
+                .errors(vec![{
+                    Error::builder()
+                        .message("I have raised a 403")
+                        .extension_code("ACCESS_DENIED")
+                        .build()
+                }])
+                .build()
+        )
+    );
+}
+
+#[tokio::test]
+async fn it_can_process_om_subgraph_200_with_graphql_data() {
+    let error = base_process_function("process_subgraph_response_om_200_graphql")
+        .await
+        .unwrap_err();
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::OK);
+    assert_eq!(
+        processed_error.body,
+        Some(
+            crate::response::Response::builder()
+                .data(serde_json::json!({ "name": "Ada Lovelace"}))
+                .build()
+        )
+    );
 }
 
 #[tokio::test]
@@ -609,7 +714,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5)\nin call to function 'process_subgraph_response_string''");
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 161, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -617,26 +722,134 @@ async fn it_can_process_string_subgraph_forbidden() {
 }
 
 #[tokio::test]
-async fn it_cannot_process_ok_subgraph_forbidden() {
-    if let Err(error) = base_process_function("process_subgraph_response_om_ok").await {
-        let processed_error = process_error(error);
-        assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, "I have raised a 200");
-    } else {
-        // Test failed
-        panic!("error processed incorrectly");
-    }
+async fn it_can_process_ok_subgraph_forbidden() {
+    let error = base_process_function("process_subgraph_response_om_ok")
+        .await
+        .unwrap_err();
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::OK);
+    assert_eq!(
+        processed_error.message,
+        Some("I have raised a 200".to_string())
+    );
 }
 
 #[tokio::test]
-async fn it_cannot_process_om_subgraph_missing_message() {
+async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     if let Err(error) = base_process_function("process_subgraph_response_om_missing_message").await
     {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5)\nin call to function 'process_subgraph_response_om_missing_message''");
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 172, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
     }
+}
+
+#[tokio::test]
+async fn it_mentions_source_when_syntax_error_occurs() {
+    let err: Box<dyn std::error::Error> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"syntax_errors.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .err()
+        .unwrap();
+
+    assert!(err.to_string().contains("syntax_errors.rhai"));
+}
+
+#[test]
+#[should_panic(
+    expected = "can use env: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", none)"
+)]
+fn it_cannot_expand_missing_environment_variable() {
+    assert!(std::env::var("THIS_SHOULD_NOT_EXIST").is_err());
+    let engine = new_rhai_test_engine();
+    let _: String = engine
+        .eval(
+            r#"
+        env::get("THIS_SHOULD_NOT_EXIST")"#,
+        )
+        .expect("can use env");
+}
+
+// POSIX specifies HOME is always set
+#[test]
+fn it_can_expand_environment_variable() {
+    let home = std::env::var("HOME").expect("can always read HOME");
+    let engine = new_rhai_test_engine();
+    let env_variable: String = engine
+        .eval(
+            r#"
+        env::get("HOME")"#,
+        )
+        .expect("can use env");
+    assert_eq!(home, env_variable);
+}
+
+#[test]
+fn it_can_compare_method_strings() {
+    let mut engine = new_rhai_test_engine();
+    engine.register_fn(
+        "new_method",
+        |method: &str| -> Result<Method, Box<EvalAltResult>> {
+            Method::from_str(&method.to_uppercase()).map_err(|e| e.to_string().into())
+        },
+    );
+
+    let method: bool = engine
+        .eval(
+            r#"
+        let get = new_method("GEt").to_string();
+        get == "GET"
+        "#,
+        )
+        .expect("can compare properly");
+    assert!(method);
+}
+
+#[tokio::test]
+async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_call()
+        .times(1)
+        .returning(move |req: SupergraphRequest| {
+            Ok(SupergraphResponse::fake_builder()
+                .header("x-custom-header", "CUSTOM_VALUE")
+                .context(req.context)
+                .build()
+                .unwrap())
+        });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"remove_header.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let context = Context::new();
+    context.insert("test", 5i64).unwrap();
+    let supergraph_req = SupergraphRequest::fake_builder()
+        .header("x-custom-header", "CUSTOM_VALUE")
+        .context(context)
+        .build()?;
+
+    let service_response = router_service.ready().await?.call(supergraph_req).await?;
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let headers = service_response.response.headers().clone();
+    assert!(headers.get("x-custom-header").is_none());
+
+    Ok(())
 }

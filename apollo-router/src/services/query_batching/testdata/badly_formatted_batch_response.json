@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "failed to deserialize the request body into JSON: EOF while parsing a list at line 1 column 784",
+        "code": "INVALID_GRAPHQL_REQUEST"
+      }
+    }
+  ]
+}

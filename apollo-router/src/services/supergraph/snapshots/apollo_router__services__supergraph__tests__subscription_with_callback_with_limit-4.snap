@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: res
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "can't open new subscription, limit reached",
+      "extensions": {
+        "code": "SUBSCRIPTION_MAX_LIMIT"
+      }
+    }
+  ]
+}

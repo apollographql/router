@@ -3,5 +3,4 @@ source: apollo-router/src/orbiter/mod.rs
 expression: usage
 ---
 configuration.supergraph.defer_support.true: 1
-configuration.telemetry.apollo.endpoint.<redacted>: 1
 

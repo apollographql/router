@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "currentUser": {
+      "id": "0",
+      "activeOrganization": {
+        "id": "1",
+        "name": null
+      }
+    }
+  },
+  "errors": [
+    {
+      "message": "error"
+    }
+  ]
+}

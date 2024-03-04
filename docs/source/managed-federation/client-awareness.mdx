@@ -1,17 +1,15 @@
 ---
 title: Client awareness
+description: Configure client awareness in Apollo Router
 ---
 
 import { Link } from "gatsby";
 
-The router supports [client awareness](https://www.apollographql.com/docs/kotlin/advanced/client-awareness/) by default:
-if the client sets the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests,
-Apollo Studio will be able to separate the metrics and queries per client.
+The Apollo Router supports [client awareness](/graphos/metrics/client-awareness/) by default. If the client sets the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests, Apollo Studio can separate the metrics and queries per client.
 
 ## Overriding client awareness headers
 
-Different header names can be used by updating the configuration file. If those headers will be sent by
-a browser, they must be allowed in the [CORS (Cross Origin Resource Sharing) configuration](../configuration/cors), as follows:
+Different header names can be used by updating the configuration file. If those headers will be sent by a browser, they must be allowed in the [CORS (Cross Origin Resource Sharing) configuration](../configuration/cors), as follows:
 
 ```yaml title="router.yaml"
 telemetry:

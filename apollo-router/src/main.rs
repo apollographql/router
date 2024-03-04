@@ -1,5 +1,3 @@
-//! Main entry point for CLI command to start server.
-
 fn main() {
     match apollo_router::main() {
         Ok(_) => {}

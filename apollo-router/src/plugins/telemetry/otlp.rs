@@ -1,14 +1,15 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
-use indexmap::map::Entry;
-use indexmap::IndexMap;
+use http::Uri;
+use lazy_static::lazy_static;
+use opentelemetry::sdk::metrics::reader::TemporalitySelector;
+use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 use tonic::metadata::MetadataMap;
@@ -19,16 +20,23 @@ use tower::BoxError;
 use url::Url;
 
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::tracing::parse_url_for_endpoint;
+use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+lazy_static! {
+    static ref DEFAULT_GRPC_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4317");
+    static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Enable otlp
+    pub(crate) enabled: bool,
+
     /// The endpoint to send data to
-    #[serde(deserialize_with = "deser_endpoint")]
-    #[schemars(with = "String")]
-    pub(crate) endpoint: Endpoint,
+    #[serde(default)]
+    pub(crate) endpoint: UriEndpoint,
 
     /// The protocol to use when sending data
     #[serde(default)]
@@ -45,48 +53,43 @@ pub(crate) struct Config {
     /// Batch processor settings
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Temporality for export (default: `Cumulative`).
+    /// Note that when exporting to Datadog agent use `Delta`.
+    #[serde(default)]
+    pub(crate) temporality: Temporality,
 }
 
 impl Config {
     pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
         &self,
     ) -> Result<T, BoxError> {
-        let endpoint = match (self.endpoint.clone(), &self.protocol) {
-            // # https://github.com/apollographql/router/issues/2036
-            // Opentelemetry rust incorrectly defaults to https
-            // This will override the defaults to that of the spec
-            // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md
-            (Endpoint::Default(_), Protocol::Http) => {
-                Url::parse("http://localhost:4318").expect("default url is valid")
-            }
-            // Default is GRPC
-            (Endpoint::Default(_), Protocol::Grpc) => {
-                Url::parse("http://localhost:4317").expect("default url is valid")
-            }
-            (Endpoint::Url(s), _) => s,
-        };
         match self.protocol {
             Protocol::Grpc => {
+                let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
                 let grpc = self.grpc.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
-                    .with_env()
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_endpoint(endpoint.as_str())
+                    .with(&endpoint, |b, endpoint| {
+                        b.with_endpoint(endpoint.to_string())
+                    })
                     .with(&grpc.try_from(&endpoint)?, |b, t| {
                         b.with_tls_config(t.clone())
                     })
-                    .with_metadata(self.grpc.metadata.clone())
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()))
                     .into();
                 Ok(exporter)
             }
             Protocol::Http => {
+                let endpoint = self.endpoint.to_uri(&DEFAULT_HTTP_ENDPOINT);
                 let http = self.http.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .http()
-                    .with_env()
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_endpoint(endpoint.as_str())
+                    .with(&endpoint, |b, endpoint| {
+                        b.with_endpoint(endpoint.to_string())
+                    })
                     .with_headers(http.headers)
                     .into();
 
@@ -94,33 +97,6 @@ impl Config {
             }
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum Endpoint {
-    Default(EndpointDefault),
-    Url(Url),
-}
-
-fn deser_endpoint<'de, D>(deserializer: D) -> Result<Endpoint, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    if s == "default" {
-        return Ok(Endpoint::Default(EndpointDefault::Default));
-    }
-
-    let url = parse_url_for_endpoint(s).map_err(serde::de::Error::custom)?;
-
-    Ok(Endpoint::Url(url))
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum EndpointDefault {
-    Default,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -144,12 +120,9 @@ pub(crate) struct GrpcExporter {
     pub(crate) key: Option<String>,
 
     /// gRPC metadata
-    #[serde(
-        deserialize_with = "metadata_map_serde::deserialize",
-        serialize_with = "metadata_map_serde::serialize"
-    )]
+    #[serde(with = "http_serde::header_map")]
     #[schemars(schema_with = "header_map", default)]
-    pub(crate) metadata: MetadataMap,
+    pub(crate) metadata: http::HeaderMap,
 }
 
 fn header_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -158,25 +131,36 @@ fn header_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Sch
 
 impl GrpcExporter {
     // Return a TlsConfig if it has something actually set.
-    pub(crate) fn try_from(self, endpoint: &Url) -> Result<Option<ClientTlsConfig>, BoxError> {
-        let domain_name = self.default_tls_domain(endpoint);
+    pub(crate) fn try_from(
+        self,
+        endpoint: &Option<Uri>,
+    ) -> Result<Option<ClientTlsConfig>, BoxError> {
+        if let Some(endpoint) = endpoint {
+            let endpoint = endpoint.to_string().parse::<Url>().map_err(|e| {
+                BoxError::from(format!("invalid GRPC endpoint {}, {}", endpoint, e))
+            })?;
+            let domain_name = self.default_tls_domain(&endpoint);
 
-        if self.ca.is_some() || self.key.is_some() || self.cert.is_some() || domain_name.is_some() {
-            Some(
-                ClientTlsConfig::new()
-                    .with(&domain_name, |b, d| b.domain_name(*d))
-                    .try_with(&self.ca, |b, c| {
-                        Ok(b.ca_certificate(Certificate::from_pem(c)))
-                    })?
-                    .try_with(
-                        &self.cert.clone().zip(self.key.clone()),
-                        |b, (cert, key)| Ok(b.identity(Identity::from_pem(cert, key))),
-                    ),
-            )
-            .transpose()
-        } else {
-            Ok(None)
+            if self.ca.is_some()
+                || self.key.is_some()
+                || self.cert.is_some()
+                || domain_name.is_some()
+            {
+                return Some(
+                    ClientTlsConfig::new()
+                        .with(&domain_name, |b, d| b.domain_name(*d))
+                        .try_with(&self.ca, |b, c| {
+                            Ok(b.ca_certificate(Certificate::from_pem(c)))
+                        })?
+                        .try_with(
+                            &self.cert.clone().zip(self.key.clone()),
+                            |b, (cert, key)| Ok(b.identity(Identity::from_pem(cert, key))),
+                        ),
+                )
+                .transpose();
+            }
         }
+        Ok(None)
     }
 
     fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {
@@ -195,116 +179,50 @@ impl GrpcExporter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Protocol {
+    #[default]
     Grpc,
     Http,
 }
 
-impl Default for Protocol {
-    fn default() -> Self {
-        Protocol::Grpc
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Temporality {
+    /// Export cumulative metrics.
+    #[default]
+    Cumulative,
+    /// Export delta metrics. `Delta` should be used when exporting to DataDog Agent.
+    Delta,
+}
+
+pub(crate) struct CustomTemporalitySelector(
+    pub(crate) opentelemetry::sdk::metrics::data::Temporality,
+);
+
+impl TemporalitySelector for CustomTemporalitySelector {
+    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry::sdk::metrics::data::Temporality {
+        self.0
     }
 }
 
-mod metadata_map_serde {
-    use tonic::metadata::KeyAndValueRef;
-    use tonic::metadata::MetadataKey;
-
-    use super::*;
-
-    pub(crate) fn serialize<S>(map: &MetadataMap, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        let mut serializable_format: IndexMap<&str, Vec<&str>> = IndexMap::new();
-
-        for key_and_value in map.iter() {
-            match key_and_value {
-                KeyAndValueRef::Ascii(key, value) => {
-                    match serializable_format.entry(key.as_str()) {
-                        Entry::Vacant(values) => {
-                            values.insert(vec![value.to_str().unwrap()]);
-                        }
-                        Entry::Occupied(mut values) => {
-                            values.get_mut().push(value.to_str().unwrap())
-                        }
-                    }
-                }
-                KeyAndValueRef::Binary(_, _) => todo!(),
-            };
-        }
-
-        serializable_format.serialize(serializer)
-    }
-
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<MetadataMap, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let serializable_format: IndexMap<String, Vec<String>> =
-            Deserialize::deserialize(deserializer)?;
-
-        let mut map = MetadataMap::new();
-
-        for (key, values) in serializable_format.into_iter() {
-            let key = MetadataKey::from_bytes(key.as_bytes()).unwrap();
-            for value in values {
-                map.append(key.clone(), value.parse().unwrap());
+impl From<&Temporality> for Box<dyn TemporalitySelector> {
+    fn from(value: &Temporality) -> Self {
+        Box::new(match value {
+            Temporality::Cumulative => CustomTemporalitySelector(
+                opentelemetry::sdk::metrics::data::Temporality::Cumulative,
+            ),
+            Temporality::Delta => {
+                CustomTemporalitySelector(opentelemetry::sdk::metrics::data::Temporality::Delta)
             }
-        }
-
-        Ok(map)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn serialize_metadata_map() {
-            let mut map = MetadataMap::new();
-            map.append("foo", "bar".parse().unwrap());
-            map.append("foo", "baz".parse().unwrap());
-            map.append("bar", "foo".parse().unwrap());
-            let mut buffer = Vec::new();
-            let mut ser = serde_yaml::Serializer::new(&mut buffer);
-            serialize(&map, &mut ser).unwrap();
-            insta::assert_snapshot!(std::str::from_utf8(&buffer).unwrap());
-            let de = serde_yaml::Deserializer::from_slice(&buffer);
-            deserialize(de).unwrap();
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn endpoint_configuration() {
-        let config: Config = serde_yaml::from_str("endpoint: default").unwrap();
-        assert_eq!(config.endpoint, Endpoint::Default(EndpointDefault::Default));
-
-        let config: Config = serde_yaml::from_str("endpoint: collector:1234").unwrap();
-        assert_eq!(
-            config.endpoint,
-            Endpoint::Url(Url::parse("http://collector:1234").unwrap())
-        );
-
-        let config: Config = serde_yaml::from_str("endpoint: https://collector:1234").unwrap();
-        assert_eq!(
-            config.endpoint,
-            Endpoint::Url(Url::parse("https://collector:1234").unwrap())
-        );
-
-        let config: Config = serde_yaml::from_str("endpoint: 127.0.0.1:1234").unwrap();
-        assert_eq!(
-            config.endpoint,
-            Endpoint::Url(Url::parse("http://127.0.0.1:1234").unwrap())
-        );
-    }
 
     #[test]
     fn endpoint_grpc_defaulting_no_scheme() {

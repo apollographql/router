@@ -1,4 +1,5 @@
 use std::fmt::Write as _;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use proteus::Parser;
@@ -6,6 +7,7 @@ use proteus::TransformBuilder;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::Value;
+use tracing_core::Level;
 
 use crate::error::ConfigurationError;
 
@@ -22,9 +24,34 @@ struct Migration {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Action {
-    Delete { path: String },
-    Copy { from: String, to: String },
-    Move { from: String, to: String },
+    Add {
+        path: String,
+        name: String,
+        value: Value,
+    },
+    Delete {
+        path: String,
+    },
+    Copy {
+        from: String,
+        to: String,
+    },
+    Move {
+        from: String,
+        to: String,
+    },
+    Change {
+        path: String,
+        from: Value,
+        to: Value,
+    },
+    /// Don't migrate anything, just log a better message before the parsing error.
+    /// It can be useful when you're moving a feature from experimental to GA and it is not backward compatible
+    Log {
+        path: String,
+        level: String,
+        log: String,
+    },
 }
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
@@ -69,6 +96,20 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
         transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
     for action in &migration.actions {
         match action {
+            Action::Add { path, name, value } => {
+                if !jsonpath_lib::select(config, &format!("$.{path}"))
+                    .unwrap_or_default()
+                    .is_empty()
+                    && jsonpath_lib::select(config, &format!("$.{path}.{name}"))
+                        .unwrap_or_default()
+                        .is_empty()
+                {
+                    transformer_builder = transformer_builder.add_action(
+                        Parser::parse(&format!(r#"const({value})"#), &format!("{path}.{name}"))
+                            .expect("migration must be valid"),
+                    );
+                }
+            }
             Action::Delete { path } => {
                 if !jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
@@ -100,6 +141,33 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     transformer_builder = transformer_builder.add_action(
                         Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
                     );
+                }
+            }
+            Action::Change { path, from, to } => {
+                if !jsonpath_lib::select(config, &format!("$.{path} == {from}"))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    transformer_builder = transformer_builder.add_action(
+                        Parser::parse(&format!(r#"const({to})"#), path)
+                            .expect("migration must be valid"),
+                    );
+                }
+            }
+            Action::Log { path, level, log } => {
+                let level = Level::from_str(level).expect("unknown level for log migration");
+
+                if !jsonpath_lib::select(config, &format!("$.{path}"))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    match level {
+                        Level::INFO => tracing::info!("{log}"),
+                        Level::ERROR => tracing::error!("{log}"),
+                        Level::WARN => tracing::warn!("{log}"),
+                        Level::TRACE => tracing::trace!("{log}"),
+                        Level::DEBUG => tracing::debug!("{log}"),
+                    }
                 }
             }
         }
@@ -274,6 +342,50 @@ mod test {
     }
 
     #[test]
+    fn add_field() {
+        // This one won't add the field because `obj.field1` already exists
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Add {
+                    path: "obj".to_string(),
+                    name: "field1".to_string(),
+                    value: 25.into()
+                })
+                .description("add field1")
+                .build(),
+        )
+        .expect("expected successful migration"));
+
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Add {
+                    path: "obj".to_string(),
+                    name: "field3".to_string(),
+                    value: 42.into()
+                })
+                .description("add field3")
+                .build(),
+        )
+        .expect("expected successful migration"));
+
+        // This one won't add the field because `unexistent` doesn't exist, we don't add parent structure
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Add {
+                    path: "unexistent".to_string(),
+                    name: "field".to_string(),
+                    value: 1.into()
+                })
+                .description("add field3")
+                .build(),
+        )
+        .expect("expected successful migration"));
+    }
+
+    #[test]
     fn move_non_existent_field() {
         insta::assert_json_snapshot!(apply_migration(
             &json!({"should": "stay"}),
@@ -349,6 +461,22 @@ mod test {
             "changed: bar\nstable: 1.0\ndeleted: gone",
             "changed: bif\nstable: 1.0\nadded: new",
             false
+        )
+        .expect("expected successful migration"));
+    }
+
+    #[test]
+    fn change_field() {
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Change {
+                    path: "obj.field1".to_string(),
+                    from: Value::Number(1u64.into()),
+                    to: Value::String("a".into()),
+                })
+                .description("change field1")
+                .build(),
         )
         .expect("expected successful migration"));
     }

@@ -3,3 +3,77 @@ health_check:
 homepage:
   enabled: true
 
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://example.com
+
+coprocessor:
+  url: https://example.com
+
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+
+limits:
+  max_depth: 20
+  max_height: 100
+  max_aliases: 100
+  max_root_fields: 10
+
+apq:
+  router:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      subgraphs:
+        reviews:
+          path: /graphql
+    callback:
+      public_url: "http://localhost:4040/callback"
+      listen: 0.0.0.0:4040
+      subgraphs:
+        - atestsubgraph
+plugins:
+  experimental.restricted:
+    enabled: true
+
+preview_entity_cache:
+  redis:
+    urls:
+      - https://example.com
+  enabled: true
+
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          http.response.status_code: true
+      supergraph:
+        attributes:
+          graphql.document: true
+      subgraph:
+        attributes:
+          subgraph.graphql.document: true
+
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream

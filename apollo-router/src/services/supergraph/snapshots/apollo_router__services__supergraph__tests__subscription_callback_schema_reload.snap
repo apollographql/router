@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: res
+---
+{
+  "data": null
+}

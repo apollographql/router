@@ -1,37 +1,35 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 #![allow(missing_docs)] // FIXME
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::string::ToString;
+use std::sync::Arc;
 use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::Method;
 use http::StatusCode;
-use once_cell::sync::Lazy;
-use reqwest::Client;
+use hyper::Body;
+use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
+use tower::Service;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::error::LicenseError;
-use crate::services::apollo_graph_reference;
-use crate::tracer::TraceId;
+use crate::plugins::telemetry::reload::prepare_context;
+use crate::query_planner::QueryPlan;
 use crate::Context;
 
-const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
-
-static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
-    apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-    Ok(Client::new())
-});
+pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Version of our externalised data. Rev this if it changes
-const EXTERNALIZABLE_VERSION: u8 = 1;
+pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
@@ -45,16 +43,18 @@ pub(crate) enum PipelineStep {
     SubgraphResponse,
 }
 
-#[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
-pub(crate) enum Control {
-    Continue,
-    Break(u16),
+impl From<PipelineStep> for opentelemetry::Value {
+    fn from(val: PipelineStep) -> Self {
+        val.to_string().into()
+    }
 }
 
-impl Default for Control {
-    fn default() -> Self {
-        Control::Continue
-    }
+#[derive(Clone, Debug, Default, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Control {
+    #[default]
+    Continue,
+    Break(u16),
 }
 
 impl Control {
@@ -72,67 +72,308 @@ impl Control {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
-    pub(crate) control: Control,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) control: Option<Control>,
     pub(crate) id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) body: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) context: Option<Context>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sdl: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) service_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) has_next: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_plan: Option<Arc<QueryPlan>>,
 }
 
+#[buildstructor::buildstructor]
 impl<T> Externalizable<T>
 where
     T: Debug + DeserializeOwned + Serialize + Send + Sync,
 {
-    pub(crate) fn new(
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing a Router
+    /// `Externalizable`.
+    ///
+    fn router_new(
         stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        path: Option<String>,
         sdl: Option<String>,
     ) -> Self {
-        Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::RouterRequest | PipelineStep::RouterResponse
+        ));
+        Externalizable {
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
-            control: Control::default(),
-            id: TraceId::maybe_new().map(|id| id.to_string()),
+            control,
+            id: Some(id),
             headers,
             body,
             context,
+            status_code,
             sdl,
+            uri: None,
+            path,
+            method,
+            service_name: None,
+            has_next: None,
+            query_plan: None,
         }
     }
 
-    pub(crate) async fn call(self, url: &str, timeout: Option<Duration>) -> Result<Self, BoxError> {
-        let my_client = CLIENT.as_ref().map_err(|e| e.to_string())?.clone();
-        let t = timeout.unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT);
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing a Supergraph
+    /// `Externalizable`.
+    ///
+    fn supergraph_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        sdl: Option<String>,
+        has_next: Option<bool>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::SupergraphRequest | PipelineStep::SupergraphResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl,
+            uri: None,
+            path: None,
+            method,
+            service_name: None,
+            has_next,
+            query_plan: None,
+        }
+    }
 
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing an Execution
+    /// `Externalizable`.
+    ///
+    fn execution_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        sdl: Option<String>,
+        has_next: Option<bool>,
+        query_plan: Option<Arc<QueryPlan>>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::ExecutionRequest | PipelineStep::ExecutionResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl,
+            uri: None,
+            path: None,
+            method,
+            service_name: None,
+            has_next,
+            query_plan,
+        }
+    }
+
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing a Subgraph
+    /// `Externalizable`.
+    ///
+    fn subgraph_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        service_name: Option<String>,
+        uri: Option<String>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::SubgraphRequest | PipelineStep::SubgraphResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl: None,
+            uri,
+            path: None,
+            method,
+            service_name,
+            has_next: None,
+            query_plan: None,
+        }
+    }
+
+    pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
+    where
+        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
-        let response = my_client
-            .post(url)
-            .json(&self)
+
+        let mut request = hyper::Request::builder()
+            .uri(uri)
+            .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
-            .timeout(t)
-            .send()
-            .await?;
+            .body(serde_json::to_vec(&self)?.into())?;
 
-        // Let's process our response
-        let response: Self = response.json().await?;
+        get_text_map_propagator(|propagator| {
+            propagator.inject_context(
+                &prepare_context(tracing::span::Span::current().context()),
+                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+            );
+        });
 
-        Ok(response)
+        let response = client.call(request).await?;
+        hyper::body::to_bytes(response.into_body())
+            .await
+            .map_err(BoxError::from)
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
     }
 }
 
+/// Convert a HeaderMap into a HashMap
+pub(crate) fn externalize_header_map(
+    input: &HeaderMap<HeaderValue>,
+) -> Result<HashMap<String, Vec<String>>, BoxError> {
+    let mut output = HashMap::new();
+    for (k, v) in input {
+        let k = k.as_str().to_owned();
+        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
+        output.entry(k).or_insert_with(Vec::new).push(v)
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
-mod tests {
-    use super::CLIENT;
+mod test {
+    use super::*;
 
     #[test]
-    fn it_will_not_externalize_without_environment() {
-        assert!(CLIENT.as_ref().is_err());
+    fn it_will_build_router_externalizable_correctly() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::RouterRequest)
+            .id(String::default())
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::RouterResponse)
+            .id(String::default())
+            .build();
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_will_not_build_router_externalizable_incorrectly() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
+            .build();
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_will_not_build_router_externalizable_incorrectl_supergraph() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SupergraphRequest)
+            .id(String::default())
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SupergraphResponse)
+            .id(String::default())
+            .build();
+    }
+
+    #[test]
+    fn it_will_build_subgraph_externalizable_correctly() {
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
+            .build();
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
+            .build();
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_will_not_build_subgraph_externalizable_incorrectly() {
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::RouterRequest)
+            .id(String::default())
+            .build();
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::RouterResponse)
+            .id(String::default())
+            .build();
     }
 }

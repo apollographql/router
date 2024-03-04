@@ -1,0 +1,22 @@
+supergraph:
+  listen: 127.0.0.1:4000
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true # Propagate errors from all subraphs
+
+coprocessor:
+  url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
+  timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
+  subgraph:
+    all:
+      request: 
+        headers: true
+        context: true
+        uri: true
+        service_name: true
+        body: true
+

@@ -1,0 +1,5 @@
+description: Move jwt configuration to authentication.router
+actions:
+  - type: move
+    from: authentication.jwt
+    to: authentication.router.jwt

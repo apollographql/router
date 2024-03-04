@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/query_planner/bridge_query_planner.rs
+expression: "subselections_keys(r#\"query Q { me {\n            id\n            reviews {\n                id\n                ... @defer(label: \"A\") { body(format: true) }\n            }\n        }}\"#).await"
+---
+None 0 query{ me { id reviews { id } } }
+Some("A") 0 query{ me { reviews { body } } }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 use http::Uri;
@@ -7,12 +8,13 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-#[cfg(unix)]
 use schemars::gen::SchemaSettings;
+use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
 use super::schema::validate_yaml_configuration;
+use super::subgraph::SubgraphConfiguration;
 use super::*;
 use crate::error::SchemaError;
 
@@ -391,10 +393,14 @@ cors:
 
 #[test]
 fn validate_project_config_files() {
+    std::env::set_var("DATADOG_AGENT_HOST", "http://example.com");
+    std::env::set_var("JAEGER_HOST", "http://example.com");
     std::env::set_var("JAEGER_USERNAME", "username");
     std::env::set_var("JAEGER_PASSWORD", "pass");
+    std::env::set_var("ZIPKIN_HOST", "http://example.com");
     std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
     std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
+    std::env::set_var("PARSER_MAX_RECURSION", "500");
 
     #[cfg(not(unix))]
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
@@ -421,6 +427,10 @@ fn validate_project_config_files() {
             .with_file_name(".skipconfigvalidation")
             .exists()
         {
+            continue;
+        }
+        #[cfg(not(telemetry_next))]
+        if entry.path().to_string_lossy().contains("telemetry_next") {
             continue;
         }
 
@@ -674,6 +684,10 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
             for (k, v) in o {
                 if k.as_str() == "properties" {
                     let properties = v.as_object().expect("properties must be an object");
+                    if properties.len() == 1 {
+                        // This is probably an enum property
+                        continue;
+                    }
                     for (k, v) in properties {
                         let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
@@ -731,4 +745,258 @@ fn test_configuration_validate_and_sanitize() {
         .supergraph(Supergraph::builder().path("/*/whatever").build())
         .build()
         .is_err());
+}
+
+#[test]
+fn load_tls() {
+    let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    cert_path.push("src");
+    cert_path.push("configuration");
+    cert_path.push("testdata");
+    cert_path.push("server.crt");
+    let cert_path = cert_path.to_string_lossy();
+
+    let mut key_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    key_path.push("src");
+    key_path.push("configuration");
+    key_path.push("testdata");
+    key_path.push("server.key");
+    let key_path = key_path.to_string_lossy();
+
+    let cfg = validate_yaml_configuration(
+        &format!(
+            r#"
+tls:
+  supergraph:
+    certificate: ${{file.{cert_path}}}
+    certificate_chain: ${{file.{cert_path}}}
+    key: ${{file.{key_path}}}
+"#,
+        ),
+        Expansion::builder().supported_mode("file").build(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    cfg.tls.supergraph.unwrap().tls_config().unwrap();
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct TestSubgraphOverride {
+    value: Option<u8>,
+    subgraph: SubgraphConfiguration<PluginConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(default)]
+struct PluginConfig {
+    a: bool,
+    b: u8,
+}
+
+impl Default for PluginConfig {
+    fn default() -> Self {
+        Self { a: true, b: 0 }
+    }
+}
+
+#[test]
+fn test_subgraph_override() {
+    let settings = SchemaSettings::draft2019_09().with(|s| {
+        s.option_nullable = true;
+        s.option_add_null_type = false;
+        s.inline_subschemas = true;
+    });
+    let gen = settings.into_generator();
+    let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
+    insta::assert_json_snapshot!(schema);
+}
+
+#[test]
+fn test_subgraph_override_json() {
+    let first = json!({
+        "subgraph": {
+            "all": {
+                "a": false
+            },
+            "subgraphs": {
+                "products": {
+                    "a": true
+                }
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(first).unwrap();
+    assert!(!data.subgraph.all.a);
+    assert!(data.subgraph.subgraphs.get("products").unwrap().a);
+
+    let second = json!({
+        "subgraph": {
+            "all": {
+                "a": false
+            },
+            "subgraphs": {
+                "products": {
+                    "b": 1
+                }
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(second).unwrap();
+    assert!(!data.subgraph.all.a);
+    // since products did not set the `a` field, it should take the override value from `all`
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
+
+    // the default value from `all` should work even if it is parsed after
+    let third = json!({
+        "subgraph": {
+            "subgraphs": {
+                "products": {
+                    "b": 1
+                }
+            },
+            "all": {
+                "a": false
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(third).unwrap();
+    assert!(!data.subgraph.all.a);
+    // since products did not set the `a` field, it should take the override value from `all`
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
+}
+
+#[test]
+fn test_deserialize_derive_default() {
+    // There are two types of serde defaulting:
+    //
+    // * container
+    // * field
+    //
+    // Container level defaulting will use an instance of the default implementation and take missing fields from it.
+    // Field level defaulting uses either the default implementation or optionally user supplied function to initialize missing fields.
+    //
+    // When using field level defaulting it is essential that the Default implementation of a struct exactly match the serde annotations.
+    //
+    // This test checks to ensure that field level defaulting is not used in conjunction with a Default implementation
+
+    // Walk every source file and check that #[derive(Default)] is not used.
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("src");
+    fn it(path: &Path) -> impl Iterator<Item = DirEntry> {
+        WalkDir::new(path).into_iter().filter_map(|e| e.ok())
+    }
+
+    // Check for derive where Deserialize is used
+    let deserialize_regex =
+        Regex::new(r"^\s*#[\s\n]*\[derive\s*\((.*,)?\s*Deserialize\s*(,.*)?\)\s*\]\s*$").unwrap();
+    let default_regex =
+        Regex::new(r"^\s*#[\s\n]*\[derive\s*\((.*,)?\s*Default\s*(,.*)?\)\s*\]\s*$").unwrap();
+
+    let mut errors = Vec::new();
+    for source_file in it(&path).filter(|e| e.file_name().to_string_lossy().ends_with(".rs")) {
+        // Read the source file into a vec of lines
+        let source = fs::read_to_string(source_file.path()).expect("failed to read file");
+        let lines: Vec<&str> = source.lines().collect();
+        for (line_number, line) in lines.iter().enumerate() {
+            if deserialize_regex.is_match(line) {
+                // Get the struct name
+                if let Some(struct_name) = find_struct_name(&lines, line_number) {
+                    let manual_implementation = format!("impl Default for {} ", struct_name);
+
+                    let has_field_level_defaults =
+                        has_field_level_serde_defaults(&lines, line_number);
+                    let has_manual_default_impl =
+                        lines.iter().any(|f| f.contains(&manual_implementation));
+                    let has_derive_default_impl = default_regex.is_match(line);
+
+                    if (has_manual_default_impl || has_derive_default_impl)
+                        && has_field_level_defaults
+                    {
+                        errors.push(format!(
+                                    "{}:{} struct {} has field level #[serde(default=\"...\")] and also implements Default. Either use #[derive(serde_derive_default::Default)] at the container OR move the defaults into the Default implementation and use #[serde(default)] at the container level",
+                                    source_file
+                                        .path()
+                                        .strip_prefix(path.parent().unwrap().parent().unwrap())
+                                        .unwrap()
+                                        .to_string_lossy(),
+                                    line_number + 1,
+                                    struct_name));
+                    }
+                }
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        panic!("Serde errors found:\n{}", errors.join("\n"));
+    }
+}
+
+#[test]
+fn it_defaults_health_check_configuration() {
+    let conf = Configuration::default();
+    let addr: ListenAddr = SocketAddr::from_str("127.0.0.1:8088").unwrap().into();
+
+    assert_eq!(conf.health_check.listen, addr);
+    assert_eq!(&conf.health_check.path, "/health");
+
+    // Defaults to enabled: true
+    assert!(conf.health_check.enabled);
+}
+
+#[test]
+fn it_sets_custom_health_check_path() {
+    let conf = Configuration::builder()
+        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .build()
+        .unwrap();
+
+    assert_eq!(&conf.health_check.path, "/healthz");
+}
+
+#[test]
+fn it_adds_slash_to_custom_health_check_path_if_missing() {
+    let conf = Configuration::builder()
+        // NB the missing `/`
+        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .build()
+        .unwrap();
+
+    assert_eq!(&conf.health_check.path, "/healthz");
+}
+
+fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {
+    let serde_field_default = Regex::new(
+        r#"^\s*#[\s\n]*\[serde\s*\((.*,)?\s*default\s*=\s*"[a-zA-Z0-9_:]+"\s*(,.*)?\)\s*\]\s*$"#,
+    )
+    .unwrap();
+    lines
+        .iter()
+        .skip(line_number + 1)
+        .take(500)
+        .take_while(|line| !line.contains('}'))
+        .any(|line| serde_field_default.is_match(line))
+}
+
+fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
+    let struct_enum_union_regex =
+        Regex::new(r"^.*(struct|enum|union)\s([a-zA-Z0-9_]+).*$").unwrap();
+
+    lines
+        .iter()
+        .skip(line_number + 1)
+        .take(5)
+        .filter_map(|line| {
+            struct_enum_union_regex.captures(line).and_then(|c| {
+                if c.get(1).unwrap().as_str() == "struct" {
+                    Some(c.get(2).unwrap().as_str().to_string())
+                } else {
+                    None
+                }
+            })
+        })
+        .next()
 }

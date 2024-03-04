@@ -11,6 +11,9 @@ metadata:
   namespace: {{ .Values.virtualservice.namespace }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -18,9 +21,14 @@ metadata:
 spec:
   hosts:
   - "*"
+  {{- if .Values.virtualservice.gatewayName }}
   gateways:
   - {{ .Values.virtualservice.gatewayName }}
-    {{- if .Values.virtualservice.http }}
+  {{- else if .Values.virtualservice.gatewayNames }}
+  gateways:
+    {{- toYaml .Values.virtualservice.gatewayNames | nindent 4 }}
+  {{- end }}
+  {{- if .Values.virtualservice.http }}
   http:
   {{- if .Values.virtualservice.http.main.enabled }}
     - name: "router-graphql-routes"

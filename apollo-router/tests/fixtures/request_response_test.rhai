@@ -3,10 +3,16 @@
 // If any of the tests fail, the thrown error will cause the respective rust
 // unit test to fail.
 
-fn process_common_request(check_context, request) {
-    if check_context {
+fn process_common_request(check_context_method_and_id, request) {
+    if check_context_method_and_id {
         if request.context.entries != () {
             throw(`context entries: expected: (), actual: ${request.context.entries}`);
+        }
+        if request.method != "GET" {
+            throw(`query: expected: "GET", actual: ${request.method}`);
+        }
+        if type_of(request.id) != "string" {
+            throw(`query: expected: "string", actual: ${type_of(request.id)}`);
         }
     }
     if request.body.operation_name != () {
@@ -36,21 +42,24 @@ fn process_supergraph_request(request) {
     if request.headers["content-type"] != "application/json" {
         throw(`header["content-type"]: expected: "application/json", actual: ${request.headers.content-type}`);
     }
+    if request.method.to_string() != "POST" {
+        throw(`query: expected: "POST", actual: ${request.method}`);
+    }
     if request.body.operation_name != "canned" {
         throw(`operation name: expected: canned, actual: ${request.body.operation_name}`);
     }
     let expected_query = `
 
-            query TopProducts($first: Int) { 
-                topProducts(first: $first) { 
-                    upc 
-                    name 
-                    reviews { 
-                        id 
-                        product { name } 
-                        author { id name } 
-                    } 
-                } 
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    upc
+                    name
+                    reviews {
+                        id
+                        product { name }
+                        author { id name }
+                    }
+                }
             }
         `;
     if request.body.query != expected_query {
@@ -99,6 +108,9 @@ fn process_common_response(response) {
     if response.body.extensions != #{} {
         throw(`query: expected: #{}, actual: ${response.body.extensions}`);
     }
+    if type_of(response.id) != "string" {
+        throw(`query: expected: "string", actual: ${type_of(response.id)}`);
+    }
 }
 
 fn process_supergraph_response(response) {
@@ -120,6 +132,31 @@ fn process_subgraph_response_om_forbidden(response) {
     };
 }
 
+fn process_subgraph_response_om_forbidden_graphql(response) {
+    throw #{
+        status: 403,
+        body: #{
+            errors: [#{
+                message: `I have raised a 403`,
+                extensions: #{
+                    code: "ACCESS_DENIED"
+                }
+            }]
+        }
+    };
+}
+
+
+fn process_subgraph_response_om_200_graphql(response) {
+    throw #{
+        status: 200,
+        body: #{
+            data: #{
+                name: "Ada Lovelace"
+            }
+        }
+    };
+}
 fn process_subgraph_response_string(response) {
     throw "I have raised an error";
 }
@@ -136,3 +173,40 @@ fn process_subgraph_response_om_missing_message(response) {
         status: 400,
     };
 }
+
+fn process_supergraph_response_is_primary(response) {
+    if !response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should be primary"
+        };
+    }
+}
+
+fn process_execution_response_is_primary(response) {
+    if !response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should be primary"
+        };
+    }
+}
+
+fn process_supergraph_deferred_response_is_not_primary(response) {
+    if response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should not be primary"
+        };
+    }
+}
+
+fn process_execution_deferred_response_is_not_primary(response) {
+    if response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should not be primary"
+        };
+    }
+}
+

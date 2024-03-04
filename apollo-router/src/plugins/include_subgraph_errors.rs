@@ -63,6 +63,7 @@ impl Plugin for IncludeSubgraphErrors {
                     // Create a redacted error to replace whatever error we have
                     tracing::info!("redacted subgraph({sub_name_error}) error");
                     _error = Box::new(crate::error::FetchError::SubrequestHttpError {
+                        status_code: None,
                         service: "redacted".to_string(),
                         reason: "redacted".to_string(),
                     });
@@ -89,12 +90,15 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
+    use crate::services::layers::persisted_queries::PersistedQueryLayer;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
-    use crate::services::router_service::RouterCreator;
+    use crate::services::router::service::RouterCreator;
+    use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
-    use crate::spec::Schema;
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -186,29 +190,35 @@ mod test {
 
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+        let planner = BridgeQueryPlanner::new(schema.to_string(), Default::default())
+            .await
+            .unwrap();
+        let schema = planner.schema();
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let plugins = create_plugins(&Configuration::default(), &schema, None)
+        let mut plugins = create_plugins(&Configuration::default(), &schema, None, None)
             .await
             .unwrap();
 
-        for (name, plugin) in plugins.into_iter() {
-            builder = builder.with_dyn_plugin(name, plugin);
-        }
+        plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
         let builder = builder
-            .with_dyn_plugin("apollo.include_subgraph_errors".to_string(), plugin)
+            .with_plugins(Arc::new(plugins))
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
+        let supergraph_creator = builder.build().await.expect("should build");
+
         RouterCreator::new(
-            Arc::new(builder.build().await.expect("should build")),
-            &Configuration::default(),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            Arc::new(supergraph_creator),
+            Arc::new(Configuration::default()),
         )
         .await
+        .unwrap()
         .make()
         .boxed()
     }

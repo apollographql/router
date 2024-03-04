@@ -47,6 +47,9 @@ mod json_ext;
 #[macro_use]
 pub mod plugin;
 
+#[macro_use]
+pub(crate) mod metrics;
+
 pub(crate) mod axum_factory;
 mod cache;
 mod configuration;
@@ -59,8 +62,11 @@ mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+pub(crate) mod logging;
+pub(crate) mod notification;
 mod orbiter;
 mod plugins;
+pub(crate) mod protocols;
 mod query_planner;
 mod request;
 mod response;
@@ -70,24 +76,29 @@ mod router_rhai;
 pub mod services;
 pub(crate) mod spec;
 mod state_machine;
-mod test_harness;
+pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+pub use crate::axum_factory::unsupported_set_axum_router_callback;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
+pub use crate::context::extensions::sync::ExtensionsMutex;
+pub use crate::context::extensions::Extensions;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
+pub use crate::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
-pub use crate::router::EntitlementSource;
+pub use crate::router::LicenseSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
+pub use crate::uplink::UplinkConfig;
 
 /// Not part of the public API
 #[doc(hidden)]
@@ -101,40 +112,5 @@ pub mod _private {
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
     // For tests
-    pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
-
-    /// Retuns the `Debug` fomatting of two `Result<Schema, SchemaError>`,
-    /// from `parse_with_ast` and `parse_with_hir` respectively.
-    ///
-    /// The two strings are expected to be equal.
-    pub fn compare_schema_parsing(schema: &str) -> (String, String) {
-        use crate::spec::Schema;
-        let conf = Default::default();
-        (
-            format!("{:?}", Schema::parse_with_ast(schema, &conf)),
-            format!("{:?}", Schema::parse_with_hir(schema, &conf)),
-        )
-    }
-
-    /// Retuns the `Debug` fomatting of two `Result<Query, SpecError>`,
-    /// from `parse_with_ast` and `parse_with_hir` respectively.
-    ///
-    /// The two strings are expected to be equal.
-    pub fn compare_query_parsing(query: &str) -> (String, String) {
-        use once_cell::sync::OnceCell;
-
-        use crate::spec::Query;
-        use crate::spec::Schema;
-
-        static DUMMY_SCHEMA: OnceCell<Schema> = OnceCell::new();
-        let conf = Default::default();
-        let schema = DUMMY_SCHEMA.get_or_init(|| {
-            Schema::parse(include_str!("testdata/minimal_supergraph.graphql"), &conf).unwrap()
-        });
-        (
-            format!("{:?}", Query::parse_with_ast(query, schema, &conf)),
-            format!("{:?}", Query::parse_with_hir(query, schema, &conf)),
-        )
-    }
 }

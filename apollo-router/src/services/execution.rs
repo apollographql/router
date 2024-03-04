@@ -2,18 +2,22 @@
 
 use std::sync::Arc;
 
+use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
+use tokio::sync::mpsc;
 use tower::BoxError;
 
 use crate::graphql;
-use crate::spec::Schema;
 use crate::Context;
+
+pub(crate) mod service;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
 // Reachable from Request
+use super::SubscriptionTaskParams;
 pub use crate::query_planner::QueryPlan;
 
 assert_impl_all!(Request: Send);
@@ -24,15 +28,11 @@ pub struct Request {
 
     pub query_plan: Arc<QueryPlan>,
 
-    /// An apollo-compiler context that contains `self.query_plan.query`.
-    ///
-    /// It normally also contains type information from the schema,
-    /// but might not if this `Request` was created in tests
-    /// with `fake_builder()` without providing a `schema` parameter.
-    #[allow(unused)] // TODO: find some uses
-    pub(crate) compiler: apollo_compiler::Snapshot,
-
     pub context: Context,
+    /// Initial data coming from subscription event if it's a subscription
+    pub(crate) source_stream_value: Option<Value>,
+    /// Channel to send all parameters needed for the subscription
+    pub(crate) subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
 }
 
 #[buildstructor::buildstructor]
@@ -46,30 +46,33 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
+        source_stream_value: Option<Value>,
+        subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
-        let compiler = query_plan.query.uncached_compiler(None).snapshot();
         Self {
             supergraph_request,
             query_plan,
-            compiler,
             context,
+            source_stream_value,
+            subscription_tx,
         }
     }
 
     #[builder(visibility = "pub(crate)")]
     #[allow(clippy::needless_lifetimes)] // needed by buildstructor-generated code
-    async fn internal_new<'a>(
+    async fn internal_new(
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
-        schema: &'a Schema,
         context: Context,
+        source_stream_value: Option<Value>,
+        subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
-        let compiler = query_plan.query.compiler(Some(schema)).await.snapshot();
         Self {
             supergraph_request,
             query_plan,
-            compiler,
             context,
+            source_stream_value,
+            subscription_tx,
         }
     }
 
@@ -83,11 +86,15 @@ impl Request {
         supergraph_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
+        source_stream_value: Option<Value>,
+        subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
         Request::new(
             supergraph_request.unwrap_or_default(),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
+            source_stream_value,
+            subscription_tx,
         )
     }
 }

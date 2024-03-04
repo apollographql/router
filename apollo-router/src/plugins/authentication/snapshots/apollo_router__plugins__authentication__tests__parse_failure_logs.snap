@@ -1,0 +1,29 @@
+---
+source: apollo-router/src/plugins/authentication/tests.rs
+expression: jwks
+---
+keys:
+  - use: sig
+    alg: HS256
+    kid: key1
+    kty: oct
+    k: c2VjcmV0Cg
+  - use: sig
+    key_ops:
+      - verify
+    alg: ES256
+    kid: afda85e09a320cf748177874592de64d
+    kty: EC
+    crv: P-256
+    x: opFUViwCYVZLmsbG2cJTA9uPvOF5Gg8W7uNhrcorGhI
+    y: bPxvCFKmlqTdEFc34OekvpviUUyelGrbi020dlgIsqo
+  - use: sig
+    key_ops:
+      - verify
+    alg: ES256
+    kid: afda85e09a320cf748177874592de64d
+    kty: EC
+    crv: P-256
+    x: opFUViwCYVZLmsbG2cJTA9uPvOF5Gg8W7uNhrcorGhI
+    y: bPxvCFKmlqTdEFc34OekvpviUUyelGrbi020dlgIsqo
+

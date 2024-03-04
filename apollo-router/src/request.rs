@@ -1,4 +1,6 @@
+use bytes::Bytes;
 use derivative::Derivative;
+use serde::de::DeserializeSeed;
 use serde::de::Error;
 use serde::Deserialize;
 use serde::Serialize;
@@ -6,10 +8,13 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
+use crate::configuration::BatchingMode;
 use crate::json_ext::Object;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
+// Note: if adding #[serde(deny_unknown_fields)],
+// also remove `Fields::Other` in `DeserializeSeed` impl.
 #[serde(rename_all = "camelCase")]
 #[derivative(Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -78,6 +83,26 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
+fn as_object<E: Error>(value: Value, null_is_default: bool) -> Result<Object, E> {
+    use serde::de::Unexpected;
+
+    let exp = if null_is_default {
+        "a map or null"
+    } else {
+        "a map"
+    };
+    match value {
+        Value::Object(object) => Ok(object),
+        // Similar to `deserialize_null_default`:
+        Value::Null if null_is_default => Ok(Object::default()),
+        Value::Null => Err(E::invalid_type(Unexpected::Unit, &exp)),
+        Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
+        Value::Number(_) => Err(E::invalid_type(Unexpected::Other("a number"), &exp)),
+        Value::String(value) => Err(E::invalid_type(Unexpected::Str(value.as_str()), &exp)),
+        Value::Array(_) => Err(E::invalid_type(Unexpected::Seq, &exp)),
+    }
+}
+
 #[buildstructor::buildstructor]
 impl Request {
     #[builder(visibility = "pub")]
@@ -129,32 +154,113 @@ impl Request {
         }
     }
 
+    /// Deserialize as JSON from `&Bytes`, avoiding string copies where possible
+    pub fn deserialize_from_bytes(data: &Bytes) -> Result<Self, serde_json::Error> {
+        let seed = RequestFromBytesSeed(data);
+        let mut de = serde_json::Deserializer::from_slice(data);
+        seed.deserialize(&mut de)
+    }
+
     /// Convert encoded URL query string parameters (also known as "search
     /// params") into a GraphQL [`Request`].
     ///
     /// An error will be produced in the event that the query string parameters
     /// cannot be turned into a valid GraphQL `Request`.
-    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        let urldecoded: serde_json::Value =
-            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-                .map_err(serde_json::Error::custom)?;
+    pub(crate) fn batch_from_urlencoded_query(
+        url_encoded_query: String,
+    ) -> Result<Vec<Request>, serde_json::Error> {
+        let value: serde_json::Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+            .map_err(serde_json::Error::custom)?;
 
-        let operation_name = if let Some(serde_json::Value::String(operation_name)) =
-            urldecoded.get("operationName")
-        {
-            Some(operation_name.clone())
+        Request::process_query_values(&value)
+    }
+
+    /// Convert Bytes into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
+    pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
+
+        Request::process_batch_values(&value)
+    }
+
+    fn allocate_result_array(value: &serde_json::Value) -> Vec<Request> {
+        match value.as_array() {
+            Some(array) => Vec::with_capacity(array.len()),
+            None => Vec::with_capacity(1),
+        }
+    }
+
+    fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
+        let mut result = Request::allocate_result_array(value);
+
+        if value.is_array() {
+            tracing::info!(
+                histogram.apollo.router.operations.batching.size = result.len() as f64,
+                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            );
+
+            tracing::info!(
+                monotonic_counter.apollo.router.operations.batching = 1u64,
+                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            );
+            for entry in value
+                .as_array()
+                .expect("We already checked that it was an array")
+            {
+                let bytes = serde_json::to_vec(entry)?;
+                result.push(Request::deserialize_from_bytes(&bytes.into())?);
+            }
         } else {
-            None
-        };
+            let bytes = serde_json::to_vec(value)?;
+            result.push(Request::deserialize_from_bytes(&bytes.into())?);
+        }
+        Ok(result)
+    }
 
-        let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
+    fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
+        let mut result = Request::allocate_result_array(value);
+
+        if value.is_array() {
+            tracing::info!(
+                histogram.apollo.router.operations.batching.size = result.len() as f64,
+                mode = "batch_http_link" // Only supported mode right now
+            );
+
+            tracing::info!(
+                monotonic_counter.apollo.router.operations.batching = 1u64,
+                mode = "batch_http_link" // Only supported mode right now
+            );
+            for entry in value
+                .as_array()
+                .expect("We already checked that it was an array")
+            {
+                result.push(Request::process_value(entry)?);
+            }
+        } else {
+            result.push(Request::process_value(value)?)
+        }
+        Ok(result)
+    }
+
+    fn process_value(value: &serde_json::Value) -> Result<Request, serde_json::Error> {
+        let operation_name =
+            if let Some(serde_json::Value::String(operation_name)) = value.get("operationName") {
+                Some(operation_name.clone())
+            } else {
+                None
+            };
+
+        let query = if let Some(serde_json::Value::String(query)) = value.get("query") {
             Some(query.as_str())
         } else {
             None
         };
-        let variables: Object = get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default();
+        let variables: Object = get_from_urlencoded_value(value, "variables")?.unwrap_or_default();
         let extensions: Object =
-            get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
+            get_from_urlencoded_value(value, "extensions")?.unwrap_or_default();
 
         let request_builder = Self::builder()
             .variables(variables)
@@ -169,9 +275,22 @@ impl Request {
 
         Ok(request)
     }
+
+    /// Convert encoded URL query string parameters (also known as "search
+    /// params") into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
+    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
+        let urldecoded: serde_json::Value =
+            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+                .map_err(serde_json::Error::custom)?;
+
+        Request::process_value(&urldecoded)
+    }
 }
 
-fn get_from_urldecoded<'a, T: Deserialize<'a>>(
+fn get_from_urlencoded_value<'a, T: Deserialize<'a>>(
     object: &'a serde_json::Value,
     key: &str,
 ) -> Result<Option<T>, serde_json::Error> {
@@ -179,6 +298,95 @@ fn get_from_urldecoded<'a, T: Deserialize<'a>>(
         Some(serde_json::from_str(byte_string.as_str())).transpose()
     } else {
         Ok(None)
+    }
+}
+
+struct RequestFromBytesSeed<'data>(&'data Bytes);
+
+impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
+    type Value = Request;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "camelCase")]
+        enum Field {
+            Query,
+            OperationName,
+            Variables,
+            Extensions,
+            #[serde(other)]
+            Other,
+        }
+
+        const FIELDS: &[&str] = &["query", "operationName", "variables", "extensions"];
+
+        struct RequestVisitor<'data>(&'data Bytes);
+
+        impl<'data, 'de> serde::de::Visitor<'de> for RequestVisitor<'data> {
+            type Value = Request;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a GraphQL request")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Request, V::Error>
+            where
+                V: serde::de::MapAccess<'de>,
+            {
+                let mut query = None;
+                let mut operation_name = None;
+                let mut variables = None;
+                let mut extensions = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Query => {
+                            if query.is_some() {
+                                return Err(Error::duplicate_field("query"));
+                            }
+                            query = Some(map.next_value()?);
+                        }
+                        Field::OperationName => {
+                            if operation_name.is_some() {
+                                return Err(Error::duplicate_field("operationName"));
+                            }
+                            operation_name = Some(map.next_value()?);
+                        }
+                        Field::Variables => {
+                            if variables.is_some() {
+                                return Err(Error::duplicate_field("variables"));
+                            }
+                            let seed = serde_json_bytes::value::BytesSeed::new(self.0);
+                            let value = map.next_value_seed(seed)?;
+                            let null_is_default = true;
+                            variables = Some(as_object(value, null_is_default)?);
+                        }
+                        Field::Extensions => {
+                            if extensions.is_some() {
+                                return Err(Error::duplicate_field("extensions"));
+                            }
+                            let seed = serde_json_bytes::value::BytesSeed::new(self.0);
+                            let value = map.next_value_seed(seed)?;
+                            let null_is_default = false;
+                            extensions = Some(as_object(value, null_is_default)?);
+                        }
+                        Field::Other => {
+                            let _: serde::de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                Ok(Request {
+                    query: query.unwrap_or_default(),
+                    operation_name: operation_name.unwrap_or_default(),
+                    variables: variables.unwrap_or_default(),
+                    extensions: extensions.unwrap_or_default(),
+                })
+            }
+        }
+
+        deserializer.deserialize_struct("Request", FIELDS, RequestVisitor(self.0))
     }
 }
 

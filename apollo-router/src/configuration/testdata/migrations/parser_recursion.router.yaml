@@ -1,0 +1,2 @@
+server:
+  experimental_parser_recursion_limit: 100

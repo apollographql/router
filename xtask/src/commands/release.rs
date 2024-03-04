@@ -5,24 +5,25 @@ use anyhow::Error;
 use anyhow::Result;
 use cargo_metadata::MetadataCommand;
 use chrono::prelude::Utc;
-use git2::Repository;
-use octorust::types::PullsCreateRequest;
-use octorust::Client;
-use structopt::StructOpt;
-use tap::TapFallible;
 use walkdir::WalkDir;
 use xtask::*;
 
-#[derive(Debug, StructOpt)]
+use crate::commands::changeset::slurp_and_remove_changesets;
+
+#[derive(Debug, clap::Subcommand)]
 pub enum Command {
     /// Prepare a new release
     Prepare(Prepare),
+
+    /// Verify that a release is ready to be published
+    PreVerify,
 }
 
 impl Command {
     pub fn run(&self) -> Result<()> {
         match self {
             Command::Prepare(command) => command.run(),
+            Command::PreVerify => PreVerify::run(),
         }
     }
 }
@@ -53,32 +54,14 @@ impl FromStr for Version {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Prepare {
-    /// Release from the current branch rather than creating a new one.
-    #[structopt(long)]
-    current_branch: bool,
-
     /// Skip the license check
-    #[structopt(long)]
-    skip_license_ckeck: bool,
-
-    /// Dry run, don't commit the changes and create the PR.
-    #[structopt(long)]
-    dry_run: bool,
+    #[clap(long)]
+    skip_license_check: bool,
 
     /// The new version that is being created OR to bump (major|minor|patch|current).
     version: Version,
-}
-
-macro_rules! git {
-    ($( $i:expr ),*) => {
-        let git = which::which("git")?;
-        let result = std::process::Command::new(git).args([$( $i ),*]).status()?;
-        if !result.success() {
-            return Err(anyhow!("git {}", [$( $i ),*].join(",")));
-        }
-    };
 }
 
 macro_rules! replace_in_file {
@@ -103,33 +86,30 @@ impl Prepare {
         self.ensure_pristine_checkout()?;
         self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;
-        let github = octorust::Client::new(
-            "router-release".to_string(),
-            octorust::auth::Credentials::Token(
-                std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN env variable must be set"),
-            ),
-        )?;
         self.update_lock()?;
         self.check_compliance()?;
 
         if let Version::Nightly = &self.version {
-            println!("Skipping various steps becasuse this is a nightly build.");
+            println!("Skipping various steps because this is a nightly build.");
+            // Only update helm charts on specific arch/os/env
+            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
+            {
+                // Update the image repository to use the nightly location
+                replace_in_file!(
+                    "./helm/chart/router/values.yaml",
+                    "^  repository: ghcr.io/apollographql/router$",
+                    format!("  repository: ghcr.io/apollographql/nightly/router")
+                );
+
+                // Update the version string for nightly builds
+                self.update_helm_charts(&version.replace("+", "-"))?;
+            }
         } else {
             self.update_install_script(&version)?;
             self.update_helm_charts(&version)?;
             self.update_docs(&version)?;
             self.docker_files(&version)?;
             self.finalize_changelog(&version)?;
-
-            if !self.dry_run {
-                if !self.current_branch {
-                    self.switch_to_release_branch(&version)?;
-                }
-
-                // This also commits all changes to previously tracked files
-                // created by this script.
-                self.create_release_pr(&github, &version).await?;
-            }
         }
 
         Ok(())
@@ -155,9 +135,17 @@ impl Prepare {
                 "the 'git' executable could not be found in your PATH"
             ));
         }
-
         if let Version::Nightly = &self.version {
-            println!("Skipping requirement that helm and helm-docs is installed because we're building a nightly that doesn't require those tools.");
+            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
+            {
+                if which::which("helm").is_err() {
+                    return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+                }
+
+                if which::which("helm-docs").is_err() {
+                    return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+                }
+            }
         } else {
             if which::which("helm").is_err() {
                 return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
@@ -175,25 +163,9 @@ impl Prepare {
         if which::which("cargo-deny").is_err() {
             return Err(anyhow!("the 'cargo-deny' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-deny"));
         }
-
-        if let Version::Nightly = &self.version {
-            println!("Skipping requirement that GITHUB_TOKEN is set in the environment because this is a nightly release which doesn't yet need it.");
-        } else if std::env::var("GITHUB_TOKEN").is_err() {
-            return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."));
-        }
         Ok(())
     }
 
-    /// Create a new branch "#.#.#" where "#.#.#" is this release's version
-    /// (release) or "#.#.#-rc.#" (release candidate)
-    fn switch_to_release_branch(&self, version: &str) -> Result<()> {
-        println!("creating release branch");
-        git!("fetch", "origin", &format!("dev:{version}"));
-        git!("checkout", version);
-        Ok(())
-    }
-
-    /// Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
     fn update_cargo_tomls(&self, version: &Version) -> Result<String> {
         println!("updating Cargo.toml files");
@@ -221,19 +193,27 @@ impl Prepare {
                 "apollo-router"
             ]),
             Version::Nightly => {
-                let head_commit: String = match Repository::open_from_env() {
-                    Ok(repo) => {
-                        let revspec = repo.revparse("HEAD")?;
-                        if revspec.mode().contains(git2::RevparseMode::SINGLE) {
-                            let mut full_hash = revspec.from().unwrap().id().to_string();
-                            full_hash.truncate(8);
-                            full_hash
-                        } else {
-                            panic!("unexpected rev-parse HEAD");
-                        }
-                    }
-                    Err(e) => panic!("failed to open: {e}"),
-                };
+                // Get the first 8 characters of the current commit hash by running
+                // the Command::new("git") command.  Be sure to take the output and
+                // run that through String::from_utf8(output.stdout) to get exactly
+                // an 8 character string.
+                let head_commit = std::process::Command::new("git")
+                    .args(["rev-parse", "HEAD"])
+                    .output()
+                    .expect("failed to execute 'git rev-parse HEAD'")
+                    .stdout;
+
+                // If it's empty, then we're in a bad state.
+                if head_commit.is_empty() {
+                    return Err(anyhow!("failed to get the current commit hash"));
+                }
+
+                // Convert it using `String::from_utf8_lossy`, which will turn
+                // any funky characters into something really noticeable.
+                let head_commit = String::from_utf8_lossy(&head_commit);
+
+                // Just get the first 8 characters, for brevity.
+                let head_commit = head_commit.chars().take(8).collect::<String>();
 
                 replace_in_file!(
                     "./apollo-router/Cargo.toml",
@@ -393,30 +373,11 @@ impl Prepare {
     /// Clear `NEXT_CHANGELOG.md` leaving only the template.
     fn finalize_changelog(&self, version: &str) -> Result<()> {
         println!("finalizing changelog");
-        let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-        let changes_regex = regex::Regex::new(
-            r"(?ms)(?P<example>^<!-- <KEEP>.*^</KEEP> -->\s*)(?P<newChangelog>.*)?",
-        )?;
-        let captures = changes_regex
-            .captures(&next_changelog)
-            .expect("changelog format was unexpected1");
-
-        // There must be a block like this in the CHANGELOG.
-        //
-        // <!-- <KEEP>
-        //   Anything here.  Doesn't matter.
-        // </KEEP> -->
-        captures.name("example").expect("example block was not found in changelog; see xtask release command source code for expectation of example block");
-
-        let new_changelog_text = captures
-            .name("newChangelog")
-            .expect("newChangelog was not found, possibly because the format was unexpected")
-            .as_str();
-
-        let new_next_changelog = changes_regex.replace(&next_changelog, "${example}");
 
         let semver_heading = "This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).";
+
+        let new_changelog = slurp_and_remove_changesets();
 
         let update_regex =
             regex::Regex::new(format!("(?ms){}\n", regex::escape(semver_heading)).as_str())?;
@@ -427,11 +388,10 @@ impl Prepare {
                 semver_heading,
                 version,
                 chrono::Utc::now().date_naive(),
-                new_changelog_text
+                &new_changelog,
             ),
         );
         std::fs::write("./CHANGELOG.md", updated.to_string())?;
-        std::fs::write("./NEXT_CHANGELOG.md", new_next_changelog.to_string())?;
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
@@ -440,7 +400,7 @@ impl Prepare {
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
         cargo!(["xtask", "check-compliance"]);
-        if !self.skip_license_ckeck {
+        if !self.skip_license_check {
             println!("updating licenses.html");
             cargo!(["xtask", "licenses"]);
         }
@@ -453,44 +413,44 @@ impl Prepare {
         cargo!(["check"]);
         Ok(())
     }
+}
 
-    /// Create the release PR
-    async fn create_release_pr(&self, github: &Client, version: &str) -> Result<()> {
-        let git = which::which("git")?;
-        let result = std::process::Command::new(git)
-            .args(["branch", "--show-current"])
-            .output()?;
-        if !result.status.success() {
-            return Err(anyhow!("failed to get git current branch"));
+struct PreVerify();
+
+impl PreVerify {
+    fn run() -> Result<()> {
+        let version = format!("v{}", *PKG_VERSION);
+
+        // Get the git tag name as a string
+        let tags_output = std::process::Command::new("git")
+            .args(["describe", "--tags", "--exact-match"])
+            .output()
+            .map_err(|e| {
+                anyhow!(
+                    "failed to execute 'git describe --tags --exact-match': {}",
+                    e
+                )
+            })?
+            .stdout;
+        let tags_raw = String::from_utf8_lossy(&tags_output);
+        let tags_list = tags_raw
+            .split("\n")
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>();
+
+        // If the tags contains the version, then we're good
+        if tags_list.is_empty() {
+            return Err(anyhow!(
+                "release cannot be performed because current git tree is not tagged"
+            ));
         }
-        let current_branch = String::from_utf8(result.stdout)?;
-
-        println!("creating release PR");
-        git!("add", "-u");
-        git!("commit", "-m", &format!("release {version}"));
-        git!(
-            "push",
-            "--set-upstream",
-            "origin",
-            &format!("{}:{}", current_branch.trim(), version)
-        );
-        github
-            .pulls()
-            .create(
-                "apollographql",
-                "router",
-                &PullsCreateRequest {
-                    base: "main".to_string(),
-                    body: format!("Release {version}"),
-                    draft: None,
-                    head: version.to_string(),
-                    issue: 0,
-                    maintainer_can_modify: None,
-                    title: format!("Release {version}"),
-                },
-            )
-            .await
-            .tap_err(|_| eprintln!("failed to create release PR"))?;
+        if !tags_list.contains(&version.as_str()) {
+            return Err(anyhow!(
+                "the git tree tags {{{}}} does not contain the version {} from the Cargo.toml",
+                tags_list.join(", "),
+                version
+            ));
+        }
         Ok(())
     }
 }

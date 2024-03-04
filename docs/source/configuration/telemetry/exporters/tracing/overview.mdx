@@ -1,0 +1,230 @@
+---
+title: Router Tracing
+subtitle: Collect tracing information from the Apollo Router
+description: Collect and export tracing information from the Apollo Router. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger, Zipkin.
+---
+
+The Apollo Router supports collection of traces with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+
+* [Jaeger](./jaeger)
+* [Zipkin](./zipkin)
+* [Datadog](./datadog)
+* [New Relic](./new-relic)
+* [OpenTelemetry Protocol (OTLP)](./otlp) over HTTP or gRPC
+
+The Apollo Router generates [**spans**](../../instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
+
+* Sub-request response times
+* Query shape (sub-request dependencies)
+* Apollo Router post-processing
+
+Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
+
+<Tip>
+
+To get the most out of distributed tracing, _all_ components in your system should be instrumented.
+
+</Tip>
+
+## Tracing common configuration
+
+Common tracing configuration contains global settings for all exporters.
+
+### Service name
+
+Set a service name for your router traces so you can easily locate them in external metrics dashboards.
+
+The service name can be set by an environment variable or in [`router.yaml`](../../../overview#yaml-config-file), with the following order of precedence (first to last):
+
+1. `OTEL_SERVICE_NAME` environment variable
+2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
+3. `telemetry.exporters.tracing.common.service_name` in `router.yaml`
+
+      <ExpansionPanel title="Example service_name">
+
+      Example setting service name in `telemetry.exporters.tracing.common.service_name`:
+
+      ```yaml title="router.yaml"
+      telemetry:
+        exporters:
+          tracing:
+            common:
+              # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+              service_name: "router" #highlight-line
+      ```
+
+      </ExpansionPanel>
+
+
+4. `telemetry.exporters.tracing.common.resource` in `router.yaml`
+
+      <ExpansionPanel title="Example resource">
+
+      Example setting service name in `telemetry.exporters.tracing.common.resource`:
+
+      ```yaml title="router.yaml"
+      telemetry:
+        exporters:
+           tracing:
+             common:
+               resource:
+                 # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+                 "service.name": "router" #highlight-line
+      ```
+
+      </ExpansionPanel>
+
+If the service name isn't explicitly set, it defaults to `unknown_service:router` or `unknown_service` if the executable name cannot be determined.
+
+### `resource`
+
+A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
+
+In [`router.yaml`](../../../overview#yaml-config-file), resource attributes are set in `telemetry.exporters.tracing.common.resource`. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       common:
+         resource:
+           "environment.name": "production"
+           "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+```
+
+For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).
+
+### `sampler`
+
+You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in [`router.yaml`](../../../overview#yaml-config-file) set `telemetry.exporters.tracing.common.sampler` and `telemetry.exporters.tracing.common.parent_based_sampler`:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       common:
+         sampler: always_on # (default) all requests are sampled (always_on|always_off|<0.0-1.0>)
+         parent_based_sampler: true # (default) If an incoming span has OpenTelemetry headers then the request will always be sampled. 
+```
+
+- `sampler` sets the sampling rate as a decimal percentage, `always_on`, or `always_off`. For example, setting `sampler: 0.1` samples 10% of your requests.
+
+- `parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to disable it (setting `parent_based_sampler: false`) if your router is exposed directly to the internet.
+
+### `propagation`
+
+The `telemetry.exporters.tracing.propagation` section allows you to configure which propagators are active in addition to those automatically activated by using an exporter.
+
+Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats, for example, OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters.
+
+For example: 
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       propagation:
+         # https://www.w3.org/TR/baggage/
+         baggage: false
+   
+         # https://www.datadoghq.com/
+         datadog: false
+   
+         # https://www.jaegertracing.io/ (compliant with opentracing)
+         jaeger: false
+   
+         # https://www.w3.org/TR/trace-context/
+         trace_context: false
+   
+         # https://zipkin.io/ (compliant with opentracing)
+         zipkin: false
+   
+         # https://aws.amazon.com/xray/ (compliant with opentracing)
+         aws_xray: false
+   
+         # If you have your own way to generate a trace id and you want to pass it via a custom request header
+         request:
+           header_name: my-trace-id
+```
+
+### Limits
+
+You may set limits on spans to prevent sending too much data to your APM. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       common:
+         max_attributes_per_event: 128
+         max_attributes_per_link: 128
+         max_attributes_per_span: 128
+         max_events_per_span: 128
+         max_links_per_span: 128
+```
+
+Attributes, events and links that exceed the limits are dropped silently.
+
+#### `max_attributes_per_event` 
+
+Events are used to describe something that happened in the context of a span. For example, an exception or a message sent. These events can have attributes that are key-value pairs that provide additional information to display via APM. 
+
+#### `max_attributes_per_link`
+
+Spans may link to other spans in the same or different trace. For example, a span may link to a parent span, or a span may link to a span in a different trace to represent that trace's parent. These links may have attributes that are key-value pairs that provide additional information to display via APM.
+
+#### `max_attributes_per_span`
+
+Spans are used to a activity in the context of a trace. For example, a request to a subgraph or a query planning. Spans can have attributes that are key-value pairs that provide additional information to display via APM.
+
+#### `max_events_per_span`
+
+Spans may have events that describe something that happened in the context of a span. For example, an exception or a message sent. The number of events per span can be limited to prevent spans becoming very large.
+
+#### `max_links_per_span`
+
+Spans may link to other spans in the same or different trace. For example, a span may link to a parent span, or a span may link to a span in a different trace to represent that trace's parent. The number of links per span can be limited to prevent spans becoming very large.
+
+### `experimental_response_trace_id`
+
+<ExperimentalFeature appendText="You can also give feedback in the [discussion on GitHub](https://github.com/apollographql/router/discussions/2147)." />
+
+If you want to expose in response headers the generated trace ID or the one you provided using propagation headers you can use this configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       experimental_response_trace_id:
+         enabled: true # default: false
+         header_name: "my-trace-id" # default: "apollo-trace-id"
+```
+Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
+
+#### `experimental_response_trace_id` reference
+
+| Attribute      | Default           | Description                                           |
+|----------------|-------------------|-------------------------------------------------------|
+| `enabled`      | `false`           | Set to true to return trace IDs on response headers.  |
+| `header_name`  | `apollo-trace-id` | The name of the header to respond with.               |
+
+
+
+## Tracing common reference
+
+| Attribute                        | Default                  | Description                                     |
+|----------------------------------|--------------------------|-------------------------------------------------|
+| `service_name`                   | `unknown_service:router` | The OpenTelemetry service name.                 |
+| `service_namespace`              |                          | The OpenTelemetry namespace.                    |
+| `resource`                       |                          | The OpenTelemetry resource to attach to traces. |
+| `experimental_response_trace_id` |                          | Return the trace ID in a response header.       |
+| `max_attributes_per_event`       | 128                      | The maximum number of attributes per event.     |
+| `max_attributes_per_link`        | 128                      | The maximum number of attributes per link.      |
+| `max_attributes_per_span`        | 128                      | The maximum number of attributes per span.      |
+| `max_events_per_span`            | 128                      | The maximum number of events per span.          |
+| `max_links_per_span`             | 128                      | The maximum links per span.                     |
+
+## Related topics
+
+* [Connecting OpenTelemetry traces to Prometheus](/technotes/TN0003-opentelemetry-traces-to-prometheus)
+* [Sending Apollo Router traces and metrics to APM tools using OpenTelemetry](/technotes/TN0015-router-to-apm-via-opentelemetry/)
