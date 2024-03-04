@@ -581,7 +581,9 @@ async fn handle_graphql(
         .get(ACCEPT_ENCODING)
         .cloned();
 
-    let res = service.oneshot(request).await;
+    let res = tokio::task::spawn(async move { service.oneshot(request).await })
+        .await
+        .expect("XXX: Fix later");
     let dur = context.busy_time();
     let processing_seconds = dur.as_secs_f64();
 
