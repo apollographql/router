@@ -175,12 +175,14 @@ where
                     let mut index = 0;
                     let mut carry_on = true;
                     while index < limit {
-                        // NOTE: Do not raise this limit about 1_024 for macOS without testing it works
-                        // correctly. This figure was determined experimentally by observing pauses in
-                        // logging during startup. If the figure goes above 1_024, you will get a 5s
-                        // pause during logging at startup on macOS. This may change in the future or
-                        // depending on your version of macOS, so we'll need to verify it a couple of
-                        // times a year to see if anything has changed.
+                        // NOTE: Now that the router is using non-blocking IO for logging, you must
+                        // not raise upper above 1_024 for macOS without testing it works correctly.
+                        // This figure was determined experimentally by observing pauses in logging
+                        // during startup. If the figure goes above 1_024, you will get a 5s pause
+                        // during logging at startup on macOS.
+                        // This may change in the future or depending on your version of macOS, so
+                        // we'll need to verify it a couple of times a year to see if anything has
+                        // changed.
                         #[cfg(target_os = "macos")]
                         let upper = index + std::cmp::min(limit - index, 1_024);
                         #[cfg(not(target_os = "macos"))]
