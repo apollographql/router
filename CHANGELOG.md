@@ -4,6 +4,42 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.41.0] - 2024-03-04
+
+## 🚀 Features
+
+### Use gzip compression when downloading Persisted Query manifests
+
+Router will now request gzip compression when downloading Persisted Query manifests for improved network efficiency.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4622
+
+## 🐛 Fixes
+
+### Implement streaming compression for subgraph requests ([Issue #4648](https://github.com/apollographql/router/issues/4648))
+
+This fixe subgraph HTTP requests to compress the body in streaming instead of loading it entirely in the compression engine before sending everything at once. This reuses the compression layer that the router uses to compress client responses.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4672
+
+### reactivate the OSX Intel builder ([PR #4723](https://github.com/apollographql/router/pull/4723))
+
+Cross compiling the router from ARM to x86 encounters issues with deno snapshots, so for now we will reactivate x86 builds for OSX on CircleCI
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4723
+
+### use a non blocking stdout and stderr ([Issue #4612](https://github.com/apollographql/router/issues/4612))
+
+If the router's output was piped into another process, and that process did not consume that output, it could entirely lock up the router. New connections were accepted, but requests never got an answer.
+This is due to Rust protecting stdout and stderr access by a lock, to prevent multiple threads from interleaving their writes. When the process receiving the output from the router does not consume, then the logger's writes to the stream start to block, which means the current thread is blocked while holding the lock. And then any other thread that might want to log something will end up blocked too, waiting for that lock to be released.
+
+This is fixed by  marking stdout and stderr as non blocking, which means that logs will be dropped silently when the buffer is full. This has another side effect that should be pointed out:
+**if we write to stdout or sdtderr directly without handling errors (example: using `println!` or `eprintln!`) while the output is not consumed, then the router will panic. While that may look concerning, we consider that panicking, which will immediately reject the in flight requests and may trigger a restart of the router, is a better outcome than the router amking requests hang indefinitely.**
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4625
+
+
+
 # [1.40.1] - 2024-02-16
 
 ## 🐛 Fixes
