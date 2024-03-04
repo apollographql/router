@@ -511,6 +511,8 @@ impl Executable {
         result
     }
 
+    /// Returns a builder that can parse command-line options and run a Router
+    /// in an existing Tokio runtime and be used to test rhai code.
     #[builder(entry = "builder_rhai", exit = "start_rhai", visibility = "pub")]
     async fn start_rhai(
         _shutdown: Option<ShutdownSource>,
