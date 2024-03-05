@@ -261,7 +261,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_batching: Batching,
-            experimental_type_conditioned_fetching: bool
+            experimental_type_conditioned_fetching: bool,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
