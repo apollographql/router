@@ -374,6 +374,59 @@ async fn it_supports_compression() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn it_supports_non_nullable_file() -> Result<(), BoxError> {
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
+
+    // Construct a manual request for non nullable checks
+    let request = Form::new()
+        .part(
+            "operations",
+            Part::text(
+                serde_json::json!({
+                    "query": "mutation SomeMutation($file0: Upload!) {
+                        file0: singleUploadNonNull(file: $file0) { filename body }
+                    }",
+                    "variables": {
+                        "file0": null,
+                    },
+                })
+                .to_string(),
+            ),
+        )
+        .part(
+            "map",
+            Part::text(
+                serde_json::json!({
+                    "0": ["variables.file0"],
+                })
+                .to_string(),
+            ),
+        )
+        .part("0", Part::text("file0 contents").file_name("file0"));
+
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG)
+        .handler(make_handler!(helper::echo_single_file))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|request| {
+            insta::assert_json_snapshot!(request, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "file0",
+                  "body": "file0 contents"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn it_supports_nested_file() -> Result<(), BoxError> {
     use reqwest::multipart::Form;
     use reqwest::multipart::Part;

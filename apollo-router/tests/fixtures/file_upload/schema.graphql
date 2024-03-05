@@ -82,6 +82,7 @@ type Mutation
   @join__type(graph: UPLOADS_CLONE)
 {
   singleUpload(file: Upload): File @join__field(graph: UPLOADS)
+  singleUploadNonNull(file: Upload!): File! @join__field(graph: UPLOADS)
   singleUploadClone(file: UploadClone): FileClone @join__field(graph: UPLOADS_CLONE)
   multiUpload(files: [Upload!]!): [File!]! @join__field(graph: UPLOADS)
   nestedUpload(nested: NestedUpload): File @join__field(graph: UPLOADS)
