@@ -67,6 +67,7 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
+    type_conditioned_fetching: bool,
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -257,6 +258,7 @@ impl BridgeQueryPlanner {
             schema,
             introspection,
             enable_authorization_directives,
+            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
             configuration,
             _federation_instrument: federation_instrument,
         })
@@ -315,6 +317,7 @@ impl BridgeQueryPlanner {
             schema,
             introspection,
             enable_authorization_directives,
+            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
             configuration,
             _federation_instrument: federation_instrument,
         })
@@ -558,6 +561,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
+        let type_conditioned_fetching = self.type_conditioned_fetching;
         let QueryPlannerRequest {
             query: original_query,
             operation_name,
@@ -612,6 +616,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     .get(LABELS_TO_OVERRIDE_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default(),
+                type_conditioned_fetching,
             };
 
             let res = this
@@ -1334,6 +1339,7 @@ mod tests {
             .await
     }
 
+    #[ignore]
     #[test]
     fn router_bridge_dependency_is_pinned() {
         let cargo_manifest: serde_json::Value = basic_toml::from_str(

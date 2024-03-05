@@ -1341,6 +1341,11 @@ expression: "&schema"
         }
       ]
     },
+    "experimental_type_conditioned_fetching": {
+      "description": "Type conditioned fetching configuration. If you don't know what this is about, you probably don't need it.",
+      "default": false,
+      "type": "boolean"
+    },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
       "type": "boolean"

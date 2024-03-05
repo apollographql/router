@@ -57,6 +57,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
+    type_conditioned_fetching: bool,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -91,6 +92,7 @@ where
             schema,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
+            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
         })
     }
 
@@ -301,6 +303,7 @@ where
                 .get(LABELS_TO_OVERRIDE_KEY)
                 .unwrap_or_default()
                 .unwrap_or_default(),
+            type_conditioned_fetching: self.type_conditioned_fetching,
         };
 
         let caching_key = CachingQueryKey {

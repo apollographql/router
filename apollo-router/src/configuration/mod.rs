@@ -191,6 +191,11 @@ pub struct Configuration {
     /// Batching configuration.
     #[serde(default)]
     pub(crate) experimental_batching: Batching,
+
+    /// Type conditioned fetching configuration.
+    /// If you don't know what this is about, you probably don't need it.
+    #[serde(default)]
+    pub(crate) experimental_type_conditioned_fetching: bool,
 }
 
 impl PartialEq for Configuration {
@@ -313,6 +318,7 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_batching: Option<Batching>,
+        experimental_type_conditioned_fetching: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -354,6 +360,7 @@ impl Configuration {
             #[cfg(not(test))]
             notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
                 .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching.unwrap_or_default()
         };
 
         conf.validate()
@@ -389,6 +396,7 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        experimental_type_conditioned_fetching: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -414,6 +422,8 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
             experimental_batching: experimental_batching.unwrap_or_default(),
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
+                .unwrap_or_default(),
         };
 
         configuration.validate()
