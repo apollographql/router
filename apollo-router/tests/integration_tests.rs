@@ -663,12 +663,12 @@ async fn missing_variables() {
     let mut expected = vec![
         graphql::Error::builder()
             .message("invalid type for variable: 'missingVariable'")
-            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
+            .extension_code("GRAPHQL_VALIDATION_FAILED")
             .extension("name", "missingVariable")
             .build(),
         graphql::Error::builder()
             .message("invalid type for variable: 'yetAnotherMissingVariable'")
-            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
+            .extension_code("GRAPHQL_VALIDATION_FAILED")
             .extension("name", "yetAnotherMissingVariable")
             .build(),
     ];
