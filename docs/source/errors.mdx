@@ -26,7 +26,7 @@ Used an unallowed HTTP method. Both mutations and subscriptions must use POST.
 </Property>
 <Property name="406" short="Not acceptable">
 
-A query's Accept header doesn't match one of the supported content types: 
+A query's HTTP `Accept` header doesn't contain any of the Router's supported mime-types: 
 - `application/json`
 - `application/graphql-response+json`
 - `multipart/mixed;deferSpec=20220824`
