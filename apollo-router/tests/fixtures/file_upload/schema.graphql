@@ -64,6 +64,12 @@ type FileClone
   body: String!
 }
 
+input NestedUpload
+  @join__type(graph: UPLOADS)
+{
+  file: Upload!
+}
+
 type Query
   @join__type(graph: UPLOADS)
   @join__type(graph: UPLOADS_CLONE)
@@ -77,4 +83,6 @@ type Mutation
 {
   singleUpload(file: Upload): File @join__field(graph: UPLOADS)
   singleUploadClone(file: UploadClone): FileClone @join__field(graph: UPLOADS_CLONE)
+  multiUpload(files: [Upload!]!): [File!]! @join__field(graph: UPLOADS)
+  nestedUpload(nested: NestedUpload): File @join__field(graph: UPLOADS)
 }

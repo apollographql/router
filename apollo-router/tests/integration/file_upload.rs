@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use bytes::Bytes;
 use http::header::CONTENT_ENCODING;
@@ -367,6 +366,132 @@ async fn it_supports_compression() -> Result<(), BoxError> {
                   "filename": "compressed.txt",
                   "body": "compression saves space sometimes!"
                 }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_supports_nested_file() -> Result<(), BoxError> {
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
+
+    // Construct a manual request that sets up a nested structure containing a file to upload
+    let request = Form::new()
+        .part(
+            "operations",
+            Part::text(
+                serde_json::json!({
+                    "query": "mutation SomeMutation($file0: NestedUpload) {
+                        file0: nestedUpload(nested: $file0) { filename body }
+                    }",
+                    "variables": {
+                        "file0": {
+                            "file": null,
+                        },
+                    },
+                })
+                .to_string(),
+            ),
+        )
+        .part(
+            "map",
+            Part::text(
+                serde_json::json!({
+                    "0": ["variables.file0.file"],
+                })
+                .to_string(),
+            ),
+        )
+        .part("0", Part::text("file0 contents").file_name("file0"));
+
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG)
+        .handler(make_handler!(helper::echo_single_file))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|request| {
+            insta::assert_json_snapshot!(request, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "file0",
+                  "body": "file0 contents"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_supports_nested_file_list() -> Result<(), BoxError> {
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
+
+    // Construct a manual request that sets up a nested structure containing a file to upload
+    let request = Form::new()
+        .part(
+            "operations",
+            Part::text(
+                serde_json::json!({
+                    "query": "mutation SomeMutation($files: [Upload!]!) {
+                        files: multiUpload(files: $files) { filename body }
+                    }",
+                    "variables": {
+                        "files": {
+                            "0": null,
+                            "1": null,
+                            "2": null,
+                        },
+                    },
+                })
+                .to_string(),
+            ),
+        )
+        .part(
+            "map",
+            Part::text(
+                serde_json::json!({
+                    "0": ["variables.files.0"],
+                    "1": ["variables.files.1"],
+                    "2": ["variables.files.2"],
+                })
+                .to_string(),
+            ),
+        )
+        .part("0", Part::text("file0 contents").file_name("file0"))
+        .part("1", Part::text("file1 contents").file_name("file1"))
+        .part("2", Part::text("file2 contents").file_name("file2"));
+
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG)
+        .handler(make_handler!(helper::echo_file_list))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|request| {
+            insta::assert_json_snapshot!(request, @r###"
+            {
+              "data": {
+                "files": [
+                  {
+                    "filename": "file0",
+                    "body": "file0 contents"
+                  },
+                  {
+                    "filename": "file1",
+                    "body": "file1 contents"
+                  },
+                  {
+                    "filename": "file2",
+                    "body": "file2 contents"
+                  }
+                ]
               }
             }
             "###);
@@ -889,6 +1014,9 @@ mod helper {
         #[error("expected a file with name '{0}' but found nothing")]
         MissingFile(String),
 
+        #[error("expected a list of files but found nothing")]
+        MissingList,
+
         #[error("expected a set of mappings but found nothing")]
         MissingMapping,
 
@@ -1068,6 +1196,69 @@ mod helper {
 
         Ok(Json(json!({
             "data": files
+        })))
+    }
+
+    /// Handler that echos back the contents of the list of files that it receives
+    pub async fn echo_file_list(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (operation, map, mut multipart) = decode_request(&mut request).await?;
+
+        // Make sure that we have some mappings
+        if map.is_empty() {
+            return Err(FileUploadError::MissingMapping);
+        }
+
+        // Make sure that we have one list input
+        let file_list = {
+            let Some((_, list)) = operation.variables.first_key_value() else {
+                return Err(FileUploadError::MissingList);
+            };
+
+            let Some(list) = list.as_object() else {
+                return Err(FileUploadError::MissingList);
+            };
+
+            list
+        };
+
+        // Make sure that the list has the correct amount of slots for the files
+        if file_list.len() != map.len() {
+            return Err(FileUploadError::VariableMismatch(
+                map.len(),
+                file_list.len(),
+            ));
+        }
+
+        // Extract all of the files
+        let mut files = Vec::new();
+        for file_mapping in map.into_keys() {
+            let f = multipart
+                .next_field()
+                .await?
+                .ok_or(FileUploadError::MissingFile(file_mapping.clone()))?;
+
+            let field_name = f
+                .name()
+                .and_then(|name| (name == file_mapping).then_some(name))
+                .ok_or(FileUploadError::UnexpectedField(
+                    file_mapping,
+                    f.name().map(String::from),
+                ))?;
+            let file_name = f.file_name().unwrap_or(field_name).to_string();
+            let body = f.bytes().await?;
+
+            files.push(
+                Upload {
+                    filename: Some(file_name),
+                    body: Some(String::from_utf8_lossy(&body).to_string()),
+                },
+            );
+        }
+
+        Ok(Json(json!({
+            "data": {
+                "files": files,
+            },
         })))
     }
 
