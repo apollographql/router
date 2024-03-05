@@ -1,7 +1,7 @@
 //! An assembly of utility functions and core structures used to implement batching support within
 //! the router.
 //!
-//! Apart from the core batching functionality, as expressed in `BatchQuery` and
+//! In addition to the core batching functionality, as expressed in `BatchQuery` and
 //! `Batch`, there are a series of utility functions for efficiently converting
 //! graphql Requests to/from batch representation in a variety of formats: JSON, bytes
 
