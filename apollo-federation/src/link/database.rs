@@ -374,7 +374,7 @@ mod tests {
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
             // TODO Multiple errors
-            insta::assert_display_snapshot!(errors, @r###"Invalid use of @link in schema: invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: "<importedElement>", as: "<alias>" }."###);
+            insta::assert_snapshot!(errors, @r###"Invalid use of @link in schema: invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: "<importedElement>", as: "<alias>" }."###);
         }
 
         #[test]
@@ -399,7 +399,7 @@ mod tests {
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
             // TODO Multiple errors
-            insta::assert_display_snapshot!(errors, @"Invalid use of @link in schema: invalid alias 'myKey' for import name '@key': should start with '@' since the imported name does");
+            insta::assert_snapshot!(errors, @"Invalid use of @link in schema: invalid alias 'myKey' for import name '@key': should start with '@' since the imported name does");
         }
 
         // TODO Implement
@@ -422,7 +422,7 @@ mod tests {
 
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
-            insta::assert_display_snapshot!(errors, @"");
+            insta::assert_snapshot!(errors, @"");
         }
         */
     }

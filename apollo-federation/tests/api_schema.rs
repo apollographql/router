@@ -65,7 +65,7 @@ fn inaccessible_types_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Type `Query` is @inaccessible but is the query root type, which must be in the API schema.
@@ -193,7 +193,7 @@ fn inaccessible_interface_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Type `Interface` is @inaccessible but is referenced by `Referencer1.someField`, which is in the API schema.
@@ -310,7 +310,7 @@ fn inaccessible_union_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Type `Union` is @inaccessible but is referenced by `Referencer1.someField`, which is in the API schema.
@@ -413,7 +413,7 @@ fn inaccessible_input_object_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Type `InputObject` is @inaccessible but is referenced by `Referencer3.someField`, which is in the API schema.
@@ -588,7 +588,7 @@ fn inaccessible_enum_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Type `Enum` is @inaccessible but is referenced by `Referencer1.somefield`, which is in the API schema.
@@ -796,7 +796,7 @@ fn inaccessible_scalar_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Type `Scalar` is @inaccessible but is referenced by `Referencer1.somefield`, which is in the API schema.
@@ -1001,7 +1001,7 @@ fn inaccessible_object_field_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Type `Query` is in the API schema but all of its members are @inaccessible.
@@ -1124,7 +1124,7 @@ fn inaccessible_interface_field_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Field `Interface.privateField` is @inaccessible but implements the interface field `Referencer1.privateField`, which is in the API schema.
@@ -1211,7 +1211,7 @@ fn inaccessible_object_field_arguments_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Argument `Object.someField(privateArg:)` is @inaccessible but implements the interface argument `Referencer1.someField(privateArg:)` which is in the API schema.
@@ -1360,7 +1360,7 @@ fn inaccessible_interface_field_arguments_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Argument `Interface.someField(privateArg:)` is @inaccessible but implements the interface argument `Referencer1.someField(privateArg:)` which is in the API schema.
@@ -1538,7 +1538,7 @@ fn inaccessible_input_object_fields_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `Referencer1.someField(someArg:)`, which is in the API schema.
@@ -1747,7 +1747,7 @@ fn inaccessible_enum_values_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Referencer1.someField(someArg:)`, which is in the API schema.
@@ -1944,7 +1944,7 @@ fn inaccessible_complex_default_values() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Input field `NestedInputObject.privateField` is @inaccessible but is used in the default value of `Query.someField(arg1:)`, which is in the API schema.
@@ -1974,7 +1974,7 @@ fn inaccessible_enum_value_as_string() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Query.someField(arg1:)`, which is in the API schema.
@@ -2001,7 +2001,7 @@ fn inaccessible_directive_arguments_with_accessible_references() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Argument `@directiveRequired(privateArg:)` is @inaccessible but is a required argument of its directive.
@@ -2056,7 +2056,7 @@ fn inaccessible_directive_on_schema_elements() {
     )
     .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Directive `@foo` cannot use @inaccessible because it may be applied to these type-system locations: OBJECT
@@ -2085,7 +2085,7 @@ fn inaccessible_on_builtins() {
     .expect_err("should return validation errors");
 
     // Note this is different from the JS implementation
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - built-in scalar definitions must be omitted
@@ -2185,7 +2185,7 @@ fn inaccessible_on_imported_elements() {
         .to_api_schema(Default::default())
         .expect_err("should return validation errors");
 
-    insta::assert_display_snapshot!(errors, @r###"
+    insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
 
       - Core feature type `link__Purpose` cannot use @inaccessible.
@@ -2248,7 +2248,7 @@ fn propagates_default_input_values() {
     )
     .expect("should succeed");
 
-    insta::assert_display_snapshot!(api_schema, @r###"
+    insta::assert_snapshot!(api_schema, @r###"
     type Query {
       field(input: Input = {one: 0, nested: {one: 2, two: 2, default: "default"}, two: 2, three: 3, object: {value: 2}, nestedWithDefault: {one: 1, two: 2, default: "default"}}): Int
     }
@@ -2295,7 +2295,7 @@ fn matches_graphql_js_directive_applications() {
     )
     .expect("should succeed");
 
-    insta::assert_display_snapshot!(api_schema, @r###"
+    insta::assert_snapshot!(api_schema, @r###"
         type Query {
           a: Int @deprecated
           b: Int
@@ -2327,7 +2327,7 @@ fn matches_graphql_js_default_value_propagation() {
     )
     .expect("should succeed");
 
-    insta::assert_display_snapshot!(api_schema, @r###"
+    insta::assert_snapshot!(api_schema, @r###"
     type Query {
       defaultShouldBeRemoved(arg: OneRequiredOneDefault): Int
       defaultShouldHavePropagatedValues(arg: OneOptionalOneDefault = {defaulted: false}): Int
@@ -2375,7 +2375,7 @@ fn remove_referencing_directive_argument() {
     )
     .expect("should succeed");
 
-    insta::assert_display_snapshot!(api_schema, @r###"
+    insta::assert_snapshot!(api_schema, @r###"
     type Query {
       a: Int
     }
@@ -2398,7 +2398,7 @@ fn include_supergraph_directives() -> Result<(), FederationError> {
         include_stream: true,
     })?;
 
-    insta::assert_display_snapshot!(api_schema, @r###"
+    insta::assert_snapshot!(api_schema, @r###"
     directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
     directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD

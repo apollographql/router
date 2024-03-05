@@ -23,7 +23,7 @@ thiserror = "1.0"
 url = "2"
 
 [dev-dependencies]
-insta = { version = "1.34.0", features = ["yaml"] }
+insta = { version = "1.36.0", features = ["yaml"] }
 
 [[test]]
 name = "main"
