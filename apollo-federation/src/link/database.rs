@@ -1,33 +1,44 @@
+use apollo_compiler::ast::{Directive, DirectiveLocation};
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::{ty, Schema};
+use std::borrow::Cow;
 use std::{collections::HashMap, sync::Arc};
-
-use apollo_compiler::ast::{Directive, DirectiveLocation, Type};
-use apollo_compiler::Schema;
 
 use crate::link::{
     spec::{Identity, Url},
     {Link, LinkError, LinksMetadata, DEFAULT_LINK_NAME},
 };
 
+/// Extract @link metadata from a schema.
 pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkError> {
+    // This finds "bootstrap" uses of @link / @core regardless of order. By spec,
+    // the bootstrap directive application must be the first application of @link / @core, but
+    // this was not enforced by the JS implementation, so we match it for backward compatibility.
     let mut bootstrap_directives = schema
         .schema_definition
         .directives
         .iter()
-        .filter(|d| parse_link_if_bootstrap_directive(schema, d));
-    let bootstrap_directive = bootstrap_directives.next();
-    if bootstrap_directive.is_none() {
+        .filter(|d| is_bootstrap_directive(schema, d));
+    let Some(bootstrap_directive) = bootstrap_directives.next() else {
         return Ok(None);
-    }
-    // We have _a_ bootstrap directives, but 2 is more than we bargained for.
-    if bootstrap_directives.next().is_some() {
+    };
+    // There must be exactly one bootstrap directive.
+    if let Some(extraneous_directive) = bootstrap_directives.next() {
         return Err(LinkError::BootstrapError(format!(
             "the @link specification itself (\"{}\") is applied multiple times",
-            Identity::link_identity()
+            extraneous_directive
+                .argument_by_name("url")
+                // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests in other projects,
+                // and should be removed when those are updated.
+                .or(extraneous_directive.argument_by_name("feature"))
+                .and_then(|value| value.as_str().map(Cow::Borrowed))
+                .unwrap_or_else(|| Cow::Owned(Identity::link_identity().to_string()))
         )));
     }
+
     // At this point, we know this schema uses "our" @link. So we now "just" want to validate
     // all of the @link usages (starting with the bootstrapping one) and extract their metadata.
-    let link_name_in_schema = &bootstrap_directive.unwrap().name;
+    let link_name_in_schema = &bootstrap_directive.name;
     let mut links = Vec::new();
     let mut by_identity = HashMap::new();
     let mut by_name_in_schema = HashMap::new();
@@ -106,31 +117,66 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     }))
 }
 
-// Note: currently only recognizing @link, not @core. Doesn't feel worth bothering with @core at
-// this point, but the latter uses the "feature" arg instead of "url".
-fn parse_link_if_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
-    if let Some(definition) = schema.directive_definitions.get(&directive.name) {
-        let locations = &definition.locations;
-        let is_correct_def = definition.repeatable
-            && locations.len() == 1
-            && locations[0] == DirectiveLocation::Schema;
-        let is_correct_def = is_correct_def
-            && definition.arguments.iter().any(|arg| {
-                arg.name == "as" && matches!(&*arg.ty, Type::Named(name) if name == "String")
-            });
-        let is_correct_def = is_correct_def && definition.arguments.iter().any(|arg| {
-            arg.name == "url" && {
-                // The "true" type of `url` in the @link spec is actually `String` (nullable), and this
+/// Returns true if the given definition matches the @link definition.
+///
+/// Either of these definitions are accepted:
+/// ```graphql
+/// directive @_ANY_NAME_(url: String!, as: String) repeatable on SCHEMA
+/// directive @_ANY_NAME_(url: String, as: String) repeatable on SCHEMA
+/// ```
+fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
+    definition.repeatable
+        && definition.locations == [DirectiveLocation::Schema]
+        && definition.argument_by_name("url").is_some_and(|argument| {
+            // The "true" type of `url` in the @link spec is actually `String` (nullable), and this
+            // for future-proofing reasons (the idea was that we may introduce later other
+            // ways to identify specs that are not urls). But we allow the definition to
+            // have a non-nullable type both for convenience and because some early
+            // federation previews actually generated that.
+            *argument.ty == ty!(String!) || *argument.ty == ty!(String)
+        })
+        && definition
+            .argument_by_name("as")
+            .is_some_and(|argument| *argument.ty == ty!(String))
+}
+
+/// Returns true if the given definition matches the @core definition.
+///
+/// Either of these definitions are accepted:
+/// ```graphql
+/// directive @_ANY_NAME_(feature: String!, as: String) repeatable on SCHEMA
+/// directive @_ANY_NAME_(feature: String, as: String) repeatable on SCHEMA
+/// directive @_ANY_NAME_(feature: String!) repeatable on SCHEMA
+/// directive @_ANY_NAME_(feature: String) repeatable on SCHEMA
+/// ```
+fn is_core_directive_definition(definition: &DirectiveDefinition) -> bool {
+    // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
+    // removed when those are updated.
+    definition.repeatable
+        && definition.locations == [DirectiveLocation::Schema]
+        && definition
+            .argument_by_name("feature")
+            .is_some_and(|argument| {
+                // The "true" type of `url` in the @core spec is actually `String` (nullable), and this
                 // for future-proofing reasons (the idea was that we may introduce later other
                 // ways to identify specs that are not urls). But we allow the definition to
                 // have a non-nullable type both for convenience and because some early
                 // federation previews actually generated that.
-                matches!(&*arg.ty, Type::Named(name) | Type::NonNullNamed(name) if name == "String")
-            }
-        });
-        if !is_correct_def {
-            return false;
-        }
+                *argument.ty == ty!(String!) || *argument.ty == ty!(String)
+            })
+        && definition
+            .argument_by_name("as")
+            // Definition may be omitted in old graphs
+            .map_or(true, |argument| *argument.ty == ty!(String))
+}
+
+/// Returns whether a given directive is the @link or @core directive that imports the @link or
+/// @core spec.
+fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
+    let Some(definition) = schema.directive_definitions.get(&directive.name) else {
+        return false;
+    };
+    if is_link_directive_definition(definition) {
         if let Some(url) = directive
             .argument_by_name("url")
             .and_then(|value| value.as_str())
@@ -145,7 +191,23 @@ fn parse_link_if_bootstrap_directive(schema: &Schema, directive: &Directive) -> 
                 url.identity == Identity::link_identity() && directive.name == expected_name
             });
         }
-    }
+    } else if is_core_directive_definition(definition) {
+        // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
+        // removed when those are updated.
+        if let Some(url) = directive
+            .argument_by_name("feature")
+            .and_then(|value| value.as_str())
+        {
+            let url = url.parse::<Url>();
+            let expected_name = directive
+                .argument_by_name("as")
+                .and_then(|value| value.as_str())
+                .unwrap_or("core");
+            return url.map_or(false, |url| {
+                url.identity == Identity::core_identity() && directive.name == expected_name
+            });
+        }
+    };
     false
 }
 
@@ -186,6 +248,74 @@ mod tests {
 
         assert!(meta
             .source_link_of_directive(&name!("inaccessible"))
+            .is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn renamed_link_directive() -> Result<(), LinkError> {
+        let schema = r#"
+          extend schema
+            @lonk(url: "https://specs.apollo.dev/link/v1.0", as: "lonk")
+            @lonk(url: "https://specs.apollo.dev/inaccessible/v0.2")
+
+          type Query { x: Int }
+
+          enum lonk__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          scalar lonk__Import
+
+          directive @lonk(url: String!, as: String, import: [lonk__Import], for: lonk__Purpose) repeatable on SCHEMA
+        "#;
+
+        let schema = Schema::parse(schema, "lonk.graphqls").unwrap();
+
+        let meta = links_metadata(&schema)?.expect("should have metadata");
+        assert!(meta
+            .source_link_of_directive(&name!("inaccessible"))
+            .is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn renamed_core_directive() -> Result<(), LinkError> {
+        let schema = r#"
+          extend schema
+            @care(feature: "https://specs.apollo.dev/core/v0.2", as: "care")
+            @care(feature: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+
+          directive @care(feature: String!, as: String, for: core__Purpose) repeatable on SCHEMA
+          directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+          directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+          directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+          directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+          type Query { x: Int }
+
+          enum care__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          scalar care__Import
+
+          scalar join__FieldSet
+
+          enum join__Graph {
+            USERS @join__graph(name: "users", url: "http://localhost:4001")
+          }
+        "#;
+
+        let schema = Schema::parse(schema, "care.graphqls").unwrap();
+
+        let meta = links_metadata(&schema)?.expect("should have metadata");
+        assert!(meta
+            .source_link_of_directive(&name!("join__graph"))
             .is_some());
 
         Ok(())

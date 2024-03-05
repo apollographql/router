@@ -51,7 +51,7 @@ pub enum Purpose {
 }
 
 impl Purpose {
-    pub fn from_ast_value(value: &Value) -> Result<Purpose, LinkError> {
+    pub fn from_value(value: &Value) -> Result<Purpose, LinkError> {
         if let Value::Enum(value) = value {
             Ok(value.parse::<Purpose>()?)
         } else {
@@ -111,7 +111,7 @@ pub struct Import {
 }
 
 impl Import {
-    pub fn from_hir_value(value: &Value) -> Result<Import, LinkError> {
+    pub fn from_value(value: &Value) -> Result<Import, LinkError> {
         // TODO: it could be nice to include the broken value in the error messages of this method
         // (especially since @link(import:) is a list), but `Value` does not implement `Display`
         // currently, so a bit annoying.
@@ -263,34 +263,56 @@ impl Link {
     }
 
     pub fn from_directive_application(directive: &Node<Directive>) -> Result<Link, LinkError> {
-        let url = directive
-            .argument_by_name("url")
-            .and_then(|arg| arg.as_str())
-            .ok_or(LinkError::BootstrapError(
+        let (url, is_link) = if let Some(value) = directive.argument_by_name("url") {
+            (value, true)
+        } else if let Some(value) = directive.argument_by_name("feature") {
+            // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
+            // removed when those are updated.
+            (value, false)
+        } else {
+            return Err(LinkError::BootstrapError(
                 "the `url` argument for @link is mandatory".to_string(),
-            ))?;
-        let url: Url = url.parse::<Url>().map_err(|e| {
-            LinkError::BootstrapError(format!("invalid `url` argument (reason: {})", e))
+            ));
+        };
+
+        let (directive_name, arg_name) = if is_link {
+            ("link", "url")
+        } else {
+            ("core", "feature")
+        };
+
+        let url = url.as_str().ok_or_else(|| {
+            LinkError::BootstrapError(format!(
+                "the `{arg_name}` argument for @{directive_name} must be a String"
+            ))
         })?;
+        let url: Url = url.parse::<Url>().map_err(|e| {
+            LinkError::BootstrapError(format!("invalid `{arg_name}` argument (reason: {e})"))
+        })?;
+
         let spec_alias = directive
             .argument_by_name("as")
             .and_then(|arg| arg.as_node_str())
             .map(Name::new)
             .transpose()?;
         let purpose = if let Some(value) = directive.argument_by_name("for") {
-            Some(Purpose::from_ast_value(value)?)
+            Some(Purpose::from_value(value)?)
         } else {
             None
         };
-        let mut imports = Vec::new();
-        if let Some(values) = directive
-            .argument_by_name("import")
-            .and_then(|arg| arg.as_list())
-        {
-            for v in values {
-                imports.push(Arc::new(Import::from_hir_value(v)?));
-            }
+
+        let imports = if is_link {
+            directive
+                .argument_by_name("import")
+                .and_then(|arg| arg.as_list())
+                .unwrap_or(&[])
+                .iter()
+                .map(|value| Ok(Arc::new(Import::from_value(value)?)))
+                .collect::<Result<Vec<Arc<Import>>, LinkError>>()?
+        } else {
+            Default::default()
         };
+
         Ok(Link {
             url,
             spec_alias,

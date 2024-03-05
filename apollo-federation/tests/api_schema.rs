@@ -2410,3 +2410,53 @@ fn include_supergraph_directives() -> Result<(), FederationError> {
 
     Ok(())
 }
+
+#[test]
+fn supports_core_directive_supergraph() {
+    let sdl = r#"
+schema
+  @core(feature: "https://specs.apollo.dev/core/v0.2")
+  @core(feature: "https://specs.apollo.dev/join/v0.2")
+{
+  query: Query
+}
+
+directive @core(feature: String!, as: String) repeatable on SCHEMA
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+) on FIELD_DEFINITION
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+) repeatable on OBJECT | INTERFACE
+
+directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+scalar join__FieldSet
+
+enum join__Graph {
+  ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001/graphql")
+}
+
+type Query {
+  me: String
+}
+    "#;
+
+    let graph = Supergraph::new(sdl).expect("should succeed");
+    let api_schema = graph
+        .to_api_schema(Default::default())
+        .expect("should succeed");
+
+    insta::assert_snapshot!(api_schema, @r###"
+    type Query {
+      me: String
+    }
+    "###);
+}
