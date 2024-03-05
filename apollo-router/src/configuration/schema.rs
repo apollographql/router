@@ -246,7 +246,8 @@ pub(crate) fn validate_yaml_configuration(
         .keys()
         .filter(|ap_name| {
             let ap_name = ap_name.as_str();
-            ap_name != "server" && ap_name != "plugins" && !apollo_plugin_names.contains(&ap_name)
+            // TODO[igni]: there's 100% a better way to do this.
+            ap_name != "experimental_type_conditioned_fetching" && ap_name != "server" && ap_name != "plugins" && !apollo_plugin_names.contains(&ap_name)
         })
         .collect();
 
