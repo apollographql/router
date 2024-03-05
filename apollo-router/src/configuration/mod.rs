@@ -261,6 +261,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_batching: Batching,
+            experimental_type_conditioned_fetching: bool
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -280,6 +281,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .experimental_batching(ad_hoc.experimental_batching)
+            .experimental_type_conditioned_fetching(ad_hoc.experimental_type_conditioned_fetching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }

@@ -246,12 +246,15 @@ pub(crate) fn validate_yaml_configuration(
         .keys()
         .filter(|ap_name| {
             let ap_name = ap_name.as_str();
-            // TODO[igni]: there's 100% a better way to do this.
-            ap_name != "experimental_type_conditioned_fetching" && ap_name != "server" && ap_name != "plugins" && !apollo_plugin_names.contains(&ap_name)
+            ap_name != "server" && ap_name != "plugins" && !apollo_plugin_names.contains(&ap_name)
         })
         .collect();
 
     if !unknown_fields.is_empty() {
+        // If you end up here while contributing,
+        // It might mean you forgot to update
+        // `impl<'de> serde::Deserialize<'de> for Configuration
+        // In `/apollo-router/src/configuration/mod.rs`
         return Err(ConfigurationError::InvalidConfiguration {
             message: "unknown fields",
             error: format!(
