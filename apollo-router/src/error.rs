@@ -160,7 +160,7 @@ impl FetchError {
 impl ErrorExtension for FetchError {
     fn extension_code(&self) -> String {
         match self {
-            FetchError::ValidationInvalidTypeVariable { .. } => "VALIDATION_INVALID_TYPE_VARIABLE",
+            FetchError::ValidationInvalidTypeVariable { .. } => "GRAPHQL_VALIDATION_FAILED",
             FetchError::ValidationPlanningError { .. } => "VALIDATION_PLANNING_ERROR",
             FetchError::SubrequestMalformedResponse { .. } => "SUBREQUEST_MALFORMED_RESPONSE",
             FetchError::SubrequestUnexpectedPatchResponse { .. } => {
