@@ -646,7 +646,8 @@ mod tests {
                     usage_reporting: UsageReporting {
                         stats_report_key: "this is a test report key".to_string(),
                         referenced_fields_by_type: Default::default(),
-                    }.into(),
+                    }
+                    .into(),
                     query: Arc::new(Query::empty()),
                 };
                 let qp_content = QueryPlannerContent::Plan {

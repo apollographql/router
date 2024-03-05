@@ -46,10 +46,12 @@ impl QueryPlan {
         usage_reporting: Option<UsageReporting>,
     ) -> Self {
         Self {
-            usage_reporting: usage_reporting.unwrap_or_else(|| UsageReporting {
-                stats_report_key: "this is a test report key".to_string(),
-                referenced_fields_by_type: Default::default(),
-            }).into(),
+            usage_reporting: usage_reporting
+                .unwrap_or_else(|| UsageReporting {
+                    stats_report_key: "this is a test report key".to_string(),
+                    referenced_fields_by_type: Default::default(),
+                })
+                .into(),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
