@@ -1200,7 +1200,9 @@ mod helper {
     }
 
     /// Handler that echos back the contents of the list of files that it receives
-    pub async fn echo_file_list(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+    pub async fn echo_file_list(
+        mut request: Request<Body>,
+    ) -> Result<Json<Value>, FileUploadError> {
         let (operation, map, mut multipart) = decode_request(&mut request).await?;
 
         // Make sure that we have some mappings
@@ -1247,12 +1249,10 @@ mod helper {
             let file_name = f.file_name().unwrap_or(field_name).to_string();
             let body = f.bytes().await?;
 
-            files.push(
-                Upload {
-                    filename: Some(file_name),
-                    body: Some(String::from_utf8_lossy(&body).to_string()),
-                },
-            );
+            files.push(Upload {
+                filename: Some(file_name),
+                body: Some(String::from_utf8_lossy(&body).to_string()),
+            });
         }
 
         Ok(Json(json!({
