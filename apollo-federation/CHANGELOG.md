@@ -17,6 +17,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Maintenance
 ## Documentation-->
 
+# [0.0.8](https://crates.io/crates/apollo-federation/0.0.8) - 2024-03-06
+
+## Features
+- Support legacy `@core` link syntax, by [goto-bus-stop] in [pull/224]  
+  This is not meant to be a long term feature, `@core()` is not intended
+  to be supported in most of the codebase.
+- Continued work on core query planning implementation, by [SimonSapin], [goto-bus-stop] in [pull/172], [pull/175]
+
+## Maintenance
+- `@link(url: String!)` argument is non-null, by [SimonSapin] in [pull/220]
+- Enable operation normalization tests using `@defer`, by [goto-bus-stop] in [pull/224]
+
+[SimonSapin]: https://github.com/SimonSapin
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[pull/172]: https://github.com/apollographql/federation-next/pull/172
+[pull/175]: https://github.com/apollographql/federation-next/pull/175
+[pull/220]: https://github.com/apollographql/federation-next/pull/220
+[pull/223]: https://github.com/apollographql/federation-next/pull/223
+[pull/224]: https://github.com/apollographql/federation-next/pull/224
+
 # [0.0.7](https://crates.io/crates/apollo-federation/0.0.7) - 2024-02-22
 
 ## Features
