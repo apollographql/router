@@ -117,16 +117,13 @@ impl Schema {
                     return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                 }
                 // there is noi standard for unix socket URLs apparently
-                let url = if url.starts_with("unix://") {
-                    println!("authority: {}", &url[7..]);
+                let url = if let Some(path) = url.strip_prefix("unix://") {
                     // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
                     // so a unix:// URL will not be parsed by http::Uri
                     // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
                     // It hides the socket path in a hex encoded authority that the unix socket connector will
                     // know how to decode
-                    let u = hyperlocal::Uri::new(&url[7..], "/").into();
-                    println!("generated Uri = {u:?} from '{url}'");
-                    u
+                    hyperlocal::Uri::new(path, "/").into()
                 } else {
                     Uri::from_str(url)
                         .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
