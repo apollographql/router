@@ -116,7 +116,7 @@ impl Schema {
                 if url.is_empty() {
                     return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                 }
-                // there is noi standard for unix socket URLs apparently
+                // there is no standard for unix socket URLs apparently
                 let url = if let Some(path) = url.strip_prefix("unix://") {
                     // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
                     // so a unix:// URL will not be parsed by http::Uri
