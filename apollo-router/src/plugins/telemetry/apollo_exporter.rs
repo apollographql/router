@@ -460,6 +460,6 @@ fn check_reports_proto_is_up_to_date() {
     assert!(
         content == include_str!("proto/reports.proto"),
         "Protobuf file is out of date. Run this command to update it:\n\n    \
-            curl -f {proto_url} > apollo-router/src/plugins/telemetry/proto/reports.proto\n\n"
+            curl -f {proto_url} > apollo-router/src/plugins/telemetry/proto/reports.proto\n\n" 
     );
 }
