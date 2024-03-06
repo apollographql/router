@@ -16,12 +16,12 @@ use apollo_compiler::schema::{
 use apollo_compiler::{ast, name, Node, Schema};
 use indexmap::{Equivalent, IndexSet};
 use lazy_static::lazy_static;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::Deref;
 use strum::IntoEnumIterator;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
     Object(ObjectTypeDefinitionPosition),
@@ -29,6 +29,19 @@ pub(crate) enum TypeDefinitionPosition {
     Union(UnionTypeDefinitionPosition),
     Enum(EnumTypeDefinitionPosition),
     InputObject(InputObjectTypeDefinitionPosition),
+}
+
+impl Debug for TypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Scalar(p) => write!(f, "Scalar({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+            Self::Enum(p) => write!(f, "Enum({p})"),
+            Self::InputObject(p) => write!(f, "InputObject({p})"),
+        }
+    }
 }
 
 impl TypeDefinitionPosition {
@@ -80,13 +93,25 @@ impl TypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum OutputTypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),
     Enum(EnumTypeDefinitionPosition),
+}
+
+impl Debug for OutputTypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Scalar(p) => write!(f, "Scalar({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+            Self::Enum(p) => write!(f, "Enum({p})"),
+        }
+    }
 }
 
 impl OutputTypeDefinitionPosition {
@@ -138,11 +163,21 @@ impl From<AbstractTypeDefinitionPosition> for OutputTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum CompositeTypeDefinitionPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),
+}
+
+impl Debug for CompositeTypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+        }
+    }
 }
 
 impl CompositeTypeDefinitionPosition {
@@ -209,7 +244,7 @@ impl TryFrom<TypeDefinitionPosition> for CompositeTypeDefinitionPosition {
                 Ok(CompositeTypeDefinitionPosition::Union(value))
             }
             _ => Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" was unexpectedly not a composite type", value,),
+                message: format!(r#"Type "{value}" was unexpectedly not a composite type"#),
             }
             .into()),
         }
@@ -294,10 +329,19 @@ impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum AbstractTypeDefinitionPosition {
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),
+}
+
+impl Debug for AbstractTypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+        }
+    }
 }
 
 impl AbstractTypeDefinitionPosition {
@@ -347,10 +391,19 @@ impl TryFrom<OutputTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceTypeDefinitionPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
+}
+
+impl Debug for ObjectOrInterfaceTypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+        }
+    }
 }
 
 impl ObjectOrInterfaceTypeDefinitionPosition {
@@ -417,11 +470,21 @@ impl TryFrom<OutputTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPo
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum FieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
     Union(UnionTypenameFieldDefinitionPosition),
+}
+
+impl Debug for FieldDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+        }
+    }
 }
 
 impl FieldDefinitionPosition {
@@ -474,10 +537,19 @@ impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition 
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
+}
+
+impl Debug for ObjectOrInterfaceFieldDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+        }
+    }
 }
 
 impl ObjectOrInterfaceFieldDefinitionPosition {
@@ -1249,12 +1321,16 @@ impl Display for ScalarTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ObjectTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
 impl ObjectTypeDefinitionPosition {
+    pub(crate) fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
+
     pub(crate) fn field(&self, field_name: Name) -> ObjectFieldDefinitionPosition {
         ObjectFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -1743,7 +1819,13 @@ impl Display for ObjectTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+impl Debug for ObjectTypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Object({self})")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ObjectFieldDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,
@@ -2190,7 +2272,13 @@ impl Display for ObjectFieldDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+impl Debug for ObjectFieldDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ObjectField({self})")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ObjectFieldArgumentDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,
@@ -2570,6 +2658,12 @@ impl Display for ObjectFieldArgumentDefinitionPosition {
             "{}.{}({}:)",
             self.type_name, self.field_name, self.argument_name
         )
+    }
+}
+
+impl Debug for ObjectFieldArgumentDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ObjectFieldArgument({self})")
     }
 }
 

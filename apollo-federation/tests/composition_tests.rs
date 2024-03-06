@@ -50,9 +50,12 @@ fn can_compose_supergraph() {
     .unwrap();
 
     let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(&supergraph.schema));
+    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
     insta::assert_snapshot!(print_sdl(
-        &supergraph.to_api_schema(Default::default()).unwrap()
+        supergraph
+            .to_api_schema(Default::default())
+            .unwrap()
+            .schema()
     ));
 }
 
@@ -104,9 +107,12 @@ fn can_compose_with_descriptions() {
     .unwrap();
 
     let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(&supergraph.schema));
+    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
     insta::assert_snapshot!(print_sdl(
-        &supergraph.to_api_schema(Default::default()).unwrap()
+        supergraph
+            .to_api_schema(Default::default())
+            .unwrap()
+            .schema()
     ));
 }
 
@@ -140,9 +146,12 @@ fn can_compose_types_from_different_subgraphs() {
     )
     .unwrap();
     let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(&supergraph.schema));
+    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
     insta::assert_snapshot!(print_sdl(
-        &supergraph.to_api_schema(Default::default()).unwrap()
+        supergraph
+            .to_api_schema(Default::default())
+            .unwrap()
+            .schema()
     ));
 }
 
@@ -181,8 +190,11 @@ fn compose_removes_federation_directives() {
         .unwrap();
 
     let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(&supergraph.schema));
+    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
     insta::assert_snapshot!(print_sdl(
-        &supergraph.to_api_schema(Default::default()).unwrap()
+        supergraph
+            .to_api_schema(Default::default())
+            .unwrap()
+            .schema()
     ));
 }

@@ -8,7 +8,7 @@ use crate::query_graph::{
     QueryGraph, QueryGraphEdge, QueryGraphEdgeTransition, QueryGraphNode, QueryGraphNodeType,
 };
 use crate::query_plan::operation::{
-    equal_selection_sets, merge_selection_sets, NormalizedSelection, NormalizedSelectionSet,
+    merge_selection_sets, NormalizedSelection, NormalizedSelectionSet,
 };
 use crate::schema::position::{
     AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition, FieldDefinitionPosition,
@@ -37,6 +37,8 @@ use strum::IntoEnumIterator;
 pub fn build_federated_query_graph(
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
+    // TODO(@goto-bus-stop): replace these booleans by descriptive types (either a struct or two
+    // enums)
     validate_extracted_subgraphs: Option<bool>,
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
@@ -1373,7 +1375,7 @@ impl FederatedQueryGraphBuilder {
             let mut all_conditions = Vec::new();
             for directive in field
                 .directives
-                .get_all(&subgraph_data.requires_directive_definition_name)
+                .get_all(&subgraph_data.provides_directive_definition_name)
             {
                 let application = subgraph_data
                     .federation_spec_definition
@@ -1881,7 +1883,7 @@ impl FederatedQueryGraphBuilder {
                                 }
                                 .into());
                             };
-                            if equal_selection_sets(conditions, followup_conditions)? {
+                            if conditions.selections == followup_conditions.selections {
                                 continue;
                             }
                         }

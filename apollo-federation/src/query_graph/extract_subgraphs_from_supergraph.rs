@@ -3,9 +3,8 @@ use crate::link::federation_spec_definition::{
     get_federation_spec_definition_from_subgraph, FederationSpecDefinition, FEDERATION_VERSIONS,
 };
 use crate::link::join_spec_definition::{
-    FieldDirectiveArguments, JoinSpecDefinition, TypeDirectiveArguments, JOIN_VERSIONS,
+    FieldDirectiveArguments, JoinSpecDefinition, TypeDirectiveArguments,
 };
-use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::{Identity, Version};
 use crate::link::spec_definition::SpecDefinition;
 use crate::query_graph::field_set::parse_field_set_without_normalization;
@@ -19,18 +18,21 @@ use crate::schema::position::{
     TypeDefinitionPosition, UnionTypeDefinitionPosition,
 };
 use crate::schema::{FederationSchema, ValidFederationSchema};
+use crate::validate_supergraph;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::executable::{Field, Selection, SelectionSet};
 use apollo_compiler::schema::{
     Component, ComponentName, ComponentOrigin, DirectiveDefinition, DirectiveList,
     DirectiveLocation, EnumType, EnumValueDefinition, ExtendedType, ExtensionId, InputObjectType,
-    InputValueDefinition, InterfaceType, Name, NamedType, ObjectType, ScalarType, Type, UnionType,
+    InputValueDefinition, InterfaceType, Name, NamedType, ObjectType, ScalarType, SchemaBuilder,
+    Type, UnionType,
 };
 use apollo_compiler::validation::Valid;
-use apollo_compiler::{name, Node, NodeStr, Schema};
+use apollo_compiler::{name, Node, NodeStr};
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -38,7 +40,7 @@ use std::sync::Arc;
 ///
 /// TODO: A lot of common data gets passed around in the functions called by this one, considering
 /// making an e.g. ExtractSubgraphs struct to contain the data.
-pub(super) fn extract_subgraphs_from_supergraph(
+pub(crate) fn extract_subgraphs_from_supergraph(
     supergraph_schema: &FederationSchema,
     validate_extracted_subgraphs: Option<bool>,
 ) -> Result<ValidFederationSubgraphs, FederationError> {
@@ -122,36 +124,6 @@ pub(super) fn extract_subgraphs_from_supergraph(
     Ok(valid_subgraphs)
 }
 
-type ValidateSupergraphOk = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
-
-fn validate_supergraph(
-    supergraph_schema: &FederationSchema,
-) -> Result<ValidateSupergraphOk, FederationError> {
-    let Some(metadata) = supergraph_schema.metadata() else {
-        return Err(SingleFederationError::InvalidFederationSupergraph {
-            message: "Invalid supergraph: must be a core schema".to_owned(),
-        }
-        .into());
-    };
-    let link_spec_definition = metadata.link_spec_definition()?;
-    let Some(join_link) = metadata.for_identity(&Identity::join_identity()) else {
-        return Err(SingleFederationError::InvalidFederationSupergraph {
-            message: "Invalid supergraph: must use the join spec".to_owned(),
-        }
-        .into());
-    };
-    let Some(join_spec_definition) = JOIN_VERSIONS.find(&join_link.url.version) else {
-        return Err(SingleFederationError::InvalidFederationSupergraph {
-            message: format!(
-                "Invalid supergraph: uses unsupported join spec version {} (supported versions: {})",
-                JOIN_VERSIONS.versions().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
-                join_link.url.version,
-            ),
-        }.into());
-    };
-    Ok((link_spec_definition, join_spec_definition))
-}
-
 type CollectEmptySubgraphsOk = (
     FederationSubgraphs,
     IndexMap<Name, &'static FederationSpecDefinition>,
@@ -211,7 +183,8 @@ fn collect_empty_subgraphs(
 
 /// TODO: Use the JS/programmatic approach instead of hard-coding definitions.
 pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, FederationError> {
-    FederationSchema::new(Schema::parse(
+    let builder = SchemaBuilder::new().adopt_orphan_extensions();
+    let builder = builder.parse(
         r#"
     extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -264,7 +237,8 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
     scalar federation__Scope
     "#,
         "subgraph.graphql",
-    )?)
+    );
+    FederationSchema::new(builder.build()?)
 }
 
 struct TypeInfo {
@@ -1473,14 +1447,24 @@ impl IntoIterator for FederationSubgraphs {
     }
 }
 
-pub(crate) struct ValidFederationSubgraph {
-    pub(crate) name: String,
-    pub(crate) url: String,
-    pub(crate) schema: ValidFederationSchema,
+// TODO(@goto-bus-stop): consider an appropriate name for this in the public API
+// TODO(@goto-bus-stop): should this exist separately from the `crate::subgraph::Subgraph` type?
+#[derive(Debug)]
+pub struct ValidFederationSubgraph {
+    pub name: String,
+    pub url: String,
+    pub schema: ValidFederationSchema,
 }
 
-pub(crate) struct ValidFederationSubgraphs {
+pub struct ValidFederationSubgraphs {
     subgraphs: BTreeMap<String, ValidFederationSubgraph>,
+}
+
+impl fmt::Debug for ValidFederationSubgraphs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ValidFederationSubgraphs ")?;
+        f.debug_map().entries(self.subgraphs.iter()).finish()
+    }
 }
 
 impl ValidFederationSubgraphs {
@@ -1501,7 +1485,7 @@ impl ValidFederationSubgraphs {
         Ok(())
     }
 
-    pub(crate) fn get(&self, name: &str) -> Option<&ValidFederationSubgraph> {
+    pub fn get(&self, name: &str) -> Option<&ValidFederationSubgraph> {
         self.subgraphs.get(name)
     }
 }

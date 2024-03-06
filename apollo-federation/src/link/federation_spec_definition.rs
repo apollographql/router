@@ -47,7 +47,7 @@ impl FederationSpecDefinition {
     pub(crate) fn new(version: Version) -> Self {
         Self {
             url: Url {
-                identity: Identity::join_identity(),
+                identity: Identity::federation_identity(),
                 version,
             },
         }

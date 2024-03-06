@@ -19,6 +19,7 @@ use std::sync::Arc;
 pub(crate) mod position;
 pub(crate) mod referencer;
 
+/// A GraphQL schema with federation data.
 #[derive(Debug)]
 pub struct FederationSchema {
     schema: Schema,
@@ -29,6 +30,10 @@ pub struct FederationSchema {
 impl FederationSchema {
     pub(crate) fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    pub(crate) fn schema_mut(&mut self) -> &mut Schema {
+        &mut self.schema
     }
 
     /// Discard the Federation metadata and return the apollo-compiler schema.
@@ -44,20 +49,27 @@ impl FederationSchema {
         &self.referencers
     }
 
+    /// Returns all the types in the schema, minus builtins.
     pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> + '_ {
-        self.schema.types.iter().map(|(type_name, type_)| {
-            let type_name = type_name.clone();
-            match type_ {
-                ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
-                ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name }.into(),
-                ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition { type_name }.into(),
-                ExtendedType::Union(_) => UnionTypeDefinitionPosition { type_name }.into(),
-                ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name }.into(),
-                ExtendedType::InputObject(_) => {
-                    InputObjectTypeDefinitionPosition { type_name }.into()
+        self.schema
+            .types
+            .iter()
+            .filter(|(_, ty)| !ty.is_built_in())
+            .map(|(type_name, type_)| {
+                let type_name = type_name.clone();
+                match type_ {
+                    ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
+                    ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name }.into(),
+                    ExtendedType::Interface(_) => {
+                        InterfaceTypeDefinitionPosition { type_name }.into()
+                    }
+                    ExtendedType::Union(_) => UnionTypeDefinitionPosition { type_name }.into(),
+                    ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name }.into(),
+                    ExtendedType::InputObject(_) => {
+                        InputObjectTypeDefinitionPosition { type_name }.into()
+                    }
                 }
-            }
-        })
+            })
     }
 
     pub(crate) fn get_directive_definitions(
@@ -129,6 +141,10 @@ impl FederationSchema {
         ))))
     }
 
+    pub(crate) fn assume_valid(self) -> ValidFederationSchema {
+        ValidFederationSchema(Arc::new(Valid::assume_valid(self)))
+    }
+
     pub(crate) fn get_directive_definition(
         &self,
         name: &Name,
@@ -162,6 +178,7 @@ impl FederationSchema {
     }
 }
 
+/// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
 #[derive(Debug, Clone)]
 pub struct ValidFederationSchema(pub(crate) Arc<Valid<FederationSchema>>);
 
@@ -171,7 +188,8 @@ impl ValidFederationSchema {
         Ok(ValidFederationSchema(Arc::new(Valid::assume_valid(schema))))
     }
 
-    pub(crate) fn schema(&self) -> &Valid<Schema> {
+    /// Access the GraphQL schema.
+    pub fn schema(&self) -> &Valid<Schema> {
         Valid::assume_valid_ref(&self.schema)
     }
 
