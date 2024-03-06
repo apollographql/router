@@ -1,6 +1,7 @@
 - code: TEST_NESTED_ERROR__NESTED
   level: error
-  component: subgraph
+  origin: subgraph
+  type: bad_request
   detail: "The request was invalid or cannot be otherwise served."
   actions:
     - "Do something"

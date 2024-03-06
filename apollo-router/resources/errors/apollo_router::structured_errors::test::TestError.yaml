@@ -1,7 +1,8 @@
 - code: TEST_ERROR__BAD_REQUEST
   level: error
-  component: subgraph
+  origin: subgraph
   detail: "The request was invalid or cannot be otherwise served."
+  type: bad_request
   actions:
     - "Do something"
   attributes:
@@ -11,7 +12,8 @@
 
 - code: TEST_ERROR__NOT_FOUND
   level: error
-  component: subgraph
+  origin: subgraph
+  type: failed_precondition
   detail: "The requested resource could not be found but may be available in the future."
   actions:
     - "Do something"

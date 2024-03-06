@@ -4,7 +4,8 @@ expression: error.definition()
 ---
 level: error
 code: TEST_ERROR__NOT_FOUND
-component: subgraph
+type: failed_precondition
+origin: subgraph
 detail: The requested resource could not be found but may be available in the future.
 attributes:
   attr:

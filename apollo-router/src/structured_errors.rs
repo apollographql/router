@@ -1,15 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
+
 use displaydoc::Display;
 use heck::ToShoutySnakeCase;
 use linkme::distributed_slice;
-
 use rust_embed::RustEmbed;
 use schemars::schema::Schema;
 use serde::Deserialize;
 use serde::Serialize;
-use crate::json_ext::{Object, Path};
 
+use crate::json_ext::Object;
+use crate::json_ext::Path;
 
 #[derive(Debug, thiserror::Error, Display)]
 pub enum Error {
@@ -24,10 +26,7 @@ pub enum Error {
     SerializedWasNotObject {
         /// the error code of the error
         error_code: String,
-    }
-
-
-
+    },
 }
 
 #[derive(RustEmbed)]
@@ -43,6 +42,27 @@ pub enum Level {
     Warn,
     /// Error
     Error,
+}
+
+#[derive(Serialize, Deserialize, Display)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorType {
+    /// This indicates a problem with the request. Retrying the same request is not likely to succeed. An example would be a query or argument that cannot be deserialized.	400 Bad Request
+    BadRequest,
+    /// The operation was rejected because the system is not in a state required for the operation’s execution. For example, the directory to be deleted is non-empty, an rmdir operation is applied to a non-directory, etc. Use UNAVAILABLE instead if the client can retry just the failing call without waiting for the system state to be explicitly fixed.	400 Bad Request, or 500 Internal Server Error
+    FailedPrecondition,
+    /// This indicates that an unexpected internal error was encountered: some invariants expected by the underlying system have been broken. This error code is reserved for serious errors.	500 Internal Server Error
+    Internal,
+    /// This could apply to a resource that has never existed (e.g. bad resource id), or a resource that no longer exists (e.g. cache expired). Note to server developers: if a request is denied for an entire class of users, such as gradual feature rollout or undocumented allowlist, NOT_FOUND may be used. If a request is denied for some users within a class of users, such as user-based access control, PERMISSION_DENIED must be used.	404 Not Found
+    NotFound,
+    /// This indicates that the requester does not have permission to execute the specified operation. PERMISSION_DENIED must not be used for rejections caused by exhausting some resource or quota. PERMISSION_DENIED must not be used if the caller cannot be identified (use UNAUTHENTICATED instead for those errors). This error does not imply that the request is valid or the requested entity exists or satisfies other pre-conditions.	403 Forbidden
+    PermissionDenied,
+    /// This indicates that the request does not have valid authentication credentials but the route requires authentication.	401 Unauthorized
+    Unauthenticated,
+    /// This indicates that the service is currently unavailable. This is most likely a transient condition, which can be corrected by retrying with a backoff.	503 Unavailable
+    Unavailable,
+    /// This error may be returned, for example, when an error code received from another address space belongs to an error space that is not known in this address space. Errors raised by APIs that do not return enough error information may also be converted to this error. If a client sees an errorType that is not known to it, it will be interpreted as UNKNOWN. Unknown errors must not trigger any special behavior. They may be treated by an implementation as being equivalent to INTERNAL.
+    Unknown,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,20 +83,20 @@ pub struct StructuredErrorDefinition {
     pub level: Level,
     /// The error code, This will be of the form ERROR_ENUM_NAME__VARIANT_NAME
     pub code: String,
-    /// The component that the error is related to, Free format, suggested values are mentioned in errors/schema.json
-    pub component: String,
-    /// The details of the error, this is a fixed value that goes into more detail than the error message that should contain when this errors can occur.
-    pub detail: String,
+    /// A course description of the error sufficient for client side branching logic.
+    #[serde(rename="type")]
+    pub ty: ErrorType,
+    /// The origin that the error is related to, Free format, suggested values are mentioned in errors/schema.json
+    pub origin: String,
+    /// The optional details of the error, this is a fixed value that goes into more detail than the error message that should contain when this errors can occur.
+    pub detail: Option<String>,
     /// The attributes associated with this error. These are the fields that are present on the error enum variant.
     pub attributes: HashMap<String, Attribute>,
-    /// The action that
+    /// Action that the user may want to take.
     pub actions: Vec<String>,
 }
 
-
-
-pub trait StructuredError:  Display + std::error::Error + 'static
-{
+pub trait StructuredError: Display + std::error::Error + 'static {
     /// Returns the definition for the error.
     fn definition(&self) -> &'static StructuredErrorDefinition;
 
@@ -92,13 +112,15 @@ pub trait StructuredError:  Display + std::error::Error + 'static
 
     /// Returns the serde json value of the error attributes.
     fn attributes(&self) -> Result<Object, Error>;
-
 }
 
 /// A utility method to validate the error definitions are in sync with the related yaml file.
 #[cfg(test)]
-pub (crate) fn validate_definitions(definitions: &'static [StructuredErrorDefinition], expected_error_codes: HashSet<&String>, mut schema: schemars::schema::RootSchema) {
-
+pub(crate) fn validate_definitions(
+    definitions: &'static [StructuredErrorDefinition],
+    expected_error_codes: HashSet<&String>,
+    mut schema: schemars::schema::RootSchema,
+) {
     // Check for duplicates
     let mut error_codes_from_yaml = std::collections::HashSet::new();
     for definition in definitions {
@@ -121,28 +143,46 @@ pub (crate) fn validate_definitions(definitions: &'static [StructuredErrorDefini
         }
     }
 
-    // TODO Check that attributes are documented by extracting the information from json schema
-    let ty = schema.schema.metadata.as_ref().and_then(|s|s.title.clone()).unwrap_or_default();
+    let ty = schema
+        .schema
+        .metadata
+        .as_ref()
+        .and_then(|s| s.title.clone())
+        .unwrap_or_default();
     for definition in definitions {
         if let Some(one_of) = &mut schema.schema.subschemas().one_of {
             for variant in one_of {
                 if let Schema::Object(o) = variant {
                     if let Some(object) = &o.object {
-                        if let Some(variant_name) = object.properties.get( "__type") {
+                        if let Some(variant_name) = object.properties.get("__type") {
                             if let Schema::Object(schema) = variant_name {
                                 if let Some(enum_values) = &schema.enum_values {
-                                    if enum_values.iter().any(|v| format!("{}__{}", ty.to_shouty_snake_case(), v.as_str().unwrap_or_default().to_shouty_snake_case()) == definition.code) {
+                                    if enum_values.iter().any(|v| {
+                                        format!(
+                                            "{}__{}",
+                                            ty.to_shouty_snake_case(),
+                                            v.as_str().unwrap_or_default().to_shouty_snake_case()
+                                        ) == definition.code
+                                    }) {
                                         for (attr, schema) in &object.properties {
                                             if attr != "__type" {
                                                 if let Schema::Object(schema) = schema {
-                                                    if let Some(description) = &schema.metadata.as_ref().and_then(|s|s.description.clone()) {
-                                                        if let Some(attr_definition) = definition.attributes.get(attr) {
-
-                                                            if let Some(description) = &schema.metadata.as_ref().and_then(|s|s.description.clone()) {
+                                                    if let Some(description) = &schema
+                                                        .metadata
+                                                        .as_ref()
+                                                        .and_then(|s| s.description.clone())
+                                                    {
+                                                        if let Some(attr_definition) =
+                                                            definition.attributes.get(attr)
+                                                        {
+                                                            if let Some(description) = &schema
+                                                                .metadata
+                                                                .as_ref()
+                                                                .and_then(|s| s.description.clone())
+                                                            {
                                                                 assert_eq!(&attr_definition.description, description, "description mismatch for attribute {} for error {}", attr, definition.code);
-                                                                continue
+                                                                continue;
                                                             }
-
                                                         }
                                                         panic!("missing yaml doc for attribute {} for error {} with doc: {}", attr, definition.code, description);
                                                     }
@@ -159,23 +199,21 @@ pub (crate) fn validate_definitions(definitions: &'static [StructuredErrorDefini
             }
         }
     }
-
 }
 
 // This contains a slice of StructuredErrorCast which allows casting from a dyn Error to a dyn StructuredError
 #[distributed_slice]
 pub static STRUCTURED_ERROR_CAST: [&'static dyn StructuredErrorCast];
 
-
 /// An extension trait that allows casting from a dyn Error to a `dyn StructuredError` using `as_structured_error_ref`
 pub trait AnyStructuredError<'a> {
     fn as_structured_error_ref(self) -> Option<&'a (dyn StructuredError)>;
 }
-impl <'a> AnyStructuredError<'a> for &'a(dyn std::error::Error + 'static) {
+impl<'a> AnyStructuredError<'a> for &'a (dyn std::error::Error + 'static) {
     fn as_structured_error_ref(self) -> Option<&'a (dyn StructuredError)> {
         for cast in STRUCTURED_ERROR_CAST {
             if let Some(e) = cast.cast_structured_error_ref(self) {
-                return Some(e)
+                return Some(e);
             }
         }
         None
@@ -184,25 +222,35 @@ impl <'a> AnyStructuredError<'a> for &'a(dyn std::error::Error + 'static) {
 
 /// A trait that allows casting from a `dyn Error` to a `dyn StructuredError`
 pub(crate) trait StructuredErrorCast: Sync + Send {
-    fn cast_structured_error_ref<'a>(&'a self, error: &'a(dyn std::error::Error + 'static)) -> Option<&'a (dyn StructuredError)>;
+    fn cast_structured_error_ref<'a>(
+        &'a self,
+        error: &'a (dyn std::error::Error + 'static),
+    ) -> Option<&'a (dyn StructuredError)>;
 }
 
-
 /// The default and only implementation of `StructuredErrorCast`
-struct DefaultStructuredErrorCast<T> where T : StructuredError + Send + Sync + std::error::Error + 'static {
-    _phantom: std::marker::PhantomData<T>
+struct DefaultStructuredErrorCast<T>
+where
+    T: StructuredError + Send + Sync + std::error::Error + 'static,
+{
+    _phantom: std::marker::PhantomData<T>,
 }
 
 /// The default and only implementation of `StructuredErrorCast,` essentially does a `downcast_ref` to `T` and then returns it as a reference to `dyn StructuredError`
-impl <T> StructuredErrorCast for DefaultStructuredErrorCast<T> where T : StructuredError + Send + Sync + std::error::Error + 'static {
-    fn cast_structured_error_ref<'a>(&'a self, error: &'a (dyn std::error::Error + 'static)) -> Option<&'a (dyn StructuredError)> {
+impl<T> StructuredErrorCast for DefaultStructuredErrorCast<T>
+where
+    T: StructuredError + Send + Sync + std::error::Error + 'static,
+{
+    fn cast_structured_error_ref<'a>(
+        &'a self,
+        error: &'a (dyn std::error::Error + 'static),
+    ) -> Option<&'a (dyn StructuredError)> {
         if let Some(e) = error.downcast_ref::<T>() {
-            return Some(e)
+            return Some(e);
         }
         None
     }
 }
-
 
 /// Macro for creating errors that implement `StructuredError`. It automatically adds a bunch of required derives and provides the implementation of the `StructuredError` trait.
 /// Usage:
@@ -334,24 +382,29 @@ macro_rules! error_type {
 
 /// An error formatter that can be used to convert errors that implement `StructuredError` to graphql errors
 pub trait ErrorFormatter {
-
     /// Convert the error into a graphql error.
-    fn format_error<T: StructuredError + ?Sized>(&self, error: &T, locations: Vec<crate::graphql::Location>, path: Option<Path>) -> Result<crate::graphql::Error, Error>;
+    fn format_error<T: StructuredError + ?Sized>(
+        &self,
+        error: &T,
+        locations: Vec<crate::graphql::Location>,
+        path: Option<Path>,
+    ) -> Result<crate::graphql::Error, Error>;
 }
-
-
 
 #[cfg(test)]
 mod test {
-    use insta::{assert_yaml_snapshot};
-    use crate::json_ext::{Object, Path};
-    use crate::structured_errors::{AnyStructuredError, ErrorFormatter, StructuredError};
+    use insta::assert_yaml_snapshot;
+
+    use crate::json_ext::Object;
+    use crate::json_ext::Path;
+    use crate::structured_errors::AnyStructuredError;
+    use crate::structured_errors::ErrorFormatter;
+    use crate::structured_errors::StructuredError;
 
     error_type!("Test error docs", TestNestedError, {
         /// Nested error
         Nested,
     });
-
 
     error_type!("Test error docs", TestError, {
         /// Not found
@@ -367,7 +420,12 @@ mod test {
 
     struct SimpleErrorFormatter;
     impl ErrorFormatter for SimpleErrorFormatter {
-        fn format_error<T: StructuredError + ?Sized>(&self, error: &T, locations: Vec<crate::graphql::Location>, path: Option<Path>) -> Result<crate::graphql::Error, super::Error> {
+        fn format_error<T: StructuredError + ?Sized>(
+            &self,
+            error: &T,
+            locations: Vec<crate::graphql::Location>,
+            path: Option<Path>,
+        ) -> Result<crate::graphql::Error, super::Error> {
             let mut attributes = error.attributes()?;
             let mut cause = error.source();
             let mut trace = vec![];
@@ -390,7 +448,10 @@ mod test {
                 cause = err.source();
             }
             attributes.insert("code".to_string(), error.code().into());
-            attributes.insert("level".to_string(), error.definition().level.to_string().into());
+            attributes.insert(
+                "level".to_string(),
+                error.definition().level.to_string().into(),
+            );
             if !trace.is_empty() {
                 attributes.insert("trace".to_string(), trace.into());
             }
@@ -406,7 +467,10 @@ mod test {
 
     #[test]
     fn test_error_definition() {
-        let error = TestError::NotFound { attr: "test".to_string(), source: Box::new(TestNestedError::Nested) };
+        let error = TestError::NotFound {
+            attr: "test".to_string(),
+            source: Box::new(TestNestedError::Nested),
+        };
         assert_yaml_snapshot!(error.definition());
     }
 
@@ -415,18 +479,37 @@ mod test {
         let error = TestError::BadRequest;
         assert_eq!(error.code(), "TEST_ERROR__BAD_REQUEST");
         assert_eq!(error.message(), "Bad request");
-        assert_eq!(error.definition().detail, "The request was invalid or cannot be otherwise served.");
-        assert_eq!(serde_json::to_string(&error.attributes().unwrap()).unwrap(), "{}".to_string());
-        assert_yaml_snapshot!(SimpleErrorFormatter.format_error(&error, Default::default(), None).unwrap());
+        assert_eq!(
+            error.definition().detail,
+            Some("The request was invalid or cannot be otherwise served.".to_string())
+        );
+        assert_eq!(
+            serde_json::to_string(&error.attributes().unwrap()).unwrap(),
+            "{}".to_string()
+        );
+        assert_yaml_snapshot!(SimpleErrorFormatter
+            .format_error(&error, Default::default(), None)
+            .unwrap());
     }
 
     #[test]
     fn test_error_formatting_with_cause() {
-        let error = TestError::NotFound { attr: "test".to_string(), source: Box::new(TestNestedError::Nested) };
+        let error = TestError::NotFound {
+            attr: "test".to_string(),
+            source: Box::new(TestNestedError::Nested),
+        };
         assert_eq!(error.code(), "TEST_ERROR__NOT_FOUND");
         assert_eq!(error.message(), "Not found");
-        assert_eq!(error.definition().detail, "The requested resource could not be found but may be available in the future.");
-        assert_eq!(serde_json::to_string(&error.attributes().unwrap()).unwrap(), "{\"attr\":\"test\"}".to_string());
-        assert_yaml_snapshot!(SimpleErrorFormatter.format_error(&error, Default::default(), None).unwrap());
+        assert_eq!(
+            error.definition().detail,
+            Some("The requested resource could not be found but may be available in the future.".to_string())
+        );
+        assert_eq!(
+            serde_json::to_string(&error.attributes().unwrap()).unwrap(),
+            "{\"attr\":\"test\"}".to_string()
+        );
+        assert_yaml_snapshot!(SimpleErrorFormatter
+            .format_error(&error, Default::default(), None)
+            .unwrap());
     }
 }

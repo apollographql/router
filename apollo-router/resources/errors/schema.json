@@ -9,9 +9,9 @@
     "additionalProperties": false,
     "required": [
       "level",
+      "type",
       "code",
-      "component",
-      "detail"
+      "origin"
     ],
     "properties": {
       "level": {
@@ -27,8 +27,26 @@
         "description": "The error code",
         "type": "string"
       },
-      "component": {
-        "description": "The source component of the error, e.g. router, redis, subgraph",
+      "type": {
+        "description": "The error type",
+        "type": "string",
+        "enum": [
+          "bad_request",
+          "failed_precondition",
+          "internal",
+          "not_found",
+          "permission_denied",
+          "unauthenticated",
+          "unavailable",
+          "unknown"
+        ]
+      },
+      "debug_uri": {
+        "description": "Http URI to a page detailing additional information that could be used to debug the error. This information may be general to the class of error or specific to this particular instance of the error.",
+        "type": "string"
+      },
+      "origin": {
+        "description": "The source of the error, e.g. router, redis, subgraph",
         "type": "string",
         "anyOf": [
           {
@@ -63,11 +81,11 @@
             "type": {
               "description": "The type of the attribute",
               "type": "string",
-                "enum": [
-                    "string",
-                    "number",
-                    "boolean"
-                ]
+              "enum": [
+                "string",
+                "number",
+                "boolean"
+              ]
             },
             "description": {
               "description": "The description of the attribute",
