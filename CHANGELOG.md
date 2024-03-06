@@ -4,6 +4,18 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.40.2] - 2024-03-06
+
+> :warn: Note: This release has additional release notes which are still work in progress.
+
+## 🐛 Fixes
+
+### Re-activate the macOS Intel builder ([PR #4723](https://github.com/apollographql/router/pull/4723))
+
+We have re-activated macOS Intel (x86) builds in CircleCI, despite their upcoming deprecation, while we take a different approach to solving this and maintaining Intel support for the time-being.   This became necessary since cross-compiling the router from ARM to x86 resulted in issues with V8 snapshots and runtime issues on the macOS Intel binaries produced by those Apple Silicon build machines.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4723
+
 # [1.40.1] - 2024-02-16
 
 ## 🐛 Fixes
