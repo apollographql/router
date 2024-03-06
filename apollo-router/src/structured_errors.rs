@@ -393,6 +393,7 @@ pub trait ErrorFormatter {
 
 #[cfg(test)]
 mod test {
+    use displaydoc::Display;
     use insta::assert_yaml_snapshot;
 
     use crate::json_ext::Object;
@@ -418,6 +419,15 @@ mod test {
         BadRequest,
     });
 
+    #[derive(Debug, thiserror::Error, Display)]
+    enum NonStructuredError {
+        /// Some unstructured error
+        Unstructured {
+
+            source: Box<dyn std::error::Error + Send + Sync>,
+        },
+    }
+
     struct SimpleErrorFormatter;
     impl ErrorFormatter for SimpleErrorFormatter {
         fn format_error<T: StructuredError + ?Sized>(
@@ -442,6 +452,7 @@ mod test {
                 } else {
                     // You may do some manual downcasting here
                     let mut o = Object::new();
+                    o.insert("code".to_string(), "UNKNOWN".into());
                     o.insert("message".to_string(), err.to_string().into());
                     trace.push(o);
                 }
@@ -493,10 +504,10 @@ mod test {
     }
 
     #[test]
-    fn test_error_formatting_with_cause() {
+    fn test_error_formatting_with_source_chain() {
         let error = TestError::NotFound {
             attr: "test".to_string(),
-            source: Box::new(TestNestedError::Nested),
+            source: Box::new(NonStructuredError::Unstructured { source: Box::new(TestNestedError::Nested)}),
         };
         assert_eq!(error.code(), "TEST_ERROR__NOT_FOUND");
         assert_eq!(error.message(), "Not found");
