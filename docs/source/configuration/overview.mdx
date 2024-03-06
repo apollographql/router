@@ -810,16 +810,6 @@ experimental_graphql_validation_mode: new
 
 This is an experimental option while we are still finding edge cases in the new implementation, but it will become the default in the future.
 
-### API Schema Generation Mode
-
-We are experimenting with a new API Schema Generation implementation written in Rust. The legacy implementation is part of the JavaScript query planner. By default, the new and legacy implementations are run side by side, and differences reported back to Apollo. To disable this, set:
-
-```yaml {4,8} title="router.yaml"
-experimental_api_schema_generation_mode: legacy
-```
-
-This is an experimental option while we are still finding edge cases in the new implementation, but it will be removed in the future.
-
 ### Plugins
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
