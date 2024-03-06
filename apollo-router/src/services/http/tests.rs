@@ -19,6 +19,7 @@ use hyper::service::make_service_fn;
 use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::TlsAcceptor;
+use hyperlocal::UnixServerExt;
 use mime::APPLICATION_JSON;
 use rustls::server::AllowAnyAuthenticatedClient;
 use rustls::Certificate;
@@ -549,4 +550,89 @@ async fn test_http_plugin_is_loaded() {
         .unwrap();
 
     assert!(started.load(Ordering::Acquire));
+}
+
+fn make_schema(path: &str) -> String {
+    r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+         {
+        query: Query
+   }
+   directive @core(feature: String!) repeatable on SCHEMA
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   scalar join__FieldSet
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "unix://"#.to_string()+path+r#"")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+   type Query {
+       currentUser: User @join__field(graph: USER)
+   }
+
+   type User
+   @join__owner(graph: USER)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id"){
+       id: ID!
+       name: String
+   }"#
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_unix_socket() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("router.sock");
+    let schema = make_schema(path.to_str().unwrap());
+
+    let make_service = make_service_fn(|_| async {
+        Ok::<_, hyper::Error>(service_fn(|mut req: http::Request<Body>| async move {
+            let data = hyper::body::to_bytes(req.body_mut()).await.unwrap();
+            let body = std::str::from_utf8(&data).unwrap();
+            println!("{:?}", body);
+            let response = http::Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{ "data": { "currentUser": { "id": "0" } } }"#,
+                ))
+                .unwrap();
+            Ok::<_, hyper::Error>(response)
+        }))
+    });
+
+    tokio::task::spawn(async move {
+        hyper::Server::bind_unix(path)
+            .unwrap()
+            .serve(make_service)
+            .await
+            .unwrap();
+    });
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(&schema)
+        .with_subgraph_network_requests()
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(r#"query { currentUser { id } }"#)
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response);
 }
