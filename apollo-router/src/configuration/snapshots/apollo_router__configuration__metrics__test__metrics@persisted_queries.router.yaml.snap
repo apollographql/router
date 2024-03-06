@@ -7,7 +7,6 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.log_unknown.: true
-          opt.safelist.enabled.: true
-          opt.safelist.require_id.: true
-
+          opt.log_unknown: true
+          opt.safelist.enabled: true
+          opt.safelist.require_id: true

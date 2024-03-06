@@ -2312,14 +2312,15 @@ async fn test_supergraph_timeout() {
     // because we need the plugins to apply on the supergraph
     let plugins = create_plugins(&conf, &schema, None, None).await.unwrap();
 
-    let mut builder = PluggableSupergraphServiceBuilder::new(planner)
+    let builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())
         .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
 
-    for (name, plugin) in plugins.into_iter() {
-        builder = builder.with_dyn_plugin(name, plugin);
-    }
-    let supergraph_creator = builder.build().await.unwrap();
+    let supergraph_creator = builder
+        .with_plugins(Arc::new(plugins))
+        .build()
+        .await
+        .unwrap();
 
     let service = RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,

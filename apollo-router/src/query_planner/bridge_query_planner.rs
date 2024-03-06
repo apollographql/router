@@ -8,6 +8,9 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use futures::future::BoxFuture;
+use opentelemetry_api::metrics::MeterProvider as _;
+use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::KeyValue;
 use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
@@ -30,6 +33,7 @@ use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::metrics::meter_provider;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
@@ -62,6 +66,23 @@ pub(crate) struct BridgeQueryPlanner {
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
+    _federation_instrument: ObservableGauge<u64>,
+}
+
+fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
+    meter_provider()
+        .meter("apollo/router")
+        .u64_observable_gauge("apollo.router.supergraph.federation")
+        .with_callback(move |observer| {
+            observer.observe(
+                1,
+                &[KeyValue::new(
+                    "federation.version",
+                    federation_version.unwrap_or(0),
+                )],
+            );
+        })
+        .init()
 }
 
 impl BridgeQueryPlanner {
@@ -223,19 +244,21 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(planner.clone()).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
             None
         };
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
+        let federation_instrument = federation_version_instrument(schema.federation_version());
         Ok(Self {
             planner,
             schema,
             introspection,
             enable_authorization_directives,
             configuration,
+            _federation_instrument: federation_instrument,
         })
     }
 
@@ -279,19 +302,21 @@ impl BridgeQueryPlanner {
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(planner.clone()).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
             None
         };
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
+        let federation_instrument = federation_version_instrument(schema.federation_version());
         Ok(Self {
             planner,
             schema,
             introspection,
             enable_authorization_directives,
             configuration,
+            _federation_instrument: federation_instrument,
         })
     }
 
@@ -562,12 +587,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
-                    let executable = modified_query
+                    let executable_document = modified_query
                         .to_executable(schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .unwrap_or_else(|invalid| invalid.partial);
                     doc = Arc::new(ParsedDocumentInner {
-                        executable,
+                        executable: Arc::new(executable_document),
                         ast: modified_query,
                         // Carry errors from previous ParsedDocument
                         // and assume transformation doesn’t introduce new errors.
@@ -682,12 +707,12 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
-            let executable = new_doc
+            let executable_document = new_doc
                 .to_executable(&self.schema.api_schema().definitions)
                 // Assume transformation creates a valid document: ignore conversion errors
                 .unwrap_or_else(|invalid| invalid.partial);
             doc = Arc::new(ParsedDocumentInner {
-                executable,
+                executable: Arc::new(executable_document),
                 ast: new_doc,
                 // Carry errors from previous ParsedDocument
                 // and assume transformation doesn’t introduce new errors.
@@ -804,6 +829,7 @@ mod tests {
 
     use super::*;
     use crate::json_ext::Path;
+    use crate::metrics::FutureMetricsExt as _;
     use crate::spec::query::subselections::SubSelectionKey;
     use crate::spec::query::subselections::SubSelectionValue;
 
@@ -859,6 +885,43 @@ mod tests {
             "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
                  Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
         );
+    }
+
+    #[test(tokio::test)]
+    async fn federation_versions() {
+        async {
+            let _planner = BridgeQueryPlanner::new(
+                include_str!("../testdata/minimal_supergraph.graphql").into(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_gauge!(
+                "apollo.router.supergraph.federation",
+                1,
+                federation.version = 1
+            );
+        }
+        .with_metrics()
+        .await;
+
+        async {
+            let _planner = BridgeQueryPlanner::new(
+                include_str!("../testdata/minimal_fed2_supergraph.graphql").into(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_gauge!(
+                "apollo.router.supergraph.federation",
+                1,
+                federation.version = 2
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[test(tokio::test)]
