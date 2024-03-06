@@ -6,7 +6,11 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.40.2] - 2024-03-06
 
-> :warn: Note: This release has additional release notes which are still work in progress.
+## 🔒 Security
+
+### Apply `limits.http_max_request_bytes` on streaming request body decompression ([PR #TODO](https://github.com/apollographql/router/pull/TODO))
+
+This release fixes a Denial-of-Service (DoS) type vulnerability which exists in affected versions of the Router according to our [published security advistory](https://github.com/apollographql/router/security/advisories/GHSA-cgqf-3cq5-wvcj).  The fix changes the evaluation of the `limits.http_max_request_bytes` configuration to take place on a stream of bytes, allowing it to be applied to compressed HTTP payloads, prior to decompression.  Previously, the limit was only being applied after the entirety of the compressed payload was decompressed, which could result in significant memory consumption which exceeded configured expectations while compressed payloads were expanded.
 
 ## 🐛 Fixes
 
