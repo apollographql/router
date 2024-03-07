@@ -779,7 +779,7 @@ async fn call_batched_http(
                 // We need our own batch aware version of call_http which only makes one call to each
                 // subgraph, but is able to decode the responses. I'll probably need to break call_http
                 // down into sub-functions, and I've started this, but it's not finished.
-                let (operation_name, context, mut request, mut txs) =
+                let (_operation_name, context, mut request, mut txs) =
                     Waiter::assemble_batch(service_waiters).await?;
 
                 request
@@ -794,6 +794,7 @@ async fn call_batched_http(
 
                 // TODO: We have multiple operation names but we are just using the first operation
                 // name in the span. Should we report all operation names?
+                // CURRENT DECISION: hard code to "batch"
                 let subgraph_req_span = tracing::info_span!("subgraph_request",
                     "otel.kind" = "CLIENT",
                     "net.peer.name" = %host,
@@ -802,7 +803,7 @@ async fn call_batched_http(
                     "http.url" = %schema_uri,
                     "net.transport" = "ip_tcp",
                     "apollo.subgraph.name" = %&service,
-                    "graphql.operation.name" = %operation_name,
+                    "graphql.operation.name" = "batch"
                 );
 
                 // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response

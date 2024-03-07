@@ -161,6 +161,7 @@ impl Waiter {
     // This is ok, because when the batch was created, the parts and context were primarily created
     // by extracting and duplicating information from the single batch request. Maybe we should use
     // a different operation name, maybe chain them all together? TODO: Decide operation name
+    // DECISION: For now we will ignore the operation name which is extracted here.
     pub(crate) async fn assemble_batch(
         service_waiters: Vec<Waiter>,
     ) -> Result<
