@@ -11,14 +11,15 @@ Learn about error codes and HTTP response status codes returned by the Apollo Ro
 <PropertyList kind="errCodes">
 <Property name="400" short="Bad request">
 
-A request failed GraphQL validation, or a request failed to be parsed.
+The request failed GraphQL validation or failed to be parsed.
 
 </Property>
 <Property name="401" short="Unauthorized">
 
-For a client making a request that requires authentication, a JWT failed to be verified.
+Requests may receive this response in two cases:
 
-For a non-client subscription endpoint calling a subscription callback URL, the router couldn't find a matching subscription identifier between its registered subscriptions and a subscription event.
+- For requests that requires authentication, the client's JWT failed verification.
+- For a non-client subscription endpoint calling a subscription callback URL, the router couldn't find a matching subscription identifier between its registered subscriptions and a subscription event.
 
 </Property>
 <Property name="405" short="Method not allowed">
@@ -48,7 +49,7 @@ Request traffic exceeded configured rate limits. See [client side traffic shapin
 </Property>
 <Property name="500" short="Internal server error">
 
-The router encountered an unexpected issue. Report this [possible bug](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) to the router team.
+The router encountered an unexpected issue. [Report](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) this possible bug to the router team.
 
 </Property>
 </PropertyList>
