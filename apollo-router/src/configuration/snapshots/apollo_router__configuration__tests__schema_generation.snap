@@ -93,6 +93,11 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "required_to_start": {
+                      "description": "Prevents the router from starting if it cannot connect to Redis",
+                      "default": false,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -301,6 +306,59 @@ expression: "&schema"
                       }
                     },
                     "additionalProperties": false
+                  }
+                },
+                "sources": {
+                  "description": "Alternative sources to extract the JWT",
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "type"
+                        ],
+                        "properties": {
+                          "name": {
+                            "description": "HTTP header expected to contain JWT",
+                            "default": "authorization",
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "header"
+                            ]
+                          },
+                          "value_prefix": {
+                            "description": "Header value prefix",
+                            "default": "Bearer",
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "properties": {
+                          "name": {
+                            "description": "Name of the cookie containing the JWT",
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "cookie"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
                   }
                 }
               },
@@ -2096,6 +2154,11 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
+            "required_to_start": {
+              "description": "Prevents the router from starting if it cannot connect to Redis",
+              "default": false,
+              "type": "boolean"
+            },
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
               "default": null,
@@ -2183,6 +2246,76 @@ expression: "&schema"
             },
             "additionalProperties": false
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "preview_file_uploads": {
+      "description": "Configuration for File Uploads plugin",
+      "type": "object",
+      "required": [
+        "enabled",
+        "protocols"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Whether the file upload plugin should be enabled (default: false)",
+          "type": "boolean"
+        },
+        "protocols": {
+          "description": "Supported protocol configurations for file uploads",
+          "type": "object",
+          "required": [
+            "multipart"
+          ],
+          "properties": {
+            "multipart": {
+              "description": "Configuration for multipart requests.\n\nThis protocol conforms to [jaydenseric's multipart spec](https://github.com/jaydenseric/graphql-multipart-request-spec)",
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "description": "Whether to enable the multipart protocol for file uploads (default: true)",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "limits": {
+                  "description": "Resource limits for multipart requests",
+                  "type": "object",
+                  "required": [
+                    "max_file_size",
+                    "max_files"
+                  ],
+                  "properties": {
+                    "max_file_size": {
+                      "description": "The maximum size of each file, in bytes (default: 5MB)",
+                      "type": "string"
+                    },
+                    "max_files": {
+                      "description": "The maximum amount of files allowed for a single query (default: 4)",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "mode": {
+                  "description": "The supported mode for the request (default: [MultipartRequestMode::Stream])",
+                  "oneOf": [
+                    {
+                      "description": "The multipart request will not be loaded into memory and instead will be streamed directly to the subgraph in the order received. This has some limitations, mainly that the query _must_ be able to be streamed directly to the subgraph without buffering.\n\nIn practice, this means that certain queries will fail due to ordering of the files.",
+                      "type": "string",
+                      "enum": [
+                        "stream"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -2504,6 +2637,11 @@ expression: "&schema"
                       "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
                       "type": "string",
                       "nullable": true
+                    },
+                    "required_to_start": {
+                      "description": "Prevents the router from starting if it cannot connect to Redis",
+                      "default": false,
+                      "type": "boolean"
                     },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",

@@ -437,6 +437,15 @@ impl Executable {
             return Ok(());
         }
 
+        // mark stdout and stderr as non blocking. If they are blocking and piped
+        // to a program that does not consume them, the router starts hanging on
+        // all requests: https://github.com/apollographql/router/issues/4612
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = set_blocking(libc::STDOUT_FILENO, false);
+            let _ = set_blocking(libc::STDERR_FILENO, false);
+        }
+
         copy_args_to_env();
 
         let apollo_telemetry_initialized = if graph_os() {
@@ -742,6 +751,26 @@ fn copy_args_to_env() {
             }
         }
     });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_blocking(fd: std::os::fd::RawFd, blocking: bool) -> std::io::Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let flags = if blocking {
+        flags & !libc::O_NONBLOCK
+    } else {
+        flags | libc::O_NONBLOCK
+    };
+    let res = unsafe { libc::fcntl(fd, libc::F_SETFL, flags) };
+    if res != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
