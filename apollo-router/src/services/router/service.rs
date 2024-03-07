@@ -700,13 +700,13 @@ impl RouterService {
     fn count_errors(errors: &[graphql::Error]) {
         let mut map = HashMap::new();
         for error in errors {
-            let code = error.extensions.get("code");
+            let code = error.extensions.get("code").and_then(|c| c.as_str());
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
         }
 
         for (code, count) in map {
-            match code.and_then(|c| c.as_str()) {
+            match code {
                 None => {
                     tracing::info!(monotonic_counter.apollo_router_graphql_error = count,);
                 }
