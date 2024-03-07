@@ -740,6 +740,10 @@ async fn call_batched_http(
     // We'd like to park a task here, but we can't park it whilst we have the context extensions
     // lock held. That would be very bad...
     // So, we set an optional listener and wait to hear back from the batch processor
+    // TODO: When we have the configuration work in place, we'll need to use the configuration
+    // settings here to determine if batching is even possible for a service. i.e.: If subgraphs
+    // all is set or (if not) if a specific subgraph name (synonym for service_name here) is set.
+    // Make sure to pick this up as part of the configuration work.
     let mut batch_responder: Option<
         tokio::sync::oneshot::Receiver<Result<SubgraphResponse, BoxError>>,
     > = None;
