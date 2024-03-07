@@ -27,7 +27,7 @@ struct OverrideSubgraphUrl {
 #[serde(untagged)]
 enum Conf {
     /// Subgraph URL mappings
-    Mapping(HashMap<String, url::Url>),
+    Mapping(HashMap<String, String>),
 }
 
 #[async_trait::async_trait]
@@ -39,8 +39,20 @@ impl Plugin for OverrideSubgraphUrl {
         Ok(OverrideSubgraphUrl {
             urls: urls
                 .into_iter()
-                .map(|(k, v)| (k, Uri::from_str(v.as_str()).unwrap()))
-                .collect(),
+                .map(|(k, url)| {
+                    // there is no standard for unix socket URLs apparently
+                    if let Some(path) = url.strip_prefix("unix://") {
+                        // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
+                        // so a unix:// URL will not be parsed by http::Uri
+                        // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
+                        // It hides the socket path in a hex encoded authority that the unix socket connector will
+                        // know how to decode
+                        Ok((k, hyperlocal::Uri::new(path, "/").into()))
+                    } else {
+                        Uri::from_str(&url).map(|url| (k, url))
+                    }
+                })
+                .collect::<Result<_, _>>()?,
         })
     }
 
