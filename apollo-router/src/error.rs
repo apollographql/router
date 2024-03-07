@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
+use tower::BoxError;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
@@ -97,13 +98,6 @@ pub(crate) enum FetchError {
 
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
-    /// could not compress request: {reason}
-    CompressionError {
-        /// The service that failed.
-        service: String,
-        /// The reason the compression failed.
-        reason: String,
-    },
 }
 
 impl FetchError {
@@ -132,8 +126,7 @@ impl FetchError {
                 }
                 FetchError::SubrequestMalformedResponse { service, .. }
                 | FetchError::SubrequestUnexpectedPatchResponse { service }
-                | FetchError::SubrequestWsError { service, .. }
-                | FetchError::CompressionError { service, .. } => {
+                | FetchError::SubrequestWsError { service, .. } => {
                     extensions
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
@@ -176,7 +169,6 @@ impl ErrorExtension for FetchError {
             FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
             FetchError::SubrequestWsError { .. } => "SUBREQUEST_WEBSOCKET_ERROR",
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
-            FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
@@ -219,7 +211,7 @@ impl From<QueryPlannerError> for CacheResolverError {
 /// Error types for service building.
 #[derive(Error, Debug, Display)]
 pub(crate) enum ServiceBuildError {
-    /// couldn't build Router Service: {0}
+    /// couldn't build Query Planner Service: {0}
     QueryPlannerError(QueryPlannerError),
 
     /// API schema generation failed: {0}
@@ -227,6 +219,9 @@ pub(crate) enum ServiceBuildError {
 
     /// schema error: {0}
     Schema(SchemaError),
+
+    /// couldn't build Router service: {0}
+    ServiceError(BoxError),
 }
 
 impl From<SchemaError> for ServiceBuildError {
@@ -250,6 +245,12 @@ impl From<Vec<PlannerError>> for ServiceBuildError {
 impl From<router_bridge::error::Error> for ServiceBuildError {
     fn from(error: router_bridge::error::Error) -> Self {
         ServiceBuildError::QueryPlannerError(error.into())
+    }
+}
+
+impl From<BoxError> for ServiceBuildError {
+    fn from(err: BoxError) -> Self {
+        ServiceBuildError::ServiceError(err)
     }
 }
 

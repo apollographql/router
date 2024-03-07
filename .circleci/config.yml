@@ -30,14 +30,14 @@ executors:
       RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
-      image: ubuntu-2004:2022.04.1
+      image: ubuntu-2004:2024.01.1
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
-      image: ubuntu-2004:2022.04.1
+      image: ubuntu-2004:2024.01.1
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8

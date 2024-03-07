@@ -531,18 +531,17 @@ mod test {
         let mut builder =
             PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
 
-        for (name, plugin) in create_plugins(
-            &config,
-            &schema,
-            None,
-            Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
-        )
-        .await
-        .expect("create plugins should work")
-        .into_iter()
-        {
-            builder = builder.with_dyn_plugin(name, plugin);
-        }
+        let plugins = Arc::new(
+            create_plugins(
+                &config,
+                &schema,
+                None,
+                Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
+            )
+            .await
+            .expect("create plugins should work"),
+        );
+        builder = builder.with_plugins(plugins);
 
         let builder = builder
             .with_subgraph_service("accounts", account_service.clone())

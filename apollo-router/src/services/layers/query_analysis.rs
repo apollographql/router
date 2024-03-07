@@ -163,7 +163,7 @@ pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 #[derive(Debug, Default)]
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
-    pub(crate) executable: ExecutableDocument,
+    pub(crate) executable: Arc<ExecutableDocument>,
     pub(crate) parse_errors: Option<DiagnosticList>,
     pub(crate) validation_errors: Option<DiagnosticList>,
 }
