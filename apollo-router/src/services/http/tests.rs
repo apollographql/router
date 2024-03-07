@@ -585,6 +585,7 @@ fn make_schema(path: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn test_unix_socket() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("router.sock");
