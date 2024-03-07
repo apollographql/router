@@ -2,19 +2,8 @@
 
 use std::net::SocketAddr;
 
-use async_compression::tokio::write::BrotliDecoder;
-use async_compression::tokio::write::GzipDecoder;
-use async_compression::tokio::write::ZlibDecoder;
-use axum::http::StatusCode;
-use axum::middleware::Next;
-use axum::response::*;
-use futures::prelude::*;
-use http::header::CONTENT_ENCODING;
-use http::Request;
-use hyper::Body;
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
-use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
 use tower_service::Service;
 use tracing::Span;
@@ -25,83 +14,6 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
-
-pub(super) async fn decompress_request_body(
-    req: Request<Body>,
-    next: Next<Body>,
-) -> Result<Response, Response> {
-    let (parts, body) = req.into_parts();
-    let content_encoding = parts.headers.get(&CONTENT_ENCODING);
-    macro_rules! decode_body {
-        ($decoder: ident, $error_message: expr) => {{
-            let body_bytes = hyper::body::to_bytes(body)
-                .map_err(|err| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        format!("cannot read request body: {err}"),
-                    )
-                        .into_response()
-                })
-                .await?;
-            let mut decoder = $decoder::new(Vec::new());
-            decoder.write_all(&body_bytes).await.map_err(|err| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("{}: {err}", $error_message),
-                )
-                    .into_response()
-            })?;
-            decoder.shutdown().await.map_err(|err| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("{}: {err}", $error_message),
-                )
-                    .into_response()
-            })?;
-
-            Ok(next
-                .run(Request::from_parts(parts, Body::from(decoder.into_inner())))
-                .await)
-        }};
-    }
-
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str() {
-            Ok(content_encoding_str) => match content_encoding_str {
-                "br" => decode_body!(BrotliDecoder, "cannot decompress (brotli) request body"),
-                "gzip" => decode_body!(GzipDecoder, "cannot decompress (gzip) request body"),
-                "deflate" => decode_body!(ZlibDecoder, "cannot decompress (deflate) request body"),
-                "identity" => Ok(next.run(Request::from_parts(parts, body)).await),
-                unknown => {
-                    let message = format!("unknown content-encoding header value {unknown:?}");
-                    tracing::error!(message);
-                    u64_counter!(
-                        "apollo_router_http_requests_total",
-                        "Total number of HTTP requests made.",
-                        1,
-                        status = StatusCode::BAD_REQUEST.as_u16() as i64,
-                        error = message.clone()
-                    );
-
-                    Err((StatusCode::BAD_REQUEST, message).into_response())
-                }
-            },
-
-            Err(err) => {
-                let message = format!("cannot read content-encoding header: {err}");
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    status = 400,
-                    error = message.clone()
-                );
-                Err((StatusCode::BAD_REQUEST, message).into_response())
-            }
-        },
-        None => Ok(next.run(Request::from_parts(parts, body)).await),
-    }
-}
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
