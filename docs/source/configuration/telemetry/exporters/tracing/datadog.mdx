@@ -43,7 +43,7 @@ For more details about Datadog configuration, see [Datadog Agent configuration](
 
 ### Enabling log correlation
 
-To enable Datadog log correlation `dd.trace_id` must be configured to appear on the `router` span:
+To enable Datadog log correlation, you must configure `dd.trace_id` to appear on the `router` span:
   
 ```yaml title="router.yaml"
 telemetry:
@@ -52,10 +52,10 @@ telemetry:
       mode: spec_compliant
       router:
         attributes:
-          dd.trace_id: true
+          dd.trace_id: true #highlight-line
 ```
 
-Your `json` formatted log messages will automatically output `dd.trace_id` on each log message if `dd.trace_id` was detected on the `router` span.
+Your JSON formatted log messages will automatically output `dd.trace_id` on each log message if `dd.trace_id` was detected on the `router` span.
 
 ## Datadog native configuration
 

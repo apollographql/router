@@ -1,7 +1,7 @@
-### Attach `dd.trace_id` to json formatted log messages ([PR #4764](https://github.com/apollographql/router/pull/4764))
+### Attach `dd.trace_id` to JSON formatted log messages ([PR #4764](https://github.com/apollographql/router/pull/4764))
 
-To enable correlation between DataDog tracing and logs, `dd.trace_id` must appear as a span attribute and also on the root of each `json` formatted log message.
-If users configure their router.yaml to include `dd.trace_id`:
+To enable correlation between DataDog tracing and logs, `dd.trace_id` must appear as a span attribute on the root of each JSON formatted log message.
+Once you configure the `dd.trace_id` attribute in router.yaml, it will automatically be extracted from the root span and attached to the logs:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -12,7 +12,6 @@ telemetry:
         attributes:
           dd.trace_id: true
 ```
-Then the `dd.trace_id` attribute will automatically be extracted from the root span and attached to the logs.
 
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4764
