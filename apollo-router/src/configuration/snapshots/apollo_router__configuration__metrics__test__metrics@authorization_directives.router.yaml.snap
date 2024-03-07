@@ -7,6 +7,5 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.directives.: true
-          opt.require_authentication.: false
-
+          opt.directives: true
+          opt.require_authentication: false

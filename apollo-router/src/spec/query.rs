@@ -291,7 +291,7 @@ impl Query {
         let validate =
             configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
         // Stretch the meaning of "assume valid" to "we’ll check later"
-        let (executable, validation_errors) = if validate {
+        let (executable_document, validation_errors) = if validate {
             match ast.to_executable_validate(schema) {
                 Ok(doc) => (doc.into_inner(), None),
                 Err(WithErrors { partial, errors }) => (partial, Some(errors)),
@@ -309,7 +309,7 @@ impl Query {
 
         Arc::new(ParsedDocumentInner {
             ast,
-            executable,
+            executable: Arc::new(executable_document),
             parse_errors,
             validation_errors,
         })

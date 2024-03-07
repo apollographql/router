@@ -291,9 +291,10 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let supergraph_creator = YamlRouterFactory
-            .create_supergraph(
+            .inner_create_supergraph(
                 config.clone(),
                 schema.to_string(),
+                None,
                 None,
                 Some(builder.extra_plugins),
             )

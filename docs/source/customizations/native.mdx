@@ -281,6 +281,24 @@ tracing::info!(
 );
 ```
 
+## Logging
+
+The Router has a logging infrastructure based on the [tracing macros](https://docs.rs/tracing/latest/tracing/index.html#macros), like metrics, and those should be the preferred way to write logs, as they will be configurable through the Router's telemetry infrastructure.
+
+Example usage:
+
+```rust
+tracing::info!(service_name = name, "received request");
+```
+
+If writing to stdout or stderr directly is still needed, additional steps should be taken to prevent errors: due to the Router using non blocking IO for stdout and stderr, `println!` and `eprintln!` cannot be used, as they would panic if those streams were blocking.
+As an example, writing to stdout would be done like this:
+
+```rust
+use std::io::Write;
+let _ = writeln!(std::io::stdout(), "value={}", 1);
+```
+
 ## Plugin Lifecycle
 
 Like individual requests, plugins follow their own strict lifecycle that helps provide structure to the Apollo Router's execution.
