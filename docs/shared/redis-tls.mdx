@@ -8,9 +8,10 @@ apq:
         urls: [ "rediss://redis.example.com:6379" ]
         #highlight-start
         tls:
-          certificate_authorities: ""
+          certificate_authorities: ${file./path/to/ca.crt}
           client_authentication:
-            certificate_chain: 
-            key: 
+            certificate: ${file./path/to/certificate.pem}
+            certificate_chain: ${file./path/to/certificate_chain.pem}
+            key: ${file./path/to/key.pem}
         #highlight-end
 ```
