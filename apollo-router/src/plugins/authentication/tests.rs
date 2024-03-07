@@ -592,6 +592,188 @@ async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whi
     let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
 }
 
+#[tokio::test]
+async fn it_extracts_the_token_from_cookies() {
+    let mut mock_service = test::MockSupergraphService::new();
+    mock_service.expect_clone().return_once(move || {
+        println!("cloned to supergraph mock");
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .once()
+            .returning(move |req: supergraph::Request| {
+                Ok(supergraph::Response::fake_builder()
+                    .data("response created within the mock")
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+        mock_service
+    });
+    let jwks_url = create_an_url("jwks.json");
+
+    let config = serde_json::json!({
+        "authentication": {
+            "router": {
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ],
+                    "sources": [
+                        {
+                            "type": "cookie",
+                            "name": "authz"
+                        }
+                    ],
+                }
+            }
+        },
+        "rhai": {
+            "scripts":"tests/fixtures",
+            "main":"require_authentication.rhai"
+        }
+    });
+    let test_harness = crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .build_router()
+        .await
+        .unwrap();
+
+    let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A";
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(
+            http::header::COOKIE,
+            format!("a= b; c = d HttpOnly; authz = {token}; e = f"),
+        )
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
+#[tokio::test]
+async fn it_supports_multiple_sources() {
+    let mut mock_service = test::MockSupergraphService::new();
+    mock_service.expect_clone().return_once(move || {
+        println!("cloned to supergraph mock");
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .once()
+            .returning(move |req: supergraph::Request| {
+                Ok(supergraph::Response::fake_builder()
+                    .data("response created within the mock")
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+        mock_service
+    });
+    let jwks_url = create_an_url("jwks.json");
+
+    let config = serde_json::json!({
+        "authentication": {
+            "router": {
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ],
+                    "sources": [
+                        {
+                            "type": "cookie",
+                            "name": "authz"
+                        },
+                        {
+                            "type": "header",
+                            "name": "authz1"
+                        },
+                        {
+                            "type": "header",
+                            "name": "authz2",
+                            "value_prefix": "bear"
+                        }
+                    ],
+                }
+            }
+        },
+        "rhai": {
+            "scripts":"tests/fixtures",
+            "main":"require_authentication.rhai"
+        }
+    });
+    let test_harness = crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .build_router()
+        .await
+        .unwrap();
+
+    let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A";
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header("Authz2", format!("Bear {token}"))
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
 async fn build_jwks_search_components() -> JwksManager {
     let mut sets = vec![];
     let mut urls = vec![];
@@ -767,7 +949,12 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
+    let mut config = JWTConf::default();
+    config.sources.push(Source::Header {
+        name: super::default_header_name(),
+        value_prefix: super::default_header_value_prefix(),
+    });
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             panic!("unexpected response: {res:?}");
         }
@@ -800,7 +987,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -840,7 +1027,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -875,7 +1062,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()) {
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())

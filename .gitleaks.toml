@@ -69,6 +69,7 @@
 
         paths = [
             '''^apollo-router\/src\/.+\/testdata\/.+''',
+            '''^apollo-router/src/plugins/authentication/tests.rs$'''
         ]
 
 [[ rules ]]
