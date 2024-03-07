@@ -9,6 +9,8 @@ use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
 use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
 use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
@@ -40,6 +42,8 @@ use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_header_value;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication::jwks::JwkSetInfo;
@@ -153,6 +157,24 @@ struct JwksConf {
     #[schemars(with = "Option<Vec<String>>", default)]
     #[serde(default)]
     algorithms: Option<Vec<Algorithm>>,
+    /// List of headers to add to the JWKS request
+    #[serde(default)]
+    headers: Vec<Header>,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Insert a header
+struct Header {
+    /// The name of the header
+    #[schemars(with = "String")]
+    #[serde(deserialize_with = "deserialize_header_name")]
+    name: HeaderName,
+
+    /// The value for the header
+    #[schemars(with = "String")]
+    #[serde(deserialize_with = "deserialize_header_value")]
+    value: HeaderValue,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -446,6 +468,7 @@ impl Plugin for AuthenticationPlugin {
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
                     poll_interval: jwks_conf.poll_interval,
+                    headers: jwks_conf.headers.clone(),
                 });
             }
 

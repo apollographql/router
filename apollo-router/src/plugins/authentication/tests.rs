@@ -1,9 +1,18 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use http::header::CONTENT_TYPE;
+use hyper::server::conn::AddrIncoming;
+use hyper::service::make_service_fn;
+use hyper::service::service_fn;
+use hyper::Server;
 use insta::assert_yaml_snapshot;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
@@ -12,6 +21,7 @@ use jsonwebtoken::jwk::EllipticCurveKeyParameters;
 use jsonwebtoken::jwk::EllipticCurveKeyType;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::EncodingKey;
+use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
@@ -19,6 +29,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tracing::subscriber;
 
+use super::Header;
 use super::*;
 use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
@@ -789,6 +800,7 @@ async fn build_jwks_search_components() -> JwksManager {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -899,6 +911,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
         issuer,
         algorithms: None,
         poll_interval: Duration::from_secs(60),
+        headers: Vec::new(),
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
@@ -1101,6 +1114,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -1132,6 +1146,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -1170,6 +1185,7 @@ async fn it_accepts_key_without_use_or_keyops() {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -1200,6 +1216,7 @@ async fn it_accepts_elliptic_curve_key_without_alg() {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -1230,6 +1247,7 @@ async fn it_accepts_rsa_key_without_alg() {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -1250,4 +1268,60 @@ fn test_parse_failure_logs() {
         let jwks = parse_jwks(include_str!("testdata/jwks.json")).expect("expected to parse jwks");
         assert_yaml_snapshot!(jwks);
     });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn jwks_send_headers() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+
+    let got_header = Arc::new(AtomicBool::new(false));
+    let gh = got_header.clone();
+    let service = make_service_fn(move |_| {
+        let gh = gh.clone();
+        async move {
+            //let gh1 = gh.clone();
+            Ok::<_, io::Error>(service_fn(move |req| {
+                println!("got re: {:?}", req.headers());
+                let gh: Arc<AtomicBool> = gh.clone();
+                async move {
+                    if req
+                        .headers()
+                        .get("jwks-authz")
+                        .and_then(|v| v.to_str().ok())
+                        == Some("user1")
+                    {
+                        gh.store(true, Ordering::Release);
+                    }
+                    Ok::<_, io::Error>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .version(http::Version::HTTP_11)
+                            .body::<hyper::Body>(include_str!("testdata/jwks.json").into())
+                            .unwrap(),
+                    )
+                }
+            }))
+        }
+    });
+    let server = Server::builder(AddrIncoming::from_listener(listener).unwrap()).serve(service);
+    tokio::task::spawn(server);
+
+    let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
+
+    let _jwks_manager = JwksManager::new(vec![JwksConfig {
+        url,
+        issuer: None,
+        algorithms: Some(HashSet::from([Algorithm::RS256])),
+        poll_interval: Duration::from_secs(60),
+        headers: vec![Header {
+            name: HeaderName::from_static("jwks-authz"),
+            value: HeaderValue::from_static("user1"),
+        }],
+    }])
+    .await
+    .unwrap();
+
+    assert!(got_header.load(Ordering::Acquire));
 }
