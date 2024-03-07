@@ -391,6 +391,13 @@ pin_project! {
     }
 }
 
+impl<B: hyper::body::HttpBody> BodyStream<B> {
+    /// Create a new `BodyStream`.
+    pub(crate) fn new(body: DecompressionBody<B>) -> Self {
+        Self { inner: body }
+    }
+}
+
 impl<B> Stream for BodyStream<B>
 where
     B: hyper::body::HttpBody,
