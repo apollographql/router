@@ -41,6 +41,7 @@ use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::batching::BatchQuery;
 use crate::batching::Waiter;
+use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
@@ -817,6 +818,20 @@ async fn call_batched_http(
                 let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
                 let client = client_factory.create(&service);
+
+                // Update our batching metrics (just before we fetch)
+                tracing::info!(
+                    histogram.apollo.router.operations.batching.size = txs.len() as f64,
+                    mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
+                    subgraph = &service
+                );
+
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.batching = 1u64,
+                    mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
+                    subgraph = &service
+                );
+
                 // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
                 let (parts, content_type, body) =
                     do_fetch(client, &context, &service, request, display_body)
