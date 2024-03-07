@@ -289,6 +289,40 @@ query {
 The response would include an error at the `/users/@/email` path since that field requires the `read:emails` scope.
 The router can execute the entire query successfully if the request includes the `read:others read:emails` scope set.
 
+The router returns `null` for unauthorized fields and applies the [standard GraphQL null propagation rules](https://www.apollographql.com/blog/graphql/basics/using-nullability-in-graphql/#what-happens-if-you-try-to-return-null-for-a-non-null-field).
+
+```json title="Unauthorized request response"
+{
+  "data": {
+    "me": null,
+		"post": {
+			"title": "Securing supergraphs",
+		}
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "me"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    },
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "post",
+        "views"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
+}
+```
+
 <MinVersion version="1.29.1">
 
 ### `@authenticated`
