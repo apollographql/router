@@ -1,89 +1,68 @@
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::Duration;
 
-use ::serde::Deserialize;
-use async_compression::tokio::write::BrotliEncoder;
-use async_compression::tokio::write::GzipEncoder;
-use async_compression::tokio::write::ZlibEncoder;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::TryFutureExt;
-use global::get_text_map_propagator;
 use http::header::ACCEPT;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::response::Parts;
-use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
-use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
-use hyper_rustls::HttpsConnector;
 use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
-use opentelemetry::global;
-use rustls::ClientConfig;
 use rustls::RootCertStore;
-use schemars::JsonSchema;
 use serde::Serialize;
-use tokio::io::AsyncWriteExt;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower_http::decompression::Decompression;
-use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
+use super::http::HttpClientServiceFactory;
+use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
+use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
+use crate::plugins::subscription::HeartbeatInterval;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
-use crate::plugins::traffic_shaping::Http2Config;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
-use crate::services::trust_dns_connector::new_async_http_connector;
-use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
-
-type HTTPClientService =
-    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
@@ -95,14 +74,14 @@ const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
 const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphql-response");
-const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
-// interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
-static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
+    HeaderValue::from_static("application/json;callbackSpec=1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
-static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
+static ACCEPT_GRAPHQL_JSON: HeaderValue =
+    HeaderValue::from_static("application/json, application/graphql-response+json");
 
 enum APQError {
     PersistedQueryNotSupported,
@@ -110,42 +89,22 @@ enum APQError {
     Other,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum Compression {
-    /// gzip
-    Gzip,
-    /// deflate
-    Deflate,
-    /// brotli
-    Br,
-}
-
-impl Display for Compression {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Compression::Gzip => write!(f, "gzip"),
-            Compression::Deflate => write!(f, "deflate"),
-            Compression::Br => write!(f, "br"),
-        }
-    }
-}
-
-#[cfg_attr(test, derive(Deserialize))]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 struct SubscriptionExtension {
     subscription_id: String,
     callback_url: url::Url,
     verifier: String,
+    heartbeat_interval_ms: u64,
 }
 
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub(crate) struct SubgraphService {
-    // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
-    // in the hot path. We use reqwest elsewhere because it's convenient and some of the
-    // opentelemetry crate require reqwest clients to work correctly (at time of writing).
-    client: HTTPClientService,
+    // we hold a HTTP client service factory here because a service with plugins applied
+    // cannot be cloned
+    pub(crate) client_factory: HttpClientServiceFactory,
     service: Arc<String>,
 
     /// Whether apq is enabled in the router for subgraph calls
@@ -164,20 +123,11 @@ impl SubgraphService {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &Configuration,
-        tls_root_store: &Option<RootCertStore>,
-        http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
+        client_factory: crate::services::http::HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
-        let tls_cert_store = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .or_else(|| tls_root_store.clone());
+
         let enable_apq = configuration
             .apq
             .subgraph
@@ -185,82 +135,25 @@ impl SubgraphService {
             .get(&name)
             .map(|apq| apq.enabled)
             .unwrap_or(configuration.apq.subgraph.all.enabled);
-        let client_cert_config = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|tls| tls.client_authentication.as_ref())
-            .or(configuration
-                .tls
-                .subgraph
-                .all
-                .client_authentication
-                .as_ref());
-
-        let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
-        let tls_client_config = match (tls_cert_store, client_cert_config) {
-            (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
-            (Some(store), None) => tls_builder
-                .with_root_certificates(store)
-                .with_no_client_auth(),
-            (None, Some(client_auth_config)) => {
-                tls_builder.with_native_roots().with_client_auth_cert(
-                    client_auth_config.certificate_chain.clone(),
-                    client_auth_config.key.clone(),
-                )?
-            }
-            (Some(store), Some(client_auth_config)) => tls_builder
-                .with_root_certificates(store)
-                .with_client_auth_cert(
-                    client_auth_config.certificate_chain.clone(),
-                    client_auth_config.key.clone(),
-                )?,
-        };
 
         SubgraphService::new(
             name,
             enable_apq,
-            http2,
             subscription_config,
-            tls_client_config,
             configuration.notify.clone(),
+            client_factory,
         )
     }
 
     pub(crate) fn new(
         service: impl Into<String>,
         enable_apq: bool,
-        http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
-        tls_config: ClientConfig,
         notify: Notify<String, graphql::Response>,
+        client_factory: crate::services::http::HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
-        let mut http_connector = new_async_http_connector()?;
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        let builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
-
-        let connector = if http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
-        };
-
-        let http_client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-            .http2_only(http2 == Http2Config::Http2Only)
-            .build(connector);
         Ok(Self {
-            client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(http_client),
+            client_factory,
             service: Arc::new(service.into()),
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
             subscription_config,
@@ -269,18 +162,39 @@ impl SubgraphService {
     }
 }
 
+pub(crate) fn generate_tls_client_config(
+    tls_cert_store: Option<RootCertStore>,
+    client_cert_config: Option<&TlsClientAuth>,
+) -> Result<rustls::ClientConfig, BoxError> {
+    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    Ok(match (tls_cert_store, client_cert_config) {
+        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+        (Some(store), None) => tls_builder
+            .with_root_certificates(store)
+            .with_no_client_auth(),
+        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
+            client_auth_config.certificate_chain.clone(),
+            client_auth_config.key.clone(),
+        )?,
+        (Some(store), Some(client_auth_config)) => tls_builder
+            .with_root_certificates(store)
+            .with_client_auth_cert(
+                client_auth_config.certificate_chain.clone(),
+                client_auth_config.key.clone(),
+            )?,
+    })
+}
+
 impl tower::Service<SubgraphRequest> for SubgraphService {
     type Response = SubgraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.client
-            .poll_ready(cx)
-            .map(|res| res.map_err(|e| Box::new(e) as BoxError))
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         let subscription_config = (request.operation_kind == OperationKind::Subscription)
             .then(|| self.subscription_config.clone())
             .flatten();
@@ -316,8 +230,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
         let (_, mut body) = subgraph_request.into_parts();
 
-        let clone = self.client.clone();
-        let client = std::mem::replace(&mut self.client, clone);
+        let client_factory = self.client_factory.clone();
 
         let arc_apq_enabled = self.apq.clone();
 
@@ -349,7 +262,9 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         .await;
                     }
                     Some(SubscriptionMode::Callback(CallbackMode {
-                        public_url, path, ..
+                        public_url,
+                        heartbeat_interval,
+                        ..
                     })) => {
                         // Hash the subgraph_request
                         let subscription_id = hashed_request;
@@ -366,7 +281,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                                 reason: "cannot get the callback stream".to_string(),
                             }
                         })?;
-                        stream_tx.send(handle.into_stream()).await?;
+                        stream_tx.send(Box::pin(handle.into_stream())).await?;
+
                         tracing::info!(
                             monotonic_counter.apollo.router.operations.subscriptions = 1u64,
                             subscriptions.mode = %"callback",
@@ -387,10 +303,16 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
                         // If not then put the subscription_id in the extensions for callback mode and continue
                         // Do this if the topic doesn't already exist
-                        let callback_url = public_url.join(&format!(
-                            "{}/{subscription_id}",
-                            path.as_deref().unwrap_or("/callback")
-                        ))?;
+                        let mut callback_url = public_url.clone();
+                        if callback_url.path_segments_mut().is_err() {
+                            callback_url = callback_url.join(&subscription_id)?;
+                        } else {
+                            callback_url
+                                .path_segments_mut()
+                                .expect("can't happen because we checked before")
+                                .push(&subscription_id);
+                        }
+
                         // Generate verifier
                         let verifier = create_verifier(&subscription_id).map_err(|err| {
                             FetchError::SubrequestHttpError {
@@ -399,19 +321,29 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                                 status_code: None,
                             }
                         })?;
+                        request
+                            .subgraph_request
+                            .headers_mut()
+                            .append(ACCEPT, CALLBACK_PROTOCOL_ACCEPT.clone());
 
                         let subscription_extension = SubscriptionExtension {
                             subscription_id,
                             callback_url,
                             verifier,
+                            heartbeat_interval_ms: match heartbeat_interval {
+                                HeartbeatInterval::Disabled(_) => 0,
+                                HeartbeatInterval::Duration(duration) => {
+                                    duration.as_millis() as u64
+                                }
+                            },
                         };
                         body.extensions.insert(
                             "subscription",
-                            serde_json_bytes::to_value(subscription_extension).map_err(|_err| {
+                            serde_json_bytes::to_value(subscription_extension).map_err(|err| {
                                 FetchError::SubrequestHttpError {
                                     service: service_name.clone(),
-                                    reason: String::from(
-                                        "cannot serialize the subscription extension",
+                                    reason: format!(
+                                        "cannot serialize the subscription extension: {err:?}",
                                     ),
                                     status_code: None,
                                 }
@@ -426,6 +358,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     }
                 }
             }
+
+            let client = client_factory.create(&service_name);
 
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
@@ -465,7 +399,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 request.clone(),
                 apq_body.clone(),
                 context.clone(),
-                client.clone(),
+                client_factory.create(&service_name),
                 &service_name,
             )
             .await?;
@@ -529,7 +463,9 @@ async fn call_websocket(
         subgraph.service.name = service_name,
     );
     if !created {
-        subscription_stream_tx.send(handle.into_stream()).await?;
+        subscription_stream_tx
+            .send(Box::pin(handle.into_stream()))
+            .await?;
         tracing::info!(
             monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
             mode = %"passthrough",
@@ -563,7 +499,7 @@ async fn call_websocket(
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let signing_params = context
-        .private_entries
+        .extensions()
         .lock()
         .get::<SigningParamsConfig>()
         .cloned();
@@ -671,7 +607,7 @@ async fn call_websocket(
         }
     });
 
-    subscription_stream_tx.send(handle_stream).await?;
+    subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
     Ok(SubgraphResponse::new_from_response(
         resp.map(|_| graphql::Response::default()),
@@ -684,7 +620,7 @@ async fn call_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
-    client: HTTPClientService,
+    client: crate::services::http::BoxService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let SubgraphRequest {
@@ -696,35 +632,17 @@ async fn call_http(
         .operation_name
         .clone()
         .unwrap_or_default();
+
     let (parts, _) = subgraph_request.into_parts();
-
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
-    let compressed_body = compress(body, &parts.headers)
-        .instrument(tracing::debug_span!("body_compression"))
-        .await
-        .map_err(|err| {
-            tracing::error!(compress_error = format!("{err:?}").as_str());
-
-            FetchError::CompressionError {
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            }
-        })?;
-
-    let mut request = http::request::Request::from_parts(parts, compressed_body.into());
+    let mut request = http::Request::from_parts(parts, Body::from(body));
 
     request
         .headers_mut()
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .insert(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
-    request
-        .headers_mut()
-        .append(ACCEPT, APP_GRAPHQL_JSON.clone());
-    request
-        .headers_mut()
-        .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
+        .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
 
     let schema_uri = request.uri();
     let host = schema_uri.host().unwrap_or_default();
@@ -751,12 +669,6 @@ async fn call_http(
         "apollo.subgraph.name" = %service_name,
         "graphql.operation.name" = %operation_name,
     );
-    get_text_map_propagator(|propagator| {
-        propagator.inject_context(
-            &subgraph_req_span.context(),
-            &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-        );
-    });
 
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
     //
@@ -772,45 +684,17 @@ async fn call_http(
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
-    let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
-    let signing_params = context
-        .private_entries
-        .lock()
-        .get::<SigningParamsConfig>()
-        .cloned();
-
-    let request = if let Some(signing_params) = signing_params {
-        signing_params.sign(request, service_name).await?
-    } else {
-        request
-    };
-
-    // Print out the debug for the request
-    if display_headers {
-        tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
-    }
-    if display_body {
-        tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
-    }
+    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
+    let request = file_uploads::http_request_wrapper(request).await;
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
-    let (parts, content_type, body) = do_fetch(
-        client,
-        &context,
-        service_name,
-        request,
-        display_headers,
-        display_body,
-    )
-    .instrument(subgraph_req_span)
-    .await?;
+    let (parts, content_type, body) =
+        do_fetch(client, &context, service_name, request, display_body)
+            .instrument(subgraph_req_span)
+            .await?;
 
-    // Print out the debug for the response
-    if display_headers {
-        tracing::info!(response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
-    }
     if display_body {
         if let Some(Ok(b)) = &body {
             tracing::info!(
@@ -930,11 +814,10 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: HTTPClientService,
+    mut client: crate::services::http::BoxService,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
-    display_headers: bool,
     display_body: bool,
 ) -> Result<
     (
@@ -946,7 +829,10 @@ async fn do_fetch(
 > {
     let _active_request_guard = context.enter_active_request();
     let response = client
-        .call(request)
+        .call(HttpRequest {
+            http_request: request,
+            context: context.clone(),
+        })
         .map_err(|err| {
             tracing::error!(fetch_error = ?err);
             FetchError::SubrequestHttpError {
@@ -957,13 +843,8 @@ async fn do_fetch(
         })
         .await?;
 
-    let (parts, body) = response.into_parts();
-    // Print out debug for the response
-    if display_headers {
-        tracing::info!(
-            http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-        );
-    }
+    let (parts, body) = response.http_response.into_parts();
+
     let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
@@ -987,6 +868,24 @@ async fn do_fetch(
         }
         Some(body)
     } else {
+        if display_body {
+            let body = hyper::body::to_bytes(body)
+                .instrument(tracing::debug_span!("aggregate_response_data"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = ?err);
+                    FetchError::SubrequestHttpError {
+                        status_code: Some(parts.status.as_u16()),
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    }
+                });
+            if let Ok(body) = &body {
+                tracing::info!(
+                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                );
+            }
+        }
         None
     };
     Ok((parts, content_type, body))
@@ -1069,43 +968,6 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
     APQError::Other
 }
 
-pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
-    let content_encoding = headers.get(&CONTENT_ENCODING);
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str()? {
-            "br" => {
-                let mut br_encoder = BrotliEncoder::new(Vec::new());
-                br_encoder.write_all(body.as_bytes()).await?;
-                br_encoder.shutdown().await?;
-
-                Ok(br_encoder.into_inner())
-            }
-            "gzip" => {
-                let mut gzip_encoder = GzipEncoder::new(Vec::new());
-                gzip_encoder.write_all(body.as_bytes()).await?;
-                gzip_encoder.shutdown().await?;
-
-                Ok(gzip_encoder.into_inner())
-            }
-            "deflate" => {
-                let mut df_encoder = ZlibEncoder::new(Vec::new());
-                df_encoder.write_all(body.as_bytes()).await?;
-                df_encoder.shutdown().await?;
-
-                Ok(df_encoder.into_inner())
-            }
-            "identity" => Ok(body.into_bytes()),
-            unknown => {
-                tracing::error!("unknown content-encoding value '{:?}'", unknown);
-                Err(BoxError::from(format!(
-                    "unknown content-encoding value '{unknown:?}'",
-                )))
-            }
-        },
-        None => Ok(body.into_bytes()),
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
@@ -1161,7 +1023,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-    use std::io;
     use std::net::SocketAddr;
     use std::net::TcpListener;
     use std::str::FromStr;
@@ -1178,15 +1039,8 @@ mod tests {
     use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
-    use http::Version;
-    use hyper::server::conn::AddrIncoming;
     use hyper::service::make_service_fn;
     use hyper::Body;
-    use hyper_rustls::TlsAcceptor;
-    use rustls::server::AllowAnyAuthenticatedClient;
-    use rustls::Certificate;
-    use rustls::PrivateKey;
-    use rustls::ServerConfig;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tokio::sync::mpsc;
@@ -1197,16 +1051,14 @@ mod tests {
     use SubgraphRequest;
 
     use super::*;
-    use crate::configuration::load_certs;
-    use crate::configuration::load_key;
-    use crate::configuration::TlsClientAuth;
-    use crate::configuration::TlsSubgraph;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::plugins::subscription::Disabled;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
+    use crate::plugins::traffic_shaping::Http2Config;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
@@ -1339,53 +1191,6 @@ mod tests {
                 .header(CONTENT_TYPE, "text/html")
                 .status(StatusCode::OK)
                 .body(r#"TEST"#.into())
-                .unwrap())
-        }
-
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
-    }
-
-    // starts a local server emulating a subgraph returning compressed response
-    async fn emulate_subgraph_compressed_response(listener: TcpListener) {
-        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            // Check the compression of the body
-            let mut encoder = GzipEncoder::new(Vec::new());
-            encoder
-                .write_all(
-                    &serde_json::to_vec(&Request::builder().query("query".to_string()).build())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            encoder.shutdown().await.unwrap();
-            let compressed_body = encoder.into_inner();
-            assert_eq!(
-                compressed_body,
-                hyper::body::to_bytes(request.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
-            );
-
-            let original_body = Response {
-                data: Some(Value::String(ByteString::from("test"))),
-                ..Response::default()
-            };
-            let mut encoder = GzipEncoder::new(Vec::new());
-            encoder
-                .write_all(&serde_json::to_vec(&original_body).unwrap())
-                .await
-                .unwrap();
-            encoder.shutdown().await.unwrap();
-            let compressed_body = encoder.into_inner();
-
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .header(CONTENT_ENCODING, "gzip")
-                .status(StatusCode::OK)
-                .body(compressed_body.into())
                 .unwrap())
         }
 
@@ -1779,7 +1584,12 @@ mod tests {
 
     async fn emulate_subgraph_with_callback_data(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            let (_, body) = request.into_parts();
+            let (parts, body) = request.into_parts();
+            assert!(parts
+                .headers
+                .get_all(ACCEPT)
+                .iter()
+                .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT));
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
                 .await
                 .map_err(|_| ())
@@ -1802,6 +1612,7 @@ mod tests {
                     subscription_extension.subscription_id
                 )
             );
+            assert_eq!(subscription_extension.heartbeat_interval_ms, 0);
 
             Ok(http::Response::builder()
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -1824,10 +1635,11 @@ mod tests {
             enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
-                    public_url: Url::parse("http://localhost:4000").unwrap(),
+                    public_url: Url::parse("http://localhost:4000/testcallback").unwrap(),
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
+                    heartbeat_interval: HeartbeatInterval::Disabled(Disabled::Disabled),
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
@@ -1875,13 +1687,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "testbis",
             true,
-            Http2Config::Disable,
             subscription_config().into(),
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::builder().build(),
+            HttpClientServiceFactory::from_config(
+                "testbis",
+                &Configuration::default(),
+                Http2Config::Disable,
+            ),
         )
         .expect("can create a SubgraphService");
         let (tx, _rx) = mpsc::channel(2);
@@ -1898,6 +1710,7 @@ mod tests {
                     ))
                     .operation_kind(OperationKind::Subscription)
                     .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -1918,13 +1731,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -1935,6 +1748,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -1951,13 +1765,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -1968,6 +1782,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -1984,13 +1799,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2001,6 +1816,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2022,13 +1838,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2039,6 +1855,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2064,13 +1881,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2081,6 +1898,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2104,13 +1922,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Disable,
             subscription_config().into(),
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::builder().build(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
         let (tx, rx) = mpsc::channel(2);
@@ -2129,6 +1947,7 @@ mod tests {
                     ))
                     .operation_kind(OperationKind::Subscription)
                     .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2156,13 +1975,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Disable,
             subscription_config().into(),
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::builder().build(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
         let (tx, _rx) = mpsc::channel(2);
@@ -2180,6 +1999,7 @@ mod tests {
                     ))
                     .operation_kind(OperationKind::Subscription)
                     .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2199,13 +2019,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2216,6 +2036,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2240,13 +2061,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2257,6 +2078,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2269,51 +2091,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_compressed_request_response_body() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(emulate_subgraph_compressed_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            false,
-            Http2Config::Enable,
-            None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
-            Notify::default(),
-        )
-        .expect("can create a SubgraphService");
-
-        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-        let resp = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .header(CONTENT_ENCODING, "gzip")
-                    .uri(url)
-                    .body(Request::builder().query("query".to_string()).build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
-            .await
-            .unwrap();
-        // Test the right decompression of the body
-        let resp_from_subgraph = Response {
-            data: Some(Value::String(ByteString::from("test"))),
-            ..Response::default()
-        };
-
-        assert_eq!(resp.response.body(), &resp_from_subgraph);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn test_unauthorized() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
@@ -2321,13 +2098,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2338,6 +2115,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2357,13 +2135,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2377,6 +2155,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2402,13 +2181,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2422,6 +2201,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2445,13 +2225,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2463,6 +2243,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2485,13 +2266,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2503,6 +2284,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2525,13 +2307,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2543,6 +2325,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2565,13 +2348,13 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             false,
-            Http2Config::Enable,
             None,
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
             Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
         )
         .expect("can create a SubgraphService");
 
@@ -2583,6 +2366,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2595,288 +2379,5 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-    }
-
-    async fn tls_server(
-        listener: tokio::net::TcpListener,
-        certificates: Vec<Certificate>,
-        key: PrivateKey,
-        body: &'static str,
-    ) {
-        let acceptor = TlsAcceptor::builder()
-            .with_single_cert(certificates, key)
-            .unwrap()
-            .with_all_versions_alpn()
-            .with_incoming(AddrIncoming::from_listener(listener).unwrap());
-        let service = make_service_fn(|_| async {
-            Ok::<_, io::Error>(service_fn(|_req| async {
-                Ok::<_, io::Error>(
-                    http::Response::builder()
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .status(StatusCode::OK)
-                        .version(Version::HTTP_11)
-                        .body::<Body>(body.into())
-                        .unwrap(),
-                )
-            }))
-        });
-        let server = Server::builder(acceptor).serve(service);
-        server.await.unwrap()
-    }
-
-    // Note: This test relies on a checked in certificate with the following validity
-    // characteristics:
-    //         Validity
-    //           Not Before: Oct 10 07:32:39 2023 GMT
-    //           Not After : Oct  7 07:32:39 2033 GMT
-    // If this test fails and it is October 7th 2033, you will need to generate a
-    // new self signed cert. Currently, we use openssl to do this, in the future I
-    // hope we have something better...
-    // In the testdata directory run:
-    // openssl x509 -req -in server_self_signed.csr -signkey server.key -out server_self_signed.crt -extfile server.ext -days 3650
-    // That will give you another 10 years, assuming nothing else in the signing
-    // framework has expired.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn tls_self_signed() {
-        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
-        let key_pem = include_str!("./testdata/server.key");
-
-        let certificates = load_certs(certificate_pem).unwrap();
-        let key = load_key(key_pem).unwrap();
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
-
-        // we cannot parse a configuration from text, because certificates are generally
-        // added by file expansion and we don't have access to that here, and inserting
-        // the PEM data directly generates parsing issues due to end of line characters
-        let mut config = Configuration::default();
-        config.tls.subgraph.subgraphs.insert(
-            "test".to_string(),
-            TlsSubgraph {
-                certificate_authorities: Some(certificate_pem.into()),
-                client_authentication: None,
-            },
-        );
-        let subgraph_service =
-            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
-                .unwrap();
-
-        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
-        let response = subgraph_service
-            .oneshot(
-                SubgraphRequest::builder()
-                    .supergraph_request(supergraph_request("query"))
-                    .subgraph_request(subgraph_http_request(url, "query"))
-                    .operation_kind(OperationKind::Query)
-                    .context(Context::new())
-                    .build(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.response.body().data, Some(Value::Null));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn tls_custom_root() {
-        let certificate_pem = include_str!("./testdata/server.crt");
-        let ca_pem = include_str!("./testdata/CA/ca.crt");
-        let key_pem = include_str!("./testdata/server.key");
-
-        let mut certificates = load_certs(certificate_pem).unwrap();
-        certificates.extend(load_certs(ca_pem).unwrap());
-        let key = load_key(key_pem).unwrap();
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
-
-        // we cannot parse a configuration from text, because certificates are generally
-        // added by file expansion and we don't have access to that here, and inserting
-        // the PEM data directly generates parsing issues due to end of line characters
-        let mut config = Configuration::default();
-        config.tls.subgraph.subgraphs.insert(
-            "test".to_string(),
-            TlsSubgraph {
-                certificate_authorities: Some(ca_pem.into()),
-                client_authentication: None,
-            },
-        );
-        let subgraph_service =
-            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
-                .unwrap();
-
-        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
-        let response = subgraph_service
-            .oneshot(
-                SubgraphRequest::builder()
-                    .supergraph_request(supergraph_request("query"))
-                    .subgraph_request(subgraph_http_request(url, "query"))
-                    .operation_kind(OperationKind::Query)
-                    .context(Context::new())
-                    .build(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.response.body().data, Some(Value::Null));
-    }
-
-    async fn tls_server_with_client_auth(
-        listener: tokio::net::TcpListener,
-        certificates: Vec<Certificate>,
-        key: PrivateKey,
-        client_root: Certificate,
-        body: &'static str,
-    ) {
-        let mut client_auth_roots = RootCertStore::empty();
-        client_auth_roots.add(&client_root).unwrap();
-
-        let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots).boxed();
-
-        let acceptor = TlsAcceptor::builder()
-            .with_tls_config(
-                ServerConfig::builder()
-                    .with_safe_defaults()
-                    .with_client_cert_verifier(client_auth)
-                    .with_single_cert(certificates, key)
-                    .unwrap(),
-            )
-            .with_all_versions_alpn()
-            .with_incoming(AddrIncoming::from_listener(listener).unwrap());
-        let service = make_service_fn(|_| async {
-            Ok::<_, io::Error>(service_fn(|_req| async {
-                Ok::<_, io::Error>(
-                    http::Response::builder()
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .status(StatusCode::OK)
-                        .version(Version::HTTP_11)
-                        .body::<Body>(body.into())
-                        .unwrap(),
-                )
-            }))
-        });
-        let server = Server::builder(acceptor).serve(service);
-        server.await.unwrap()
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn tls_client_auth() {
-        let server_certificate_pem = include_str!("./testdata/server.crt");
-        let ca_pem = include_str!("./testdata/CA/ca.crt");
-        let server_key_pem = include_str!("./testdata/server.key");
-
-        let mut server_certificates = load_certs(server_certificate_pem).unwrap();
-        let ca_certificate = load_certs(ca_pem).unwrap().remove(0);
-        server_certificates.push(ca_certificate.clone());
-        let key = load_key(server_key_pem).unwrap();
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(tls_server_with_client_auth(
-            listener,
-            server_certificates,
-            key,
-            ca_certificate,
-            r#"{"data": null}"#,
-        ));
-
-        let client_certificate_pem = include_str!("./testdata/client.crt");
-        let client_key_pem = include_str!("./testdata/client.key");
-
-        let client_certificates = load_certs(client_certificate_pem).unwrap();
-        let client_key = load_key(client_key_pem).unwrap();
-
-        // we cannot parse a configuration from text, because certificates are generally
-        // added by file expansion and we don't have access to that here, and inserting
-        // the PEM data directly generates parsing issues due to end of line characters
-        let mut config = Configuration::default();
-        config.tls.subgraph.subgraphs.insert(
-            "test".to_string(),
-            TlsSubgraph {
-                certificate_authorities: Some(ca_pem.into()),
-                client_authentication: Some(TlsClientAuth {
-                    certificate_chain: client_certificates,
-                    key: client_key,
-                }),
-            },
-        );
-        let subgraph_service =
-            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
-                .unwrap();
-
-        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
-        let response = subgraph_service
-            .oneshot(
-                SubgraphRequest::builder()
-                    .supergraph_request(supergraph_request("query"))
-                    .subgraph_request(subgraph_http_request(url, "query"))
-                    .operation_kind(OperationKind::Query)
-                    .context(Context::new())
-                    .build(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.response.body().data, Some(Value::Null));
-    }
-
-    // starts a local server emulating a subgraph returning status code 401
-    async fn emulate_h2c_server(listener: TcpListener) {
-        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            println!("h2C server got req: {_request:?}");
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .status(StatusCode::OK)
-                .body(
-                    serde_json::to_string(&Response {
-                        data: Some(Value::default()),
-                        ..Response::default()
-                    })
-                    .expect("always valid")
-                    .into(),
-                )
-                .unwrap())
-        }
-
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener)
-            .unwrap()
-            .http2_only(true)
-            .serve(make_svc);
-        server.await.unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_h2c() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(emulate_h2c_server(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            true,
-            Http2Config::Http2Only,
-            None,
-            rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
-            Notify::default(),
-        )
-        .expect("can create a SubgraphService");
-
-        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-        let response = subgraph_service
-            .oneshot(
-                SubgraphRequest::builder()
-                    .supergraph_request(supergraph_request("query"))
-                    .subgraph_request(subgraph_http_request(url, "query"))
-                    .operation_kind(OperationKind::Query)
-                    .context(Context::new())
-                    .build(),
-            )
-            .await
-            .unwrap();
-        assert!(response.response.body().errors.is_empty());
     }
 }

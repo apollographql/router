@@ -1,6 +1,7 @@
 //! Router errors.
 use std::sync::Arc;
 
+use apollo_federation::error::FederationError;
 use displaydoc::Display;
 use lazy_static::__Deref;
 use router_bridge::introspect::IntrospectionError;
@@ -10,6 +11,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
+use tower::BoxError;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
@@ -94,25 +96,8 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// subquery requires field '{field}' but it was not found in the current response
-    ExecutionFieldNotFound {
-        /// The field that is not found.
-        field: String,
-    },
-
-    #[cfg(test)]
-    /// invalid content: {reason}
-    ExecutionInvalidContent { reason: String },
-
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
-    /// could not compress request: {reason}
-    CompressionError {
-        /// The service that failed.
-        service: String,
-        /// The reason the compression failed.
-        reason: String,
-    },
 }
 
 impl FetchError {
@@ -141,16 +126,10 @@ impl FetchError {
                 }
                 FetchError::SubrequestMalformedResponse { service, .. }
                 | FetchError::SubrequestUnexpectedPatchResponse { service }
-                | FetchError::SubrequestWsError { service, .. }
-                | FetchError::CompressionError { service, .. } => {
+                | FetchError::SubrequestWsError { service, .. } => {
                     extensions
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
-                }
-                FetchError::ExecutionFieldNotFound { field, .. } => {
-                    extensions
-                        .entry("field")
-                        .or_insert_with(|| field.clone().into());
                 }
                 FetchError::ValidationInvalidTypeVariable { name } => {
                     extensions
@@ -189,11 +168,7 @@ impl ErrorExtension for FetchError {
             }
             FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
             FetchError::SubrequestWsError { .. } => "SUBREQUEST_WEBSOCKET_ERROR",
-            FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
-            FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
-            #[cfg(test)]
-            FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
@@ -236,16 +211,28 @@ impl From<QueryPlannerError> for CacheResolverError {
 /// Error types for service building.
 #[derive(Error, Debug, Display)]
 pub(crate) enum ServiceBuildError {
-    /// couldn't build Router Service: {0}
+    /// couldn't build Query Planner Service: {0}
     QueryPlannerError(QueryPlannerError),
+
+    /// API schema generation failed: {0}
+    ApiSchemaError(FederationError),
 
     /// schema error: {0}
     Schema(SchemaError),
+
+    /// couldn't build Router service: {0}
+    ServiceError(BoxError),
 }
 
 impl From<SchemaError> for ServiceBuildError {
     fn from(err: SchemaError) -> Self {
         ServiceBuildError::Schema(err)
+    }
+}
+
+impl From<FederationError> for ServiceBuildError {
+    fn from(err: FederationError) -> Self {
+        ServiceBuildError::ApiSchemaError(err)
     }
 }
 
@@ -261,6 +248,12 @@ impl From<router_bridge::error::Error> for ServiceBuildError {
     }
 }
 
+impl From<BoxError> for ServiceBuildError {
+    fn from(err: BoxError) -> Self {
+        ServiceBuildError::ServiceError(err)
+    }
+}
+
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerError {
@@ -268,7 +261,7 @@ pub(crate) enum QueryPlannerError {
     SchemaValidationErrors(PlannerErrors),
 
     /// invalid query
-    OperationValidationErrors(Vec<apollo_compiler::GraphQLError>),
+    OperationValidationErrors(Vec<apollo_compiler::execution::GraphQLError>),
 
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
@@ -279,7 +272,7 @@ pub(crate) enum QueryPlannerError {
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
-    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    /// empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
     EmptyPlan(UsageReporting), // usage_reporting_signature
 
     /// unhandled planner result
@@ -301,7 +294,7 @@ pub(crate) enum QueryPlannerError {
     Unauthorized(Vec<Path>),
 }
 
-impl IntoGraphQLErrors for Vec<apollo_compiler::GraphQLError> {
+impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         Ok(self
             .into_iter()
@@ -555,7 +548,7 @@ pub(crate) enum SchemaError {
 /// Collection of schema validation errors.
 #[derive(Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) errors: apollo_compiler::Diagnostics,
+    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
 }
 
 impl std::fmt::Display for ParseErrors {
@@ -578,7 +571,7 @@ impl std::fmt::Display for ParseErrors {
 /// Collection of schema validation errors.
 #[derive(Debug)]
 pub(crate) struct ValidationErrors {
-    pub(crate) errors: apollo_compiler::Diagnostics,
+    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
 }
 
 impl IntoGraphQLErrors for ValidationErrors {
@@ -588,7 +581,7 @@ impl IntoGraphQLErrors for ValidationErrors {
             .iter()
             .map(|diagnostic| {
                 Error::builder()
-                    .message(diagnostic.message().to_string())
+                    .message(diagnostic.error.to_string())
                     .locations(
                         diagnostic
                             .get_line_column()
@@ -614,15 +607,9 @@ impl std::fmt::Display for ValidationErrors {
                 f.write_str("\n")?;
             }
             if let Some(location) = error.get_line_column() {
-                write!(
-                    f,
-                    "[{}:{}] {}",
-                    location.line,
-                    location.column,
-                    error.message()
-                )?;
+                write!(f, "[{}:{}] {}", location.line, location.column, error.error)?;
             } else {
-                write!(f, "{}", error.message())?;
+                write!(f, "{}", error.error)?;
             }
         }
         Ok(())

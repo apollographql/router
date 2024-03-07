@@ -48,18 +48,18 @@ where
                         return Ok(ControlFlow::Continue(req));
                     }
 
-                    let doc = match req.context.private_entries.lock().get::<ParsedDocument>() {
+                    let doc = match req.context.extensions().lock().get::<ParsedDocument>() {
                         None => {
                             let errors = vec![Error::builder()
                                 .message("Cannot find executable document".to_string())
                                 .extension_code("MISSING_EXECUTABLE_DOCUMENT")
                                 .build()];
-                            let res = SupergraphResponse::builder()
+                            let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
                                 .extensions(Object::default())
                                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                                 .context(req.context.clone())
-                                .build()?;
+                                .build();
 
                             return Ok(ControlFlow::Break(res));
                         }
@@ -76,12 +76,12 @@ where
                                 .message("Cannot find operation".to_string())
                                 .extension_code("MISSING_OPERATION")
                                 .build()];
-                            let res = SupergraphResponse::builder()
+                            let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
                                 .extensions(Object::default())
                                 .status_code(StatusCode::METHOD_NOT_ALLOWED)
                                 .context(req.context)
-                                .build()?;
+                                .build();
 
                             Ok(ControlFlow::Break(res))
                         }
@@ -254,28 +254,48 @@ mod forbid_http_get_mutations_tests {
 
     fn create_request(method: Method, operation_kind: OperationKind) -> SupergraphRequest {
         let query = match operation_kind {
-            OperationKind::Query => "query { a }\n type Query { a: Int }",
-            OperationKind::Mutation => "mutation { a }\n type Mutation { a: Int }",
-
-            OperationKind::Subscription => "subscription { a }\n type Subscription { a: Int }",
+            OperationKind::Query => {
+                "
+                    type Query { a: Int }
+                    query { a }
+                "
+            }
+            OperationKind::Mutation => {
+                "
+                    type Query { a: Int }
+                    type Mutation { a: Int }
+                    mutation { a }
+                "
+            }
+            OperationKind::Subscription => {
+                "
+                    type Query { a: Int }
+                    type Subscription { a: Int }
+                    subscription { a }
+                "
+            }
         };
 
-        let ast = ast::Document::parse(query, "");
-        let (_schema, executable) = ast.to_mixed();
+        let ast = ast::Document::parse(query, "").unwrap();
+        let (_schema, executable) = ast.to_mixed_validate().unwrap();
+        let executable = executable.into_inner();
 
         let context = Context::new();
         context
-            .private_entries
+            .extensions()
             .lock()
-            .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner { ast, executable }));
+            .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
+                ast,
+                executable: Arc::new(executable),
+                parse_errors: None,
+                validation_errors: None,
+            }));
 
-        let request = SupergraphRequest::fake_builder()
+        SupergraphRequest::fake_builder()
             .method(method)
             .query(query)
             .context(context)
             .build()
-            .unwrap();
-
-        request
+            .unwrap()
     }
 }

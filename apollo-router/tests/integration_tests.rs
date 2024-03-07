@@ -17,6 +17,7 @@ use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use apollo_router::Configuration;
 use apollo_router::Context;
+use apollo_router::_private::create_test_service_factory_from_yaml;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -33,6 +34,8 @@ use tower::BoxError;
 use tower::ServiceExt;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
+
+mod integration;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -795,7 +798,7 @@ async fn query_just_at_token_limit() {
 async fn normal_query_with_defer_accept_header() {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
     let (mut response, _registry) = {
@@ -838,7 +841,7 @@ async fn defer_path_with_disabled_config() {
             }
         }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting failure due to disabled config defer support");
 
@@ -875,7 +878,7 @@ async fn defer_path() {
             }
         }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -918,7 +921,7 @@ async fn defer_path_in_array() {
                 }
             }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -991,7 +994,7 @@ async fn defer_empty_primary_response() {
             }
         }"#,
         )
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -1028,7 +1031,7 @@ async fn defer_default_variable() {
 
     let request = supergraph::Request::fake_builder()
         .query(query)
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -1048,7 +1051,7 @@ async fn defer_default_variable() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .variable("if", false)
-        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -1279,8 +1282,12 @@ async fn query_rust_with_config(
 }
 
 async fn fallible_setup_router_and_registry(
-    config: serde_json::Value,
+    mut config: serde_json::Value,
 ) -> Result<(router::BoxCloneService, CountingServiceRegistry), BoxError> {
+    if config["experimental_api_schema_generation_mode"].is_null() {
+        config["experimental_api_schema_generation_mode"] = "both".into();
+    }
+
     let counting_registry = CountingServiceRegistry::new();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
@@ -1512,4 +1519,25 @@ Make sure it is accessible, and the configuration is working with the router."#,
         );
 
     insta::assert_snapshot!(include_str!("../../examples/graphql/supergraph.graphql"));
+}
+
+// This test must use the multi_thread tokio executor or the opentelemetry hang bug will
+// be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
+#[tokio::test(flavor = "multi_thread")]
+#[tracing_test::traced_test]
+async fn test_telemetry_doesnt_hang_with_invalid_schema() {
+    create_test_service_factory_from_yaml(
+        include_str!("../src/testdata/invalid_supergraph.graphql"),
+        r#"
+    telemetry:
+      exporters:
+        tracing:
+          common:
+            service_name: router
+          otlp:
+            enabled: true
+            endpoint: default
+"#,
+    )
+    .await;
 }

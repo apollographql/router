@@ -11,6 +11,7 @@ use std::collections::HashSet;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
 use tower::BoxError;
 
@@ -26,21 +27,29 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     pub(crate) extracted_scopes: HashSet<String>,
     requires_scopes_directive_name: String,
+    entity_query: bool,
 }
 
 pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
-pub(crate) const REQUIRES_SCOPES_SPEC_URL: &str = "https://specs.apollo.dev/requiresScopes/v0.1";
+pub(crate) const REQUIRES_SCOPES_SPEC_BASE_URL: &str = "https://specs.apollo.dev/requiresScopes";
+pub(crate) const REQUIRES_SCOPES_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 impl<'a> ScopeExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a ast::Document,
+        entity_query: bool,
+    ) -> Option<Self> {
         Some(Self {
             schema,
+            entity_query,
             fragments: transform::collect_fragments(executable),
             extracted_scopes: HashSet::new(),
             requires_scopes_directive_name: Schema::directive_name(
                 schema,
-                REQUIRES_SCOPES_SPEC_URL,
+                REQUIRES_SCOPES_SPEC_BASE_URL,
+                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
                 REQUIRES_SCOPES_DIRECTIVE_NAME,
             )?,
         })
@@ -60,6 +69,38 @@ impl<'a> ScopeExtractionVisitor<'a> {
         self.extracted_scopes.extend(scopes_argument(
             ty.directives().get(&self.requires_scopes_directive_name),
         ));
+    }
+
+    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+        use crate::spec::query::traverse::Visitor;
+
+        if node.selection_set.len() != 1 {
+            return Err("invalid number of selections for _entities query".into());
+        }
+
+        match node.selection_set.first() {
+            Some(ast::Selection::Field(field)) => {
+                if field.name.as_str() != "_entities" {
+                    return Err("expected _entities field".into());
+                }
+
+                for selection in &field.selection_set {
+                    match selection {
+                        ast::Selection::InlineFragment(f) => {
+                            match f.type_condition.as_ref() {
+                                None => {
+                                    return Err("expected type condition".into());
+                                }
+                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
+                            };
+                        }
+                        _ => return Err("expected inline fragment".into()),
+                    }
+                }
+                Ok(())
+            }
+            _ => Err("expected _entities field".into()),
+        }
     }
 }
 
@@ -90,7 +131,11 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
             ));
         }
 
-        traverse::operation(self, root_type, node)
+        if !self.entity_query {
+            traverse::operation(self, root_type, node)
+        } else {
+            self.entities_operation(node)
+        }
     }
 
     fn field(
@@ -162,7 +207,7 @@ fn scopes_sets_argument(directive: &ast::Directive) -> impl Iterator<Item = Hash
 pub(crate) struct ScopeFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    implementers_map: &'a HashMap<Name, Implementers>,
     request_scopes: HashSet<String>,
     pub(crate) query_requires_scopes: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
@@ -178,7 +223,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        implementers_map: &'a HashMap<Name, Implementers>,
         scopes: HashSet<String>,
         dry_run: bool,
     ) -> Option<Self> {
@@ -194,7 +239,8 @@ impl<'a> ScopeFilteringVisitor<'a> {
             current_path: Path::default(),
             requires_scopes_directive_name: Schema::directive_name(
                 schema,
-                REQUIRES_SCOPES_SPEC_URL,
+                REQUIRES_SCOPES_SPEC_BASE_URL,
+                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
                 REQUIRES_SCOPES_DIRECTIVE_NAME,
             )?,
         })
@@ -244,16 +290,19 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
     }
 
+    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+        self.implementers_map
+            .get(type_name)
+            .map(|implementers| implementers.iter())
+            .into_iter()
+            .flatten()
+    }
+
     fn implementors_with_different_requirements(
         &self,
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        println!(
-            "implementors with different requirements for {:?}, node name={}",
-            field_def.name,
-            node.name.as_str()
-        );
         // we can request __typename outside of fragments even if the types have different
         // authorization requirements
         if node.name.as_str() == TYPENAME {
@@ -288,10 +337,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
             let type_name = field_def.ty.inner_named_type();
 
             for ty in self
-                .implementers_map
-                .get(type_name)
-                .into_iter()
-                .flatten()
+                .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
                 // aggregate the list of scope sets
@@ -336,7 +382,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
             if t.is_interface() {
                 let mut scope_sets = None;
 
-                for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
+                for ty in self.implementors(parent_type) {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
                         // aggregate the list of scope sets
                         // we transform to a common representation of sorted vectors because the element order
@@ -669,11 +715,10 @@ mod tests {
     "#;
 
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = Document::parse(query, "query.graphql");
-        schema.validate().unwrap();
-        doc.to_executable(&schema).validate(&schema).unwrap();
-        let mut visitor = ScopeExtractionVisitor::new(&schema, &doc).unwrap();
+        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+        let doc = Document::parse(query, "query.graphql").unwrap();
+        doc.to_executable_validate(&schema).unwrap();
+        let mut visitor = ScopeExtractionVisitor::new(&schema, &doc, false).unwrap();
         traverse::document(&mut visitor, &doc).unwrap();
 
         visitor.extracted_scopes.into_iter().collect()
@@ -701,10 +746,9 @@ mod tests {
 
     #[track_caller]
     fn filter(schema: &str, query: &str, scopes: HashSet<String>) -> (Document, Vec<Path>) {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = Document::parse(query, "query.graphql");
-        schema.validate().unwrap();
-        doc.to_executable(&schema).validate(&schema).unwrap();
+        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+        let doc = Document::parse(query, "query.graphql").unwrap();
+        doc.to_executable_validate(&schema).unwrap();
 
         let map = schema.implementers_map();
         let mut visitor = ScopeFilteringVisitor::new(&schema, &doc, &map, scopes, false).unwrap();

@@ -1,14 +1,18 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::Diagnostics;
+use apollo_compiler::schema::Implementers;
+use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use http::Uri;
+use semver::Version;
+use semver::VersionReq;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -23,11 +27,11 @@ use crate::Configuration;
 #[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    pub(crate) definitions: apollo_compiler::Schema,
+    pub(crate) definitions: Valid<apollo_compiler::Schema>,
     /// Stored for comparison with the validation errors from query planning.
-    diagnostics: Option<Diagnostics>,
+    diagnostics: Option<DiagnosticList>,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
+    pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
 }
@@ -59,41 +63,37 @@ impl Schema {
         Ok(schema)
     }
 
-    pub(crate) fn make_compiler(sdl: &str) -> Result<apollo_compiler::schema::Schema, SchemaError> {
+    pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
         let mut parser = apollo_compiler::Parser::new();
-        let ast = parser.parse_ast(sdl, "schema.graphql");
+        let result = parser.parse_ast(sdl, "schema.graphql");
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        ast.check_parse_errors()
-            .map_err(|errors| SchemaError::Parse(ParseErrors { errors }))?;
-
-        let definitions = ast.to_schema();
-        Ok(definitions)
+        result.map_err(|invalid| {
+            SchemaError::Parse(ParseErrors {
+                errors: invalid.errors,
+            })
+        })
     }
 
     pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
-        let mut parser = apollo_compiler::Parser::new();
-        let ast = parser.parse_ast(sdl, "schema.graphql");
-
-        // Trace log recursion limit data
-        let recursion_limit = parser.recursion_reached();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        ast.check_parse_errors()
-            .map_err(|errors| SchemaError::Parse(ParseErrors { errors }))?;
-
-        let definitions = ast.to_schema();
-
-        let diagnostics = if configuration.experimental_graphql_validation_mode
-            == GraphQLValidationMode::Legacy
-        {
-            None
+        let ast = Self::parse_ast(sdl)?;
+        let validate =
+            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
+        // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
+        let (definitions, diagnostics) = if validate {
+            match ast.to_schema_validate() {
+                Ok(schema) => (schema, None),
+                Err(WithErrors { partial, errors }) => (Valid::assume_valid(partial), Some(errors)),
+            }
         } else {
-            definitions.validate().err()
+            match ast.to_schema() {
+                Ok(schema) => (Valid::assume_valid(schema), None),
+                Err(WithErrors { partial, .. }) => (Valid::assume_valid(partial), None),
+            }
         };
 
         // Only error out if new validation is used: with `Both`, we take the legacy
@@ -126,9 +126,7 @@ impl Schema {
             }
         }
 
-        let mut hasher = Sha256::new();
-        hasher.update(sdl.as_bytes());
-        let schema_id = Some(format!("{:x}", hasher.finalize()));
+        let schema_id = Some(Self::schema_id(sdl));
         tracing::info!(
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
@@ -146,10 +144,25 @@ impl Schema {
         })
     }
 
-    pub(crate) fn create_api_schema(&self) -> String {
-        apollo_federation::Supergraph::from(self.definitions.clone())
-            .to_api_schema()
-            .to_string()
+    pub(crate) fn schema_id(sdl: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(sdl.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+
+    pub(crate) fn create_api_schema(
+        &self,
+        configuration: &Configuration,
+    ) -> Result<String, apollo_federation::error::FederationError> {
+        use apollo_federation::ApiSchemaOptions;
+        use apollo_federation::Supergraph;
+
+        let schema = Supergraph::from(self.definitions.clone());
+        let api_schema = schema.to_api_schema(ApiSchemaOptions {
+            include_defer: configuration.supergraph.defer_support,
+            ..Default::default()
+        })?;
+        Ok(api_schema.to_string())
     }
 
     pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
@@ -180,6 +193,10 @@ impl Schema {
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
         self.definitions.get_interface(abstract_type).is_some()
+    }
+
+    pub(crate) fn is_union(&self, abstract_type: &str) -> bool {
+        self.definitions.get_union(abstract_type).is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
@@ -231,22 +248,78 @@ impl Schema {
         self.diagnostics.is_some()
     }
 
-    pub(crate) fn has_spec(&self, url: &str) -> bool {
+    /// Return the federation major version based on the @link or @core directives in the schema,
+    /// or None if there are no federation directives.
+    pub(crate) fn federation_version(&self) -> Option<i64> {
+        for directive in &self.definitions.schema_definition.directives {
+            let join_url = if directive.name == "core" {
+                let Some(feature) = directive
+                    .argument_by_name("feature")
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+
+                feature
+            } else if directive.name == "link" {
+                let Some(url) = directive
+                    .argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+
+                url
+            } else {
+                continue;
+            };
+
+            match join_url.rsplit_once("/v") {
+                Some(("https://specs.apollo.dev/join", "0.1")) => return Some(1),
+                Some(("https://specs.apollo.dev/join", _)) => return Some(2),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
         self.definitions
             .schema_definition
             .directives
             .iter()
             .filter(|dir| dir.name.as_str() == "link")
             .any(|link| {
-                link.argument_by_name("url")
+                if let Some(url_in_link) = link
+                    .argument_by_name("url")
                     .and_then(|value| value.as_str())
-                    == Some(url)
+                {
+                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_in_url) =
+                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
+                        return false;
+                    };
+
+                    base_url_in_link == base_url && version_range.matches(&version_in_url)
+                } else {
+                    false
+                }
             })
     }
 
     pub(crate) fn directive_name(
         schema: &apollo_compiler::schema::Schema,
-        url: &str,
+        base_url: &str,
+        expected_version_range: &str,
         default: &str,
     ) -> Option<String> {
         schema
@@ -255,9 +328,29 @@ impl Schema {
             .iter()
             .filter(|dir| dir.name.as_str() == "link")
             .find(|link| {
-                link.argument_by_name("url")
+                if let Some(url_in_link) = link
+                    .argument_by_name("url")
                     .and_then(|value| value.as_str())
-                    == Some(url)
+                {
+                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_in_url) =
+                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                    else {
+                        return false;
+                    };
+
+                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
+                        return false;
+                    };
+
+                    base_url_in_link == base_url && version_range.matches(&version_in_url)
+                } else {
+                    false
+                }
             })
             .map(|link| {
                 link.argument_by_name("as")
@@ -456,6 +549,25 @@ mod tests {
         };
         assert!(has_in_stock_field(&schema));
         assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
+    }
+
+    #[test]
+    fn federation_version() {
+        // @core directive
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(schema.federation_version(), Some(1));
+
+        // @link directive
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(schema.federation_version(), Some(2));
     }
 
     #[test]

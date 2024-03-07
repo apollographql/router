@@ -1,0 +1,10 @@
+---
+source: apollo-router/src/plugins/telemetry/mod.rs
+expression: prometheus_metrics
+---
+apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="+Inf"} 1
+apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="1"} 1
+apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="2"} 1
+apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="3"} 1
+apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="4"} 1
+apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="5"} 1

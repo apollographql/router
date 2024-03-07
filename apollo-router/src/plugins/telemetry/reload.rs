@@ -8,11 +8,16 @@ use once_cell::sync::OnceCell;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_api::trace::SpanContext;
+use opentelemetry_api::trace::TraceFlags;
+use opentelemetry_api::trace::TraceState;
+use opentelemetry_api::Context;
 use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
 use tracing_core::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_opentelemetry::PreSampledTracer;
 use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Filter;
@@ -27,16 +32,22 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
+use super::config_new::logging::RateLimit;
+use super::dynamic_attribute::DynAttributeLayer;
+use super::fmt_layer::FmtLayer;
+use super::formatters::json::Json;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
+use super::ROUTER_SPAN_NAME;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::metrics::layer::MetricsLayer;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::formatters::filter_metric_events;
-use crate::plugins::telemetry::formatters::text::TextFormatter;
+use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
+use crate::router_factory::STARTING_SPAN_NAME;
 
-pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Registry>;
+pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
 
 pub(super) type LayeredTracer = Layered<
     Filtered<
@@ -79,30 +90,17 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
-        tracing_subscriber::fmt::Layer::new()
-            .event_format(FilteringFormatter::new(
-                TextFormatter::new()
-                    .with_filename(false)
-                    .with_line(false)
-                    .with_target(false),
-                filter_metric_events,
-            ))
-            .fmt_fields(NullFieldFormatter)
-            .boxed()
+        FmtLayer::new(
+            FilteringFormatter::new(Text::default(), filter_metric_events, &RateLimit::default()),
+            std::io::stdout,
+        )
+        .boxed()
     } else {
-        tracing_subscriber::fmt::Layer::new()
-            .json()
-            .map_event_format(|e| {
-                FilteringFormatter::new(
-                    e.json()
-                        .with_current_span(true)
-                        .with_span_list(true)
-                        .flatten_event(true),
-                    filter_metric_events,
-                )
-            })
-            .fmt_fields(NullFieldFormatter)
-            .boxed()
+        FmtLayer::new(
+            FilteringFormatter::new(Json::default(), filter_metric_events, &RateLimit::default()),
+            std::io::stdout,
+        )
+        .boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
@@ -114,10 +112,11 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
         .get_or_try_init(move || {
             // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
             let log_level = format!("{log_level},salsa=error");
-
+            tracing::debug!("Running the router with log level set to {log_level}");
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
+                .with(DynAttributeLayer::new())
                 .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
@@ -141,7 +140,31 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     }
 }
 
-pub(crate) struct SamplingFilter {}
+pub(crate) fn apollo_opentelemetry_initialized() -> bool {
+    OPENTELEMETRY_TRACER_HANDLE.get().is_some()
+}
+
+// When propagating trace headers to a subgraph or coprocessor, we need a valid trace id and span id
+// When the SamplingFilter does not sample a trace, those ids are set to 0 and mark the trace as invalid.
+// In that case we still need to propagate headers to subgraphs to tell them they should not sample the trace.
+// To that end, we update the context just for that request to create valid span et trace ids, with the
+// sampling bit set to false
+pub(crate) fn prepare_context(context: Context) -> Context {
+    if !context.span().span_context().is_valid() {
+        if let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            let span_context = SpanContext::new(
+                tracer.new_trace_id(),
+                tracer.new_span_id(),
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            );
+            return context.with_remote_span_context(span_context);
+        }
+    }
+    context
+}
+pub(crate) struct SamplingFilter;
 
 #[allow(dead_code)]
 impl SamplingFilter {
@@ -183,14 +206,14 @@ where
         meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
-        // we ignore events
+        // we ignore metric events
         if !meta.is_span() {
-            return false;
+            return meta.fields().iter().any(|f| f.name() == "message");
         }
 
         // if there's an exsting otel context set by the client request, and it is sampled,
         // then that trace is sampled
-        let current_otel_context = opentelemetry_api::Context::current();
+        let current_otel_context = opentelemetry::Context::current();
         if current_otel_context.span().span_context().is_sampled() {
             return true;
         }
@@ -205,9 +228,14 @@ where
             return spanref.is_sampled();
         }
 
+        // always sample the router loading trace
+        if meta.name() == STARTING_SPAN_NAME {
+            return true;
+        }
+
         // we only make the sampling decision on the root span. If we reach here for any other span,
         // it means that the parent span was not enabled, so we should not enable this span either
-        if meta.name() != REQUEST_SPAN_NAME {
+        if meta.name() != REQUEST_SPAN_NAME && meta.name() != ROUTER_SPAN_NAME {
             return false;
         }
 

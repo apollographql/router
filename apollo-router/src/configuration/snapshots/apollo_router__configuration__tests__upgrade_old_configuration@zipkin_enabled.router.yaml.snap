@@ -4,8 +4,9 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    zipkin:
-      endpoint: default
-      enabled: true
+  exporters:
+    tracing:
+      zipkin:
+        endpoint: default
+        enabled: true
 

@@ -81,6 +81,7 @@ use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
+use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
@@ -232,6 +233,7 @@ async fn init(
     );
 
     let client = reqwest::Client::builder()
+        .no_gzip()
         .default_headers(default_headers)
         .redirect(Policy::none())
         .build()
@@ -288,6 +290,7 @@ pub(super) async fn init_with_config(
     );
 
     let client = reqwest::Client::builder()
+        .no_gzip()
         .default_headers(default_headers)
         .redirect(Policy::none())
         .build()
@@ -385,7 +388,7 @@ async fn it_displays_sandbox() {
         "{}",
         response.text().await.unwrap()
     );
-    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+    assert_eq!(response.bytes().await.unwrap(), sandbox_page_content());
 }
 
 #[tokio::test]
@@ -431,7 +434,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
         "{}",
         response.text().await.unwrap()
     );
-    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+    assert_eq!(response.bytes().await.unwrap(), sandbox_page_content());
 }
 
 #[tokio::test]
@@ -1162,7 +1165,7 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
     );
     assert_eq!(
         response.text().await.unwrap(),
-        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\", \"multipart/mixed;boundary=\\\"graphql\\\";subscriptionSpec=1.0\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
+        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\", \"multipart/mixed;subscriptionSpec=1.0\" or \"multipart/mixed;deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
     );
 
     server.shutdown().await
@@ -1200,8 +1203,8 @@ async fn it_displays_homepage() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.text().await.unwrap(),
-        home_page_content(Homepage::fake_builder().enabled(false).build())
+        response.bytes().await.unwrap(),
+        home_page_content(&Homepage::fake_builder().enabled(false).build())
     );
     server.shutdown().await.unwrap();
 }
@@ -1666,10 +1669,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(
-            ACCEPT,
-            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-        )
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
@@ -1727,10 +1727,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(
-            ACCEPT,
-            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-        )
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
@@ -2313,16 +2310,17 @@ async fn test_supergraph_timeout() {
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
-    let plugins = create_plugins(&conf, &schema, None).await.unwrap();
+    let plugins = create_plugins(&conf, &schema, None, None).await.unwrap();
 
-    let mut builder = PluggableSupergraphServiceBuilder::new(planner)
+    let builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())
         .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
 
-    for (name, plugin) in plugins.into_iter() {
-        builder = builder.with_dyn_plugin(name, plugin);
-    }
-    let supergraph_creator = builder.build().await.unwrap();
+    let supergraph_creator = builder
+        .with_plugins(Arc::new(plugins))
+        .build()
+        .await
+        .unwrap();
 
     let service = RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,

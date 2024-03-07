@@ -400,6 +400,7 @@ fn validate_project_config_files() {
     std::env::set_var("ZIPKIN_HOST", "http://example.com");
     std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
     std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
+    std::env::set_var("PARSER_MAX_RECURSION", "500");
 
     #[cfg(not(unix))]
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();

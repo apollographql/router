@@ -37,6 +37,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services;
+use crate::services::external::externalize_header_map;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
@@ -50,6 +51,7 @@ use crate::services::trust_dns_connector::AsyncHyperResolver;
 #[cfg(test)]
 mod test;
 
+mod execution;
 mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
@@ -102,6 +104,13 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         service: services::supergraph::BoxService,
     ) -> services::supergraph::BoxService {
         self.supergraph_service(service)
+    }
+
+    fn execution_service(
+        &self,
+        service: services::execution::BoxService,
+    ) -> services::execution::BoxService {
+        self.execution_service(service)
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
@@ -172,6 +181,18 @@ where
         service: services::supergraph::BoxService,
     ) -> services::supergraph::BoxService {
         self.configuration.supergraph.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            self.sdl.clone(),
+        )
+    }
+
+    fn execution_service(
+        &self,
+        service: services::execution::BoxService,
+    ) -> services::execution::BoxService {
+        self.configuration.execution.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -272,6 +293,9 @@ struct Conf {
     /// The supergraph stage request/response configuration
     #[serde(default)]
     supergraph: supergraph::SupergraphStage,
+    /// The execution stage request/response configuration
+    #[serde(default)]
+    execution: execution::ExecutionStage,
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,
@@ -1140,19 +1164,6 @@ fn validate_coprocessor_output<T>(
         )));
     }
     Ok(())
-}
-
-/// Convert a HeaderMap into a HashMap
-pub(crate) fn externalize_header_map(
-    input: &HeaderMap<HeaderValue>,
-) -> Result<HashMap<String, Vec<String>>, BoxError> {
-    let mut output = HashMap::new();
-    for (k, v) in input {
-        let k = k.as_str().to_owned();
-        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
-        output.entry(k).or_insert_with(Vec::new).push(v)
-    }
-    Ok(output)
 }
 
 /// Convert a HashMap into a HeaderMap

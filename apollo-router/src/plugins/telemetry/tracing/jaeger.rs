@@ -11,7 +11,8 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::SocketEndpoint;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -86,7 +87,12 @@ impl TracingConfigurator for Config {
         )
     }
 
-    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError> {
+    fn apply(
+        &self,
+        builder: Builder,
+        common: &TracingCommon,
+        _spans_config: &Spans,
+    ) -> Result<Builder, BoxError> {
         match &self {
             Config::Agent {
                 enabled,
@@ -131,7 +137,7 @@ impl TracingConfigurator for Config {
                     .with_batch_processor_config(batch_processor.clone().into())
                     .build_collector_exporter::<runtime::Tokio>()?;
                 Ok(builder.with_span_processor(
-                    BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                    BatchSpanProcessor::builder(exporter, runtime::Tokio)
                         .with_batch_config(batch_processor.clone().into())
                         .build(),
                 ))

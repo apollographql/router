@@ -26,15 +26,15 @@ impl ResourceDetector for EnvServiceNameDetector {
 }
 
 pub(crate) trait ConfigResource {
-    fn service_name(&self) -> Option<String>;
-    fn service_namespace(&self) -> Option<String>;
+    fn service_name(&self) -> &Option<String>;
+    fn service_namespace(&self) -> &Option<String>;
 
     fn resource(&self) -> &BTreeMap<String, AttributeValue>;
 
     fn to_resource(&self) -> Resource {
         let config_resource_detector = ConfigResourceDetector {
-            service_name: self.service_name(),
-            service_namespace: self.service_namespace(),
+            service_name: self.service_name().clone(),
+            service_namespace: self.service_namespace().clone(),
             resources: self.resource().clone(),
         };
 
@@ -135,7 +135,8 @@ mod test {
     use std::collections::BTreeMap;
     use std::env;
 
-    use opentelemetry_api::Key;
+    use opentelemetry::Key;
+    use serial_test::serial;
 
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::resource::ConfigResource;
@@ -146,18 +147,22 @@ mod test {
         resources: BTreeMap<String, AttributeValue>,
     }
     impl ConfigResource for TestConfig {
-        fn service_name(&self) -> Option<String> {
-            self.service_name.clone()
+        fn service_name(&self) -> &Option<String> {
+            &self.service_name
         }
-        fn service_namespace(&self) -> Option<String> {
-            self.service_namespace.clone()
+        fn service_namespace(&self) -> &Option<String> {
+            &self.service_namespace
         }
         fn resource(&self) -> &BTreeMap<String, AttributeValue> {
             &self.resources
         }
     }
 
+    // All of the tests in this module must execute serially wrt each other because they rely on
+    // env settings and one of the tests modifies the env for the duration of the test. We enforce
+    // this with the #[serial] derive.
     #[test]
+    #[serial]
     fn test_empty() {
         let test_config = TestConfig {
             service_name: None,
@@ -186,6 +191,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_config_resources() {
         let test_config = TestConfig {
             service_name: None,
@@ -221,6 +227,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_service_name_service_namespace() {
         let test_config = TestConfig {
             service_name: Some("override-service-name".to_string()),
@@ -239,6 +246,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_service_name_override() {
         // Order of precedence
         // OTEL_SERVICE_NAME env

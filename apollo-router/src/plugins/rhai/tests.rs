@@ -714,7 +714,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 155, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 161, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -740,7 +740,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 166, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 172, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -811,4 +811,45 @@ fn it_can_compare_method_strings() {
         )
         .expect("can compare properly");
     assert!(method);
+}
+
+#[tokio::test]
+async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_call()
+        .times(1)
+        .returning(move |req: SupergraphRequest| {
+            Ok(SupergraphResponse::fake_builder()
+                .header("x-custom-header", "CUSTOM_VALUE")
+                .context(req.context)
+                .build()
+                .unwrap())
+        });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"remove_header.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let context = Context::new();
+    context.insert("test", 5i64).unwrap();
+    let supergraph_req = SupergraphRequest::fake_builder()
+        .header("x-custom-header", "CUSTOM_VALUE")
+        .context(context)
+        .build()?;
+
+    let service_response = router_service.ready().await?.call(supergraph_req).await?;
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let headers = service_response.response.headers().clone();
+    assert!(headers.get("x-custom-header").is_none());
+
+    Ok(())
 }

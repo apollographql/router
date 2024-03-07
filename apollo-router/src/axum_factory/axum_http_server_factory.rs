@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum::error_handling::HandleErrorLayer;
 use axum::extract::Extension;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -32,16 +33,18 @@ use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_http::decompression::DecompressionBody;
 use tower_http::trace::TraceLayer;
 
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
 use super::listeners::ListenersAndRouters;
-use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
+use super::ENDPOINT_CALLBACK;
 use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
@@ -50,14 +53,36 @@ use crate::configuration::ListenAddr;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::plugins::telemetry::SpanMode;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::http::service::BodyStream;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+
+static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+
+struct SessionCountGuard;
+
+impl SessionCountGuard {
+    fn start() -> Self {
+        let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
+        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        Self
+    }
+}
+
+impl Drop for SessionCountGuard {
+    fn drop(&mut self) {
+        let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
+        tracing::info!(value.apollo_router_session_count_active = session_count,);
+    }
+}
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -103,7 +128,7 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "Health check exposed at {}/{}",
+            "Health check exposed at {}{}",
             configuration.health_check.listen,
             configuration.health_check.path
         );
@@ -151,11 +176,9 @@ where
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder()
-                                .status(status_code)
-                                .body::<hyper::Body>(
-                                    serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                                )?,
+                            response: http::Response::builder().status(status_code).body::<Body>(
+                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                            )?,
                             context: req.context,
                         })
                     }
@@ -384,6 +407,26 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
+// This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
+pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
+    configuration
+        .apollo_plugins
+        .plugins
+        .iter()
+        .find(|(s, _)| s.as_str() == "telemetry")
+        .and_then(|(_, v)| v.get("instrumentation").and_then(|v| v.as_object()))
+        .and_then(|v| v.get("spans").and_then(|v| v.as_object()))
+        .and_then(|v| {
+            v.get("mode")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        })
+        .unwrap_or_default()
+}
+
+async fn decompression_error(_error: BoxError) -> axum::response::Response {
+    (StatusCode::BAD_REQUEST, "cannot decompress request body").into_response()
+}
+
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -396,9 +439,18 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
+    let span_mode = span_mode(configuration);
 
-    let main_route = main_router::<RF>(configuration)
-        .layer(middleware::from_fn(decompress_request_body))
+    let decompression = ServiceBuilder::new()
+        .layer(HandleErrorLayer::<_, ()>::new(decompression_error))
+        .layer(
+            tower_http::decompression::RequestDecompressionLayer::new()
+                .br(true)
+                .gzip(true)
+                .deflate(true),
+        );
+    let mut main_route = main_router::<RF>(configuration)
+        .layer(decompression)
         .layer(middleware::from_fn_with_state(
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
@@ -407,12 +459,25 @@ where
         .layer(cors)
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
+        .layer(
+            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
+        )
         .layer(middleware::from_fn(metrics_handler));
+
+    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+        main_route = main_endpoint_layer(main_route);
+    }
 
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+        .fold(main_route, |acc, r| {
+            let mut router = r.into_router();
+            if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+                router = main_endpoint_layer(router);
+            }
+
+            acc.merge(router)
+        });
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
@@ -461,7 +526,10 @@ async fn license_handler<B>(
                 )
                 .is_ok()
         {
-            ::tracing::error!("{}", LICENSE_EXPIRED_SHORT_MESSAGE);
+            ::tracing::error!(
+                code = APOLLO_ROUTER_LICENSE_EXPIRED,
+                LICENSE_EXPIRED_SHORT_MESSAGE
+            );
         }
     }
 
@@ -475,19 +543,21 @@ async fn license_handler<B>(
     }
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
+pub(super) fn main_router<RF>(
+    configuration: &Configuration,
+) -> axum::Router<(), DecompressionBody<Body>>
 where
     RF: RouterFactory,
 {
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
         get({
-            move |Extension(service): Extension<RF>, request: Request<Body>| {
+            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
                 handle_graphql(service.create().boxed(), request)
             }
         })
         .post({
-            move |Extension(service): Extension<RF>, request: Request<Body>| {
+            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
                 handle_graphql(service.create().boxed(), request)
             }
         }),
@@ -497,12 +567,14 @@ where
         router = router.route(
             "/",
             get({
-                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                move |Extension(service): Extension<RF>,
+                      request: Request<DecompressionBody<Body>>| {
                     handle_graphql(service.create().boxed(), request)
                 }
             })
             .post({
-                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                move |Extension(service): Extension<RF>,
+                      request: Request<DecompressionBody<Body>>| {
                     handle_graphql(service.create().boxed(), request)
                 }
             }),
@@ -514,9 +586,13 @@ where
 
 async fn handle_graphql(
     service: router::BoxService,
-    http_request: Request<Body>,
+    http_request: Request<DecompressionBody<Body>>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1i64,);
+    let _guard = SessionCountGuard::start();
+
+    let (parts, body) = http_request.into_parts();
+
+    let http_request = http::Request::from_parts(parts, Body::wrap_stream(BodyStream::new(body)));
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -534,7 +610,6 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -557,7 +632,6 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
 
             let opt_compressor = accept_encoding
@@ -577,5 +651,40 @@ async fn handle_graphql(
 
             http::Response::from_parts(parts, body).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_span_mode_default() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
+    }
+
+    #[test]
+    fn test_span_mode_spec_compliant() {
+        let config = Configuration::from_str(include_str!(
+            "testdata/span_mode_spec_compliant.router.yaml"
+        ))
+        .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::SpecCompliant);
+    }
+
+    #[test]
+    fn test_span_mode_deprecated() {
+        let config =
+            Configuration::from_str(include_str!("testdata/span_mode_deprecated.router.yaml"))
+                .unwrap();
+        let mode = span_mode(&config);
+        assert_eq!(mode, SpanMode::Deprecated);
     }
 }

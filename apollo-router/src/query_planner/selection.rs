@@ -1,12 +1,14 @@
+use apollo_compiler::schema::ExtendedType;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
 
-use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
+use crate::spec::TYPENAME;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
@@ -48,96 +50,197 @@ pub(crate) struct InlineFragment {
     pub(crate) selections: Vec<Selection>,
 }
 
-pub(crate) fn select_object(
-    content: &Object,
+pub(crate) fn execute_selection_set<'a>(
+    input_content: &'a Value,
     selections: &[Selection],
     schema: &Schema,
-) -> Result<Option<Value>, FetchError> {
+    mut current_type: Option<&'a str>,
+) -> Value {
+    let content = match input_content.as_object() {
+        Some(o) => o,
+        None => return Value::Null,
+    };
+
+    current_type = content
+        .get(TYPENAME)
+        .and_then(|v| v.as_str())
+        .or(current_type);
+
     let mut output = Object::with_capacity(selections.len());
     for selection in selections {
         match selection {
-            Selection::Field(field) => {
-                if let Some((key, value)) = select_field(content, field, schema)? {
-                    if let Some(o) = output.get_mut(field.name.as_str()) {
-                        o.deep_merge(value);
-                    } else {
-                        output.insert(key.to_owned(), value);
+            Selection::Field(Field {
+                alias,
+                name,
+                selections,
+            }) => {
+                let selection_name = alias.as_deref().unwrap_or(name.as_str());
+                let field_type = current_type.and_then(|t| {
+                    schema.definitions.types.get(t).and_then(|ty| match ty {
+                        apollo_compiler::schema::ExtendedType::Object(o) => {
+                            o.fields.get(name.as_str()).map(|f| &f.ty)
+                        }
+                        apollo_compiler::schema::ExtendedType::Interface(i) => {
+                            i.fields.get(name.as_str()).map(|f| &f.ty)
+                        }
+                        _ => None,
+                    })
+                });
+
+                match content.get_key_value(selection_name) {
+                    None => {
+                        if name == TYPENAME {
+                            // if the __typename field was missing but we can infer it, fill it
+                            if let Some(ty) = current_type {
+                                output.insert(
+                                    ByteString::from(selection_name.to_owned()),
+                                    Value::String(ByteString::from(ty.to_owned())),
+                                );
+                                continue;
+                            }
+                        }
+                        // the behaviour here does not align with the gateway: we should instead assume that
+                        // data is in the correct shape, and return a null (or even no value at all) on
+                        // missing fields. If a field was missing, it should have been nullified,
+                        // and if it was non nullable, the parent object would have been nullified.
+                        // Unfortunately, we don't validate subgraph responses yet
+                        if field_type
+                            .as_ref()
+                            .map(|ty| !ty.is_non_null())
+                            .unwrap_or(false)
+                        {
+                            output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
+                        } else {
+                            return Value::Null;
+                        }
+                    }
+                    Some((key, value)) => {
+                        if let Some(elements) = value.as_array() {
+                            let selected = elements
+                                .iter()
+                                .map(|element| match selections {
+                                    Some(sels) => execute_selection_set(
+                                        element,
+                                        sels,
+                                        schema,
+                                        field_type
+                                            .as_ref()
+                                            .map(|ty| ty.inner_named_type().as_str()),
+                                    ),
+                                    None => element.clone(),
+                                })
+                                .collect::<Vec<_>>();
+                            output.insert(key.clone(), Value::Array(selected));
+                        } else if let Some(sels) = selections {
+                            output.insert(
+                                key.clone(),
+                                execute_selection_set(
+                                    value,
+                                    sels,
+                                    schema,
+                                    field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
+                                ),
+                            );
+                        } else {
+                            output.insert(key.clone(), value.clone());
+                        }
                     }
                 }
             }
-            Selection::InlineFragment(fragment) => {
-                if let Some(Value::Object(value)) =
-                    select_inline_fragment(content, fragment, schema)?
-                {
-                    output.append(&mut value.to_owned())
+            Selection::InlineFragment(InlineFragment {
+                type_condition,
+                selections,
+            }) => match type_condition {
+                None => continue,
+                Some(condition) => {
+                    if type_condition_matches(schema, current_type, condition) {
+                        if let Value::Object(selected) =
+                            execute_selection_set(input_content, selections, schema, current_type)
+                        {
+                            for (key, value) in selected.into_iter() {
+                                match output.entry(key) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(value);
+                                    }
+                                    Entry::Occupied(e) => {
+                                        e.into_mut().deep_merge(value);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        };
-    }
-    if output.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(Value::Object(output)))
-}
-
-fn select_field<'a>(
-    content: &'a Object,
-    field: &Field,
-    schema: &Schema,
-) -> Result<Option<(&'a ByteString, Value)>, FetchError> {
-    let res = match (
-        content.get_key_value(field.name.as_str()),
-        &field.selections,
-    ) {
-        (Some((k, v)), _) => select_value(v, field, schema).map(|opt| opt.map(|v| (k, v))),
-        (None, _) => Err(FetchError::ExecutionFieldNotFound {
-            field: field.name.to_owned(),
-        }),
-    };
-    res
-}
-
-fn select_inline_fragment(
-    content: &Object,
-    fragment: &InlineFragment,
-    schema: &Schema,
-) -> Result<Option<Value>, FetchError> {
-    match (&fragment.type_condition, &content.get("__typename")) {
-        (Some(condition), Some(Value::String(typename))) => {
-            if condition == typename || schema.is_subtype(condition, typename.as_str()) {
-                select_object(content, &fragment.selections, schema)
-            } else {
-                Ok(None)
-            }
+            },
         }
-        (None, _) => select_object(content, &fragment.selections, schema),
-        (_, None) => Err(FetchError::ExecutionFieldNotFound {
-            field: "__typename".to_string(),
-        }),
-        (_, _) => Ok(None),
     }
+
+    Value::Object(output)
 }
 
-fn select_value(
-    content: &Value,
-    field: &Field,
+/// This is similar to DoesFragmentTypeApply from the GraphQL spec, but the
+/// `current_type` could be an abstract type or None (we're not yet implementing
+/// CompleteValue and ResolveAbstractType). So this function is more flexible,
+/// checking if the condition is a subtype of the current type, or vice versa.
+///
+/// <https://spec.graphql.org/October2021/#DoesFragmentTypeApply()>
+/// <https://spec.graphql.org/October2021/#CompleteValue()>
+/// <https://spec.graphql.org/October2021/#ResolveAbstractType()>
+fn type_condition_matches(
     schema: &Schema,
-) -> Result<Option<Value>, FetchError> {
-    match (content, &field.selections) {
-        (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
-        (Value::Array(elements), Some(_)) => elements
-            .iter()
-            .map(|element| {
-                select_value(element, field, schema)
-                    // if a value cannot be selected from the array element, return Some(Value::Null)
-                    // instead of None, because None will short circuit the iteration and return
-                    // an empty array
-                    .map(|opt| opt.unwrap_or(Value::Null))
-            })
-            .collect::<Result<Vec<Value>, FetchError>>()
-            .map(|v| Some(Value::Array(v))),
-        (value, None) => Ok(Some(value.to_owned())),
-        _ => Ok(None),
+    current_type: Option<&str>,
+    type_condition: &str,
+) -> bool {
+    // Not having a current type is probably invalid, but this is not the place to check it.
+    let current_type = match current_type {
+        Some(t) => t,
+        None => return false,
+    };
+
+    if current_type == type_condition {
+        return true;
+    }
+
+    let current_type = match schema.definitions.types.get(current_type) {
+        None => return false,
+        Some(t) => t,
+    };
+
+    let conditional_type = match schema.definitions.types.get(type_condition) {
+        None => return false,
+        Some(t) => t,
+    };
+
+    use ExtendedType::*;
+    match current_type {
+        Object(object_type) => match conditional_type {
+            Interface(interface_type) => object_type
+                .implements_interfaces
+                .contains(&interface_type.name),
+
+            Union(union_type) => union_type.members.contains(&object_type.name),
+
+            _ => false,
+        },
+
+        Interface(interface_type) => match conditional_type {
+            Interface(conditional_type) => conditional_type
+                .implements_interfaces
+                .contains(&interface_type.name),
+
+            Object(object_type) => object_type
+                .implements_interfaces
+                .contains(&interface_type.name),
+
+            _ => false,
+        },
+
+        Union(union_type) => match conditional_type {
+            Object(object_type) => union_type.members.contains(&object_type.name),
+
+            _ => false,
+        },
+
+        _ => false,
     }
 }
 
@@ -148,6 +251,7 @@ mod tests {
 
     use super::Selection;
     use super::*;
+    use crate::error::FetchError;
     use crate::graphql::Response;
     use crate::json_ext::Path;
 
@@ -169,15 +273,8 @@ mod tests {
         Ok(Value::Array(
             values
                 .into_iter()
-                .flat_map(|value| match (value, selections) {
-                    (Value::Object(content), requires) => {
-                        select_object(content, requires, schema).transpose()
-                    }
-                    (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
-                        reason: "not an object".to_string(),
-                    })),
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+                .map(|value| execute_selection_set(value, selections, schema, None))
+                .collect::<Vec<_>>(),
         ))
     }
 
@@ -187,6 +284,7 @@ mod tests {
             let response = Response::builder()
                 .data($content)
                 .build();
+            // equivalent to "... on OtherStuffToIgnore {} ... on User { __typename id job { name } }"
             let stub = json!([
                 {
                     "kind": "InlineFragment",
@@ -264,14 +362,16 @@ mod tests {
 
     #[test]
     fn test_selection_missing_field() {
-        assert!(matches!(
+        // equivalent to "... on OtherStuffToIgnore {} ... on User { __typename id job { name } }"
+
+        assert_eq!(
             select!(
                 include_str!("testdata/schema.graphql"),
                 json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}),
             )
-                .unwrap_err(),
-            FetchError::ExecutionFieldNotFound { field } if field == "id"
-        ));
+            .unwrap(),
+            bjson!([{}])
+        );
     }
 
     #[test]
@@ -321,7 +421,7 @@ mod tests {
         ]);
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = select_object(response.as_object().unwrap(), &selection, &schema);
+        let value = execute_selection_set(&response, &selection, &schema, None);
         println!(
             "response\n{}\nand selection\n{:?}\n returns:\n{}",
             serde_json::to_string_pretty(&response).unwrap(),
@@ -330,7 +430,7 @@ mod tests {
         );
 
         assert_eq!(
-            value.unwrap().unwrap(),
+            value,
             bjson!({
                 "__typename": "MainObject",
                 "mainObjectList": [
@@ -341,6 +441,276 @@ mod tests {
                         "key": "b"
                     }
                 ]
+            })
+        );
+    }
+
+    #[test]
+    fn test_execute_selection_set_abstract_types() {
+        let schema = with_supergraph_boilerplate(
+            "type Query { hello: String }
+            type Entity {
+              id: Int!
+              nestedUnion: NestedUnion
+              nestedInterface: WrapperNestedInterface
+              objectWithinUnion: Union1
+              objectWithinInterface: NestedObject
+            }
+            union NestedUnion = Union1 | Union2
+            type Union1 {
+              id: Int!
+              field: Int!
+            }
+            type Union2 {
+              id: Int!
+            }
+            interface WrapperNestedInterface {
+              id: Int!
+            }
+            interface NestedInterface implements WrapperNestedInterface {
+              id: Int!
+            }
+            type NestedObject implements NestedInterface & WrapperNestedInterface {
+              id: Int!
+              field: Int!
+            }
+            type NestedObject2 implements NestedInterface & WrapperNestedInterface {
+              id: Int!
+            }",
+        );
+        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+
+        let response = bjson!({
+          "__typename": "Entity",
+          "id": 1780384,
+          "nestedUnion": {
+            "__typename": "Union1",
+            "id": 1780384,
+            "field": 1,
+          },
+          "nestedInterface": {
+            "__typename": "NestedObject",
+            "id": 1780384,
+            "field": 1,
+          },
+          "objectWithinUnion": {
+            "__typename": "Union2",
+            "id": 1780384,
+          },
+          "objectWithinInterface": {
+            "__typename": "NestedObject2",
+            "id": 1780384,
+          },
+        });
+
+        let requires = json!([
+          {
+            "kind": "InlineFragment",
+            "typeCondition": "Entity",
+            "selections": [
+              {
+                "kind": "Field",
+                "name": "__typename"
+              },
+              {
+                "kind": "Field",
+                "name": "nestedUnion",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Union1",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "field"
+                      },
+                    ]
+                  },
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Union2",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                    ]
+                  }
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "nestedInterface",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedObject",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "field"
+                      },
+                    ]
+                  },
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedObject2",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      },
+                    ]
+                  }
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "objectWithinUnion",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedUnion",
+                    "selections": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "Union1",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "field"
+                          },
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "Union2",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                        ]
+                      }
+                    ]
+                  },
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "objectWithinInterface",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "NestedInterface",
+                    "selections": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "NestedObject",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "field"
+                          },
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "NestedObject2",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          },
+                        ]
+                      }
+                    ]
+                  },
+                ]
+              },
+              {
+                "kind": "Field",
+                "name": "id"
+              },
+            ]
+          }
+        ]);
+
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let value = execute_selection_set(&response, &selection, &schema, None);
+
+        assert_eq!(
+            value,
+            bjson!({
+                "__typename": "Entity",
+                "nestedUnion": {
+                    "__typename": "Union1",
+                    "id": 1780384,
+                    "field": 1,
+                },
+                "nestedInterface": {
+                  "__typename": "NestedObject",
+                  "id": 1780384,
+                  "field": 1,
+                },
+                "objectWithinUnion": {
+                  "__typename": "Union2",
+                  "id": 1780384,
+                },
+                "objectWithinInterface": {
+                  "__typename": "NestedObject2",
+                  "id": 1780384,
+                },
+                "id": 1780384,
             })
         );
     }

@@ -1,10 +1,10 @@
 //! Authorization plugin
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
 use tower::BoxError;
 
@@ -16,24 +16,32 @@ use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
-pub(crate) const AUTHENTICATED_SPEC_URL: &str = "https://specs.apollo.dev/authenticated/v0.1";
+pub(crate) const AUTHENTICATED_SPEC_BASE_URL: &str = "https://specs.apollo.dev/authenticated";
+pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     pub(crate) found: bool,
     authenticated_directive_name: String,
+    entity_query: bool,
 }
 
 impl<'a> AuthenticatedCheckVisitor<'a> {
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a ast::Document,
+        entity_query: bool,
+    ) -> Option<Self> {
         Some(Self {
             schema,
+            entity_query,
             fragments: transform::collect_fragments(executable),
             found: false,
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_URL,
+                AUTHENTICATED_SPEC_BASE_URL,
+                AUTHENTICATED_SPEC_VERSION_RANGE,
                 AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
@@ -51,9 +59,52 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
         t.directives().has(&self.authenticated_directive_name)
     }
+
+    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+        use crate::spec::query::traverse::Visitor;
+
+        if node.selection_set.len() != 1 {
+            return Err("invalid number of selections for _entities query".into());
+        }
+
+        match node.selection_set.first() {
+            Some(ast::Selection::Field(field)) => {
+                if field.name.as_str() != "_entities" {
+                    return Err("expected _entities field".into());
+                }
+
+                for selection in &field.selection_set {
+                    match selection {
+                        ast::Selection::InlineFragment(f) => {
+                            match f.type_condition.as_ref() {
+                                None => {
+                                    return Err("expected type condition".into());
+                                }
+                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
+                            };
+                        }
+                        _ => return Err("expected inline fragment".into()),
+                    }
+                }
+                Ok(())
+            }
+            _ => Err("expected _entities field".into()),
+        }
+    }
 }
 
 impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
+    fn operation(
+        &mut self,
+        root_type: &str,
+        node: &ast::OperationDefinition,
+    ) -> Result<(), BoxError> {
+        if !self.entity_query {
+            traverse::operation(self, root_type, node)
+        } else {
+            self.entities_operation(node)
+        }
+    }
     fn field(
         &mut self,
         _parent_type: &str,
@@ -127,7 +178,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    implementers_map: &'a HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
@@ -142,7 +193,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        implementers_map: &'a HashMap<Name, Implementers>,
         dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
@@ -156,7 +207,8 @@ impl<'a> AuthenticatedVisitor<'a> {
             current_path: Path::default(),
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_URL,
+                AUTHENTICATED_SPEC_BASE_URL,
+                AUTHENTICATED_SPEC_VERSION_RANGE,
                 AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
@@ -173,6 +225,14 @@ impl<'a> AuthenticatedVisitor<'a> {
 
     fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
         t.directives().has(&self.authenticated_directive_name)
+    }
+
+    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+        self.implementers_map
+            .get(type_name)
+            .map(|implementers| implementers.iter())
+            .into_iter()
+            .flatten()
     }
 
     fn implementors_with_different_requirements(
@@ -212,10 +272,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             let mut is_authenticated: Option<bool> = None;
 
             for ty in self
-                .implementers_map
-                .get(type_name)
-                .into_iter()
-                .flatten()
+                .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
                 let ty_is_authenticated = ty.directives().has(&self.authenticated_directive_name);
@@ -242,7 +299,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             if t.is_interface() {
                 let mut is_authenticated: Option<bool> = None;
 
-                for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
+                for ty in self.implementors(parent_type) {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
                         let field_is_authenticated =
                             f.directives.has(&self.authenticated_directive_name);
@@ -551,10 +608,8 @@ mod tests {
 
     #[track_caller]
     fn filter(schema: &str, query: &str) -> (ast::Document, Vec<Path>) {
-        let schema = Schema::parse(schema, "schema.graphql");
-        let doc = ast::Document::parse(query, "query.graphql");
-        schema.validate().unwrap();
-        doc.to_executable(&schema).validate(&schema).unwrap();
+        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
 
         let map = schema.implementers_map();
         let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map, false).unwrap();
@@ -1433,7 +1488,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
@@ -1514,7 +1569,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
@@ -1589,7 +1644,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
@@ -1608,11 +1663,8 @@ mod tests {
         )
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
-        headers.insert(
-            "Accept".into(),
-            "multipart/mixed; deferSpec=20220824".into(),
-        );
-        context.private_entries.lock().insert(ClientRequestAccepts {
+        headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
+        context.extensions().lock().insert(ClientRequestAccepts {
             multipart_defer: true,
             multipart_subscription: true,
             json: true,

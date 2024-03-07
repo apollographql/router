@@ -1,9 +1,19 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use http::header::CONTENT_TYPE;
+use hyper::server::conn::AddrIncoming;
+use hyper::service::make_service_fn;
+use hyper::service::service_fn;
+use hyper::Server;
+use insta::assert_yaml_snapshot;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::CommonParameters;
@@ -11,14 +21,19 @@ use jsonwebtoken::jwk::EllipticCurveKeyParameters;
 use jsonwebtoken::jwk::EllipticCurveKeyType;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::EncodingKey;
+use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use serde::Serialize;
 use serde_json::Value;
+use tracing::subscriber;
 
+use super::Header;
 use super::*;
+use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
+use crate::plugins::authentication::jwks::parse_jwks;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
@@ -588,6 +603,188 @@ async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whi
     let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
 }
 
+#[tokio::test]
+async fn it_extracts_the_token_from_cookies() {
+    let mut mock_service = test::MockSupergraphService::new();
+    mock_service.expect_clone().return_once(move || {
+        println!("cloned to supergraph mock");
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .once()
+            .returning(move |req: supergraph::Request| {
+                Ok(supergraph::Response::fake_builder()
+                    .data("response created within the mock")
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+        mock_service
+    });
+    let jwks_url = create_an_url("jwks.json");
+
+    let config = serde_json::json!({
+        "authentication": {
+            "router": {
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ],
+                    "sources": [
+                        {
+                            "type": "cookie",
+                            "name": "authz"
+                        }
+                    ],
+                }
+            }
+        },
+        "rhai": {
+            "scripts":"tests/fixtures",
+            "main":"require_authentication.rhai"
+        }
+    });
+    let test_harness = crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .build_router()
+        .await
+        .unwrap();
+
+    let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A";
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(
+            http::header::COOKIE,
+            format!("a= b; c = d HttpOnly; authz = {token}; e = f"),
+        )
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
+#[tokio::test]
+async fn it_supports_multiple_sources() {
+    let mut mock_service = test::MockSupergraphService::new();
+    mock_service.expect_clone().return_once(move || {
+        println!("cloned to supergraph mock");
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .once()
+            .returning(move |req: supergraph::Request| {
+                Ok(supergraph::Response::fake_builder()
+                    .data("response created within the mock")
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+        mock_service
+    });
+    let jwks_url = create_an_url("jwks.json");
+
+    let config = serde_json::json!({
+        "authentication": {
+            "router": {
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ],
+                    "sources": [
+                        {
+                            "type": "cookie",
+                            "name": "authz"
+                        },
+                        {
+                            "type": "header",
+                            "name": "authz1"
+                        },
+                        {
+                            "type": "header",
+                            "name": "authz2",
+                            "value_prefix": "bear"
+                        }
+                    ],
+                }
+            }
+        },
+        "rhai": {
+            "scripts":"tests/fixtures",
+            "main":"require_authentication.rhai"
+        }
+    });
+    let test_harness = crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .build_router()
+        .await
+        .unwrap();
+
+    let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A";
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header("Authz2", format!("Bear {token}"))
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
 async fn build_jwks_search_components() -> JwksManager {
     let mut sets = vec![];
     let mut urls = vec![];
@@ -603,6 +800,7 @@ async fn build_jwks_search_components() -> JwksManager {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -622,7 +820,7 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::HS256, key.common.key_algorithm.unwrap());
     assert_eq!("key2", key.common.key_id.unwrap());
 }
 
@@ -639,7 +837,7 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::HS256, key.common.key_algorithm.unwrap());
     assert_eq!("key1", key.common.key_id.unwrap());
 }
 
@@ -668,7 +866,7 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::ES256, key.common.key_algorithm.unwrap());
     assert_eq!(
         "afda85e09a320cf748177874592de64d",
         key.common.key_id.unwrap()
@@ -688,7 +886,7 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
-    assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
+    assert_eq!(KeyAlgorithm::RS256, key.common.key_algorithm.unwrap());
     assert_eq!(
         "022516583d56b68faf40260fda72978a",
         key.common.key_id.unwrap()
@@ -713,6 +911,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
         issuer,
         algorithms: None,
         poll_interval: Duration::from_secs(60),
+        headers: Vec::new(),
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
@@ -731,7 +930,7 @@ async fn issuer_check() {
         common: CommonParameters {
             public_key_use: Some(PublicKeyUse::Signature),
             key_operations: Some(vec![KeyOperations::Verify]),
-            algorithm: Some(Algorithm::ES256),
+            key_algorithm: Some(KeyAlgorithm::ES256),
             key_id: Some("hello".to_string()),
             ..Default::default()
         },
@@ -763,7 +962,12 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    let mut config = JWTConf::default();
+    config.sources.push(Source::Header {
+        name: super::default_header_name(),
+        value_prefix: super::default_header_value_prefix(),
+    });
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             panic!("unexpected response: {res:?}");
         }
@@ -796,7 +1000,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -836,7 +1040,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -871,7 +1075,7 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
                 &hyper::body::to_bytes(res.response.into_body())
@@ -910,6 +1114,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -941,6 +1146,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
         });
     }
 
@@ -961,4 +1167,161 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
     };
 
     assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[tokio::test]
+async fn it_accepts_key_without_use_or_keyops() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks-no-use.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::ES256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[tokio::test]
+async fn it_accepts_elliptic_curve_key_without_alg() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks-ec-no-alg.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::ES256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[tokio::test]
+async fn it_accepts_rsa_key_without_alg() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks-rsa-no-alg.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::RS384,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[test]
+fn test_parse_failure_logs() {
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let jwks = parse_jwks(include_str!("testdata/jwks.json")).expect("expected to parse jwks");
+        assert_yaml_snapshot!(jwks);
+    });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn jwks_send_headers() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+
+    let got_header = Arc::new(AtomicBool::new(false));
+    let gh = got_header.clone();
+    let service = make_service_fn(move |_| {
+        let gh = gh.clone();
+        async move {
+            //let gh1 = gh.clone();
+            Ok::<_, io::Error>(service_fn(move |req| {
+                println!("got re: {:?}", req.headers());
+                let gh: Arc<AtomicBool> = gh.clone();
+                async move {
+                    if req
+                        .headers()
+                        .get("jwks-authz")
+                        .and_then(|v| v.to_str().ok())
+                        == Some("user1")
+                    {
+                        gh.store(true, Ordering::Release);
+                    }
+                    Ok::<_, io::Error>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .version(http::Version::HTTP_11)
+                            .body::<hyper::Body>(include_str!("testdata/jwks.json").into())
+                            .unwrap(),
+                    )
+                }
+            }))
+        }
+    });
+    let server = Server::builder(AddrIncoming::from_listener(listener).unwrap()).serve(service);
+    tokio::task::spawn(server);
+
+    let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
+
+    let _jwks_manager = JwksManager::new(vec![JwksConfig {
+        url,
+        issuer: None,
+        algorithms: Some(HashSet::from([Algorithm::RS256])),
+        poll_interval: Duration::from_secs(60),
+        headers: vec![Header {
+            name: HeaderName::from_static("jwks-authz"),
+            value: HeaderValue::from_static("user1"),
+        }],
+    }])
+    .await
+    .unwrap();
+
+    assert!(got_header.load(Ordering::Acquire));
 }

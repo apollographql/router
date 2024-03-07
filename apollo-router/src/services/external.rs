@@ -2,10 +2,13 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use hyper::Body;
@@ -19,6 +22,8 @@ use tower::BoxError;
 use tower::Service;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::plugins::telemetry::reload::prepare_context;
+use crate::query_planner::QueryPlan;
 use crate::Context;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
@@ -36,6 +41,12 @@ pub(crate) enum PipelineStep {
     ExecutionResponse,
     SubgraphRequest,
     SubgraphResponse,
+}
+
+impl From<PipelineStep> for opentelemetry::Value {
+    fn from(val: PipelineStep) -> Self {
+        val.to_string().into()
+    }
 }
 
 #[derive(Clone, Debug, Default, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -88,6 +99,8 @@ pub(crate) struct Externalizable<T> {
     pub(crate) status_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) has_next: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_plan: Option<Arc<QueryPlan>>,
 }
 
 #[buildstructor::buildstructor]
@@ -130,6 +143,7 @@ where
             method,
             service_name: None,
             has_next: None,
+            query_plan: None,
         }
     }
 
@@ -168,6 +182,47 @@ where
             method,
             service_name: None,
             has_next,
+            query_plan: None,
+        }
+    }
+
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing an Execution
+    /// `Externalizable`.
+    ///
+    fn execution_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        sdl: Option<String>,
+        has_next: Option<bool>,
+        query_plan: Option<Arc<QueryPlan>>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::ExecutionRequest | PipelineStep::ExecutionResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl,
+            uri: None,
+            path: None,
+            method,
+            service_name: None,
+            has_next,
+            query_plan,
         }
     }
 
@@ -206,6 +261,7 @@ where
             method,
             service_name,
             has_next: None,
+            query_plan: None,
         }
     }
 
@@ -228,7 +284,7 @@ where
 
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &tracing::span::Span::current().context(),
+                &prepare_context(tracing::span::Span::current().context()),
                 &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
             );
         });
@@ -239,6 +295,19 @@ where
             .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
     }
+}
+
+/// Convert a HeaderMap into a HashMap
+pub(crate) fn externalize_header_map(
+    input: &HeaderMap<HeaderValue>,
+) -> Result<HashMap<String, Vec<String>>, BoxError> {
+    let mut output = HashMap::new();
+    for (k, v) in input {
+        let k = k.as_str().to_owned();
+        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
+        output.entry(k).or_insert_with(Vec::new).push(v)
+    }
+    Ok(output)
 }
 
 #[cfg(test)]

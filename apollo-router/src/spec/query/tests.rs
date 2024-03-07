@@ -1,3 +1,4 @@
+use apollo_compiler::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;
@@ -470,6 +471,112 @@ fn reformat_response_data_fragment_spread() {
 }
 
 #[test]
+fn reformat_response_data_abstract_fragment_spread() {
+    let schema = "type Query {
+  dog: Dog
+}
+
+type Dog {
+  name: String!
+  nickname: String!
+  barkVolume: Int
+}
+
+type Cat {
+  name: String!
+  nickname: String!
+  meowVolume: Int
+}
+
+union CatOrDog = Cat | Dog";
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { __isCatOrDog: __typename ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "dog": {"__isCatOrDog": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .expected(json! {
+            {"dog": {"__isCatOrDog": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .test();
+
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } __isCatOrDog: __typename }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "dog": {"name": "Fido", "nickname": "Fi", "barkVolume": 7, "__isCatOrDog": "Dog" }}
+        })
+        .expected(json! {
+            {"dog": {"name": "Fido", "nickname": "Fi", "barkVolume": 7, "__isCatOrDog": "Dog" }}
+        })
+        .test();
+
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { __typename ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"dog": { "__typename": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .expected(json! {
+            {"dog": { "__typename": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .test();
+}
+
+#[test]
+fn reformat_response_data_nested_abstract_fragment_spread() {
+    let schema = "type Query {
+  nestedDog: NestedDog
+}
+
+type NestedDog {
+  dog: Dog!
+}
+
+type Dog {
+  name: String!
+  nickname: String!
+  barkVolume: Int
+}
+
+type Cat {
+  name: String!
+  nickname: String!
+  meowVolume: Int
+}
+
+union CatOrDog = Cat | NestedDog";
+    let query = "query test { nestedDog { ...petFragment } } fragment petFragment on CatOrDog { __isCatOrDog: __typename ... on NestedDog { dog { name nickname barkVolume } } ... on Cat { name nickname meowVolume } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "nestedDog": {"__isCatOrDog": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .expected(json! {
+            {"nestedDog": {"__isCatOrDog": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .test();
+
+    let query = "query test { nestedDog { ...petFragment } } fragment petFragment on CatOrDog { __typename ... on NestedDog { dog { name nickname barkVolume } } ... on Cat { name nickname meowVolume } }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"nestedDog": { "__typename": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .expected(json! {
+            {"nestedDog": { "__typename": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .test();
+}
+
+#[test]
 fn reformat_response_data_best_effort() {
     FormatTest::builder()
         .schema(
@@ -522,9 +629,9 @@ fn reformat_response_data_best_effort() {
                         "baz": "2",
                     },
                     "array": [
-                        {"bar": null, "baz": "3"},
+                        {},
                         null,
-                        {"bar": "5", "baz": null}
+                        {}
                     ],
                     "other": null,
                 },
@@ -1648,7 +1755,7 @@ fn variable_validation() {
               id: ID!
           }
           type Query{
-              send(message: MessageInput): String}",
+              send(message: MessageInput): Receipt}",
         "query {
             send(message: {
                 content: \"Hello\"
@@ -1668,7 +1775,7 @@ fn variable_validation() {
               id: ID!
           }
           type Query{
-              send(message: MessageInput): String}",
+              send(message: MessageInput): Receipt}",
         "query($msg: MessageInput) {
             send(message: $msg) {
                 id
@@ -1679,8 +1786,23 @@ fn variable_validation() {
         }})
     );
 
-    assert_validation!(
-        "type Mutation{
+    let schema = r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1")
+            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+             {
+            query: Query
+            mutation: Mutation
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type Mutation{
             foo(input: FooInput!): FooResponse!
         }
         type Query{
@@ -1697,13 +1819,18 @@ fn variable_validation() {
         enum EnumWithDefault {
           WEB
           MOBILE
-        }",
+        }
+        "#;
+
+    let res = run_validation!(
+        schema,
         "mutation foo($input: FooInput!) {
             foo (input: $input) {
             __typename
         }}",
         json!({"input":{}})
     );
+    assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
 }
 
 #[test]
@@ -3674,6 +3801,59 @@ fn skip() {
         body: String
     }";
 
+    // with variables
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query($skip: Boolean = false)  {
+                get @skip(if: $skip) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+        )
+        .variables(json! {{
+            "skip": true
+        }})
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "review": {
+                    "id": "b",
+                }
+            },
+        }})
+        .expected(json! {{}})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query {
+                get @skip(if: true) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+        )
+        .variables(json! {{
+            "skip": true
+        }})
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "review": {
+                    "id": "b",
+                }
+            },
+        }})
+        .expected(json! {{}})
+        .test();
+
     // duplicate operation name
     FormatTest::builder()
         .schema(schema)
@@ -3683,7 +3863,7 @@ fn skip() {
                     name @skip(if: true)
                 }
                 get @skip(if: false) {
-                    id 
+                    id
                     review {
                         id
                     }
@@ -5641,9 +5821,12 @@ fn filtered_defer_fragment() {
         }
       }";
 
-    let doc = ExecutableDocument::parse(&schema.definitions, query, "query.graphql");
-    let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&schema, &doc).unwrap();
+    let ast = Parser::new()
+        .parse_ast(filtered_query, "filtered_query.graphql")
+        .unwrap();
+    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let (fragments, operations, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, &doc, &ast).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5662,15 +5845,15 @@ fn filtered_defer_fragment() {
         is_original: true,
         unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
+        schema_aware_hash,
     };
 
-    let doc = ExecutableDocument::parse(
-        &schema.definitions,
-        filtered_query,
-        "filtered_query.graphql",
-    );
-    let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&schema, &doc).unwrap();
+    let ast = Parser::new()
+        .parse_ast(filtered_query, "filtered_query.graphql")
+        .unwrap();
+    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let (fragments, operations, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, &doc, &ast).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5690,6 +5873,7 @@ fn filtered_defer_fragment() {
         is_original: false,
         unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
+        schema_aware_hash,
     };
 
     query.filtered_query = Some(Arc::new(filtered));

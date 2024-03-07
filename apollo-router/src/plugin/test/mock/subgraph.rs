@@ -130,34 +130,34 @@ impl Service<SubgraphRequest> for MockSubgraph {
 
         if let Some(sub_stream) = &mut req.subscription_stream {
             sub_stream
-                .try_send(
+                .try_send(Box::pin(
                     self.subscription_stream
                         .take()
                         .expect("must have a subscription stream set")
                         .into_stream(),
-                )
+                ))
                 .unwrap();
         }
 
-        // Redact the callback url and subscription_id because it generates a subscription uuid
+        // Redact the callbackUrl and subscriptionId because it generates a subscription uuid
         if let Some(serde_json_bytes::Value::Object(subscription_ext)) =
             body.extensions.get_mut("subscription")
         {
-            if let Some(callback_url) = subscription_ext.get_mut("callback_url") {
+            if let Some(callback_url) = subscription_ext.get_mut("callbackUrl") {
                 let mut cb_url = url::Url::parse(
                     callback_url
                         .as_str()
-                        .expect("callback_url extension must be a string"),
+                        .expect("callbackUrl extension must be a string"),
                 )
-                .expect("callback_url must be a valid URL");
+                .expect("callbackUrl must be a valid URL");
                 cb_url.path_segments_mut().unwrap().pop();
                 cb_url.path_segments_mut().unwrap().push("subscription_id");
 
                 *callback_url = serde_json_bytes::Value::String(cb_url.to_string().into());
             }
-            if let Some(subscription_id) = subscription_ext.get_mut("subscription_id") {
+            if let Some(subscription_id) = subscription_ext.get_mut("subscriptionId") {
                 *subscription_id =
-                    serde_json_bytes::Value::String("subscription_id".to_string().into());
+                    serde_json_bytes::Value::String("subscriptionId".to_string().into());
             }
         }
 

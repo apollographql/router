@@ -1,13 +1,19 @@
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
+use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -41,7 +47,7 @@ impl QueryAnalysisLayer {
                 configuration
                     .supergraph
                     .query_planning
-                    .experimental_cache
+                    .cache
                     .in_memory
                     .limit,
             ))),
@@ -105,13 +111,16 @@ impl QueryAnalysisLayer {
 
                 let context = Context::new();
 
-                let operation_name = doc
-                    .executable
-                    .get_operation(op_name.as_deref())
-                    .ok()
-                    .and_then(|operation| operation.name().map(|s| s.as_str().to_owned()));
+                let operation = doc.executable.get_operation(op_name.as_deref()).ok();
+                let operation_name = operation
+                    .as_ref()
+                    .and_then(|operation| operation.name.as_ref().map(|s| s.as_str().to_owned()));
 
                 context.insert(OPERATION_NAME, operation_name).unwrap();
+                let operation_kind = operation.map(|op| OperationKind::from(op.operation_type));
+                context
+                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
+                    .expect("cannot insert operation kind in the context; this is a bug");
 
                 if self.enable_authorization_directives {
                     AuthorizationPlugin::query_analysis(
@@ -119,8 +128,7 @@ impl QueryAnalysisLayer {
                         &self.schema,
                         &self.configuration,
                         &context,
-                    )
-                    .await;
+                    );
                 }
 
                 (*self.cache.lock().await).put(
@@ -139,7 +147,7 @@ impl QueryAnalysisLayer {
         request.context.extend(&context);
         request
             .context
-            .private_entries
+            .extensions()
             .lock()
             .insert::<ParsedDocument>(doc);
 
@@ -152,7 +160,30 @@ impl QueryAnalysisLayer {
 
 pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 
+#[derive(Debug, Default)]
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
-    pub(crate) executable: ExecutableDocument,
+    pub(crate) executable: Arc<ExecutableDocument>,
+    pub(crate) parse_errors: Option<DiagnosticList>,
+    pub(crate) validation_errors: Option<DiagnosticList>,
 }
+
+impl Display for ParsedDocumentInner {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Hash for ParsedDocumentInner {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.ast.hash(state);
+    }
+}
+
+impl PartialEq for ParsedDocumentInner {
+    fn eq(&self, other: &Self) -> bool {
+        self.ast == other.ast
+    }
+}
+
+impl Eq for ParsedDocumentInner {}

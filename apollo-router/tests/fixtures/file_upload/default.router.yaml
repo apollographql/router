@@ -1,0 +1,13 @@
+# Simple config for testing file uploads
+
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 512kb
+        max_files: 5
+include_subgraph_errors:
+  all: true

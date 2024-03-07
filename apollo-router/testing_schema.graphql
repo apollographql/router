@@ -4,6 +4,7 @@ schema
 {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 
 directive @core(feature: String!) repeatable on SCHEMA

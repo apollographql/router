@@ -26,7 +26,6 @@ use http_body::Body as _;
 use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
-use router_bridge::planner::Planner;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -44,7 +43,6 @@ use crate::http_ext;
 use crate::plugin::test::MockSupergraphService;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::QueryPlanResult;
 use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::apq::APQLayer;
@@ -66,16 +64,18 @@ use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 
-pub(crate) static MULTIPART_DEFER_HEADER_VALUE: HeaderValue =
+pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
-pub(crate) static MULTIPART_SUBSCRIPTION_HEADER_VALUE: HeaderValue =
+pub(crate) static MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE);
 static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
@@ -88,7 +88,7 @@ pub(crate) struct RouterService {
     apq_layer: APQLayer,
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    experimental_http_max_request_bytes: usize,
+    http_max_request_bytes: usize,
     experimental_batching: Batching,
 }
 
@@ -98,7 +98,7 @@ impl RouterService {
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
-        experimental_http_max_request_bytes: usize,
+        http_max_request_bytes: usize,
         experimental_batching: Batching,
     ) -> Self {
         RouterService {
@@ -106,7 +106,7 @@ impl RouterService {
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
-            experimental_http_max_request_bytes,
+            http_max_request_bytes,
             experimental_batching,
         }
     }
@@ -256,7 +256,7 @@ impl RouterService {
             multipart_defer: accepts_multipart_defer,
             multipart_subscription: accepts_multipart_subscription,
         } = context
-            .private_entries
+            .extensions()
             .lock()
             .get()
             .cloned()
@@ -295,13 +295,15 @@ impl RouterService {
                     })
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
-                        parts
-                            .headers
-                            .insert(CONTENT_TYPE, MULTIPART_DEFER_HEADER_VALUE.clone());
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
+                        );
                     } else if accepts_multipart_subscription {
-                        parts
-                            .headers
-                            .insert(CONTENT_TYPE, MULTIPART_SUBSCRIPTION_HEADER_VALUE.clone());
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
+                        );
                     }
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
@@ -340,10 +342,11 @@ impl RouterService {
                             .error(
                                 graphql::Error::builder()
                                     .message(format!(
-                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
+                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
                                         APPLICATION_JSON.essence_str(),
                                         GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        MULTIPART_DEFER_CONTENT_TYPE
+                                        MULTIPART_DEFER_ACCEPT,
+                                        MULTIPART_SUBSCRIPTION_ACCEPT,
                                     ))
                                     .extension_code("INVALID_ACCEPT_HEADER")
                                     .build(),
@@ -567,15 +570,15 @@ impl RouterService {
                     .parse()
                     .ok()
             })();
-            if content_length.unwrap_or(0) > self.experimental_http_max_request_bytes {
+            if content_length.unwrap_or(0) > self.http_max_request_bytes {
                 Err(TranslateError {
                     status: StatusCode::PAYLOAD_TOO_LARGE,
-                    error: "payload too large for the `experimental_http_max_request_bytes` configuration",
+                    error: "payload too large for the `http_max_request_bytes` configuration",
                     extension_code: "INVALID_GRAPHQL_REQUEST",
                     extension_details: "payload too large".to_string(),
                 })
             } else {
-                let body = http_body::Limited::new(body, self.experimental_http_max_request_bytes);
+                let body = http_body::Limited::new(body, self.http_max_request_bytes);
                 hyper::body::to_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await
@@ -583,7 +586,7 @@ impl RouterService {
                         if e.is::<http_body::LengthLimitError>() {
                             TranslateError {
                                 status: StatusCode::PAYLOAD_TOO_LARGE,
-                                error: "payload too large for the `experimental_http_max_request_bytes` configuration",
+                                error: "payload too large for the `http_max_request_bytes` configuration",
                                 extension_code: "INVALID_GRAPHQL_REQUEST",
                                 extension_details: "payload too large".to_string(),
                             }
@@ -607,7 +610,7 @@ impl RouterService {
 
         if ok_results.len() > 1 {
             context
-                .private_entries
+                .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
         }
@@ -640,18 +643,18 @@ impl RouterService {
             let new_context = Context::new();
             new_context.extend(&context);
             let client_request_accepts_opt = context
-                .private_entries
+                .extensions()
                 .lock()
                 .get::<ClientRequestAccepts>()
                 .cloned();
             if let Some(client_request_accepts) = client_request_accepts_opt {
                 new_context
-                    .private_entries
+                    .extensions()
                     .lock()
                     .insert(client_request_accepts);
             }
             new_context
-                .private_entries
+                .extensions()
                 .lock()
                 .insert(self.experimental_batching.clone());
             results.push(SupergraphRequest {
@@ -694,7 +697,7 @@ pub(crate) struct RouterCreator {
     apq_layer: APQLayer,
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    experimental_http_max_request_bytes: usize,
+    http_max_request_bytes: usize,
     experimental_batching: Batching,
 }
 
@@ -733,7 +736,7 @@ impl RouterCreator {
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
-                    .await,
+                    .await?,
             )
         } else {
             APQLayer::disabled()
@@ -744,9 +747,7 @@ impl RouterCreator {
             static_page,
             apq_layer,
             query_analysis_layer,
-            experimental_http_max_request_bytes: configuration
-                .limits
-                .experimental_http_max_request_bytes,
+            http_max_request_bytes: configuration.limits.http_max_request_bytes,
             persisted_query_layer,
             experimental_batching: configuration.experimental_batching.clone(),
         })
@@ -765,7 +766,7 @@ impl RouterCreator {
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
-            self.experimental_http_max_request_bytes,
+            self.http_max_request_bytes,
             self.experimental_batching.clone(),
         ));
 
@@ -784,9 +785,5 @@ impl RouterCreator {
 impl RouterCreator {
     pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.supergraph_creator.cache_keys(count).await
-    }
-
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.supergraph_creator.planner()
     }
 }

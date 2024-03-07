@@ -8,6 +8,9 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
+use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
 use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
@@ -15,6 +18,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use jsonwebtoken::jwk::AlgorithmParameters;
 use jsonwebtoken::jwk::EllipticCurve;
 use jsonwebtoken::jwk::Jwk;
+use jsonwebtoken::jwk::KeyAlgorithm;
 use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use jsonwebtoken::Algorithm;
@@ -38,6 +42,8 @@ use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_header_value;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication::jwks::JwkSetInfo;
@@ -57,7 +63,7 @@ pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication
 const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
-enum AuthenticationError<'a> {
+pub(crate) enum AuthenticationError<'a> {
     /// Configured header is not convertible to a string
     CannotConvertToString,
 
@@ -90,6 +96,9 @@ enum AuthenticationError<'a> {
 
     /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from '{expected}'
     InvalidIssuer { expected: String, token: String },
+
+    /// Unsupported key algorithm: {0}
+    UnsupportedKeyAlgorithm(KeyAlgorithm),
 }
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
@@ -124,6 +133,10 @@ struct JWTConf {
     /// Header value prefix
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
+
+    /// Alternative sources to extract the JWT
+    #[serde(default)]
+    sources: Vec<Source>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -144,7 +157,43 @@ struct JwksConf {
     #[schemars(with = "Option<Vec<String>>", default)]
     #[serde(default)]
     algorithms: Option<Vec<Algorithm>>,
+    /// List of headers to add to the JWKS request
+    #[serde(default)]
+    headers: Vec<Header>,
 }
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Insert a header
+struct Header {
+    /// The name of the header
+    #[schemars(with = "String")]
+    #[serde(deserialize_with = "deserialize_header_name")]
+    name: HeaderName,
+
+    /// The value for the header
+    #[schemars(with = "String")]
+    #[serde(deserialize_with = "deserialize_header_value")]
+    value: HeaderValue,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "lowercase", tag = "type")]
+enum Source {
+    Header {
+        /// HTTP header expected to contain JWT
+        #[serde(default = "default_header_name")]
+        name: String,
+        /// Header value prefix
+        #[serde(default = "default_header_value_prefix")]
+        value_prefix: String,
+    },
+    Cookie {
+        /// Name of the cookie containing the JWT
+        name: String,
+    },
+}
+
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -212,12 +261,18 @@ fn search_jwks(
         // criteria)
         for mut key in jwks.keys.into_iter().filter(|key| {
             // We are only interested in keys which are used for signature verification
-            if let Some(purpose) = &key.common.public_key_use {
-                purpose == &PublicKeyUse::Signature
-            } else if let Some(purpose) = &key.common.key_operations {
-                purpose.contains(&KeyOperations::Verify)
-            } else {
-                false
+            match (&key.common.public_key_use, &key.common.key_operations) {
+                // "use" https://datatracker.ietf.org/doc/html/rfc7517#section-4.2 and
+                // "key_ops" https://datatracker.ietf.org/doc/html/rfc7517#section-4.3 are both optional
+                (None, None) => true,
+                (None, Some(purpose)) => purpose.contains(&KeyOperations::Verify),
+                (Some(key_use), None) => key_use == &PublicKeyUse::Signature,
+                // The "use" and "key_ops" JWK members SHOULD NOT be used together;
+                // however, if both are used, the information they convey MUST be
+                // consistent
+                (Some(key_use), Some(purpose)) => {
+                    key_use == &PublicKeyUse::Signature && purpose.contains(&KeyOperations::Verify)
+                }
             }
         }) {
             let mut key_score = 0;
@@ -229,9 +284,9 @@ fn search_jwks(
 
             // Furthermore, we would like our algorithms to match, or at least the kty
             // If we have an algorithm that matches, boost the score
-            match key.common.algorithm {
+            match key.common.key_algorithm {
                 Some(algorithm) => {
-                    if algorithm != criteria.alg {
+                    if convert_key_algorithm(algorithm) != Some(criteria.alg) {
                         continue;
                     }
                     key_score += 1;
@@ -250,7 +305,7 @@ fn search_jwks(
                         Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512,
                         AlgorithmParameters::OctetKey(_),
                     ) => {
-                        key.common.algorithm = Some(criteria.alg);
+                        key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                     }
                     (
                         Algorithm::RS256
@@ -261,21 +316,21 @@ fn search_jwks(
                         | Algorithm::PS512,
                         AlgorithmParameters::RSA(_),
                     ) => {
-                        key.common.algorithm = Some(criteria.alg);
+                        key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                     }
                     (Algorithm::ES256, AlgorithmParameters::EllipticCurve(params)) => {
                         if params.curve == EllipticCurve::P256 {
-                            key.common.algorithm = Some(criteria.alg);
+                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
                     }
                     (Algorithm::ES384, AlgorithmParameters::EllipticCurve(params)) => {
                         if params.curve == EllipticCurve::P384 {
-                            key.common.algorithm = Some(criteria.alg);
+                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
                     }
                     (Algorithm::EdDSA, AlgorithmParameters::EllipticCurve(params)) => {
                         if params.curve == EllipticCurve::Ed25519 {
-                            key.common.algorithm = Some(criteria.alg);
+                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
                     }
                     _ => {
@@ -311,9 +366,9 @@ fn search_jwks(
             .map(|(score, (_, candidate))| (
                 score,
                 &candidate.common.key_id,
-                candidate.common.algorithm
+                candidate.common.key_algorithm
             ))
-            .collect::<Vec<(&usize, &Option<String>, Option<Algorithm>)>>()
+            .collect::<Vec<(&usize, &Option<String>, Option<KeyAlgorithm>)>>()
     );
 
     if candidates.is_empty() {
@@ -375,7 +430,7 @@ impl Plugin for AuthenticationPlugin {
             None
         };
 
-        let router = if let Some(router_conf) = init.config.router {
+        let router = if let Some(mut router_conf) = init.config.router {
             if router_conf
                 .jwt
                 .header_value_prefix
@@ -385,6 +440,23 @@ impl Plugin for AuthenticationPlugin {
             {
                 return Err(Error::BadHeaderValuePrefix.into());
             }
+
+            for source in &router_conf.jwt.sources {
+                if let Source::Header { value_prefix, .. } = source {
+                    if value_prefix.as_bytes().iter().any(u8::is_ascii_whitespace) {
+                        return Err(Error::BadHeaderValuePrefix.into());
+                    }
+                }
+            }
+
+            router_conf.jwt.sources.insert(
+                0,
+                Source::Header {
+                    name: router_conf.jwt.header_name.clone(),
+                    value_prefix: router_conf.jwt.header_value_prefix.clone(),
+                },
+            );
+
             let mut list = vec![];
             for jwks_conf in &router_conf.jwt.jwks {
                 let url: Url = Url::from_str(jwks_conf.url.as_str())?;
@@ -396,6 +468,7 @@ impl Plugin for AuthenticationPlugin {
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
                     poll_interval: jwks_conf.poll_interval,
+                    headers: jwks_conf.headers.clone(),
                 });
             }
 
@@ -432,7 +505,7 @@ impl Plugin for AuthenticationPlugin {
             ServiceBuilder::new()
                 .instrument(authentication_service_span())
                 .checkpoint(move |request: router::Request| {
-                    authenticate(&configuration, &jwks_manager, request)
+                    Ok(authenticate(&configuration, &jwks_manager, request))
                 })
                 .service(service)
                 .boxed()
@@ -458,7 +531,7 @@ fn authenticate(
     config: &JWTConf,
     jwks_manager: &JwksManager,
     request: router::Request,
-) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+) -> ControlFlow<router::Response, router::Request> {
     const AUTHENTICATION_KIND: &str = "JWT";
 
     // We are going to do a lot of similar checking so let's define a local function
@@ -467,7 +540,7 @@ fn authenticate(
         context: Context,
         error: AuthenticationError,
         status: StatusCode,
-    ) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+    ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
         tracing::info!(
             monotonic_counter.apollo_authentication_failure_count = 1u64,
@@ -483,7 +556,7 @@ fn authenticate(
             authentication.jwt.failed = true
         );
         tracing::info!(message = %error, "jwt authentication failure");
-        let response = router::Response::error_builder()
+        let response = router::Response::infallible_builder()
             .error(
                 graphql::Error::builder()
                     .message(error.to_string())
@@ -492,77 +565,27 @@ fn authenticate(
             )
             .status_code(status)
             .context(context)
-            .build()?;
-        Ok(ControlFlow::Break(response))
+            .build();
+        ControlFlow::Break(response)
     }
 
-    // The http_request is stored in a `Router::Request` context.
-    // We are going to check the headers for the presence of the configured header
-    let jwt_value_result = match request.router_request.headers().get(&config.header_name) {
-        Some(value) => value.to_str(),
-        None => {
-            return Ok(ControlFlow::Continue(request));
+    let mut jwt = None;
+    for source in &config.sources {
+        match extract_jwt(source, request.router_request.headers()) {
+            None => continue,
+            Some(Err(error)) => {
+                return failure_message(request.context, error, StatusCode::BAD_REQUEST)
+            }
+            Some(Ok(extracted_jwt)) => {
+                jwt = Some(extracted_jwt);
+                break;
+            }
         }
-    };
-
-    // If we find the header, but can't convert it to a string, let the client know
-    let jwt_value_untrimmed = match jwt_value_result {
-        Ok(value) => value,
-        Err(_not_a_string_error) => {
-            return failure_message(
-                request.context,
-                AuthenticationError::CannotConvertToString,
-                StatusCode::BAD_REQUEST,
-            );
-        }
-    };
-
-    // Let's trim out leading and trailing whitespace to be accommodating
-    let jwt_value = jwt_value_untrimmed.trim();
-
-    // Make sure the format of our message matches our expectations
-    // Technically, the spec is case sensitive, but let's accept
-    // case variations
-    //
-    let prefix_len = config.header_value_prefix.len();
-    if jwt_value.len() < prefix_len
-        || !&jwt_value[..prefix_len].eq_ignore_ascii_case(&config.header_value_prefix)
-    {
-        return failure_message(
-            request.context,
-            AuthenticationError::InvalidPrefix(jwt_value_untrimmed, &config.header_value_prefix),
-            StatusCode::BAD_REQUEST,
-        );
     }
 
-    // If there's no header prefix, we need to avoid splitting the header
-    let jwt = if config.header_value_prefix.is_empty() {
-        // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
-        if jwt_value.contains(' ') {
-            return failure_message(
-                request.context,
-                AuthenticationError::InvalidPrefix(
-                    jwt_value_untrimmed,
-                    &config.header_value_prefix,
-                ),
-                StatusCode::BAD_REQUEST,
-            );
-        }
-        // we can simply assign the jwt to the jwt_value; we'll validate down below
-        jwt_value
-    } else {
-        // Otherwise, we need to split our string in (at most 2) sections.
-        let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
-        if jwt_parts.len() != 2 {
-            return failure_message(
-                request.context,
-                AuthenticationError::MissingJWT(jwt_value),
-                StatusCode::BAD_REQUEST,
-            );
-        }
-
-        // We have our jwt
-        jwt_parts[1]
+    let jwt = match jwt {
+        Some(jwt) => jwt,
+        None => return ControlFlow::Continue(request),
     };
 
     // Try to create a valid header to work with
@@ -632,7 +655,7 @@ fn authenticate(
             kind = %AUTHENTICATION_KIND
         );
         tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1u64);
-        return Ok(ControlFlow::Continue(request));
+        return ControlFlow::Continue(request);
     }
 
     // We can't find a key to process this JWT.
@@ -648,6 +671,94 @@ fn authenticate(
             AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
             StatusCode::UNAUTHORIZED,
         )
+    }
+}
+
+fn extract_jwt<'a, 'b: 'a>(
+    source: &'a Source,
+    headers: &'b HeaderMap,
+) -> Option<Result<&'b str, AuthenticationError<'a>>> {
+    match source {
+        Source::Header { name, value_prefix } => {
+            // The http_request is stored in a `Router::Request` context.
+            // We are going to check the headers for the presence of the configured header
+            let jwt_value_result = match headers.get(name) {
+                Some(value) => value.to_str(),
+                None => return None,
+            };
+
+            // If we find the header, but can't convert it to a string, let the client know
+            let jwt_value_untrimmed = match jwt_value_result {
+                Ok(value) => value,
+                Err(_not_a_string_error) => {
+                    return Some(Err(AuthenticationError::CannotConvertToString));
+                }
+            };
+
+            // Let's trim out leading and trailing whitespace to be accommodating
+            let jwt_value = jwt_value_untrimmed.trim();
+
+            // Make sure the format of our message matches our expectations
+            // Technically, the spec is case sensitive, but let's accept
+            // case variations
+            //
+            let prefix_len = value_prefix.len();
+            if jwt_value.len() < prefix_len
+                || !&jwt_value[..prefix_len].eq_ignore_ascii_case(value_prefix)
+            {
+                return Some(Err(AuthenticationError::InvalidPrefix(
+                    jwt_value_untrimmed,
+                    value_prefix,
+                )));
+            }
+            // If there's no header prefix, we need to avoid splitting the header
+            let jwt = if value_prefix.is_empty() {
+                // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
+                if jwt_value.contains(' ') {
+                    return Some(Err(AuthenticationError::InvalidPrefix(
+                        jwt_value_untrimmed,
+                        value_prefix,
+                    )));
+                }
+
+                // we can simply assign the jwt to the jwt_value; we'll validate down below
+                jwt_value
+            } else {
+                // Otherwise, we need to split our string in (at most 2) sections.
+                let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
+                if jwt_parts.len() != 2 {
+                    return Some(Err(AuthenticationError::MissingJWT(jwt_value)));
+                }
+
+                // We have our jwt
+                jwt_parts[1]
+            };
+            Some(Ok(jwt))
+        }
+        Source::Cookie { name } => {
+            for header in headers.get_all("cookie") {
+                let value = match header.to_str() {
+                    Ok(value) => value,
+                    Err(_not_a_string_error) => {
+                        return Some(Err(AuthenticationError::CannotConvertToString));
+                    }
+                };
+                for cookie in cookie::Cookie::split_parse(value) {
+                    match cookie {
+                        Err(_) => continue,
+                        Ok(cookie) => {
+                            if cookie.name() == name {
+                                if let Some(value) = cookie.value_raw() {
+                                    return Some(Ok(value));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            None
+        }
     }
 }
 
@@ -669,7 +780,7 @@ fn decode_jwt(
             }
         };
 
-        let algorithm = match jwk.common.algorithm {
+        let key_algorithm = match jwk.common.key_algorithm {
             Some(a) => a,
             None => {
                 error = Some((
@@ -680,8 +791,22 @@ fn decode_jwt(
             }
         };
 
+        let algorithm = match convert_key_algorithm(key_algorithm) {
+            Some(a) => a,
+            None => {
+                error = Some((
+                    AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+                continue;
+            }
+        };
+
         let mut validation = Validation::new(algorithm);
         validation.validate_nbf = true;
+        // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
+        // we don't validate audience yet, so this is deactivated
+        validation.validate_aud = false;
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
             Ok(v) => return Ok((issuer, v)),
@@ -745,6 +870,45 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
             }
         }
         None => Duration::MAX,
+    }
+}
+
+//Apparently the jsonwebtoken crate now has 2 different enums for algorithms
+pub(crate) fn convert_key_algorithm(algorithm: KeyAlgorithm) -> Option<Algorithm> {
+    Some(match algorithm {
+        jsonwebtoken::jwk::KeyAlgorithm::HS256 => jsonwebtoken::Algorithm::HS256,
+        jsonwebtoken::jwk::KeyAlgorithm::HS384 => jsonwebtoken::Algorithm::HS384,
+        jsonwebtoken::jwk::KeyAlgorithm::HS512 => jsonwebtoken::Algorithm::HS512,
+        jsonwebtoken::jwk::KeyAlgorithm::ES256 => jsonwebtoken::Algorithm::ES256,
+        jsonwebtoken::jwk::KeyAlgorithm::ES384 => jsonwebtoken::Algorithm::ES384,
+        jsonwebtoken::jwk::KeyAlgorithm::RS256 => jsonwebtoken::Algorithm::RS256,
+        jsonwebtoken::jwk::KeyAlgorithm::RS384 => jsonwebtoken::Algorithm::RS384,
+        jsonwebtoken::jwk::KeyAlgorithm::RS512 => jsonwebtoken::Algorithm::RS512,
+        jsonwebtoken::jwk::KeyAlgorithm::PS256 => jsonwebtoken::Algorithm::PS256,
+        jsonwebtoken::jwk::KeyAlgorithm::PS384 => jsonwebtoken::Algorithm::PS384,
+        jsonwebtoken::jwk::KeyAlgorithm::PS512 => jsonwebtoken::Algorithm::PS512,
+        jsonwebtoken::jwk::KeyAlgorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
+        // we do not use the encryption algorithms
+        jsonwebtoken::jwk::KeyAlgorithm::RSA1_5
+        | jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP
+        | jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP_256 => return None,
+    })
+}
+
+pub(crate) fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
+    match algorithm {
+        jsonwebtoken::Algorithm::HS256 => jsonwebtoken::jwk::KeyAlgorithm::HS256,
+        jsonwebtoken::Algorithm::HS384 => jsonwebtoken::jwk::KeyAlgorithm::HS384,
+        jsonwebtoken::Algorithm::HS512 => jsonwebtoken::jwk::KeyAlgorithm::HS512,
+        jsonwebtoken::Algorithm::ES256 => jsonwebtoken::jwk::KeyAlgorithm::ES256,
+        jsonwebtoken::Algorithm::ES384 => jsonwebtoken::jwk::KeyAlgorithm::ES384,
+        jsonwebtoken::Algorithm::RS256 => jsonwebtoken::jwk::KeyAlgorithm::RS256,
+        jsonwebtoken::Algorithm::RS384 => jsonwebtoken::jwk::KeyAlgorithm::RS384,
+        jsonwebtoken::Algorithm::RS512 => jsonwebtoken::jwk::KeyAlgorithm::RS512,
+        jsonwebtoken::Algorithm::PS256 => jsonwebtoken::jwk::KeyAlgorithm::PS256,
+        jsonwebtoken::Algorithm::PS384 => jsonwebtoken::jwk::KeyAlgorithm::PS384,
+        jsonwebtoken::Algorithm::PS512 => jsonwebtoken::jwk::KeyAlgorithm::PS512,
+        jsonwebtoken::Algorithm::EdDSA => jsonwebtoken::jwk::KeyAlgorithm::EdDSA,
     }
 }
 

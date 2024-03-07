@@ -1,0 +1,5 @@
+supergraph:
+  query_planning:
+    experimental_cache:
+      redis:
+        urls: []

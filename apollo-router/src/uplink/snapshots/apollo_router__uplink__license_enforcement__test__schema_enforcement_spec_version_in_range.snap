@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+assertion_line: 714
+expression: report.to_string()
+---
+Schema features:
+* @authenticated
+  https://specs.apollo.dev/authenticated/v0.1
