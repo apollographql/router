@@ -253,15 +253,6 @@ impl Plugin for Telemetry {
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
-        let public_meter_provider = Some(FilterMeterProvider::public(
-            metrics_builder.public_meter_provider_builder.build(),
-        ));
-        let private_meter_provider = Some(FilterMeterProvider::private(
-            metrics_builder.apollo_meter_provider_builder.build(),
-        ));
-        let public_prometheus_meter_provider = metrics_builder
-            .prometheus_meter_provider
-            .map(FilterMeterProvider::public);
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
@@ -2024,16 +2015,6 @@ mod tests {
                 "status" = "200",
                 "x-custom" = "coming_from_header"
             );
-            assert_histogram_sum!(
-                "apollo_router_http_request_duration_seconds",
-                1,
-                "another_test" = "my_default_value",
-                "my_value" = 2,
-                "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "200",
-                "x-custom" = "coming_from_header"
-            );
         }
         .with_metrics()
         .await;
@@ -2532,15 +2513,6 @@ mod tests {
 
             assert_counter!(
                 "apollo_router_http_requests_total",
-                1,
-                "another_test" = "my_default_value",
-                "error" = "400 Bad Request",
-                "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "400"
-            );
-            assert_histogram_sum!(
-                "apollo_router_http_request_duration_seconds",
                 1,
                 "another_test" = "my_default_value",
                 "error" = "400 Bad Request",
