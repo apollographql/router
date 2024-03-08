@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.40.1"
+version = "1.40.2"
 dependencies = [
  "access-json",
  "anyhow",
@@ -278,6 +278,7 @@ dependencies = [
  "clap",
  "console",
  "console-subscriber",
+ "cookie",
  "dashmap",
  "derivative",
  "derive_more",
@@ -408,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.40.1"
+version = "1.40.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -424,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.40.1"
+version = "1.40.2"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -1667,6 +1668,16 @@ name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
+name = "cookie"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cd91cf61412820176e137621345ee43b3f4423e589e7ae4e50d601d93e35ef8"
+dependencies = [
+ "time",
+ "version_check",
+]
 
 [[package]]
 name = "cookie-factory"
@@ -4083,9 +4094,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "0.8.9"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dce281c5e46beae905d4de1870d8b1509a9142b62eedf18b443b011ca8343d0"
+checksum = "a4a650543ca06a924e8b371db273b2756685faae30f8487da1b56505a8f78b0c"
 dependencies = [
  "libc",
  "log",

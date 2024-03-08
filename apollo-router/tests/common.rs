@@ -10,7 +10,6 @@ use std::time::SystemTime;
 
 use buildstructor::buildstructor;
 use http::header::ACCEPT;
-use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use jsonpath_lib::Selector;
@@ -394,7 +393,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn execute_bad_content_encoding(
+    pub fn execute_bad_content_type(
         &self,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"))
@@ -403,7 +402,7 @@ impl IntegrationTest {
     fn execute_query_internal(
         &self,
         query: &Value,
-        content_encoding: Option<&'static str>,
+        content_type: Option<&'static str>,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
@@ -422,8 +421,10 @@ impl IntegrationTest {
 
                 let mut request = client
                     .post(url)
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
+                    .header(
+                        CONTENT_TYPE,
+                        content_type.unwrap_or(APPLICATION_JSON.essence_str()),
+                    )
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
                     .header("x-my-header", "test")
@@ -661,7 +662,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn assert_log_contains(&mut self, msg: &str) {
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(5) {
+        while now.elapsed() < Duration::from_secs(10) {
             if let Ok(line) = self.stdio_rx.try_recv() {
                 if line.contains(msg) {
                     return;
