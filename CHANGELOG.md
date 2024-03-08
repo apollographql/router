@@ -8,29 +8,29 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Entity cache: Add spans around redis interaction ([PR #4667](https://github.com/apollographql/router/pull/4667))
+### Entity caching: Add tracing spans around Redis interactions ([PR #4667](https://github.com/apollographql/router/pull/4667))
 
-This adds the `cache_lookup` and `cache_store` spans to show the entity cache's Redis calls in traces. This also changes the behavior slightly so that storing in Redis does not stop the execution of the rest of the query
+This adds `cache_lookup` and `cache_store` spans to traces which show Redis calls related to our recently announced [entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching/) feature.  This also changes the behavior slightly so that storing in Redis does not stop the execution of the rest of the query.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4667
 
-### Use gzip compression when downloading Persisted Query manifests
+### Use Gzip compression when downloading Persisted Query manifests ([PR #4622](https://github.com/apollographql/router/pull/4622))
 
-Router will now request gzip compression when downloading Persisted Query manifests for improved network efficiency.
+Router will now request Gzip compression when downloading Persisted Query manifests for improved network efficiency.
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4622
 
 ### Redis: add a fail open option ([Issue #4334](https://github.com/apollographql/router/issues/4334))
 
 This option configures the Router's behavior in case it cannot connect to Redis:
-- by default, it will still start, so requests will still be handled in a degraded state
-- when active, that option will prevent the router from starting if it cannot connect
+- By default, the router will start and all requests will be handled in a degraded state.
+- Alternatively, this option can be configured to prevent the router from starting if it can't connect to Redis.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4534
 
 ## 🐛 Fixes
 
-### Default header correctly set in `experimental_response_trace_id` when enabled ([Issue #4699](https://github.com/apollographql/router/issues/4699))
+### Default header now correctly set when `experimental_response_trace_id` is enabled ([Issue #4699](https://github.com/apollographql/router/issues/4699))
 
 When configuring the `experimental_response_trace_id` without an explicit header it now correctly takes the default one `apollo-trace-id`.
 
