@@ -44,6 +44,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::HeartbeatInterval;
@@ -685,6 +686,9 @@ async fn call_http(
 
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
+    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
+    let request = file_uploads::http_request_wrapper(request).await;
+
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     let (parts, content_type, body) =
         do_fetch(client, &context, service_name, request, display_body)
@@ -811,7 +815,6 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 
 async fn do_fetch(
     mut client: crate::services::http::BoxService,
-
     context: &Context,
     service_name: &str,
     request: Request<Body>,

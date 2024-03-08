@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use apollo_compiler::ExecutableDocument;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
@@ -18,6 +19,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::json_ext::Value;
+use crate::services::layers::query_analysis::ParsedDocument;
 
 pub(crate) mod extensions;
 
@@ -247,6 +249,16 @@ impl Context {
             self.entries.insert(kv.key().clone(), kv.value().clone());
         }
     }
+
+    /// Read only access to the executable document. This is UNSTABLE and may be changed or removed in future router releases.
+    /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
+    #[doc(hidden)]
+    pub fn unsupported_executable_document(&self) -> Option<Arc<ExecutableDocument>> {
+        self.extensions()
+            .lock()
+            .get::<ParsedDocument>()
+            .map(|d| d.executable.clone())
+    }
 }
 
 pub(crate) struct BusyTimerGuard {
@@ -322,6 +334,8 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use crate::Context;
 
     #[test]
@@ -394,5 +408,20 @@ mod test {
         extensions.insert(1usize);
         let v = extensions.get::<usize>();
         assert_eq!(v, Some(&1usize));
+    }
+
+    #[test]
+    fn test_executable_document_access() {
+        let c = Context::new();
+        assert!(c.unsupported_executable_document().is_none());
+        c.extensions().lock().insert(Arc::new(
+            crate::services::layers::query_analysis::ParsedDocumentInner {
+                ast: Default::default(),
+                executable: Default::default(),
+                parse_errors: Default::default(),
+                validation_errors: Default::default(),
+            },
+        ));
+        assert!(c.unsupported_executable_document().is_some());
     }
 }

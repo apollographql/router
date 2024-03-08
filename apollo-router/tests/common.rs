@@ -10,10 +10,14 @@ use std::time::SystemTime;
 
 use buildstructor::buildstructor;
 use http::header::ACCEPT;
-use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use jsonpath_lib::Selector;
+use mediatype::names::BOUNDARY;
+use mediatype::names::FORM_DATA;
+use mediatype::names::MULTIPART;
+use mediatype::MediaType;
+use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
@@ -59,6 +63,7 @@ pub struct IntegrationTest {
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
+    supergraph: PathBuf,
     _subgraphs: wiremock::MockServer,
     subscriber: Option<Dispatch>,
 }
@@ -101,6 +106,8 @@ impl IntegrationTest {
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
+        supergraph: Option<PathBuf>,
+        mut subgraph_overrides: HashMap<String, String>,
     ) -> Self {
         // Prevent multiple integration tests from running at the same time
         let lock = LOCK
@@ -115,6 +122,13 @@ impl IntegrationTest {
         let address = listener.local_addr().unwrap();
         let url = format!("http://{address}/");
 
+        // Add a default override for products, if not specified
+        subgraph_overrides.entry("products".into()).or_insert(url);
+
+        // Insert the overrides into the config
+        let overrides = subgraph_overrides
+            .into_iter()
+            .map(|(name, url)| (name, serde_json::Value::String(url)));
         let mut config: Value = serde_yaml::from_str(config).unwrap();
         match config
             .as_object_mut()
@@ -123,20 +137,22 @@ impl IntegrationTest {
         {
             None => {
                 if let Some(o) = config.as_object_mut() {
-                    o.insert(
-                        "override_subgraph_url".to_string(),
-                        json! {{ "products": url}},
-                    );
+                    o.insert("override_subgraph_url".to_string(), overrides.collect());
                 }
             }
             Some(override_url) => {
-                let url = format!("http://{address}");
-                override_url.insert("products".to_string(), url.into());
+                override_url.extend(overrides);
             }
         }
 
         let config_str = serde_yaml::to_string(&config).unwrap();
 
+        let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
+            "..",
+            "examples",
+            "graphql",
+            "local.graphql",
+        ]));
         let subgraphs = wiremock::MockServer::builder()
             .listener(listener)
             .start()
@@ -166,6 +182,7 @@ impl IntegrationTest {
             stdio_tx,
             stdio_rx,
             collect_stdio,
+            supergraph,
             _subgraphs: subgraphs,
             subscriber,
         }
@@ -193,8 +210,7 @@ impl IntegrationTest {
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
-                &PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"])
-                    .to_string_lossy(),
+                &self.supergraph.to_string_lossy(),
                 "--log",
                 "error,apollo_router=info",
             ])
@@ -378,7 +394,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn execute_bad_content_encoding(
+    pub fn execute_bad_content_type(
         &self,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"))
@@ -387,7 +403,7 @@ impl IntegrationTest {
     fn execute_query_internal(
         &self,
         query: &Value,
-        content_encoding: Option<&'static str>,
+        content_type: Option<&'static str>,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
@@ -404,8 +420,10 @@ impl IntegrationTest {
 
                 let mut request = client
                     .post("http://localhost:4000")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
+                    .header(
+                        CONTENT_TYPE,
+                        content_type.unwrap_or(APPLICATION_JSON.essence_str()),
+                    )
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
                     .header("x-my-header", "test")
@@ -473,6 +491,65 @@ impl IntegrationTest {
                     panic!("unable to send successful request to router, {err}")
                 }
             }
+        }
+        .with_subscriber(dispatch.unwrap_or_default())
+    }
+
+    /// Make a raw multipart request to the router.
+    #[allow(dead_code)]
+    pub fn execute_multipart_request(
+        &self,
+        request: reqwest::multipart::Form,
+        transform: Option<fn(reqwest::Request) -> reqwest::Request>,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        assert!(
+            self.router.is_some(),
+            "router was not started, call `router.start().await; router.assert_started().await`"
+        );
+
+        let dispatch = self.subscriber.clone();
+        async move {
+            let span = info_span!("client_raw_request");
+            let span_id = span.context().span().span_context().trace_id().to_string();
+
+            async move {
+                let client = reqwest::Client::new();
+                let mime = {
+                    let mut m = MediaType::new(MULTIPART, FORM_DATA);
+                    m.set_param(BOUNDARY, mediatype::Value::new(request.boundary()).unwrap());
+
+                    m
+                };
+
+                let mut request = client
+                    .post("http://localhost:4000")
+                    .header(CONTENT_TYPE, mime.to_string())
+                    .header("apollographql-client-name", "custom_name")
+                    .header("apollographql-client-version", "1.0")
+                    .header("x-my-header", "test")
+                    .multipart(request)
+                    .build()
+                    .unwrap();
+
+                // Optionally transform the request if needed
+                let transformer = transform.unwrap_or(core::convert::identity);
+
+                global::get_text_map_propagator(|propagator| {
+                    propagator.inject_context(
+                        &tracing::span::Span::current().context(),
+                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    );
+                });
+                request.headers_mut().remove(ACCEPT);
+                match client.execute(transformer(request)).await {
+                    Ok(response) => (span_id, response),
+                    Err(err) => {
+                        panic!("unable to send successful request to router, {err}")
+                    }
+                }
+            }
+            .instrument(span)
+            .await
         }
         .with_subscriber(dispatch.unwrap_or_default())
     }
