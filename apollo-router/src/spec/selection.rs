@@ -208,7 +208,7 @@ impl Selection {
             (None, _) => true,
             (
                 // TODO[igni]
-                Some(PathElement::Key(key, type_condition)),
+                Some(PathElement::Key(key, _type_condition)),
                 Selection::Field {
                     name,
                     alias,

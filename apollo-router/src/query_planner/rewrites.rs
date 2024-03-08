@@ -54,7 +54,8 @@ impl DataRewrite {
                 // `Key` and we ignore other cases (in theory, it could be `Fragment` needs
                 // to be supported someday if we ever need to rewrite full object values,
                 // but that can be added then).
-                if let Some((parent, PathElement::Key(k, type_conditions))) =
+                // TODO[igni]
+                if let Some((parent, PathElement::Key(k, _type_conditions))) =
                     split_path_last_element(&setter.path)
                 {
                     data.select_values_and_paths_mut(schema, &parent, |_path, obj| {

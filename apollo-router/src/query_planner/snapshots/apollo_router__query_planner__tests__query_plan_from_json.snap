@@ -37,8 +37,13 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
+                                            None,
                                         ),
-                                        Flatten,
+                                        Flatten(
+                                            Some(
+                                                [],
+                                            ),
+                                        ),
                                     ],
                                 ),
                                 node: Fetch(
@@ -96,8 +101,13 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
+                                            None,
                                         ),
-                                        Flatten,
+                                        Flatten(
+                                            Some(
+                                                [],
+                                            ),
+                                        ),
                                     ],
                                 ),
                                 node: Fetch(
@@ -171,6 +181,7 @@ Sequence {
                                     [
                                         Key(
                                             "product",
+                                            None,
                                         ),
                                     ],
                                 ),
@@ -227,6 +238,7 @@ Sequence {
                                     [
                                         Key(
                                             "product",
+                                            None,
                                         ),
                                     ],
                                 ),

@@ -458,11 +458,12 @@ impl FetchNode {
             (Value::Null, errors)
         } else {
             // TODO[igni]
-            let current_slice = if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
-                &current_dir.0[..current_dir.0.len() - 1]
-            } else {
-                &current_dir.0[..]
-            };
+            let current_slice =
+                if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
+                    &current_dir.0[..current_dir.0.len() - 1]
+                } else {
+                    &current_dir.0[..]
+                };
 
             let errors: Vec<Error> = response
                 .errors
