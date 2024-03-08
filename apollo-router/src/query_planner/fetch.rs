@@ -13,6 +13,7 @@ use super::execution::ExecutionParameters;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
+use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql;
@@ -244,6 +245,18 @@ impl FetchNode {
             service_name,
             ..
         } = self;
+
+        // The client closed the connection, we are still executing the request pipeline,
+        // but we won't send unused trafic to subgraph
+        if parameters
+            .context
+            .extensions()
+            .lock()
+            .get::<CanceledRequest>()
+            .is_some()
+        {
+            return (Value::Object(Object::default()), Vec::new());
+        }
 
         let Variables {
             variables,

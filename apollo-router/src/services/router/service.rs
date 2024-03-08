@@ -34,6 +34,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::ClientRequestAccepts;
+use crate::axum_factory::CanceledRequest;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -249,6 +250,15 @@ impl RouterService {
                 },
             },
         };
+
+        if context
+            .extensions()
+            .lock()
+            .get::<CanceledRequest>()
+            .is_some()
+        {
+            tracing::error!("broken pipe: the client closed the connection");
+        }
 
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,

@@ -37,6 +37,8 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_http::decompression::DecompressionBody;
 use tower_http::trace::TraceLayer;
+use tracing::instrument::WithSubscriber;
+use tracing::Instrument;
 
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
@@ -64,6 +66,7 @@ use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+use crate::Context;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -602,7 +605,28 @@ async fn handle_graphql(
         .get(ACCEPT_ENCODING)
         .cloned();
 
-    let res = service.oneshot(request).await;
+    // to make sure we can record request handling when the client closes the connection prematurely,
+    // we execute the request in a separate task that will run until we get the first response, which
+    // means it went through the entire pipeline at least once (not looking at deferred responses or
+    // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
+    // the context a flag to indicate that the request is canceled and subgraph calls should not be made
+    let mut cancel_handler = CancelHandler::new(&context);
+    let task = service
+        .oneshot(request)
+        .with_current_subscriber()
+        .in_current_span();
+    let res = match tokio::task::spawn(task).await {
+        Ok(res) => res,
+        Err(_e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "router service call failed",
+            )
+                .into_response();
+        }
+    };
+    cancel_handler.on_response();
+
     let dur = context.busy_time();
     let processing_seconds = dur.as_secs_f64();
 
@@ -653,6 +677,34 @@ async fn handle_graphql(
         }
     }
 }
+
+struct CancelHandler<'a> {
+    context: &'a Context,
+    got_first_response: bool,
+}
+
+impl<'a> CancelHandler<'a> {
+    fn new(context: &'a Context) -> Self {
+        CancelHandler {
+            context,
+            got_first_response: false,
+        }
+    }
+
+    fn on_response(&mut self) {
+        self.got_first_response = true;
+    }
+}
+
+impl<'a> Drop for CancelHandler<'a> {
+    fn drop(&mut self) {
+        if !self.got_first_response {
+            self.context.extensions().lock().insert(CanceledRequest);
+        }
+    }
+}
+
+pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {
