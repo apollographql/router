@@ -1,13 +1,11 @@
 //! This file is to load test subscriptions and should be launched manually, not in our CI
-use common::IntegrationTest;
-use common::Telemetry;
 use futures::StreamExt;
 use http::HeaderValue;
 use serde_json::json;
 use tower::BoxError;
 
-#[path = "../common.rs"]
-mod common;
+use super::common::IntegrationTest;
+use super::common::Telemetry;
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("../fixtures/subscription.router.yaml");
 const SUB_QUERY: &str =

@@ -26,7 +26,6 @@ use http_body::Body as _;
 use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
-use router_bridge::planner::Planner;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -44,7 +43,6 @@ use crate::http_ext;
 use crate::plugin::test::MockSupergraphService;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::QueryPlanResult;
 use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::apq::APQLayer;
@@ -738,7 +736,7 @@ impl RouterCreator {
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
-                    .await,
+                    .await?,
             )
         } else {
             APQLayer::disabled()
@@ -787,9 +785,5 @@ impl RouterCreator {
 impl RouterCreator {
     pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.supergraph_creator.cache_keys(count).await
-    }
-
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.supergraph_creator.planner()
     }
 }
