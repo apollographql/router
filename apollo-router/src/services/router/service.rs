@@ -251,15 +251,6 @@ impl RouterService {
             },
         };
 
-        if context
-            .extensions()
-            .lock()
-            .get::<CanceledRequest>()
-            .is_some()
-        {
-            tracing::error!("broken pipe: the client closed the connection");
-        }
-
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
