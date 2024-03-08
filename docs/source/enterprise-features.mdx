@@ -3,28 +3,23 @@ title: Enterprise features for the Apollo Router
 description: Available with GraphOS Enterprise
 ---
 
-The Apollo Router provides expanded performance, security, and customization features for organizations with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+Since the Apollo Router is [source-available](https://www.apollographql.com/blog/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features), you can use its codebase without connecting it to GraphOS. GraphOS organizations with the Enterprise plan can [connect a self-hosted router to GraphOS](/graphos/quickstart/self-hosted#6-connect-the-router-to-graphos) for an expanded feature set.
+
+A router connected to GraphOS, whether cloud- or self-hosted, is called a **GraphOS router**. It has access to specific GraphOS features depending on the connected GraphOS organization's plan. Refer to the [pricing page](https://www.apollographql.com/pricing#graphos-router) to compare GraphOS router features across plan types.
 
 <Tip>
 
-Try out these Enterprise features for free with an [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+Try out Enterprise GraphOS router features for free with an [Enterprise trial](/graphos/org/plans/#enterprise-trials).
 
 </Tip>
 
 ## List of features
 
-- **Real-time updates** via [GraphQL subscriptions](./executing-operations/subscription-support/)
-- **Authentication of inbound requests** via [JSON Web Token (JWT)](./configuration/authn-jwt/)
-- [**Authorization** of specific fields and types](./configuration/authorization) through the [`@requiresScopes`](./configuration/authorization#requiresscopes), [`@authenticated`](./configuration/authorization#authenticated), and [`@policy`](./configuration/authorization#policy) directives
-- Redis-backed [**distributed caching** of query plans and persisted queries](./configuration/distributed-caching/)
-- **Custom request handling** in any language via [external coprocessing](./customizations/coprocessor/)
-- **Mitigation of potentially malicious requests** via [operation limits](./configuration/operation-limits) and [safelisting with persisted queries](./configuration/persisted-queries)
-- **Custom instrumentation and telemetry**, including [custom attributes for spans](./configuration/telemetry/instrumentation/spans/#attributes).
-- An [**offline Enterprise license**](#offline-enterprise-license) enables running the router with Enterprise features when disconnected from the internet.
+<GraphOSRouterFeatures />
 
 <Tip>
 
-Articles specifically about Enterprise features are marked with a **❖** icon in the left navigation.
+Articles about Enterprise features are marked with a **❖** icon in the left navigation.
 
 </Tip>
 
@@ -116,7 +111,7 @@ Follow these steps to configure an Apollo Router to use an offline Enterprise li
     * [`APOLLO_SUPERGRAPH_PATH`](./configuration/overview/#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
     * [`APOLLO_SUPERGRAPH_URLS`](./configuration/overview/#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
-1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](../configuration/overview#apollo_graph_ref) environment variables. 
+1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](./configuration/overview#apollo_graph_ref) environment variables. 
 
     These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 

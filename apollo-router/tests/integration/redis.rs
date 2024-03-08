@@ -741,4 +741,58 @@ mod test {
         let _ = connection_task.await;
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connection_failure_blocks_startup() {
+        let _ = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                // invalid port
+                                "urls": ["redis://127.0.0.1:6378"]
+                            }
+                        }
+                    }
+                }
+            }))
+            .unwrap()
+            .schema(include_str!("../fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let e = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                // invalid port
+                                "urls": ["redis://127.0.0.1:6378"],
+                                "required_to_start": true
+                            }
+                        }
+                    }
+                }
+            }))
+            .unwrap()
+            .schema(include_str!("../fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
+        );
+    }
 }

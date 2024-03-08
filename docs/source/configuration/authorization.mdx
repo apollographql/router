@@ -3,7 +3,7 @@ title: Authorization in the Apollo Router
 description: Strengthen service security with a centralized governance layer
 ---
 
-<GraphOSEnterpriseRequired />
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal services, checks can be essential to limit data to authorized parties.
 
@@ -289,6 +289,40 @@ query {
 The response would include an error at the `/users/@/email` path since that field requires the `read:emails` scope.
 The router can execute the entire query successfully if the request includes the `read:others read:emails` scope set.
 
+The router returns `null` for unauthorized fields and applies the [standard GraphQL null propagation rules](https://www.apollographql.com/blog/graphql/basics/using-nullability-in-graphql/#what-happens-if-you-try-to-return-null-for-a-non-null-field).
+
+```json title="Unauthorized request response"
+{
+  "data": {
+    "me": null,
+		"post": {
+			"title": "Securing supergraphs",
+		}
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "me"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    },
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "post",
+        "views"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
+}
+```
+
 <MinVersion version="1.29.1">
 
 ### `@authenticated`
@@ -499,7 +533,7 @@ You can nest arrays and elements as needed to achieve your desired logic. For th
 
 #### Example `@policy` use case
 
-#### Usage with a coprocessor
+##### Usage with a coprocessor
 
 Diving even deeper into the [social media example](#example-requiresscopes-use-case): suppose you want only a user to have access to their own profile and credit card information. Of the available authorization directives, you use `@policy` instead of `@requiresScopes` because the validation logic relies on more than the scopes of an access token.
 
@@ -634,6 +668,10 @@ fn supergraph_service(service) {
   service.map_request(request_callback);
 }
 ```
+
+#### Special case for subscriptions
+
+When using subscriptions along with `@policy` authorization, subscription events restart from the execution service, which means that if the authorization status of the subscription session changed, then it cannot go through query planning again, and the session should be closed. To that end, the policies should be evaluated again at the execution service level, and if they changed, an error should be returned to stop the subscription.
 
 ## Composition and federation
 

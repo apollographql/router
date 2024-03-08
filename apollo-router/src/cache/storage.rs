@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+use tower::BoxError;
 
 use super::redis::*;
 use crate::configuration::RedisCache;
@@ -60,18 +61,22 @@ where
         max_capacity: NonZeroUsize,
         config: Option<RedisCache>,
         caller: &str,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BoxError> {
+        Ok(Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
+                let required_to_start = config.required_to_start;
                 match RedisCacheStorage::new(config).await {
                     Err(e) => {
                         tracing::error!(
-                            "could not open connection to Redis for {} caching: {:?}",
-                            caller,
-                            e
+                            cache = caller,
+                            e,
+                            "could not open connection to Redis for caching",
                         );
+                        if required_to_start {
+                            return Err(e);
+                        }
                         None
                     }
                     Ok(storage) => Some(storage),
@@ -79,7 +84,7 @@ where
             } else {
                 None
             },
-        }
+        })
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {

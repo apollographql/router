@@ -11,6 +11,7 @@ use std::collections::HashSet;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
 use tower::BoxError;
 
@@ -189,7 +190,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
 pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    implementers_map: &'a HashMap<Name, Implementers>,
     dry_run: bool,
     request_policies: HashSet<String>,
     pub(crate) query_requires_policies: bool,
@@ -224,7 +225,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        implementers_map: &'a HashMap<Name, Implementers>,
         successful_policies: HashSet<String>,
         dry_run: bool,
     ) -> Option<Self> {
@@ -291,6 +292,14 @@ impl<'a> PolicyFilteringVisitor<'a> {
         }
     }
 
+    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+        self.implementers_map
+            .get(type_name)
+            .map(|implementers| implementers.iter())
+            .into_iter()
+            .flatten()
+    }
+
     fn implementors_with_different_requirements(
         &self,
         field_def: &ast::FieldDefinition,
@@ -328,10 +337,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             let mut policies_sets: Option<Vec<Vec<String>>> = None;
 
             for ty in self
-                .implementers_map
-                .get(type_name)
-                .into_iter()
-                .flatten()
+                .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
                 // aggregate the list of policies sets
@@ -376,7 +382,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             if t.is_interface() {
                 let mut policies_sets: Option<Vec<Vec<String>>> = None;
 
-                for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
+                for ty in self.implementors(parent_type) {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
                         // aggregate the list of policies sets
                         // we transform to a common representation of sorted vectors because the element order

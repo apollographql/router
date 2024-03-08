@@ -3,7 +3,7 @@ title: JWT Authentication in the Apollo Router
 description: Restrict access to credentialed users and systems
 ---
 
-<GraphOSEnterpriseRequired />
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The Apollo Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
@@ -47,9 +47,19 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
             - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
               issuer: <optional name of issuer>
               poll_interval: <optional poll interval>
+              headers: # optional list of static headers added to the HTTP request to the JWKS URL
+                - name: User-Agent
+                  value: router
           # These keys are optional. Default values are shown.
           header_name: Authorization
           header_value_prefix: Bearer
+          # array of alternative token sources
+          sources:
+            - type: header
+              name: X-Authorization
+              value_prefix: Bearer
+            - type: cookie
+              name: authz
     ```
 
     These options are documented [below](#configuration-options).
@@ -99,6 +109,7 @@ The following configuration options are supported:
 - `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
 - `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
+- `headers`: **optional** a list of headers sent when downloading from the JWKS URL
 
 </td>
 </tr>
@@ -129,6 +140,33 @@ The default value is `Authorization`.
 The string that will always precede the JWT in the header value corresponding to [`header_name`](#header_name). This value must not include whitespace.
 
 The default value is `Bearer`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `sources`
+
+</td>
+<td>
+
+This is an array of possible token sources, as it could be provided in different headers depending on the client, or it could be stored in a cookie. If the default token source defined by the above `header_name` and `header_value_prefix` does not find the token, then each of the alternative sources is tried until one matches.
+
+```yaml title="router.yaml"
+    authentication:
+      router:
+        jwt:
+          jwks:
+            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+          sources:
+            - type: header
+              name: X-Authorization
+              value_prefix: Bearer
+            - type: cookie
+              name: authz
+```
 
 </td>
 </tr>
@@ -629,7 +667,7 @@ The y-coordinate of the elliptic curve point for this public key, as the base64-
 
   // highlight-start
   // Symmetric-algorithm-specific property
-  "k": "c2VjcmV0Cg==" // ⚠️ This is a base64-encoded shared secret! ⚠️
+  "k": "c2VjcmV0Cg" // ⚠️ This is a base64-encoded shared secret! ⚠️
   // highlight-end
 }
 ```
@@ -651,7 +689,7 @@ The y-coordinate of the elliptic curve point for this public key, as the base64-
 </td>
 <td>
 
-The value of the shared symmetric key, as the base64-encoded value of the key's octet sequence representation.
+The value of the shared symmetric key, as the [(URL safe, without padding) base64-encoded value](https://datatracker.ietf.org/doc/html/rfc7515#section-2) of the key's octet sequence representation.
 
 **⚠️ If your JWK uses a symmetric signature algorithm, always [provide your JWKS to the router](#jwks) via a `file://` URL!** Shared keys should never be made available over the network.
 

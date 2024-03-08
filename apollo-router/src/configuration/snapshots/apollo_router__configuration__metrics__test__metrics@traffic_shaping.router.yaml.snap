@@ -7,12 +7,11 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.router.rate_limit.: true
-          opt.router.timeout.: true
-          opt.subgraph.compression.: true
-          opt.subgraph.deduplicate_query.: true
-          opt.subgraph.http2.: true
-          opt.subgraph.rate_limit.: true
-          opt.subgraph.retry.: true
-          opt.subgraph.timeout.: true
-
+          opt.router.rate_limit: true
+          opt.router.timeout: true
+          opt.subgraph.compression: true
+          opt.subgraph.deduplicate_query: true
+          opt.subgraph.http2: true
+          opt.subgraph.rate_limit: true
+          opt.subgraph.retry: true
+          opt.subgraph.timeout: true
