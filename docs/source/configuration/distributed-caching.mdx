@@ -4,6 +4,8 @@ subtitle: Redis-backed caching for query plans and APQ
 description: Distributed caching for Apollo Router with GraphOS Enterprise. Configure a Redis-backed cache for query plans and automatic persisted queries (APQ).
 ---
 
+import RedisTLS from '../../shared/redis-tls.mdx'
+
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 If you have multiple Apollo Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](./in-memory-caching).
@@ -151,7 +153,7 @@ When using the same Redis instance for multiple puposes, the `namespace` option 
 
 ### TLS
 
-TLS for Redis connections can be configured in the same way as subgraphs, to [override the list of certificate authorities](./overview/#overriding-certificate-authorities-for-subgraphs) or [set up client authentication](./overview/#tls-client-authentication-for-subgraph-requests).
+<RedisTLS />
 
 ### Required to start
 

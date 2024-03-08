@@ -41,6 +41,22 @@ telemetry:
 
 For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
 
+### Enabling log correlation
+
+To enable Datadog log correlation, you must configure `dd.trace_id` to appear on the `router` span:
+  
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          dd.trace_id: true #highlight-line
+```
+
+Your JSON formatted log messages will automatically output `dd.trace_id` on each log message if `dd.trace_id` was detected on the `router` span.
+
 ## Datadog native configuration
 
 <Caution>
