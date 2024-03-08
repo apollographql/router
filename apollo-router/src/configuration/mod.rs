@@ -11,6 +11,7 @@ mod tests;
 mod upgrade;
 mod yaml;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::io::BufReader;
@@ -190,7 +191,7 @@ pub struct Configuration {
 
     /// Batching configuration.
     #[serde(default)]
-    pub(crate) experimental_batching: Batching,
+    pub(crate) batching: Batching,
 }
 
 impl PartialEq for Configuration {
@@ -255,7 +256,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
-            experimental_batching: Batching,
+            batching: Batching,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -274,7 +275,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
-            .experimental_batching(ad_hoc.experimental_batching)
+            .batching(ad_hoc.batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -312,7 +313,7 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
-        experimental_batching: Option<Batching>,
+        batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -348,7 +349,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
+            batching: batching.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -387,7 +388,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
-        experimental_batching: Option<Batching>,
+        batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -413,7 +414,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
+            batching: batching.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -1391,4 +1392,28 @@ pub(crate) struct Batching {
 
     /// Batching mode
     pub(crate) mode: BatchingMode,
+
+    /// Subgraph options for batching
+    ///
+    /// Note: Batching from the router to subgraphs can either be enabled for
+    /// all subgraphs or configured per subgraph, but not both.
+    pub(crate) subgraph: Option<SubgraphBatchingConfig>,
+}
+
+/// Batching configuration for subgraphs
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum SubgraphBatchingConfig {
+    /// Batching options for all known subgraphs
+    All(CommonBatchingConfig),
+
+    /// Per-subgraph batching options
+    Subgraphs(HashMap<String, CommonBatchingConfig>),
+}
+
+/// Common options for configuring subgraph batching
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+pub(crate) struct CommonBatchingConfig {
+    /// Whether this batching config should be enabled
+    enabled: bool,
 }

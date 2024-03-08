@@ -1,6 +1,6 @@
 ---
 title: Query batching
-description: Receive query batches with the Apollo Router  
+description: Receive query batches with the Apollo Router
 ---
 
 <ExperimentalFeature />
@@ -15,7 +15,7 @@ The Apollo Router supports client and subgraph query batching.
 
 If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual operations sent to the router.
 
-Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number in a batch and the maximum duration to wait for operations to accumulate before sending the batch. 
+Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number in a batch and the maximum duration to wait for operations to accumulate before sending the batch.
 
 The Apollo Router must be configured to receive query batches, otherwise it rejects them. When processing a  batch, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
 
@@ -27,12 +27,12 @@ Both the Apollo Router and client need to be configured to support query batchin
 
 #### Client Query Batching
 
-By default, receiving client query batches is _not_ enabled in the Apollo Router. 
+By default, receiving client query batches is _not_ enabled in the Apollo Router.
 
 To enable query batching, set the following fields in your `router.yaml` configuration file:
 
 ```yaml title="router.yaml"
-experimental_batching:
+batching:
   enabled: true
   mode: batch_http_link
 ```
@@ -46,19 +46,31 @@ experimental_batching:
 
 If Client query batching is enabled, and the router subgraphs [support query batching](https://www.apollographql.com/docs/apollo-server/api/apollo-server#allowbatchedhttprequests), then subgraph query batching may be enabled by setting the following fields in your `router.yaml` configuration file:
 
-```yaml title="router.yaml"
-experimental_batching:
+```yaml title="router.all_enabled.yaml"
+batching:
   enabled: true
   mode: batch_http_link
   subgraph:
+    # Enable batching on all subgraphs
     all:
       enabled: true
+```
+
+```yaml title="router.yaml"
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Configure batching support per subgraph
     subgraphs:
       subgraph_1:
         enabled: true
       subgraph_2:
         enabled: true
 ```
+
+<Note>
+The router can be configured to either support batching for all subgraphs or configured per each subgraph, but not both.
 
 <Note>
 There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Bearing this constraint in mind, the router will only be able to generate batches from queries which are processed which don't contain such constraints.
@@ -276,7 +288,7 @@ As a result, the router returns an invalid batch error:
 
 ### Individual query error
 
-If a single query in a batch cannot be processed, this results in an individual error. 
+If a single query in a batch cannot be processed, this results in an individual error.
 
 For example, the query `MyFirstQuery` is accessing a field that doesn't exist, while the rest of the batch query is valid.
 
@@ -313,7 +325,7 @@ As a result, an error is returned for the individual invalid query and the other
 ## Known limitations
 
 ### Unsupported query modes
- 
+
 When batching is enabled, any batch operation that results in a stream of responses is unsupported, including:
 - [`@defer`](/graphos/operations/defer/)
 - [subscriptions](/graphos/operations/subscriptions/)

@@ -305,7 +305,7 @@ async fn it_processes_a_valid_query_batch() {
                 hyper::Body::from(result)
             });
         let config = serde_json::json!({
-            "experimental_batching": {
+            "batching": {
                 "enabled": true,
                 "mode" : "batch_http_link"
             }
@@ -394,7 +394,7 @@ async fn it_will_not_process_a_poorly_formatted_query_batch() {
                 hyper::Body::from(result)
             });
         let config = serde_json::json!({
-            "experimental_batching": {
+            "batching": {
                 "enabled": true,
                 "mode" : "batch_http_link"
             }
@@ -448,7 +448,7 @@ async fn it_will_process_a_non_batched_defered_query() {
                 hyper::Body::from(bytes)
             });
         let config = serde_json::json!({
-            "experimental_batching": {
+            "batching": {
                 "enabled": true,
                 "mode" : "batch_http_link"
             }
@@ -508,7 +508,7 @@ async fn it_will_not_process_a_batched_deferred_query() {
                 hyper::Body::from(result)
             });
         let config = serde_json::json!({
-            "experimental_batching": {
+            "batching": {
                 "enabled": true,
                 "mode" : "batch_http_link"
             }
