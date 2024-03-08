@@ -552,16 +552,17 @@ pub(super) fn main_router<RF>(
 where
     RF: RouterFactory,
 {
+    let early_cancel = configuration.supergraph.early_cancel;
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
         get({
             move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
-                handle_graphql(service.create().boxed(), request)
+                handle_graphql(service.create().boxed(), early_cancel, request)
             }
         })
         .post({
             move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
-                handle_graphql(service.create().boxed(), request)
+                handle_graphql(service.create().boxed(), early_cancel, request)
             }
         }),
     );
@@ -572,13 +573,13 @@ where
             get({
                 move |Extension(service): Extension<RF>,
                       request: Request<DecompressionBody<Body>>| {
-                    handle_graphql(service.create().boxed(), request)
+                    handle_graphql(service.create().boxed(), early_cancel, request)
                 }
             })
             .post({
                 move |Extension(service): Extension<RF>,
                       request: Request<DecompressionBody<Body>>| {
-                    handle_graphql(service.create().boxed(), request)
+                    handle_graphql(service.create().boxed(), early_cancel, request)
                 }
             }),
         );
@@ -589,6 +590,7 @@ where
 
 async fn handle_graphql(
     service: router::BoxService,
+    early_cancel: bool,
     http_request: Request<DecompressionBody<Body>>,
 ) -> impl IntoResponse {
     let _guard = SessionCountGuard::start();
@@ -605,27 +607,32 @@ async fn handle_graphql(
         .get(ACCEPT_ENCODING)
         .cloned();
 
-    // to make sure we can record request handling when the client closes the connection prematurely,
-    // we execute the request in a separate task that will run until we get the first response, which
-    // means it went through the entire pipeline at least once (not looking at deferred responses or
-    // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
-    // the context a flag to indicate that the request is canceled and subgraph calls should not be made
-    let mut cancel_handler = CancelHandler::new(&context);
-    let task = service
-        .oneshot(request)
-        .with_current_subscriber()
-        .in_current_span();
-    let res = match tokio::task::spawn(task).await {
-        Ok(res) => res,
-        Err(_e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "router service call failed",
-            )
-                .into_response();
-        }
+    let res = if early_cancel {
+        service.oneshot(request).await
+    } else {
+        // to make sure we can record request handling when the client closes the connection prematurely,
+        // we execute the request in a separate task that will run until we get the first response, which
+        // means it went through the entire pipeline at least once (not looking at deferred responses or
+        // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
+        // the context a flag to indicate that the request is canceled and subgraph calls should not be made
+        let mut cancel_handler = CancelHandler::new(&context);
+        let task = service
+            .oneshot(request)
+            .with_current_subscriber()
+            .in_current_span();
+        let res = match tokio::task::spawn(task).await {
+            Ok(res) => res,
+            Err(_e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "router service call failed",
+                )
+                    .into_response();
+            }
+        };
+        cancel_handler.on_response();
+        res
     };
-    cancel_handler.on_response();
 
     let dur = context.busy_time();
     let processing_seconds = dur.as_secs_f64();
