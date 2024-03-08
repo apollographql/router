@@ -701,6 +701,7 @@ expression: "&schema"
               ],
               "properties": {
                 "all": {
+                  "description": "Common options for configuring subgraph batching",
                   "type": "object",
                   "required": [
                     "enabled"
@@ -725,6 +726,7 @@ expression: "&schema"
                 "subgraphs": {
                   "type": "object",
                   "additionalProperties": {
+                    "description": "Common options for configuring subgraph batching",
                     "type": "object",
                     "required": [
                       "enabled"
