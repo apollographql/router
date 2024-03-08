@@ -4,12 +4,12 @@
 
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph;
-use apollo_router::{MockedSubgraphs, TestHarness};
+use apollo_router::MockedSubgraphs;
+use apollo_router::TestHarness;
 use serde_json::json;
 use tower::ServiceExt;
 
 mod integration;
-
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled() {
@@ -20,9 +20,7 @@ async fn test_type_conditions_enabled() {
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .build()
-        .expect("expecting valid request")
-        .try_into()
-        .unwrap();
+        .expect("expecting valid request");
 
     let response = supergraph_service
         .oneshot(request)
@@ -44,9 +42,7 @@ async fn test_type_conditions_disabled() {
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .build()
-        .expect("expecting valid request")
-        .try_into()
-        .unwrap();
+        .expect("expecting valid request");
 
     let response = supergraph_service
         .oneshot(request)

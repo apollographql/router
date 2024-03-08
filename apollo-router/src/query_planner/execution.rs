@@ -188,7 +188,6 @@ impl PlanNode {
                             "otel.kind" = "INTERNAL"
                         ))
                         .await;
-
                     value = v;
                     errors = err;
                 }

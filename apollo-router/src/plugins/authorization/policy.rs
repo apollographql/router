@@ -478,8 +478,9 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
         let implementors_with_different_field_requirements =
             self.implementors_with_different_field_requirements(parent_type, node);
 
+        // TODO[igni]
         self.current_path
-            .push(PathElement::Key(field_name.as_str().into()));
+            .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
             self.current_path.push(PathElement::Flatten);
         }

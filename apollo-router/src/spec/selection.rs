@@ -207,7 +207,8 @@ impl Selection {
         match (path.get(0), self) {
             (None, _) => true,
             (
-                Some(PathElement::Key(key)),
+                // TODO[igni]
+                Some(PathElement::Key(key, type_condition)),
                 Selection::Field {
                     name,
                     alias,
@@ -268,7 +269,8 @@ impl Selection {
             (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten), _) => {
                 self.contains_error_path(&path[1..], fragments)
             }
-            (Some(PathElement::Key(_)), Selection::InlineFragment { selection_set, .. }) => {
+            // TODO: type conditions
+            (Some(PathElement::Key(_, _)), Selection::InlineFragment { selection_set, .. }) => {
                 selection_set
                     .iter()
                     .any(|selection| selection.contains_error_path(path, fragments))
