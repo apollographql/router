@@ -194,7 +194,6 @@ impl Variables {
             let representations = Value::Array(Vec::from_iter(values));
 
             variables.insert("representations", representations);
-
             Some(Variables {
                 variables,
                 inverted_paths,
@@ -458,7 +457,8 @@ impl FetchNode {
 
             (Value::Null, errors)
         } else {
-            let current_slice = if current_dir.last() == Some(&json_ext::PathElement::Flatten) {
+            // TODO[igni]
+            let current_slice = if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
                 &current_dir.0[..current_dir.0.len() - 1]
             } else {
                 &current_dir.0[..]

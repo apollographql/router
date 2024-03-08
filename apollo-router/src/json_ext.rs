@@ -24,6 +24,11 @@ pub(crate) type Object = Map<ByteString, Value>;
 
 const FRAGMENT_PREFIX: &str = "... on ";
 
+static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?:\[)(.+?)(?:,\s*|)(?:\])")
+        .expect("this regex to check for type conditions is valid")
+});
+
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
         match $object.remove($key) {
@@ -239,7 +244,8 @@ impl ValueExt for Value {
 
         for p in path.iter() {
             match p {
-                PathElement::Flatten => {
+                PathElement::Flatten(type_conditions) => {
+                    // TODO
                     return res_value;
                 }
 
@@ -295,7 +301,8 @@ impl ValueExt for Value {
 
         for p in path.iter() {
             match p {
-                PathElement::Flatten => {
+                PathElement::Flatten(type_condition) => {
+                    // TODO
                     if current_node.is_null() {
                         let a = Vec::new();
                         *current_node = Value::Array(a);
@@ -380,6 +387,7 @@ impl ValueExt for Value {
             &mut |_path, value| {
                 res = Ok(value);
             },
+            None,
         );
         res
     }
@@ -389,7 +397,7 @@ impl ValueExt for Value {
     where
         F: FnMut(&Path, &'a Value),
     {
-        iterate_path(schema, &mut Path::default(), &path.0, self, &mut f)
+        iterate_path(schema, &mut Path::default(), &path.0, self, &mut f, None)
     }
 
     #[track_caller]
@@ -397,7 +405,7 @@ impl ValueExt for Value {
     where
         F: FnMut(&Path, &'a mut Value),
     {
-        iterate_path_mut(schema, &mut Path::default(), &path.0, self, &mut f)
+        iterate_path_mut(schema, &mut Path::default(), &path.0, self, &mut f, None)
     }
 
     #[track_caller]
@@ -452,16 +460,18 @@ fn iterate_path<'a, F>(
     path: &'a [PathElement],
     data: &'a Value,
     f: &mut F,
+    type_conditions: Option<TypeConditions>,
 ) where
     F: FnMut(&Path, &'a Value),
 {
     match path.get(0) {
         None => f(parent, data),
-        Some(PathElement::Flatten) => {
+        Some(PathElement::Flatten(type_conditions)) => {
             if let Some(array) = data.as_array() {
                 for (i, value) in array.iter().enumerate() {
                     parent.push(PathElement::Index(i));
-                    iterate_path(schema, parent, &path[1..], value, f);
+                    // TODO[clone]
+                    iterate_path(schema, parent, &path[1..], value, f, type_conditions.clone());
                     parent.pop();
                 }
             }
@@ -470,24 +480,65 @@ fn iterate_path<'a, F>(
             if let Value::Array(a) = data {
                 if let Some(value) = a.get(*i) {
                     parent.push(PathElement::Index(*i));
-
-                    iterate_path(schema, parent, &path[1..], value, f);
+                    iterate_path(schema, parent, &path[1..], value, f, type_conditions);
                     parent.pop();
                 }
             }
         }
-        // TODO: type conditions
+        Some(PathElement::Key(k, Some(type_conditions))) if !type_conditions.is_empty() => {
+            if let Value::Object(o) = data {
+                if let Some(Value::String(type_name)) = o.get("__typename") {
+                    if type_conditions
+                        .iter()
+                        .any(|tc| tc.as_str() == type_name.as_str())
+                    {
+                        if let Some(value) = o.get(k.as_str()) {
+                            parent.push(PathElement::Key(
+                                k.to_string(),
+                                Some(type_conditions.clone()),
+                            ));
+                            iterate_path(
+                                schema,
+                                parent,
+                                &path[1..],
+                                value,
+                                f,
+                                // TODO[igni srsly]
+                                Some(type_conditions.clone()),
+                            );
+                            parent.pop();
+                        }
+                    }
+                }
+            } else if let Value::Array(array) = data {
+                for (i, value) in array.iter().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    iterate_path(
+                        schema,
+                        parent,
+                        path,
+                        value,
+                        f,                    
+                        // TODO[igni srsly]
+                        Some(type_conditions.clone()),
+                    );
+                    parent.pop();
+                }
+            }
+        }
         Some(PathElement::Key(k, type_conditions)) => {
             if let Value::Object(o) = data {
                 if let Some(value) = o.get(k.as_str()) {
                     parent.push(PathElement::Key(k.to_string(), type_conditions.clone()));
-                    iterate_path(schema, parent, &path[1..], value, f);
+                    // TODO[clone]
+                    iterate_path(schema, parent, &path[1..], value, f, type_conditions.clone());
                     parent.pop();
                 }
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter().enumerate() {
                     parent.push(PathElement::Index(i));
-                    iterate_path(schema, parent, path, value, f);
+                    // TODO[clone]
+                    iterate_path(schema, parent, path, value, f, type_conditions.clone());
                     parent.pop();
                 }
             }
@@ -499,11 +550,12 @@ fn iterate_path<'a, F>(
                 // are used to essentially create a type-based choice in a "selection" path, but
                 // `parent` is a direct path to a specific position in the value and do not need
                 // fragments.
-                iterate_path(schema, parent, &path[1..], data, f);
+                iterate_path(schema, parent, &path[1..], data, f, type_conditions);
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter().enumerate() {
                     parent.push(PathElement::Index(i));
-                    iterate_path(schema, parent, path, value, f);
+                    // TODO[igni]
+                    iterate_path(schema, parent, path, value, f, type_conditions.clone());
                     parent.pop();
                 }
             }
@@ -511,22 +563,26 @@ fn iterate_path<'a, F>(
     }
 }
 
+
+// TODO[igni]: type conditions
 fn iterate_path_mut<'a, F>(
     schema: &Schema,
     parent: &mut Path,
     path: &'a [PathElement],
     data: &'a mut Value,
     f: &mut F,
+    type_conditions: Option<TypeConditions>
 ) where
     F: FnMut(&Path, &'a mut Value),
 {
     match path.get(0) {
         None => f(parent, data),
-        Some(PathElement::Flatten) => {
+        Some(PathElement::Flatten(type_conditions)) => {
             if let Some(array) = data.as_array_mut() {
                 for (i, value) in array.iter_mut().enumerate() {
                     parent.push(PathElement::Index(i));
-                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    // TODO[clone]
+                    iterate_path_mut(schema, parent, &path[1..], value, f, type_conditions.clone());
                     parent.pop();
                 }
             }
@@ -535,7 +591,48 @@ fn iterate_path_mut<'a, F>(
             if let Value::Array(a) = data {
                 if let Some(value) = a.get_mut(*i) {
                     parent.push(PathElement::Index(*i));
-                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    iterate_path_mut(schema, parent, &path[1..], value, f, type_conditions);
+                    parent.pop();
+                }
+            }
+        }
+        Some(PathElement::Key(k, Some(type_conditions))) if !type_conditions.is_empty() => {
+            if let Value::Object(o) = data {
+                if let Some(Value::String(type_name)) = o.get("__typename") {
+                    if type_conditions
+                        .iter()
+                        .any(|tc| tc.as_str() == type_name.as_str())
+                    {
+                        if let Some(value) = o.get_mut(k.as_str()) {
+                            parent.push(PathElement::Key(
+                                k.to_string(),
+                                Some(type_conditions.clone()),
+                            ));
+                            iterate_path_mut(
+                                schema,
+                                parent,
+                                &path[1..],
+                                value,
+                                f,
+                                // TODO[igni srsly]
+                                Some(type_conditions.clone()),
+                            );
+                            parent.pop();
+                        }
+                    }
+                }
+            } else if let Value::Array(array) = data {
+                for (i, value) in array.iter_mut().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    iterate_path_mut(
+                        schema,
+                        parent,
+                        path,
+                        value,
+                        f,                    
+                        // TODO[igni srsly]
+                        Some(type_conditions.clone()),
+                    );
                     parent.pop();
                 }
             }
@@ -544,25 +641,32 @@ fn iterate_path_mut<'a, F>(
             if let Value::Object(o) = data {
                 if let Some(value) = o.get_mut(k.as_str()) {
                     parent.push(PathElement::Key(k.to_string(), type_conditions.clone()));
-                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    // TODO[clone]
+                    iterate_path_mut(schema, parent, &path[1..], value, f, type_conditions.clone());
                     parent.pop();
                 }
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter_mut().enumerate() {
                     parent.push(PathElement::Index(i));
-                    iterate_path_mut(schema, parent, path, value, f);
+                    // TODO[clone]
+                    iterate_path_mut(schema, parent, path, value, f, type_conditions.clone());
                     parent.pop();
                 }
             }
         }
-        // TODO: type conditions
         Some(PathElement::Fragment(name)) => {
             if data.is_object_of_type(schema, name) {
-                iterate_path_mut(schema, parent, &path[1..], data, f);
+                // Note that (not unlike `Flatten`) we do not include the fragment in the `parent`
+                // path, because we want that path to be a "pure" response path. Fragments in path
+                // are used to essentially create a type-based choice in a "selection" path, but
+                // `parent` is a direct path to a specific position in the value and do not need
+                // fragments.
+                iterate_path_mut(schema, parent, &path[1..], data, f, type_conditions);
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter_mut().enumerate() {
                     parent.push(PathElement::Index(i));
-                    iterate_path_mut(schema, parent, path, value, f);
+                    // TODO[igni]
+                    iterate_path_mut(schema, parent, path, value, f, type_conditions.clone());
                     parent.pop();
                 }
             }
@@ -572,6 +676,7 @@ fn iterate_path_mut<'a, F>(
 
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
+/// TODO: impl display for PathElement
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(untagged)]
 pub enum PathElement {
@@ -580,7 +685,7 @@ pub enum PathElement {
         deserialize_with = "deserialize_flatten",
         serialize_with = "serialize_flatten"
     )]
-    Flatten,
+    Flatten(Option<TypeConditions>),
 
     /// An index path element.
     Index(usize),
@@ -608,7 +713,7 @@ pub enum ResponsePathElement<'a> {
     Key(&'a str),
 }
 
-fn deserialize_flatten<'de, D>(deserializer: D) -> Result<(), D::Error>
+fn deserialize_flatten<'de, D>(deserializer: D) -> Result<Option<TypeConditions>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -618,18 +723,37 @@ where
 struct FlattenVisitor;
 
 impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
-    type Value = ();
+    type Value = Option<TypeConditions>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a string that is '@'")
+        write!(
+            formatter,
+            "a string that is '@', potentially preceded of followed by type conditions"
+        )
     }
 
     fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        if s == "@" {
-            Ok(())
+        let mut type_conditions = Vec::new();
+        let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
+            type_conditions.extend(
+                caps.extract::<1>()
+                    .1
+                    .map(|s| s.split(',').map(|s| s.to_string()))
+                    .into_iter()
+                    .flatten(),
+            );
+            ""
+        });
+
+        if path == "@" {
+            if type_conditions.is_empty() {
+                Ok(Some(type_conditions))
+            } else {
+                Ok(None)
+            }
         } else {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str(s),
@@ -639,11 +763,24 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     }
 }
 
-fn serialize_flatten<S>(serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_flatten<S>(
+    type_conditions: &Option<TypeConditions>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    serializer.serialize_str("@")
+    let tc_string = if let Some(c) = type_conditions {
+        if !c.is_empty() {
+            format!("[{}]", c.join(","))
+        } else {
+            "".to_string()
+        }
+    } else {
+        "".to_string()
+    };
+    let res = format!("@{}", tc_string);
+    serializer.serialize_str(res.as_str())
 }
 
 fn deserialize_fragment<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -699,21 +836,22 @@ impl<'de> serde::de::Visitor<'de> for KeyVisitor {
     where
         E: serde::de::Error,
     {
-        static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?:\[)(.+?)(?:,\s*|)(?:\])")
-                .expect("this regex to check for type conditions is valid")
-        });
-
         let mut type_conditions = Vec::new();
-        let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions.extend(caps.extract::<1>().1.map(|s| s.to_string()));
+        let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
+            type_conditions.extend(
+                caps.extract::<1>()
+                    .1
+                    .map(|s| s.split(',').map(|s| s.to_string()))
+                    .into_iter()
+                    .flatten(),
+            );
             ""
         });
 
         if type_conditions.is_empty() {
-            Ok((key.to_string(), None))
+            Ok((path.to_string(), None))
         } else {
-            Ok((key.to_string(), Some(type_conditions)))
+            Ok((path.to_string(), Some(type_conditions)))
         }
     }
 }
@@ -730,22 +868,43 @@ where
 }
 
 fn key_from_str(s: &str) -> Result<PathElement, String> {
-    static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?:\[)(.+?)(?:,\s*|)(?:\])")
-            .expect("this regex to check for type conditions is valid")
-    });
-
     let mut type_conditions = Vec::new();
     let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions.extend(caps.extract::<1>().1.map(|s| s.to_string()));
+        type_conditions.extend(
+            caps.extract::<1>()
+                .1
+                .map(|s| s.split(',').map(|s| s.to_string()))
+                .into_iter()
+                .flatten(),
+        );
         ""
     });
 
-    if type_conditions.is_empty() {
-        Ok(PathElement::Key(path.to_string(), None))
-    } else {
-        Ok(PathElement::Key(path.to_string(), Some(type_conditions)))
+    Ok(PathElement::Key(
+        path.to_string(),
+        type_conditions.is_empty().then_some(type_conditions),
+    ))
+}
+
+fn flatten_from_str(s: &str) -> Result<PathElement, String> {
+    let mut type_conditions = Vec::new();
+    let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
+        type_conditions.extend(
+            caps.extract::<1>()
+                .1
+                .map(|s| s.split(',').map(|s| s.to_string()))
+                .into_iter()
+                .flatten(),
+        );
+        ""
+    });
+
+    if path != "@" {
+        return Err("invalid flatten".to_string());
     }
+    Ok(PathElement::Flatten(
+        type_conditions.is_empty().then_some(type_conditions),
+    ))
 }
 
 /// A path into the result document.
@@ -763,8 +922,8 @@ impl Path {
                 .map(|s| {
                     if let Ok(index) = s.parse::<usize>() {
                         PathElement::Index(index)
-                    } else if s == "@" {
-                        PathElement::Flatten
+                    } else if s.contains('@') {
+                        flatten_from_str(s).unwrap()
                     } else {
                         // TODO: type conditions
                         s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
@@ -867,8 +1026,8 @@ where
                 .map(|s| {
                     if let Ok(index) = s.parse::<usize>() {
                         PathElement::Index(index)
-                    } else if s == "@" {
-                        PathElement::Flatten
+                    } else if s.contains('@') {
+                        flatten_from_str(s).unwrap()
                     } else {
                         s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
                             || key_from_str(s).unwrap(),
@@ -895,7 +1054,14 @@ impl fmt::Display for Path {
                     };
                     write!(f, "{key}")?;
                 }
-                PathElement::Flatten => write!(f, "@")?,
+                PathElement::Flatten(type_conditions) => {
+                    write!(f, "@")?;
+                    if let Some(c) = type_conditions {
+                        if !c.is_empty() {
+                            write!(f, "[{}]", c.join(","))?;
+                        }
+                    };
+                }
                 PathElement::Fragment(name) => {
                     write!(f, "{FRAGMENT_PREFIX}{name}")?;
                 }
@@ -1190,10 +1356,10 @@ mod tests {
         assert_eq!(
             path.0,
             vec![
-                PathElement::Key("k".to_string()),
-                PathElement::Fragment("T".to_string(), None),
-                PathElement::Flatten,
-                PathElement::Key("arr".to_string()),
+                PathElement::Key("k".to_string(), None),
+                PathElement::Fragment("T".to_string()),
+                PathElement::Flatten(None),
+                PathElement::Key("arr".to_string(), None),
                 PathElement::Index(3),
             ]
         );

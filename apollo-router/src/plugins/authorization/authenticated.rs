@@ -361,7 +361,8 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         self.current_path
             .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
-            self.current_path.push(PathElement::Flatten);
+            // TODO[igni]
+            self.current_path.push(PathElement::Flatten(None));
         }
 
         let implementors_with_different_requirements =

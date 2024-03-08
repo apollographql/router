@@ -9,10 +9,10 @@ expression: response
         "id": "ff70d1f5-d1ac-46dd-8ed1-5f2d81ff2db0",
         "sections": [
           {
-            "artwork": null
+            "artwork": "Hello World"
           },
           {
-            "artwork": null
+            "artwork": "Hello World"
           }
         ]
       },

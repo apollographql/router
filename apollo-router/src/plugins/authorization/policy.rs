@@ -482,7 +482,7 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
         self.current_path
             .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
-            self.current_path.push(PathElement::Flatten);
+            self.current_path.push(PathElement::Flatten(None));
         }
 
         let res = if is_authorized
