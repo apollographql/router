@@ -4,6 +4,48 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.41.0] - 2024-03-08
+
+## 🚀 Features
+
+### Entity caching: Add tracing spans around Redis interactions ([PR #4667](https://github.com/apollographql/router/pull/4667))
+
+This adds `cache_lookup` and `cache_store` spans to traces which show Redis calls related to our recently announced [entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching/) feature.  This also changes the behavior slightly so that storing in Redis does not stop the execution of the rest of the query.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4667
+
+### Use Gzip compression when downloading Persisted Query manifests ([PR #4622](https://github.com/apollographql/router/pull/4622))
+
+Router will now request Gzip compression when downloading Persisted Query manifests for improved network efficiency.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4622
+
+### Redis: add a fail open option ([Issue #4334](https://github.com/apollographql/router/issues/4334))
+
+This option configures the Router's behavior in case it cannot connect to Redis:
+- By default, the router will start and all requests will be handled in a degraded state.
+- Alternatively, this option can be configured to prevent the router from starting if it can't connect to Redis.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4534
+
+## 🐛 Fixes
+
+### Default header now correctly set when `experimental_response_trace_id` is enabled ([Issue #4699](https://github.com/apollographql/router/issues/4699))
+
+When configuring the `experimental_response_trace_id` without an explicit header it now correctly takes the default one `apollo-trace-id`.
+
+Example of configuration:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4702
+
 # [1.40.2] - 2024-03-06
 
 ## 🔒 Security
