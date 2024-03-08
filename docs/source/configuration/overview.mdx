@@ -3,6 +3,8 @@ title: Configuring the Apollo Router
 description: Command arguments and YAML config
 ---
 
+import RedisTLS from '../../shared/redis-tls.mdx'
+
 Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
 
 ## Environment variables
@@ -711,6 +713,10 @@ tls:
           certificate_chain: ${file./path/to/certificate_chain.pem}
           key: ${file./path/to/key.pem}
 ```
+
+#### Redis TLS configuration
+
+<RedisTLS />
 
 ### Request limits
 
