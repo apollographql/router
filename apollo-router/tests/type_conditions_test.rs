@@ -2,6 +2,7 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use apollo_compiler::execution::JsonMap;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph;
 use apollo_router::MockedSubgraphs;
@@ -17,8 +18,12 @@ async fn test_type_conditions_enabled() {
         "experimental_type_conditioned_fetching": true
     }});
     let supergraph_service = harness.build_supergraph().await.unwrap();
+    let mut variables = JsonMap::new();
+    variables.insert("movieResultParam", "movieResultEnabled".into());
+    variables.insert("articleResultParam", "articleResultEnabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
+        .variables(variables)
         .build()
         .expect("expecting valid request");
 
@@ -39,6 +44,9 @@ async fn test_type_conditions_disabled() {
         "experimental_type_conditioned_fetching": false
     }});
     let supergraph_service = harness.build_supergraph().await.unwrap();
+    let mut variables = JsonMap::new();
+    variables.insert("movieResultParam", "movieResultDisabled".into());
+    variables.insert("articleResultParam", "articleResultDisabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .build()
@@ -61,33 +69,32 @@ fn setup(configuration: serde_json::Value) -> TestHarness<'static> {
         "operationName":"Search__searchSubgraph__0"
     }},
 json!{{
-        "data": {
+        "data":{
             "search":[
                 {
                     "__typename":"ArticleResult",
-                    "id":"ff70d1f5-d1ac-46dd-8ed1-5f2d81ff2db0",
+                    "id":"a7052397-b605-414a-aba4-408d51c8eef0",
                     "sections":[
                         {
                             "__typename":"EntityCollectionSection",
-                            "id":"a7487f33-bd37-48a6-a843-c0cda86f5049"
+                            "id":"d0182b8a-a671-4244-ba1c-905274b0d198"
                         },
                         {
-                            "__typename":"EntityCollectionSection",
-                            "id":"cdb43f1d-df2d-4293-a328-8d38a0cdd742"
+                            "__typename":"EntityCollectionSection","id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
                         }
                     ]
                 },
                 {
                     "__typename":"ArticleResult",
-                    "id":"5092bbea-8bc3-4c4f-a9eb-003604ed9add",
+                    "id":"3a7b08c9-d8c0-4c55-b55d-596a272392e0",
                     "sections":[
                         {
-                            "__typename":"GallerySection",
-                            "id":"798e75ae-9378-41de-a014-af9f9a5e99eb"
+                            "__typename":"EntityCollectionSection",
+                            "id":"f44f584e-5d3d-4466-96f5-9afc3f5d5a54"
                         },
                         {
                             "__typename":"GallerySection",
-                            "id":"f756501a-7377-4081-861b-0097cbfb7f41"
+                            "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
                         }
                     ]
                 }
@@ -96,38 +103,71 @@ json!{{
     }}).build();
 
     let artwork_service = MockSubgraph::builder().with_json(json!{{
-        "query":"query Search__artworkSubgraph__1($representations:[_Any!]!){_entities(representations:$representations){...on EntityCollectionSection{artwork title}...on GallerySection{artwork}}}","operationName":"Search__artworkSubgraph__1",
+        "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
+        "operationName":"Search__artworkSubgraph__1",
         "variables":{
+            "movieResultParam":"movieResultEnabled",
             "representations":[
                 {
                     "__typename":"EntityCollectionSection",
-                    "id":"a7487f33-bd37-48a6-a843-c0cda86f5049"
+                    "id":"d0182b8a-a671-4244-ba1c-905274b0d198"
                 },
                 {
                     "__typename":"EntityCollectionSection",
-                    "id":"cdb43f1d-df2d-4293-a328-8d38a0cdd742"
+                    "id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"f44f584e-5d3d-4466-96f5-9afc3f5d5a54"
                 },
                 {
                     "__typename":"GallerySection",
-                    "id":"798e75ae-9378-41de-a014-af9f9a5e99eb"
-                },
-                {
-                    "__typename":"GallerySection",
-                    "id":"f756501a-7377-4081-861b-0097cbfb7f41"
+                    "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
                 }
             ]
         }
     }},
 json!{{
-        "data":{
+    "data":{
+        "_entities":[
+            {"artwork":"movieResultEnabled artwork"},
+            {"artwork":"movieResultEnabled artwork"}
+        ]
+    }
+    }})
+    // Disabled
+    .with_json(json!{{
+            "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
+            "operationName":"Search__artworkSubgraph__1",
+            "variables":{
+                "representations":[
+                    {
+                        "__typename":"EntityCollectionSection",
+                        "id":"d0182b8a-a671-4244-ba1c-905274b0d198"
+                    },
+                    {
+                        "__typename":"EntityCollectionSection",
+                        "id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
+                    },
+                    {
+                        "__typename":"EntityCollectionSection",
+                        "id":"f44f584e-5d3d-4466-96f5-9afc3f5d5a54"
+                    },
+                    {
+                        "__typename":"GallerySection",
+                        "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
+                    }
+                ]
+            }
+        }},
+    json!{
+        {"data":{
             "_entities":[
                 {
-                    "artwork":"Hello World",
-                    "title":"Hello World"
+                    "artwork":"Hello World"
                 },
                 {
-                    "artwork":"Hello World",
-                    "title":"Hello World"
+                    "artwork":"Hello World"
                 }
             ]
         }
@@ -146,18 +186,18 @@ json!{{
         .extra_plugin(mocks)
 }
 
-static QUERY: &str = "
-query Search {
+static QUERY: &str = r#"
+query Search($movieResultParam: String, $articleResultParam: String) {
     search {
       ... on MovieResult {
         sections {
           ... on EntityCollectionSection {
-            artwork
             id
             title
+            artwork(params: $movieResultParam)
           }
           ... on GallerySection {
-            artwork
+            artwork(params: $movieResultParam)
             id
           }
         }
@@ -167,12 +207,12 @@ query Search {
         id
         sections {
           ... on GallerySection {
-            artwork
+            artwork(params: $articleResultParam)
           }
           ... on EntityCollectionSection {
-            artwork
+            artwork(params: $articleResultParam)
           }
         }
       }
     }
-}";
+}"#;

@@ -128,6 +128,8 @@ impl Service<SubgraphRequest> for MockSubgraph {
         }
         let body = req.subgraph_request.body_mut();
 
+        dbg!(&body);
+
         if let Some(sub_stream) = &mut req.subscription_stream {
             sub_stream
                 .try_send(Box::pin(

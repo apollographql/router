@@ -6,7 +6,7 @@ expression: response
   "data": {
     "search": [
       {
-        "id": "ff70d1f5-d1ac-46dd-8ed1-5f2d81ff2db0",
+        "id": "a7052397-b605-414a-aba4-408d51c8eef0",
         "sections": [
           {
             "artwork": "Hello World"
@@ -17,7 +17,7 @@ expression: response
         ]
       },
       {
-        "id": "5092bbea-8bc3-4c4f-a9eb-003604ed9add",
+        "id": "3a7b08c9-d8c0-4c55-b55d-596a272392e0",
         "sections": [
           {
             "artwork": null
