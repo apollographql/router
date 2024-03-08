@@ -266,6 +266,15 @@ impl RouterService {
         let (mut parts, mut body) = response.into_parts();
         process_vary_header(&mut parts.headers);
 
+        if context
+            .extensions()
+            .lock()
+            .get::<CanceledRequest>()
+            .is_some()
+        {
+            parts.status = StatusCode::from_u16(499).expect("499 is not a standard status code but common enough");
+        }
+
         match body.next().await {
             None => {
                 tracing::error!("router service is not available to process request",);
