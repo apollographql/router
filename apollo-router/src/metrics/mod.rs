@@ -231,11 +231,9 @@ pub(crate) mod test_utils {
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
                 {
                     if matches!(ty, MetricType::Histogram) {
-                        if let Some(value) = value.to_u64() {
-                            return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.attributes == *attributes && datapoint.count == value
-                            });
-                        }
+                        return histogram.data_points.iter().any(|datapoint| {
+                            datapoint.attributes == *attributes && datapoint.sum == value
+                        });
                     }
                 }
             }
@@ -905,7 +903,7 @@ macro_rules! assert_gauge {
 }
 
 #[cfg(test)]
-macro_rules! assert_histogram {
+macro_rules! assert_histogram_sum {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
@@ -932,7 +930,7 @@ macro_rules! assert_histogram {
     };
 
     ($name:literal, $value: expr) => {
-        let result = crate::metrics::collect_metrics().assert($name, $value, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &[]);
         assert_metric!(result, $name, None, Some($value.into()), &[]);
     };
 }
@@ -1143,7 +1141,7 @@ mod test {
     async fn test_u64_histogram() {
         async {
             u64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1153,7 +1151,7 @@ mod test {
     async fn test_i64_histogram() {
         async {
             i64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1163,7 +1161,7 @@ mod test {
     async fn test_f64_histogram() {
         async {
             f64_histogram!("test", "test description", 1.0, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1185,7 +1183,7 @@ mod test {
     async fn test_type_counter() {
         async {
             f64_counter!("test", "test description", 1.0, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1196,7 +1194,7 @@ mod test {
     async fn test_type_up_down_counter() {
         async {
             f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1211,7 +1209,7 @@ mod test {
                 .u64_observable_gauge("test")
                 .with_callback(|m| m.observe(5, &[]))
                 .init();
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;

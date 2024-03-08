@@ -647,6 +647,7 @@ impl Selectors for HttpCommonAttributes {
                 ));
             }
         }
+
         if let Some(true) = &self.http_response_status_code {
             attrs.push_back(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
@@ -848,7 +849,7 @@ impl HttpServerAttributes {
             .next()
     }
 
-    fn forwarded_host(request: &Request) -> Option<Uri> {
+    pub(crate) fn forwarded_host(request: &Request) -> Option<Uri> {
         request
             .router_request
             .headers()

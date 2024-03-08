@@ -82,6 +82,11 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    /// The request method.
+    RequestMethod {
+        /// The request method enabled or not
+        request_method: bool,
+    },
     /// A header from the response
     ResponseHeader {
         /// The name of the request header.
@@ -446,6 +451,9 @@ impl Selector for RouterSelector {
 
     fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
         match self {
+            RouterSelector::RequestMethod { request_method } if *request_method => {
+                Some(request.router_request.method().to_string().into())
+            }
             RouterSelector::RequestHeader {
                 request_header,
                 default,

@@ -56,7 +56,6 @@ impl Default for AggregateMeterProvider {
             inner: Arc::new(Mutex::new(Inner::default())),
         };
 
-        dbg!("default aggregate meter provider");
         // If the regular global meter provider has been set then the aggregate meter provider will use it. Otherwise it'll default to a no-op.
         // For this to work the global meter provider must be set before the aggregate meter provider is created.
         // This functionality is not guaranteed to stay like this, so use at your own risk.

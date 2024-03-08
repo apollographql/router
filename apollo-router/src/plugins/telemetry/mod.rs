@@ -61,8 +61,8 @@ use self::config::Sampler;
 use self::config::SamplerOption;
 use self::config::TraceIdFormat;
 use self::config_new::instruments::Instrumented;
-use self::config_new::instruments::RouterCustomInstruments;
-use self::config_new::instruments::SubgraphCustomInstruments;
+use self::config_new::instruments::RouterInstruments;
+use self::config_new::instruments::SubgraphInstruments;
 use self::config_new::instruments::SupergraphCustomInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
@@ -343,11 +343,6 @@ impl Plugin for Telemetry {
                         .attributes
                         .on_request(request);
 
-                    config_request
-                        .instrumentation
-                        .instruments
-                        .router
-                        .on_request(request);
                     custom_attributes.extend([
                         KeyValue::new(CLIENT_NAME_KEY, client_name.to_string()),
                         KeyValue::new(CLIENT_VERSION_KEY, client_version.to_string()),
@@ -360,9 +355,10 @@ impl Plugin for Telemetry {
                         ),
                     ]);
 
-                    let custom_instruments: RouterCustomInstruments = RouterCustomInstruments::new(
-                        &config_request.instrumentation.instruments.router.custom,
-                    );
+                    let custom_instruments: RouterInstruments = config_request
+                        .instrumentation
+                        .instruments
+                        .new_router_instruments();
                     custom_instruments.on_request(request);
 
                     (
@@ -373,7 +369,7 @@ impl Plugin for Telemetry {
                 },
                 move |(custom_attributes, custom_instruments, ctx): (
                     LinkedList<KeyValue>,
-                    RouterCustomInstruments,
+                    RouterInstruments,
                     Context,
                 ),
                       fut| {
@@ -402,11 +398,6 @@ impl Plugin for Telemetry {
                                     .attributes
                                     .on_response(response),
                             );
-                            config
-                                .instrumentation
-                                .instruments
-                                .router
-                                .on_response(response);
                             custom_instruments.on_response(response);
 
                             if expose_trace_id.enabled {
@@ -440,11 +431,6 @@ impl Plugin for Telemetry {
                             span.set_dyn_attributes(
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
-                            config
-                                .instrumentation
-                                .instruments
-                                .router
-                                .on_error(err, &ctx);
                             custom_instruments.on_error(err, &ctx);
                         }
 
@@ -621,14 +607,10 @@ impl Plugin for Telemetry {
                         .subgraph
                         .attributes
                         .on_request(sub_request);
-                    config
+                    let custom_instruments = config
                         .instrumentation
                         .instruments
-                        .subgraph
-                        .on_request(sub_request);
-                    let custom_instruments = SubgraphCustomInstruments::new(
-                        &config.instrumentation.instruments.subgraph.custom,
-                    );
+                        .new_subgraph_instruments();
                     custom_instruments.on_request(sub_request);
 
                     (
@@ -639,7 +621,7 @@ impl Plugin for Telemetry {
                 },
                 move |(context, custom_instruments, custom_attributes): (
                     Context,
-                    SubgraphCustomInstruments,
+                    SubgraphInstruments,
                     LinkedList<KeyValue>,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
@@ -667,7 +649,6 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
-                                conf.instrumentation.instruments.subgraph.on_response(resp);
                                 custom_instruments.on_response(resp);
                             }
                             Err(err) => {
@@ -676,10 +657,6 @@ impl Plugin for Telemetry {
                                 span.set_dyn_attributes(
                                     conf.instrumentation.spans.subgraph.attributes.on_error(err),
                                 );
-                                conf.instrumentation
-                                    .instruments
-                                    .subgraph
-                                    .on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                             }
                         }
@@ -1870,6 +1847,7 @@ mod tests {
 
     use axum::headers::HeaderName;
     use dashmap::DashMap;
+    use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
@@ -1893,15 +1871,19 @@ mod tests {
     use super::apollo::ForwardHeaders;
     use super::Telemetry;
     use crate::error::FetchError;
+    use crate::graphql;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::plugins::telemetry::handle_error_internal;
+    use crate::services::RouterRequest;
+    use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
@@ -2023,7 +2005,7 @@ mod tests {
                 "status" = "200",
                 "x-custom" = "coming_from_header"
             );
-            assert_histogram!(
+            assert_histogram_sum!(
                 "apollo_router_http_request_duration_seconds",
                 1,
                 "another_test" = "my_default_value",
@@ -2078,6 +2060,285 @@ mod tests {
                 "myname" = "label_value",
                 "renamed_value" = "my_value_set",
                 "status" = "400"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_custom_router_instruments() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
+                    .await;
+
+            let mut mock_bad_request_service = MockRouterService::new();
+            mock_bad_request_service
+                .expect_call()
+                .times(2)
+                .returning(move |req: RouterRequest| {
+                    Ok(RouterResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .build()
+                        .unwrap())
+                });
+            let mut bad_request_router_service =
+                plugin.router_service(BoxService::new(mock_bad_request_service));
+            let router_req = RouterRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql");
+            let _router_response = bad_request_router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            assert_counter!("acme.graphql.custom_req", 1.0);
+            assert_histogram_sum!(
+                "http.server.request.body.size",
+                55.0,
+                "http.response.status_code" = 400,
+                "acme.my_attribute" = "application/json"
+            );
+            assert_histogram_sum!("acme.request.length", 55.0);
+
+            let router_req = RouterRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("custom-length", "5")
+                .header("content-length", "5")
+                .header("content-type", "application/graphql");
+            let _router_response = bad_request_router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+            assert_counter!("acme.graphql.custom_req", 1.0);
+            assert_histogram_sum!("acme.request.length", 60.0);
+            assert_histogram_sum!(
+                "http.server.request.body.size",
+                60.0,
+                "http.response.status_code" = 400,
+                "acme.my_attribute" = "application/json"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_custom_supergraph_instruments() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
+                    .await;
+
+            let mut mock_bad_request_service = MockSupergraphService::new();
+            mock_bad_request_service.expect_call().times(3).returning(
+                move |req: SupergraphRequest| {
+                    Ok(SupergraphResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .build()
+                        .unwrap())
+                },
+            );
+            let mut bad_request_supergraph_service =
+                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+            let supergraph_req = SupergraphRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .query("Query test { me {name} }")
+                .operation_name("test".to_string());
+            let _router_response = bad_request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(supergraph_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "acme.graphql.requests",
+                1.0,
+                "acme.my_attribute" = "application/json",
+                "graphql_query" = "Query test { me {name} }",
+                "graphql.document" = "Query test { me {name} }"
+            );
+
+            let supergraph_req = SupergraphRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("custom-length", "5")
+                .header("content-length", "5")
+                .header("content-type", "application/graphql")
+                .query("Query test { me {name} }")
+                .operation_name("test".to_string());
+
+            let _router_response = bad_request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(supergraph_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+            assert_counter!(
+                "acme.graphql.requests",
+                2.0,
+                "acme.my_attribute" = "application/json",
+                "graphql_query" = "Query test { me {name} }",
+                "graphql.document" = "Query test { me {name} }"
+            );
+
+            let supergraph_req = SupergraphRequest::fake_builder()
+                .header("custom-length", "5")
+                .header("content-length", "5")
+                .header("content-type", "application/graphql")
+                .query("Query test { me {name} }")
+                .operation_name("test".to_string());
+
+            let _router_response = bad_request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(supergraph_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+            assert_counter!(
+                "acme.graphql.requests",
+                2.0,
+                "acme.my_attribute" = "application/json",
+                "graphql_query" = "Query test { me {name} }",
+                "graphql.document" = "Query test { me {name} }"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_custom_subgraph_instruments() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
+                    .await;
+
+            let mut mock_bad_request_service = MockSubgraphService::new();
+            mock_bad_request_service.expect_call().times(2).returning(
+                move |req: SubgraphRequest| {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
+                    let errors = vec![
+                        graphql::Error::builder()
+                            .message("nope".to_string())
+                            .extension_code("NOPE")
+                            .build(),
+                        graphql::Error::builder()
+                            .message("nok".to_string())
+                            .extension_code("NOK")
+                            .build(),
+                    ];
+                    Ok(SubgraphResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .headers(headers)
+                        .errors(errors)
+                        .build())
+                },
+            );
+            let mut bad_request_subgraph_service =
+                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+            let sub_req = http::Request::builder()
+                .method("POST")
+                .uri("http://test")
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .body(graphql::Request::builder().query("{ me {name} }").build())
+                .unwrap();
+            let subgraph_req = SubgraphRequest::fake_builder()
+                .subgraph_request(sub_req)
+                .subgraph_name("test".to_string())
+                .build();
+
+            let _router_response = bad_request_subgraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(subgraph_req)
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "acme.subgraph.error_reqs",
+                1.0,
+                graphql_error = opentelemetry::Value::Array(opentelemetry::Array::String(vec![
+                    "nope".into(),
+                    "nok".into()
+                ])),
+                subgraph.name = "test"
+            );
+            let sub_req = http::Request::builder()
+                .method("POST")
+                .uri("http://test")
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .body(graphql::Request::builder().query("{ me {name} }").build())
+                .unwrap();
+            let subgraph_req = SubgraphRequest::fake_builder()
+                .subgraph_request(sub_req)
+                .subgraph_name("test".to_string())
+                .build();
+
+            let _router_response = bad_request_subgraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(subgraph_req)
+                .await
+                .unwrap();
+            assert_counter!(
+                "acme.subgraph.error_reqs",
+                2.0,
+                graphql_error = opentelemetry::Value::Array(opentelemetry::Array::String(vec![
+                    "nope".into(),
+                    "nok".into()
+                ])),
+                subgraph.name = "test"
             );
         }
         .with_metrics()
@@ -2259,7 +2520,7 @@ mod tests {
                 "renamed_value" = "my_value_set",
                 "status" = "400"
             );
-            assert_histogram!(
+            assert_histogram_sum!(
                 "apollo_router_http_request_duration_seconds",
                 1,
                 "another_test" = "my_default_value",
