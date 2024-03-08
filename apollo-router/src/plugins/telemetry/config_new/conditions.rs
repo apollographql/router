@@ -152,7 +152,6 @@ where
     fn on_request(&self, request: &T::Request) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
-            // TODO return Some(null) ?!
             SelectorOrValue::Selector(selector) => selector.on_request(request),
         }
     }
@@ -160,7 +159,6 @@ where
     fn on_response(&self, response: &T::Response) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
-            // TODO return Some(null) ?!
             SelectorOrValue::Selector(selector) => selector.on_response(response),
         }
     }

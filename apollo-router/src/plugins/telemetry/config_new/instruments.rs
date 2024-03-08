@@ -3,11 +3,9 @@ use std::collections::LinkedList;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use http::header::CONTENT_LENGTH;
 use opentelemetry_api::metrics::Counter;
 use opentelemetry_api::metrics::Histogram;
 use opentelemetry_api::metrics::MeterProvider;
-use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::metrics::UpDownCounter;
 use opentelemetry_api::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
@@ -38,6 +36,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
 
+const METER_NAME: &str = "apollo/router";
+
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -58,7 +58,7 @@ pub(crate) struct InstrumentsConfig {
 
 impl InstrumentsConfig {
     pub(crate) fn new_router_instruments(&self) -> RouterInstruments {
-        let meter = metrics::meter_provider().meter("apollo/router");
+        let meter = metrics::meter_provider().meter(METER_NAME);
         let http_server_request_duration = self
             .router
             .attributes
@@ -83,46 +83,61 @@ impl InstrumentsConfig {
             .attributes
             .http_server_request_body_size
             .is_enabled()
-            .then(|| CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Custom(None),
-                    histogram: Some(meter.f64_histogram("http.server.request.body.size").init()),
-                    attributes: Vec::new(),
-                    selector: Some(Arc::new(RouterSelector::RequestHeader {
-                        request_header: "content-length".to_string(),
-                        redact: None,
-                        default: None,
-                    })),
-                    selectors: match &self.router.attributes.http_server_request_body_size {
-                        DefaultedStandardInstrument::Bool(_) => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            Some(attributes.clone())
-                        }
-                    },
-                }),
+            .then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.router.attributes.http_server_request_body_size {
+                    DefaultedStandardInstrument::Bool(_) => None,
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomHistogram {
+                    inner: Mutex::new(CustomHistogramInner {
+                        increment: Increment::Custom(None),
+                        histogram: Some(
+                            meter.f64_histogram("http.server.request.body.size").init(),
+                        ),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(RouterSelector::RequestHeader {
+                            request_header: "content-length".to_string(),
+                            redact: None,
+                            default: None,
+                        })),
+                        selectors,
+                    }),
+                }
             });
         let http_server_response_body_size = self
             .router
             .attributes
             .http_server_response_body_size
             .is_enabled()
-            .then(|| CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Custom(None),
-                    histogram: Some(meter.f64_histogram("http.server.response.body.size").init()),
-                    attributes: Vec::new(),
-                    selector: Some(Arc::new(RouterSelector::ResponseHeader {
-                        response_header: "content-length".to_string(),
-                        redact: None,
-                        default: None,
-                    })),
-                    selectors: match &self.router.attributes.http_server_response_body_size {
-                        DefaultedStandardInstrument::Bool(_) => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            Some(attributes.clone())
-                        }
-                    },
-                }),
+            .then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.router.attributes.http_server_response_body_size {
+                    DefaultedStandardInstrument::Bool(_) => None,
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+
+                CustomHistogram {
+                    inner: Mutex::new(CustomHistogramInner {
+                        increment: Increment::Custom(None),
+                        histogram: Some(
+                            meter.f64_histogram("http.server.response.body.size").init(),
+                        ),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(RouterSelector::ResponseHeader {
+                            response_header: "content-length".to_string(),
+                            redact: None,
+                            default: None,
+                        })),
+                        selectors,
+                    }),
+                }
             });
         let http_server_active_requests = self
             .router
@@ -155,48 +170,60 @@ impl InstrumentsConfig {
     }
 
     pub(crate) fn new_subgraph_instruments(&self) -> SubgraphInstruments {
-        let meter = metrics::meter_provider().meter("apollo/router");
+        let meter = metrics::meter_provider().meter(METER_NAME);
         let http_client_request_duration = self
             .subgraph
             .attributes
             .http_client_request_duration
             .is_enabled()
-            .then(|| CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Duration(Instant::now()),
-                    histogram: Some(meter.f64_histogram("http.client.request.duration").init()),
-                    attributes: Vec::new(),
-                    selector: None,
-                    selectors: match &self.subgraph.attributes.http_client_request_duration {
-                        DefaultedStandardInstrument::Bool(_) => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            Some(attributes.clone())
-                        }
-                    },
-                }),
+            .then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.subgraph.attributes.http_client_request_duration {
+                    DefaultedStandardInstrument::Bool(_) => None,
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomHistogram {
+                    inner: Mutex::new(CustomHistogramInner {
+                        increment: Increment::Duration(Instant::now()),
+                        histogram: Some(meter.f64_histogram("http.client.request.duration").init()),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: None,
+                        selectors,
+                    }),
+                }
             });
         let http_client_request_body_size = self
             .subgraph
             .attributes
             .http_client_request_body_size
             .is_enabled()
-            .then(|| CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Custom(None),
-                    histogram: Some(meter.f64_histogram("http.client.request.body.size").init()),
-                    attributes: Vec::new(),
-                    selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
-                        subgraph_request_header: "content-length".to_string(),
-                        redact: None,
-                        default: None,
-                    })),
-                    selectors: match &self.subgraph.attributes.http_client_request_body_size {
-                        DefaultedStandardInstrument::Bool(_) => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            Some(attributes.clone())
-                        }
-                    },
-                }),
+            .then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.subgraph.attributes.http_client_request_body_size {
+                    DefaultedStandardInstrument::Bool(_) => None,
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomHistogram {
+                    inner: Mutex::new(CustomHistogramInner {
+                        increment: Increment::Custom(None),
+                        histogram: Some(
+                            meter.f64_histogram("http.client.request.body.size").init(),
+                        ),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
+                            subgraph_request_header: "content-length".to_string(),
+                            redact: None,
+                            default: None,
+                        })),
+                        selectors,
+                    }),
+                }
             });
         let http_client_response_body_size = self
             .subgraph
@@ -431,133 +458,6 @@ pub(crate) trait Instrumented {
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
-struct SubgraphInstant(Instant);
-
-impl Instrumented for SubgraphInstrumentsConfig {
-    type Request = subgraph::Request;
-    type Response = subgraph::Response;
-
-    fn on_request(&self, request: &Self::Request) {
-        let meter = metrics::meter_provider().meter("apollo/router");
-        request
-            .context
-            .extensions()
-            .lock()
-            .insert(SubgraphInstant(Instant::now()));
-        if self.http_client_request_body_size.is_enabled() {
-            let body_size = request
-                .subgraph_request
-                .headers()
-                .get(&CONTENT_LENGTH)
-                .and_then(|val| val.to_str().ok()?.parse::<u64>().ok());
-            if let Some(body_size) = body_size {
-                match meter
-                    .u64_histogram("http.client.request.body.size")
-                    .try_init()
-                {
-                    Ok(histogram) => {
-                        let attrs = self
-                            .http_client_request_body_size
-                            .on_request(request)
-                            .into_iter()
-                            .collect::<Vec<_>>();
-                        histogram.record(body_size, &attrs);
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            "cannot create gauge for 'http.client.request.body.size': {err:?}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    fn on_response(&self, response: &Self::Response) {
-        let meter = metrics::meter_provider().meter("apollo/router");
-        if self.http_client_request_duration.is_enabled() {
-            let attrs = self
-                .http_client_request_duration
-                .on_response(response)
-                .into_iter()
-                .collect::<Vec<_>>();
-            let request_duration = response
-                .context
-                .extensions()
-                .lock()
-                .get::<SubgraphInstant>()
-                .map(|i| i.0.elapsed());
-            if let Some(request_duration) = request_duration {
-                match meter
-                    .f64_histogram("http.client.request.duration")
-                    .with_unit(Unit::new("s"))
-                    .try_init()
-                {
-                    Ok(histogram) => histogram.record(request_duration.as_secs_f64(), &attrs),
-                    Err(err) => {
-                        tracing::error!(
-                            "cannot create histogram for 'http.client.request.duration': {err:?}"
-                        );
-                    }
-                }
-            }
-        }
-
-        if self.http_client_response_body_size.is_enabled() {
-            let body_size = response
-                .response
-                .headers()
-                .get(&CONTENT_LENGTH)
-                .and_then(|val| val.to_str().ok()?.parse::<u64>().ok());
-            if let Some(body_size) = body_size {
-                match meter
-                    .u64_histogram("http.client.response.body.size")
-                    .try_init()
-                {
-                    Ok(histogram) => {
-                        let attrs = self
-                            .http_client_response_body_size
-                            .on_response(response)
-                            .into_iter()
-                            .collect::<Vec<_>>();
-                        histogram.record(body_size, &attrs);
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            "cannot create histogram for 'http.client.response.body.size': {err:?}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        let meter = metrics::meter_provider().meter("apollo/router");
-        if self.http_client_request_duration.is_enabled() {
-            let attrs = self
-                .http_client_request_duration
-                .on_error(error)
-                .into_iter()
-                .collect::<Vec<_>>();
-            let request_duration = ctx
-                .extensions()
-                .lock()
-                .get::<SubgraphInstant>()
-                .map(|i| i.0.elapsed());
-            if let Some(request_duration) = request_duration {
-                if let Ok(histogram) = meter
-                    .f64_histogram("http.client.request.duration")
-                    .with_unit(Unit::new("s"))
-                    .try_init()
-                {
-                    histogram.record(request_duration.as_secs_f64(), &attrs)
-                }
-            }
-        }
-    }
-}
-
 impl<A, B, E, Request, Response> Instrumented for Extendable<A, Instrument<B, E>>
 where
     A: Default + Instrumented<Request = Request, Response = Response>,
@@ -626,7 +526,7 @@ where
     pub(crate) fn new(config: &HashMap<String, Instrument<Attributes, Select>>) -> Self {
         let mut counters = Vec::new();
         let mut histograms = Vec::new();
-        let meter = metrics::meter_provider().meter("apollo/router");
+        let meter = metrics::meter_provider().meter(METER_NAME);
 
         for (instrument_name, instrument) in config {
             match instrument.ty {
