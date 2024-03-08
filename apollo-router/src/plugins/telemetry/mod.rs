@@ -1,7 +1,6 @@
 //! Telemetry plugin.
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::collections::LinkedList;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -375,7 +374,7 @@ impl Plugin for Telemetry {
                     )
                 },
                 move |(custom_attributes, custom_instruments, ctx): (
-                    LinkedList<KeyValue>,
+                    Vec<KeyValue>,
                     RouterInstruments,
                     Context,
                 ),
@@ -526,7 +525,7 @@ impl Plugin for Telemetry {
 
                     (req.context.clone(), custom_instruments, custom_attributes)
                 },
-                move |(ctx, custom_instruments, custom_attributes): (Context, SupergraphCustomInstruments, LinkedList<KeyValue>), fut| {
+                move |(ctx, custom_instruments, custom_attributes): (Context, SupergraphCustomInstruments, Vec<KeyValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -629,7 +628,7 @@ impl Plugin for Telemetry {
                 move |(context, custom_instruments, custom_attributes): (
                     Context,
                     SubgraphInstruments,
-                    LinkedList<KeyValue>,
+                    Vec<KeyValue>,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();

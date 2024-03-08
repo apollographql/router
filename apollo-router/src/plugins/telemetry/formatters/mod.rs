@@ -3,7 +3,6 @@ pub(crate) mod json;
 pub(crate) mod text;
 
 use std::collections::HashMap;
-use std::collections::LinkedList;
 use std::fmt;
 use std::time::Instant;
 
@@ -230,7 +229,7 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
     })
 }
 
-pub(crate) fn to_list(resource: Resource) -> LinkedList<(String, serde_json::Value)> {
+pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
     resource
         .into_iter()
         .map(|(k, v)| {

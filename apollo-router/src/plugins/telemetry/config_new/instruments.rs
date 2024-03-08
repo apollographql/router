@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::LinkedList;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -230,23 +229,30 @@ impl InstrumentsConfig {
             .attributes
             .http_client_response_body_size
             .is_enabled()
-            .then(|| CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Custom(None),
-                    histogram: Some(meter.f64_histogram("http.client.response.body.size").init()),
-                    attributes: Vec::new(),
-                    selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
-                        subgraph_response_header: "content-length".to_string(),
-                        redact: None,
-                        default: None,
-                    })),
-                    selectors: match &self.subgraph.attributes.http_client_response_body_size {
-                        DefaultedStandardInstrument::Bool(_) => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            Some(attributes.clone())
-                        }
-                    },
-                }),
+            .then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.subgraph.attributes.http_client_response_body_size {
+                    DefaultedStandardInstrument::Bool(_) => None,
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomHistogram {
+                    inner: Mutex::new(CustomHistogramInner {
+                        increment: Increment::Custom(None),
+                        histogram: Some(
+                            meter.f64_histogram("http.client.response.body.size").init(),
+                        ),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
+                            subgraph_response_header: "content-length".to_string(),
+                            redact: None,
+                            default: None,
+                        })),
+                        selectors,
+                    }),
+                }
             });
         SubgraphInstruments {
             http_client_request_duration,
@@ -319,23 +325,23 @@ where
     type Request = Request;
     type Response = Response;
 
-    fn on_request(&self, request: &Self::Request) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) => LinkedList::new(),
+            Self::Bool(_) => Vec::new(),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
-    fn on_response(&self, response: &Self::Response) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) => LinkedList::new(),
+            Self::Bool(_) => Vec::new(),
             Self::Extendable { attributes } => attributes.on_response(response),
         }
     }
 
-    fn on_error(&self, error: &BoxError) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) => LinkedList::new(),
+            Self::Bool(_) => Vec::new(),
             Self::Extendable { attributes } => attributes.on_error(error),
         }
     }
@@ -404,15 +410,15 @@ where
 
     type Response = Response;
 
-    fn on_request(&self, request: &Self::Request) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_request(request)
     }
 
-    fn on_response(&self, response: &Self::Response) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_response(response)
     }
 
-    fn on_error(&self, error: &BoxError) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_error(error)
     }
 }
@@ -484,7 +490,7 @@ impl Selectors for SubgraphInstrumentsConfig {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
 
-    fn on_request(&self, request: &Self::Request) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
         attrs.extend(self.http_client_request_duration.on_request(request));
         attrs.extend(self.http_client_response_body_size.on_request(request));
@@ -492,7 +498,7 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_response(response);
         attrs.extend(self.http_client_request_duration.on_response(response));
         attrs.extend(self.http_client_response_body_size.on_response(response));
@@ -500,7 +506,7 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> LinkedList<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_error(error);
         attrs.extend(self.http_client_request_duration.on_error(error));
         attrs.extend(self.http_client_response_body_size.on_error(error));
