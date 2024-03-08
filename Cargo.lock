@@ -5657,7 +5657,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.5.16+v2.7.1"
-source = "git+https://github.com/apollographql/federation-rs?branch=igni/type_conditioned_fetching#a9f61d3f6cbbf4f2df5cdaffd43a9ddecac37e58"
+source = "git+https://github.com/apollographql/federation-rs?branch=igni/type_conditioned_fetching#207536722046c7779d51c79071d35dadb18e8b0a"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",

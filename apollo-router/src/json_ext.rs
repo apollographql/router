@@ -25,7 +25,7 @@ pub(crate) type Object = Map<ByteString, Value>;
 const FRAGMENT_PREFIX: &str = "... on ";
 
 static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:\[)(.+?)(?:,\s*|)(?:\])")
+    Regex::new(r"(?:\|\[)(.+?)(?:,\s*|)(?:\])")
         .expect("this regex to check for type conditions is valid")
 });
 
@@ -776,7 +776,7 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
         });
 
         if path == "@" {
-            Ok(type_conditions.is_empty().then_some(type_conditions))
+            Ok((!type_conditions.is_empty()).then_some(type_conditions))
         } else {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str(s),
@@ -795,7 +795,7 @@ where
 {
     let tc_string = if let Some(c) = type_conditions {
         if !c.is_empty() {
-            format!("[{}]", c.join(","))
+            format!("![{}]", c.join(","))
         } else {
             "".to_string()
         }
@@ -1079,7 +1079,7 @@ impl fmt::Display for Path {
                 PathElement::Key(key, type_conditions) => {
                     if let Some(c) = type_conditions {
                         if !c.is_empty() {
-                            write!(f, "[{}]", c.join(","))?;
+                            write!(f, "![{}]", c.join(","))?;
                         }
                     };
                     write!(f, "{key}")?;
@@ -1088,7 +1088,7 @@ impl fmt::Display for Path {
                     write!(f, "@")?;
                     if let Some(c) = type_conditions {
                         if !c.is_empty() {
-                            write!(f, "[{}]", c.join(","))?;
+                            write!(f, "![{}]", c.join(","))?;
                         }
                     };
                 }
