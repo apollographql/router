@@ -250,6 +250,14 @@ where
                 }
             }
 
+            // dd.trace_id is special. It must appear as a root attribute on log lines, so we need to extract it from the root span.
+            // We're just going to assume if it's there then we should output it, as the user will have to have configured it to be there.
+            if let Some(span) = &current_span {
+                if let Some(dd_trace_id) = extract_dd_trace_id(span) {
+                    serializer.serialize_entry("dd.trace_id", &dd_trace_id)?;
+                }
+            }
+
             if self.config.display_span_list && current_span.is_some() {
                 serializer.serialize_entry(
                     "spans",
@@ -267,6 +275,38 @@ where
         visit().map_err(|_| fmt::Error)?;
         writeln!(writer)
     }
+}
+
+fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Option<String> {
+    let mut dd_trace_id = None;
+    let mut root = span.scope().from_root();
+    if let Some(root_span) = root.next() {
+        let ext = root_span.extensions();
+        // Extract dd_trace_id, this could be in otel data or log attributes
+        if let Some(otel_data) = root_span.extensions().get::<OtelData>() {
+            if let Some(attributes) = otel_data.builder.attributes.as_ref() {
+                if let Some((_k, v)) = attributes
+                    .iter()
+                    .find(|(k, _v)| k.as_str() == "dd.trace_id")
+                {
+                    dd_trace_id = Some(v.to_string());
+                }
+            }
+        };
+
+        if dd_trace_id.is_none() {
+            if let Some(log_attr) = ext.get::<LogAttributes>() {
+                if let Some(kv) = log_attr
+                    .attributes()
+                    .iter()
+                    .find(|kv| kv.key.as_str() == "dd.trace_id")
+                {
+                    dd_trace_id = Some(kv.value.to_string());
+                }
+            }
+        }
+    }
+    dd_trace_id
 }
 
 struct WriteAdaptor<'a> {
@@ -299,5 +339,83 @@ impl<'a> io::Write for WriteAdaptor<'a> {
 impl<'a> fmt::Debug for WriteAdaptor<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("WriteAdaptor { .. }")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use tracing::subscriber;
+    use tracing_core::Event;
+    use tracing_core::Subscriber;
+    use tracing_subscriber::layer::Context;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::registry::LookupSpan;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::Registry;
+
+    use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
+    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+    use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
+
+    struct RequiresDatadogLayer;
+    impl<S> Layer<S> for RequiresDatadogLayer
+    where
+        S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    {
+        fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+            let current_span = event
+                .parent()
+                .and_then(|id| ctx.span(id))
+                .or_else(|| ctx.lookup_current())
+                .expect("current span expected");
+            let extracted = extract_dd_trace_id(&current_span);
+            assert_eq!(extracted, Some("1234".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_extract_dd_trace_id_span_attribute() {
+        subscriber::with_default(
+            Registry::default()
+                .with(RequiresDatadogLayer)
+                .with(tracing_opentelemetry::layer()),
+            || {
+                let root_span = tracing::info_span!("root", dd.trace_id = "1234");
+                let _root_span = root_span.enter();
+                tracing::info!("test");
+            },
+        );
+    }
+
+    #[test]
+    fn test_extract_dd_trace_id_dyn_attribute() {
+        subscriber::with_default(
+            Registry::default()
+                .with(RequiresDatadogLayer)
+                .with(DynAttributeLayer)
+                .with(tracing_opentelemetry::layer()),
+            || {
+                let root_span = tracing::info_span!("root");
+                root_span.set_dyn_attribute("dd.trace_id".into(), "1234".into());
+                let _root_span = root_span.enter();
+                tracing::info!("test");
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_missing_dd_attribute() {
+        subscriber::with_default(
+            Registry::default()
+                .with(RequiresDatadogLayer)
+                .with(DynAttributeLayer)
+                .with(tracing_opentelemetry::layer()),
+            || {
+                let root_span = tracing::info_span!("root");
+                let _root_span = root_span.enter();
+                tracing::info!("test");
+            },
+        );
     }
 }

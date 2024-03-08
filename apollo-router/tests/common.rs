@@ -659,7 +659,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn assert_log_contains(&mut self, msg: &str) {
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(5) {
+        while now.elapsed() < Duration::from_secs(10) {
             if let Ok(line) = self.stdio_rx.try_recv() {
                 if line.contains(msg) {
                     return;

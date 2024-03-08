@@ -1,0 +1,16 @@
+For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](https://www.apollographql.com/docs/router/overview/#yaml-config-file). For example:
+
+```yaml
+apq:
+  router:
+    cache:
+      redis:
+        urls: [ "rediss://redis.example.com:6379" ]
+        #highlight-start
+        tls:
+          certificate_authorities: ${file./path/to/ca.crt}
+          client_authentication:
+            certificate_chain: ${file./path/to/certificate_chain.pem}
+            key: ${file./path/to/key.pem}
+        #highlight-end
+```
