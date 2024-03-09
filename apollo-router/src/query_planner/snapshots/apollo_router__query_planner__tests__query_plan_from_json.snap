@@ -40,9 +40,7 @@ Sequence {
                                             None,
                                         ),
                                         Flatten(
-                                            Some(
-                                                [],
-                                            ),
+                                            None,
                                         ),
                                     ],
                                 ),
@@ -104,9 +102,7 @@ Sequence {
                                             None,
                                         ),
                                         Flatten(
-                                            Some(
-                                                [],
-                                            ),
+                                            None,
                                         ),
                                     ],
                                 ),
