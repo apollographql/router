@@ -46,7 +46,11 @@ async fn test_type_conditions_enabled() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_disabled() {
     let harness = setup(json! {{
-        "experimental_type_conditioned_fetching": false
+        "experimental_type_conditioned_fetching": false,
+        // will make debugging easier
+        "plugins": {
+            "experimental.expose_query_plan": true
+        }
     }});
     let supergraph_service = harness.build_supergraph().await.unwrap();
     let mut variables = JsonMap::new();
@@ -54,6 +58,7 @@ async fn test_type_conditions_disabled() {
     variables.insert("articleResultParam", "articleResultDisabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
+        .header("Apollo-Expose-Query-Plan", "true")
         .build()
         .expect("expecting valid request");
 
@@ -85,7 +90,8 @@ json!{{
                             "id":"d0182b8a-a671-4244-ba1c-905274b0d198"
                         },
                         {
-                            "__typename":"EntityCollectionSection","id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
+                            "__typename":"EntityCollectionSection",
+                            "id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
                         }
                     ]
                 },
@@ -100,6 +106,34 @@ json!{{
                         {
                             "__typename":"GallerySection",
                             "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
+                        }
+                    ]
+                },
+                {
+                    "__typename":"MovieResult",
+                    "id":"c5f4985f-8fb6-4414-a3f5-56f7f58dd043",
+                    "sections":[
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                        }
+                    ]
+                },
+                {
+                    "__typename":"MovieResult",
+                    "id":"ff140d35-ce5d-48fe-bad7-1cfb2c3e310a",
+                    "sections":[
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                        },
+                        {
+                            "__typename":"GallerySection",
+                            "id":"2f772201-42ca-4376-9871-2252cc052262"
                         }
                     ]
                 }
@@ -130,6 +164,22 @@ json!{{
                 {
                     "__typename":"GallerySection",
                     "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                },
+                {
+                    "__typename":"GallerySection",
+                    "id":"2f772201-42ca-4376-9871-2252cc052262"
                 }
             ]
         }
@@ -163,19 +213,36 @@ json!{{
                 {
                     "__typename":"GallerySection",
                     "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                },
+                {
+                    "__typename":"GallerySection",
+                    "id":"2f772201-42ca-4376-9871-2252cc052262"
                 }
             ]
         }
         }},
-        json!{{
+        json!{
+        {
             "data":{
                 "_entities":[
                     {"artwork":"articleResultEnabled artwork"},
                     {"artwork":"articleResultEnabled artwork"}
                 ]
             }
-        }}
-    )
+        }
+    })
     // Disabled, not great
     .with_json(json!{{
             "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
@@ -197,22 +264,42 @@ json!{{
                     {
                         "__typename":"GallerySection",
                         "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
+                    },
+                    {
+                        "__typename":"EntityCollectionSection",
+                        "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                    },
+                    {
+                        "__typename":"EntityCollectionSection",
+                        "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                    },
+                    {
+                        "__typename":"EntityCollectionSection",
+                        "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                    },
+                    {
+                        "__typename":"GallerySection",
+                        "id":"2f772201-42ca-4376-9871-2252cc052262"
                     }
                 ]
             }
         }},
+        // can't mock according to variables because they're not even propagated here...
     json!{
-        {"data":{
-            "_entities":[
+        {
+            "data": {
+              "_entities": [
                 {
-                    "artwork":"Hello World"
+                  "artwork": "Hello World"
                 },
                 {
-                    "artwork":"Hello World"
+                  "title": "Hello World",
+                  "artwork": "Hello World"
                 }
-            ]
+              ]
+            }
         }
-    }}).build();
+    }).build();
 
     let mut mocks = MockedSubgraphs::default();
     mocks.insert("searchSubgraph", search_service);
