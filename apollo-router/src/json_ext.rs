@@ -469,17 +469,39 @@ fn iterate_path<'a, F>(
         Some(PathElement::Flatten(type_conditions)) => {
             if let Some(array) = data.as_array() {
                 for (i, value) in array.iter().enumerate() {
-                    parent.push(PathElement::Index(i));
-                    // TODO[clone]
-                    iterate_path(
-                        schema,
-                        parent,
-                        &path[1..],
-                        value,
-                        f,
-                        type_conditions.clone(),
-                    );
-                    parent.pop();
+                    if let Some(tc) = type_conditions {
+                        if !tc.is_empty() {
+                            if let Value::Object(o) = value {
+                                if let Some(Value::String(type_name)) = o.get("__typename") {
+                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                                        parent.push(PathElement::Index(i));
+                                        // TODO[clone]
+                                        iterate_path(
+                                            schema,
+                                            parent,
+                                            &path[1..],
+                                            value,
+                                            f,
+                                            type_conditions.clone(),
+                                        );
+                                        parent.pop();
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        parent.push(PathElement::Index(i));
+                        // TODO[clone]
+                        iterate_path(
+                            schema,
+                            parent,
+                            &path[1..],
+                            value,
+                            f,
+                            type_conditions.clone(),
+                        );
+                        parent.pop();
+                    }
                 }
             }
         }

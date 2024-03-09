@@ -32,12 +32,12 @@ expression: response
           {
             "id": "d9077ad2-d79a-45b5-b5ee-25ded226f03c",
             "title": null,
-            "artwork": null
+            "artwork": "movieResultEnabled artwork"
           },
           {
             "id": "9f1f1ebb-21d3-4afe-bb7d-6de706f78f02",
             "title": null,
-            "artwork": null
+            "artwork": "movieResultEnabled artwork"
           }
         ],
         "id": "c5f4985f-8fb6-4414-a3f5-56f7f58dd043"

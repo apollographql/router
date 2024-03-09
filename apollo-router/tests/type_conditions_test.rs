@@ -142,29 +142,13 @@ json!{{
     }}).build();
 
     let artwork_service = MockSubgraph::builder()
-    // Enabled has 2 queries: first one...
+    // Enabled has 2 queries: first one is on MovieResult only
     .with_json(json!{{
         "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
         "operationName":"Search__artworkSubgraph__1",
         "variables":{
             "movieResultParam":"movieResultEnabled",
             "representations":[
-                {
-                    "__typename":"EntityCollectionSection",
-                    "id":"d0182b8a-a671-4244-ba1c-905274b0d198"
-                },
-                {
-                    "__typename":"EntityCollectionSection",
-                    "id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
-                },
-                {
-                    "__typename":"EntityCollectionSection",
-                    "id":"f44f584e-5d3d-4466-96f5-9afc3f5d5a54"
-                },
-                {
-                    "__typename":"GallerySection",
-                    "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
-                },
                 {
                     "__typename":"EntityCollectionSection",
                     "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
@@ -192,7 +176,7 @@ json!{{
         ]
     }
     }})
-    // ... and second one!
+    // ... and second one  one is on ArticleResult only
     .with_json(json!{{
         "query": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}...on EntityCollectionSection{artwork(params:$articleResultParam)}}}","operationName":"Search__artworkSubgraph__2",
         "variables":{
@@ -214,22 +198,6 @@ json!{{
                     "__typename":"GallerySection",
                     "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
                 },
-                {
-                    "__typename":"EntityCollectionSection",
-                    "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
-                },
-                {
-                    "__typename":"EntityCollectionSection",
-                    "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
-                },
-                {
-                    "__typename":"EntityCollectionSection",
-                    "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
-                },
-                {
-                    "__typename":"GallerySection",
-                    "id":"2f772201-42ca-4376-9871-2252cc052262"
-                }
             ]
         }
         }},
