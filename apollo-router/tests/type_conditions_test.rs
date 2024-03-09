@@ -19,6 +19,9 @@ async fn test_type_conditions_enabled() {
         // will make debugging easier
         "plugins": {
             "experimental.expose_query_plan": true
+        },
+        "include_subgraph_errors": {
+            "all": true
         }
     }});
     let supergraph_service = harness.build_supergraph().await.unwrap();
@@ -50,6 +53,9 @@ async fn test_type_conditions_disabled() {
         // will make debugging easier
         "plugins": {
             "experimental.expose_query_plan": true
+        },
+        "include_subgraph_errors": {
+            "all": true
         }
     }});
     let supergraph_service = harness.build_supergraph().await.unwrap();
@@ -171,14 +177,28 @@ json!{{
 json!{{
     "data":{
         "_entities":[
-            {"artwork":"movieResultEnabled artwork"},
-            {"artwork":"movieResultEnabled artwork"}
+            {
+                "title": "d9077ad2-d79a-45b5-b5ee-25ded226f03c title",
+                "artwork":"movieResultEnabled artwork"
+            },
+            {
+                "title": "9f1f1ebb-21d3-4afe-bb7d-6de706f78f02 title",
+                "artwork":"movieResultEnabled artwork"
+            },
+            {
+                "title": "24cea0de-2ac8-4cbe-85b6-8b1b80647c12 title",
+                "artwork":"movieResultEnabled artwork"
+            },
+            {
+                "artwork":"movieResultEnabled artwork"
+            }
         ]
     }
     }})
     // ... and second one  one is on ArticleResult only
     .with_json(json!{{
-        "query": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}...on EntityCollectionSection{artwork(params:$articleResultParam)}}}","operationName":"Search__artworkSubgraph__2",
+        "query": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}...on EntityCollectionSection{artwork(params:$articleResultParam)title}}}",
+        "operationName": "Search__artworkSubgraph__2",
         "variables":{
             "articleResultParam":"articleResultEnabled",
             "representations":[
@@ -205,7 +225,19 @@ json!{{
         {
             "data":{
                 "_entities":[
-                    {"artwork":"articleResultEnabled artwork"},
+                    {
+                        "artwork":"articleResultEnabled artwork",
+                        "title": "d0182b8a-a671-4244-ba1c-905274b0d198 title"
+                    },
+                    {
+                        "artwork":"articleResultEnabled artwork",
+                        "title": "e6eec2fc-05ce-40a2-956b-f1335e615204 title"
+                    },
+
+                    {
+                        "artwork":"articleResultEnabled artwork",
+                        "title": "f44f584e-5d3d-4466-96f5-9afc3f5d5a54 title"
+                    },
                     {"artwork":"articleResultEnabled artwork"}
                 ]
             }
@@ -258,11 +290,34 @@ json!{{
             "data": {
               "_entities": [
                 {
-                  "artwork": "Hello World"
+                    "title":"d0182b8a-a671-4244-ba1c-905274b0d198 title",
+                    "artwork":"Hello World",
                 },
                 {
-                  "title": "Hello World",
-                  "artwork": "Hello World"
+                    "title":"e6eec2fc-05ce-40a2-956b-f1335e615204 title",
+                    "artwork":"Hello World",
+                },
+                {
+                    "title":"f44f584e-5d3d-4466-96f5-9afc3f5d5a54 title",
+                    "artwork":"Hello World",
+                },
+                {
+                    "artwork":"Hello World"
+                },
+                {
+                    "title":"d9077ad2-d79a-45b5-b5ee-25ded226f03c title",
+                    "artwork":"Hello World",
+                },
+                {
+                    "title":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02 title",
+                    "artwork":"Hello World",
+                },
+                {
+                    "title":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12 title",
+                    "artwork":"Hello World",
+                },
+                {
+                    "artwork":"Hello World"
                 }
               ]
             }
@@ -307,6 +362,7 @@ query Search($movieResultParam: String, $articleResultParam: String) {
           }
           ... on EntityCollectionSection {
             artwork(params: $articleResultParam)
+            title
           }
         }
       }
