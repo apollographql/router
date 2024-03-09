@@ -795,7 +795,7 @@ where
 {
     let tc_string = if let Some(c) = type_conditions {
         if !c.is_empty() {
-            format!("![{}]", c.join(","))
+            format!("|[{}]", c.join(","))
         } else {
             "".to_string()
         }
@@ -1079,7 +1079,7 @@ impl fmt::Display for Path {
                 PathElement::Key(key, type_conditions) => {
                     if let Some(c) = type_conditions {
                         if !c.is_empty() {
-                            write!(f, "![{}]", c.join(","))?;
+                            write!(f, "|[{}]", c.join(","))?;
                         }
                     };
                     write!(f, "{key}")?;
@@ -1088,7 +1088,7 @@ impl fmt::Display for Path {
                     write!(f, "@")?;
                     if let Some(c) = type_conditions {
                         if !c.is_empty() {
-                            write!(f, "![{}]", c.join(","))?;
+                            write!(f, "|[{}]", c.join(","))?;
                         }
                     };
                 }
