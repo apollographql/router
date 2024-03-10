@@ -104,7 +104,7 @@ futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.13.0"
 hex = { version = "0.4.3", features = ["serde"] }
 http = "0.2.11"
-http-body = "0.4.6"
+http-body = "1.0.0"
 heck = "0.4.1"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
