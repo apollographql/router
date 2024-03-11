@@ -151,7 +151,12 @@ const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
+
 pub(crate) const OTEL_STATUS_CODE: &str = "otel.status_code";
+#[allow(dead_code)]
+pub(crate) const OTEL_STATUS_DESCRIPTION: &str = "otel.status_description";
+pub(crate) const OTEL_STATUS_CODE_OK: &str = "OK";
+pub(crate) const OTEL_STATUS_CODE_ERROR: &str = "ERROR";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -428,12 +433,12 @@ impl Plugin for Telemetry {
                             }
 
                             if response.response.status() >= StatusCode::BAD_REQUEST {
-                                span.record(OTEL_STATUS_CODE, "Error");
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             } else {
-                                span.record(OTEL_STATUS_CODE, "Ok");
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                             }
                         } else if let Err(err) = &response {
-                            span.record(OTEL_STATUS_CODE, "Error");
+                            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             span.set_dyn_attributes(
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
@@ -644,9 +649,9 @@ impl Plugin for Telemetry {
                         match &result {
                             Ok(resp) => {
                                 if resp.response.status() >= StatusCode::BAD_REQUEST {
-                                    span.record(OTEL_STATUS_CODE, "Error");
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                 } else {
-                                    span.record(OTEL_STATUS_CODE, "Ok");
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                                 }
                                 span.set_dyn_attributes(
                                     conf.instrumentation
@@ -658,7 +663,7 @@ impl Plugin for Telemetry {
                                 custom_instruments.on_response(resp);
                             }
                             Err(err) => {
-                                span.record(OTEL_STATUS_CODE, "Error");
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
 
                                 span.set_dyn_attributes(
                                     conf.instrumentation.spans.subgraph.attributes.on_error(err),
