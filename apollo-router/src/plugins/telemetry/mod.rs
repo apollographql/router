@@ -1312,8 +1312,6 @@ impl Telemetry {
                 }
             }
         } else {
-            println!("MISSING REPORTING");
-
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
                 licensed_operation_count_by_type: LicensedOperationCountByType {
