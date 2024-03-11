@@ -762,84 +762,6 @@ where
     serializer.serialize_str(format!("{FRAGMENT_PREFIX}{name}").as_str())
 }
 
-// fn deserialize_key<'de, D>(deserializer: D) -> Result<(String, Option<TypeConditions>), D::Error>
-// where
-//     D: serde::Deserializer<'de>,
-// {
-//     deserializer.deserialize_str(KeyVisitor)
-// }
-
-// struct KeyVisitor;
-
-// impl<'de> serde::de::Visitor<'de> for KeyVisitor {
-//     type Value = (String, Option<TypeConditions>);
-
-//     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-//         write!(formatter, "a string that may include type conditions")
-//     }
-
-//     fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-//     where
-//         E: serde::de::Error,
-//     {
-//         let mut type_conditions = Vec::new();
-//         let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-//             type_conditions.extend(
-//                 caps.extract::<1>()
-//                     .1
-//                     .map(|s| s.split(',').map(|s| s.to_string()))
-//                     .into_iter()
-//                     .flatten(),
-//             );
-//             ""
-//         });
-
-//         Ok((
-//             path.to_string(),
-//             (!type_conditions.is_empty()).then_some(type_conditions),
-//         ))
-//     }
-// }
-
-// fn serialize_key<S>(
-//     name: &String,
-//     tc: &Option<TypeConditions>,
-//     serializer: S,
-// ) -> Result<S::Ok, S::Error>
-// where
-//     S: serde::Serializer,
-// {
-//     let tc = if let Some(tc) = tc {
-//         if !tc.is_empty() {
-//             format!("|[{}]", tc.join(","))
-//         } else {
-//             "".to_string()
-//         }
-//     } else {
-//         "".to_string()
-//     };
-//     serializer.serialize_str(format!("{tc}{name}").as_str())
-// }
-
-// fn key_from_str(s: &str) -> Result<PathElement, String> {
-//     let mut type_conditions = Vec::new();
-//     let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-//         type_conditions.extend(
-//             caps.extract::<1>()
-//                 .1
-//                 .map(|s| s.split(',').map(|s| s.to_string()))
-//                 .into_iter()
-//                 .flatten(),
-//         );
-//         ""
-//     });
-
-//     Ok(PathElement::Key(
-//         path.to_string(),
-//         (!type_conditions.is_empty()).then_some(type_conditions),
-//     ))
-// }
-
 fn flatten_from_str(s: &str) -> Result<PathElement, String> {
     let mut type_conditions = Vec::new();
     let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
@@ -877,7 +799,7 @@ impl Path {
                     if let Ok(index) = s.parse::<usize>() {
                         PathElement::Index(index)
                     } else if s.contains('@') {
-                        flatten_from_str(s).unwrap()
+                        flatten_from_str(s).unwrap_or(PathElement::Flatten(None))
                     } else {
                         s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
                             || PathElement::Key(s.to_string()),

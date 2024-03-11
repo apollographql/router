@@ -779,7 +779,6 @@ async fn insert_entities_in_result(
                         e.path
                             .as_ref()
                             .map(|path| {
-                                // TODO[igni]: what s going on here?
                                 path.starts_with(&Path(vec![
                                     PathElement::Key(ENTITIES.to_string()),
                                     PathElement::Index(entity_idx),
