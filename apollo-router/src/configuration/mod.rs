@@ -1415,5 +1415,20 @@ pub(crate) enum SubgraphBatchingConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub(crate) struct CommonBatchingConfig {
     /// Whether this batching config should be enabled
-    enabled: bool,
+    pub(crate) enabled: bool,
+}
+
+impl Batching {
+    // Check if we should enable batching for a particular subgraph (service_name)
+    pub(crate) fn batch_include(&self, service_name: &str) -> bool {
+        match &self.subgraph {
+            Some(subgraph_batching_config) => match subgraph_batching_config {
+                SubgraphBatchingConfig::All(all_config) => all_config.enabled,
+                SubgraphBatchingConfig::Subgraphs(subgraphs) => subgraphs
+                    .iter()
+                    .any(|(k, v)| k == service_name && v.enabled),
+            },
+            None => false,
+        }
+    }
 }

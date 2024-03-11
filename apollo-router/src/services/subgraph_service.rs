@@ -41,6 +41,7 @@ use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::batching::BatchQuery;
 use crate::batching::Waiter;
+use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
@@ -737,40 +738,54 @@ async fn call_batched_http(
     client_factory: crate::services::http::HttpClientServiceFactory,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
-    // We'd like to park a task here, but we can't park it whilst we have the context extensions
-    // lock held. That would be very bad...
-    // So, we set an optional listener and wait to hear back from the batch processor
-    // TODO: When we have the configuration work in place, we'll need to use the configuration
-    // settings here to determine if batching is even possible for a service. i.e.: If subgraphs
-    // all is set or (if not) if a specific subgraph name (synonym for service_name here) is set.
-    // Make sure to pick this up as part of the configuration work.
+    // We use configuration to determine if calls may be batched. If we have Batching
+    // configuration, then we check (batch_include()) if the current subgraph has batching enabled
+    // in configuration. If it does, we then start to process a potential batch.
+    //
+    // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
+    // we have the context extensions lock held. That would be very bad...
+    // We set optional batch_responder and waiters_opt to control waiting behaviour without
+    // holding the extensions lock.
     let mut batch_responder: Option<
         tokio::sync::oneshot::Receiver<Result<SubgraphResponse, BoxError>>,
     > = None;
     let mut waiters_opt = None;
-    if let Some(batching) = context.extensions().lock().get_mut::<BatchQuery>() {
-        if !batching.finished() {
-            tracing::debug!("in subgraph we have batching: {batching}, service: {service_name}");
-            batching.increment_subgraph_seen();
-            tracing::debug!("ready to process batch?: {}", batching.ready());
-            batch_responder = Some(batching.get_waiter(
-                request.clone(),
-                body.clone(),
-                context.clone(),
-                service_name,
-            ));
-            if batching.ready() {
-                // This is where we start processing our accumulated batch data.
-                // We can't do it whilst holding the context extensions lock, so signal we are
-                // ready to proceed by updating waiters_opt.
-                tracing::debug!("Batch data: {batching}");
-                waiters_opt = Some(batching.get_waiters());
+    {
+        let mut extensions_guard = context.extensions().lock();
+        let batching_opt = extensions_guard.get::<Batching>();
+        if let Some(batching) = batching_opt {
+            if batching.batch_include(service_name) {
+                if let Some(batch_query) = extensions_guard.get_mut::<BatchQuery>() {
+                    if !batch_query.finished() {
+                        tracing::debug!(
+                        "in subgraph we have batch_query: {batch_query}, service: {service_name}"
+                    );
+                        batch_query.increment_subgraph_seen();
+                        tracing::debug!("ready to process batch?: {}", batch_query.ready());
+                        batch_responder = Some(batch_query.get_waiter(
+                            request.clone(),
+                            body.clone(),
+                            context.clone(),
+                            service_name,
+                        ));
+                        if batch_query.ready() {
+                            // This is where we start processing our accumulated batch data.
+                            // We can't do it whilst holding the context extensions lock, so signal we are
+                            // ready to proceed by updating waiters_opt.
+                            tracing::debug!("Batch data: {batch_query}");
+                            waiters_opt = Some(batch_query.get_waiters());
+                        }
+                    }
+                }
             }
         }
     }
     // We've dropped the extensions lock, check to see if we have batches to process or just a
     // normal http call.
     // TODO: Think about the impact on the router if a batch is never finished/ready. Can that happen?
+    // I think this is a limitation of this prototype. For instance, a query may be rejected for
+    // various reasons during execution or query planning (e.g.: authz), so we need to figure out
+    // how to handle that situation.
     if let Some(receiver) = batch_responder {
         // If waiters_opt is Some, then our batch is full and it's time to process it.
         if let Some(waiters) = waiters_opt {

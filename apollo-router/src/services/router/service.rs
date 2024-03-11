@@ -40,6 +40,7 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
+use crate::configuration::SubgraphBatchingConfig;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -609,9 +610,27 @@ impl RouterService {
         let mut results = Vec::with_capacity(ok_results.len());
         let batch_size = ok_results.len();
 
+        // Insert our batch configuration into Context extensions.
+        // If the results len > 1, we always insert our batching configuration
+        // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
         let shared_batch_details: Option<Arc<Mutex<Batch>>> = if ok_results.len() > 1 {
             context.extensions().lock().insert(self.batching.clone());
-            Some(Arc::new(Mutex::new(Batch::new(batch_size))))
+            match &self.batching.subgraph {
+                Some(subgraph_batching_config) => {
+                    let enabled = match subgraph_batching_config {
+                        SubgraphBatchingConfig::All(all_config) => all_config.enabled,
+                        SubgraphBatchingConfig::Subgraphs(subgraphs) => {
+                            subgraphs.values().any(|v| v.enabled)
+                        }
+                    };
+                    if enabled {
+                        Some(Arc::new(Mutex::new(Batch::new(batch_size))))
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            }
         } else {
             None
         };
@@ -648,14 +667,15 @@ impl RouterService {
                 .lock()
                 .get::<ClientRequestAccepts>()
                 .cloned();
+            // Sub-scope so that new_context_guard is dropped before pushing into the new
+            // SupergraphRequest
             {
-                // Sub-scope so that new_context_guard is dropped before pushing into the new
-                // SupergraphRequest
                 let mut new_context_guard = new_context.extensions().lock();
                 if let Some(client_request_accepts) = client_request_accepts_opt {
                     new_context_guard.insert(client_request_accepts);
                 }
                 new_context_guard.insert(self.batching.clone());
+                // We are only going to insert a BatchQuery if Subgraph processing is enabled
                 if let Some(shared_batch_details) = &shared_batch_details {
                     new_context_guard
                         .insert(BatchQuery::new(index + 1, shared_batch_details.clone()));
