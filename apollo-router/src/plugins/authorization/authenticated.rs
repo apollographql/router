@@ -357,9 +357,8 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
 
         let field_requires_authentication = self.is_field_authenticated(field_def);
 
-        // TODO[type condition?]
         self.current_path
-            .push(PathElement::Key(field_name.as_str().into(), None));
+            .push(PathElement::Key(field_name.as_str().into()));
         if is_field_list {
             // TODO[igni]
             self.current_path.push(PathElement::Flatten(None));

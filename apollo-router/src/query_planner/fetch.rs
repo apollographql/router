@@ -367,11 +367,7 @@ impl FetchNode {
         response: graphql::Response,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
-            // TODO[igni]
-            let entities_path = Path(vec![json_ext::PathElement::Key(
-                "_entities".to_string(),
-                None,
-            )]);
+            let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
 
             let mut errors: Vec<Error> = vec![];
             for mut error in response.errors {

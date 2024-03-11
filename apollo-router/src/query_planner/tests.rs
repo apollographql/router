@@ -271,10 +271,10 @@ async fn defer() {
                         defer_label: None,
                     }],
                     label: None,
-                    query_path: Path(vec![PathElement::Key("t".to_string(), None)]), 
+                    query_path: Path(vec![PathElement::Key("t".to_string())]), 
                     subselection: Some("{ y }".to_string()),
                     node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                        path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                        path: Path(vec![PathElement::Key("t".to_string())]),
                         node: Box::new(PlanNode::Fetch(FetchNode {
                             service_name: "Y".to_string(),
                             requires: vec![query_planner::selection::Selection::InlineFragment(

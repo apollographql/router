@@ -37,7 +37,6 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
-                                            None,
                                         ),
                                         Flatten(
                                             None,
@@ -99,7 +98,6 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
-                                            None,
                                         ),
                                         Flatten(
                                             None,
@@ -177,7 +175,6 @@ Sequence {
                                     [
                                         Key(
                                             "product",
-                                            None,
                                         ),
                                     ],
                                 ),
@@ -234,7 +231,6 @@ Sequence {
                                     [
                                         Key(
                                             "product",
-                                            None,
                                         ),
                                     ],
                                 ),
