@@ -1,6 +1,7 @@
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use schemars::gen::SchemaGenerator;
@@ -44,6 +45,12 @@ where
 
 impl Extendable<(), ()> {
     pub(crate) fn empty<A, E>() -> Extendable<A, E>
+    where
+        A: Default,
+    {
+        Default::default()
+    }
+    pub(crate) fn empty_arc<A, E>() -> Arc<Extendable<A, E>>
     where
         A: Default,
     {

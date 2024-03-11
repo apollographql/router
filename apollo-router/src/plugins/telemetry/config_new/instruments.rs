@@ -300,7 +300,7 @@ pub(crate) struct ActiveRequestsAttributes {
 #[serde(deny_unknown_fields, untagged)]
 enum DefaultedStandardInstrument<T> {
     Bool(bool),
-    Extendable { attributes: T },
+    Extendable { attributes: Arc<T> },
 }
 
 impl<T> Default for DefaultedStandardInstrument<T> {
@@ -393,8 +393,8 @@ where
     unit: String,
 
     /// Attributes to include on the instrument.
-    #[serde(default = "Extendable::empty::<A, E>")]
-    attributes: Extendable<A, E>,
+    #[serde(default = "Extendable::empty_arc::<A, E>")]
+    attributes: Arc<Extendable<A, E>>,
 
     /// The instrument conditions.
     #[serde(default = "Condition::empty::<E>")]
@@ -810,7 +810,7 @@ where
 {
     increment: Increment,
     selector: Option<Arc<T>>,
-    selectors: Extendable<A, T>,
+    selectors: Arc<Extendable<A, T>>,
     counter: Option<Counter<f64>>,
     condition: Condition<T>,
     attributes: Vec<opentelemetry_api::KeyValue>,
@@ -916,7 +916,7 @@ struct ActiveRequestsCounter {
 
 struct ActiveRequestsCounterInner {
     counter: Option<UpDownCounter<i64>>,
-    attrs_config: ActiveRequestsAttributes,
+    attrs_config: Arc<ActiveRequestsAttributes>,
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
@@ -1008,7 +1008,7 @@ where
 {
     increment: Increment,
     selector: Option<Arc<T>>,
-    selectors: Option<Extendable<A, T>>,
+    selectors: Option<Arc<Extendable<A, T>>>,
     histogram: Option<Histogram<f64>>,
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
