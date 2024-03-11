@@ -662,14 +662,14 @@ mod test {
 
     fn get_gauge_value(result: &mut ResourceMetrics) -> i64 {
         assert_eq!(result.scope_metrics.len(), 1);
-        assert_eq!(result.scope_metrics.get(0).unwrap().metrics.len(), 1);
+        assert_eq!(result.scope_metrics.first().unwrap().metrics.len(), 1);
         assert_eq!(
             result
                 .scope_metrics
-                .get(0)
+                .first()
                 .unwrap()
                 .metrics
-                .get(0)
+                .first()
                 .unwrap()
                 .data
                 .as_any()
@@ -681,17 +681,17 @@ mod test {
         );
         result
             .scope_metrics
-            .get(0)
+            .first()
             .unwrap()
             .metrics
-            .get(0)
+            .first()
             .unwrap()
             .data
             .as_any()
             .downcast_ref::<Gauge<i64>>()
             .unwrap()
             .data_points
-            .get(0)
+            .first()
             .unwrap()
             .value
     }

@@ -727,7 +727,7 @@ impl BridgeQueryPlanner {
             // It can happen if you have a statically skipped query like { get @skip(if: true) { id name }} because it will be statically filtered with {}
             if selections
                 .operations
-                .get(0)
+                .first()
                 .map(|op| op.selection_set.is_empty())
                 .unwrap_or_default()
             {
@@ -744,7 +744,7 @@ impl BridgeQueryPlanner {
             // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
             if let Some(output_keys) = selections
                 .operations
-                .get(0)
+                .first()
                 .and_then(|op| op.is_only_typenames_with_output_keys())
             {
                 let operation_name = selections.operations[0].kind().to_string();
