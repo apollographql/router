@@ -229,7 +229,7 @@ async fn service_call(
                 return Ok(SupergraphResponse::infallible_builder()
                     .context(context)
                     .errors(vec![graphql::Error::builder()
-                        .message("@defer is not supported on subscriptions")
+                        .message("@defer is not supported within a subscription")
                         .extension_code("DEFER_NOT_SUPPORTED_ON_SUBSCRIPTION")
                         .build()])
                     .status_code(StatusCode::BAD_REQUEST)
