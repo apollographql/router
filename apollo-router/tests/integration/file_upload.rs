@@ -1235,7 +1235,7 @@ mod helper {
 
             // TODO: This is a bit hard-coded, but it should be enough for testing the whole plugin stack
             // The shape of the variables list for tests should always be ["variables.<NAME_OF_FILE>"]
-            let var_name = var_mapping.get(0).ok_or(FileUploadError::MissingMapping)?;
+            let var_name = var_mapping.first().ok_or(FileUploadError::MissingMapping)?;
             let var_name = var_name.split('.').nth(1).unwrap().to_string();
 
             files.insert(
