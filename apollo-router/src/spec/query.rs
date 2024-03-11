@@ -1062,7 +1062,7 @@ impl Query {
                         false
                     }
                 }),
-            None => self.operations.get(0),
+            None => self.operations.first(),
         }
     }
 

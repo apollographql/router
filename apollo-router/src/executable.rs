@@ -519,6 +519,7 @@ impl Executable {
                 ));
             }
             (Some(config), None) => config,
+            #[allow(clippy::blocks_in_if_conditions)]
             _ => match opt.config_path.as_ref().map(|path| {
                 let path = if path.is_relative() {
                     current_directory.join(path)
