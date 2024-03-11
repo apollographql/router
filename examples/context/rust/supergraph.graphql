@@ -41,7 +41,7 @@ type Product
 type Query {
   me: User @join__field(graph: ACCOUNTS)
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
-  search(id: String)
+  search(id: String): S_RESPONSE @join__field(graph: SEARCH)
 }
 
 type Review
@@ -77,6 +77,24 @@ enum core__Purpose {
   SECURITY
 }
 
+type S_RESPONSE {
+  query: String
+  searchResult: S_RESPONSE2
+}
+
+type S_RESPONSE2
+  @join__owner(graph: SEARCH)
+  @join__type(graph: RANDOM_1, key: "sKey { aP }") 
+{
+    sKey: SKey @join__field(graph: SEARCH)
+}
+
+type SKey
+  @join__owner(graph: SEARCH) {
+    aP: JSON @join__field(graph: SEARCH)
+}
+
+scalar JSON
 scalar join__FieldSet
 
 enum join__Graph {
@@ -84,4 +102,6 @@ enum join__Graph {
   INVENTORY @join__graph(name: "inventory" url: "https://inventory.demo.starstuff.dev")
   PRODUCTS @join__graph(name: "products" url: "https://products.demo.starstuff.dev")
   REVIEWS @join__graph(name: "reviews" url: "https://reviews.demo.starstuff.dev")
+  SEARCH @join__graph(name: "search" url: "https://reviews.demo.starstuff.dev")
+  RANDOM_1 @join__graph(name: "random1" url: "https://reviews.demo.starstuff.dev")
 }

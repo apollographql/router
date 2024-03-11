@@ -5,7 +5,7 @@ Demonstrate use of context to pass information between request lifecycle stages.
 ## Usage
 
 ```bash
-cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
+cargo run -- -s ./graphql/supergraph.graphql -c ./router.yaml
 ```
 
 ## Implementation
