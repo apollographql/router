@@ -10,6 +10,7 @@ use tracing::Span;
 
 use crate::plugins::telemetry::SpanMode;
 use crate::plugins::telemetry::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::OTEL_STATUS_CODE_ERROR;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
@@ -55,7 +56,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             self.license,
             LicenseState::LicensedWarn | LicenseState::LicensedHalt
         ) {
-            span.record(OTEL_STATUS_CODE, "Error");
+            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             span.record("apollo_router.license", LICENSE_EXPIRED_SHORT_MESSAGE);
         }
 
