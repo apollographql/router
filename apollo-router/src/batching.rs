@@ -227,14 +227,14 @@ impl Drop for Batch {
 mod tests {
     use std::time::Duration;
 
-    use crate::graphql;
-    use crate::services::{SubgraphRequest, SubgraphResponse};
-    use crate::Context;
-
     use hyper::body::to_bytes;
     use tokio::sync::oneshot;
 
     use super::Waiter;
+    use crate::graphql;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
+    use crate::Context;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_assembles_batch() {
