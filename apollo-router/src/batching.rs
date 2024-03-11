@@ -222,3 +222,100 @@ impl Drop for Batch {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use crate::graphql;
+    use crate::services::{SubgraphRequest, SubgraphResponse};
+    use crate::Context;
+
+    use hyper::body::to_bytes;
+    use tokio::sync::oneshot;
+
+    use super::Waiter;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_assembles_batch() {
+        let context = Context::new();
+
+        // Assemble a list of waiters for testing
+        let (receivers, waiters): (Vec<_>, Vec<_>) = (0..2)
+            .map(|index| {
+                let (tx, rx) = oneshot::channel();
+                let graphql_request = graphql::Request::fake_builder()
+                    .operation_name("batch_test")
+                    .query(format!("query batch_test {{ slot{index} }}"))
+                    .build();
+
+                (
+                    rx,
+                    Waiter::new(
+                        SubgraphRequest::fake_builder()
+                            .subgraph_request(
+                                http::Request::builder()
+                                    .body(graphql_request.clone())
+                                    .unwrap(),
+                            )
+                            .subgraph_name(format!("slot{index}"))
+                            .build(),
+                        graphql_request,
+                        context.clone(),
+                        tx,
+                    ),
+                )
+            })
+            .unzip();
+
+        // Try to assemble them
+        let (op_name, _context, request, txs) = Waiter::assemble_batch(waiters).await.unwrap();
+
+        // Make sure we've assembled the request correctly
+        assert_eq!(op_name, "batch_test");
+
+        // We should see the aggregation of all of the requests
+        let actual: Vec<graphql::Request> = serde_json::from_str(
+            &String::from_utf8(to_bytes(request.into_body()).await.unwrap().to_vec()).unwrap(),
+        )
+        .unwrap();
+
+        let expected: Vec<_> = (0..2)
+            .map(|index| {
+                graphql::Request::fake_builder()
+                    .operation_name("batch_test")
+                    .query(format!("query batch_test {{ slot{index} }}"))
+                    .build()
+            })
+            .collect();
+        assert_eq!(actual, expected);
+
+        // We should also have all of the correct senders and they should be linked to the correct waiter
+        // Note: We reverse the senders since they should be in reverse order when assembled
+        assert_eq!(txs.len(), receivers.len());
+        for (index, (tx, rx)) in Iterator::zip(txs.into_iter().rev(), receivers).enumerate() {
+            let data = serde_json_bytes::json!({
+                "data": {
+                    format!("slot{index}"): "valid"
+                }
+            });
+            let response = SubgraphResponse {
+                response: http::Response::builder()
+                    .body(graphql::Response::builder().data(data.clone()).build())
+                    .unwrap(),
+                context: Context::new(),
+            };
+
+            tx.send(Ok(response)).unwrap();
+
+            // We want to make sure that we don't hang the test if we don't get the correct message
+            let received = tokio::time::timeout(Duration::from_millis(10), rx)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(received.response.into_body().data, Some(data));
+        }
+    }
+}

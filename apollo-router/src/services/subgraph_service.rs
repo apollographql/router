@@ -2663,4 +2663,162 @@ mod tests {
 
         assert_eq!(resp.response.body(), &expected_resp);
     }
+
+    #[test]
+    fn it_gets_uri_details() {
+        let path = "https://example.com/path".parse().unwrap();
+        let (host, port, path) = super::get_uri_details(&path);
+
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 443);
+        assert_eq!(path, "/path");
+    }
+
+    #[test]
+    fn it_converts_ok_http_to_graphql() {
+        let (parts, body) = http::Response::builder()
+            .status(StatusCode::OK)
+            .body(None)
+            .unwrap()
+            .into_parts();
+        let actual = super::http_response_to_graphql_response(
+            "test_service",
+            Ok(ContentType::ApplicationGraphqlResponseJson),
+            body,
+            &parts,
+        );
+
+        let expected = graphql::Response::builder().build();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_converts_error_http_to_graphql() {
+        let (parts, body) = http::Response::builder()
+            .status(StatusCode::IM_A_TEAPOT)
+            .body(None)
+            .unwrap()
+            .into_parts();
+        let actual = super::http_response_to_graphql_response(
+            "test_service",
+            Ok(ContentType::ApplicationGraphqlResponseJson),
+            body,
+            &parts,
+        );
+
+        let expected = graphql::Response::builder()
+            .error(
+                super::FetchError::SubrequestHttpError {
+                    status_code: Some(418),
+                    service: "test_service".into(),
+                    reason: "418: I'm a teapot".into(),
+                }
+                .to_graphql_error(None),
+            )
+            .build();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_converts_http_with_body_to_graphql() {
+        let mut json = serde_json::json!({
+            "data": {
+                "some_field": "some_value"
+            }
+        });
+
+        let (parts, body) = http::Response::builder()
+            .status(StatusCode::OK)
+            .body(Some(Ok(Bytes::from(json.to_string()))))
+            .unwrap()
+            .into_parts();
+
+        let actual = super::http_response_to_graphql_response(
+            "test_service",
+            Ok(ContentType::ApplicationGraphqlResponseJson),
+            body,
+            &parts,
+        );
+
+        let expected = graphql::Response::builder()
+            .data(json["data"].take())
+            .build();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_converts_http_with_graphql_errors_to_graphql() {
+        let error = graphql::Error::builder()
+            .message("error was encountered for test")
+            .extension_code("SOME_EXTENSION")
+            .build();
+        let mut json = serde_json::json!({
+            "data": {
+                "some_field": "some_value",
+                "error_field": null,
+            },
+            "errors": [error],
+        });
+
+        let (parts, body) = http::Response::builder()
+            .status(StatusCode::OK)
+            .body(Some(Ok(Bytes::from(json.to_string()))))
+            .unwrap()
+            .into_parts();
+
+        let actual = super::http_response_to_graphql_response(
+            "test_service",
+            Ok(ContentType::ApplicationGraphqlResponseJson),
+            body,
+            &parts,
+        );
+
+        let expected = graphql::Response::builder()
+            .data(json["data"].take())
+            .error(error)
+            .build();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_converts_error_http_with_graphql_errors_to_graphql() {
+        let error = graphql::Error::builder()
+            .message("error was encountered for test")
+            .extension_code("SOME_EXTENSION")
+            .build();
+        let mut json = serde_json::json!({
+            "data": {
+                "some_field": "some_value",
+                "error_field": null,
+            },
+            "errors": [error],
+        });
+
+        let (parts, body) = http::Response::builder()
+            .status(StatusCode::IM_A_TEAPOT)
+            .body(Some(Ok(Bytes::from(json.to_string()))))
+            .unwrap()
+            .into_parts();
+
+        let actual = super::http_response_to_graphql_response(
+            "test_service",
+            Ok(ContentType::ApplicationGraphqlResponseJson),
+            body,
+            &parts,
+        );
+
+        let expected = graphql::Response::builder()
+            .data(json["data"].take())
+            .error(
+                super::FetchError::SubrequestHttpError {
+                    status_code: Some(418),
+                    service: "test_service".into(),
+                    reason: "418: I'm a teapot".into(),
+                }
+                .to_graphql_error(None),
+            )
+            .error(error)
+            .build();
+        assert_eq!(actual, expected);
+    }
 }
