@@ -92,7 +92,7 @@ pub(crate) struct RouterService {
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     http_max_request_bytes: usize,
-    experimental_batching: Batching,
+    batching: Batching,
 }
 
 impl RouterService {
@@ -102,7 +102,7 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         http_max_request_bytes: usize,
-        experimental_batching: Batching,
+        batching: Batching,
     ) -> Self {
         RouterService {
             supergraph_creator,
@@ -110,7 +110,7 @@ impl RouterService {
             persisted_query_layer,
             query_analysis_layer,
             http_max_request_bytes,
-            experimental_batching,
+            batching,
         }
     }
 }
@@ -444,8 +444,8 @@ impl RouterService {
                 Err(err) => {
                     // It may be a batch of requests, so try that (if config allows) before
                     // erroring out
-                    if self.experimental_batching.enabled
-                        && matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
+                    if self.batching.enabled
+                        && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
                     {
                         result = graphql::Request::batch_from_urlencoded_query(q.to_string())
                             .map_err(|e| TranslateError {
@@ -457,9 +457,9 @@ impl RouterService {
                                 ),
                             })?;
                     } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
-                        let extension_details = if self.experimental_batching.enabled
-                            && !matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink) {
-                            format!("batching not supported for mode `{}`", self.experimental_batching.mode)
+                        let extension_details = if self.batching.enabled
+                            && !matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
+                            format!("batching not supported for mode `{}`", self.batching.mode)
                         } else {
                             "batching not enabled".to_string()
                         };
@@ -503,8 +503,8 @@ impl RouterService {
                 result.push(request);
             }
             Err(err) => {
-                if self.experimental_batching.enabled
-                    && matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
+                if self.batching.enabled
+                    && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
                 {
                     result =
                         graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
@@ -516,13 +516,10 @@ impl RouterService {
                             ),
                         })?;
                 } else if !bytes.is_empty() && bytes[0] == b'[' {
-                    let extension_details = if self.experimental_batching.enabled
-                        && !matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
+                    let extension_details = if self.batching.enabled
+                        && !matches!(self.batching.mode, BatchingMode::BatchHttpLink)
                     {
-                        format!(
-                            "batching not supported for mode `{}`",
-                            self.experimental_batching.mode
-                        )
+                        format!("batching not supported for mode `{}`", self.batching.mode)
                     } else {
                         "batching not enabled".to_string()
                     };
@@ -613,10 +610,7 @@ impl RouterService {
         let batch_size = ok_results.len();
 
         let shared_batch_details: Option<Arc<Mutex<Batch>>> = if ok_results.len() > 1 {
-            context
-                .extensions()
-                .lock()
-                .insert(self.experimental_batching.clone());
+            context.extensions().lock().insert(self.batching.clone());
             Some(Arc::new(Mutex::new(Batch::new(batch_size))))
         } else {
             None
@@ -661,7 +655,7 @@ impl RouterService {
                 if let Some(client_request_accepts) = client_request_accepts_opt {
                     new_context_guard.insert(client_request_accepts);
                 }
-                new_context_guard.insert(self.experimental_batching.clone());
+                new_context_guard.insert(self.batching.clone());
                 if let Some(shared_batch_details) = &shared_batch_details {
                     new_context_guard
                         .insert(BatchQuery::new(index + 1, shared_batch_details.clone()));
@@ -717,7 +711,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     http_max_request_bytes: usize,
-    experimental_batching: Batching,
+    batching: Batching,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -768,7 +762,7 @@ impl RouterCreator {
             query_analysis_layer,
             http_max_request_bytes: configuration.limits.http_max_request_bytes,
             persisted_query_layer,
-            experimental_batching: configuration.experimental_batching.clone(),
+            batching: configuration.batching.clone(),
         })
     }
 
@@ -786,7 +780,7 @@ impl RouterCreator {
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
             self.http_max_request_bytes,
-            self.experimental_batching.clone(),
+            self.batching.clone(),
         ));
 
         ServiceBuilder::new()
