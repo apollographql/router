@@ -1,3 +1,4 @@
+mod batching;
 #[path = "../common.rs"]
 mod common;
 mod docs;
