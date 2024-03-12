@@ -113,7 +113,6 @@ async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
     insta::assert_json_snapshot!(response);
 }
 
-
 fn setup_no_articles(configuration: serde_json::Value) -> TestHarness<'static> {
     let search_service =  MockSubgraph::builder().with_json(json!{{
         "query":"query Search__searchSubgraph__0{search{__typename ...on MovieResult{sections{__typename ...on EntityCollectionSection{__typename id}...on GallerySection{__typename id}}id}...on ArticleResult{id sections{__typename ...on GallerySection{__typename id}...on EntityCollectionSection{__typename id}}}}}",
@@ -215,7 +214,6 @@ json!{{
         .schema(schema)
         .extra_plugin(mocks)
 }
-
 
 fn setup(configuration: serde_json::Value) -> TestHarness<'static> {
     let search_service =  MockSubgraph::builder().with_json(json!{{
