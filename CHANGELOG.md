@@ -4,6 +4,49 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.42.0] - 2024-03-12
+
+## 🚀 Features
+
+### Add headers to the JWKS download request ([Issue #4651](https://github.com/apollographql/router/issues/4651))
+
+The router supports the new `authentication.router.jwt.jwks.headers` option for setting static headers on HTTP requests to download a JWKS from an identity provider.
+
+For details, see the [JWKS configuration option](https://www.apollographql.com/docs/router/configuration/authn-jwt#jwks).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4688
+
+### Support loading JWT from other sources ([PR #4711](https://github.com/apollographql/router/pull/4711))
+
+The router supports the new `authentication.router.jwt.sources` option. It enables cookies as an alternative source for tokens and allows multiple alternative sources.
+
+For details, see the [sources configuration option](https://www.apollographql.com/docs/router/configuration/authn-jwt#sources).
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4711
+
+## 🐛 Fixes
+
+### Attach `dd.trace_id` to JSON formatted log messages ([PR #4764](https://github.com/apollographql/router/pull/4764))
+
+To enable correlation between DataDog tracing and logs, `dd.trace_id` must appear as a span attribute on the root of each JSON formatted log message.
+Once you configure the `dd.trace_id` attribute in router.yaml, it will automatically be extracted from the root span and attached to the logs:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          dd.trace_id: true
+```
+
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4764
+
+
+
 # [1.41.0] - 2024-03-08
 
 ## 🚀 Features
