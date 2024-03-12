@@ -1242,7 +1242,7 @@ expression: "&schema"
     },
     "experimental_api_schema_generation_mode": {
       "description": "Set the API schema generation implementation to use.",
-      "default": "both",
+      "default": "legacy",
       "oneOf": [
         {
           "description": "Use the new Rust-based implementation.",
