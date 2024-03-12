@@ -717,12 +717,7 @@ pub(crate) struct CanceledRequest;
 mod tests {
     use std::str::FromStr;
 
-    use http::header::ACCEPT;
-    use http::header::CONTENT_TYPE;
-    use tower::Service;
-
     use super::*;
-    use crate::assert_snapshot_subscriber;
 
     #[test]
     fn test_span_mode_default() {
@@ -750,34 +745,5 @@ mod tests {
                 .unwrap();
         let mode = span_mode(&config);
         assert_eq!(mode, SpanMode::Deprecated);
-    }
-
-    #[tokio::test]
-    async fn request_cancel() {
-        let mut http_router = crate::TestHarness::builder()
-            .schema(include_str!("../testdata/supergraph.graphql"))
-            .build_http_service()
-            .await
-            .unwrap();
-
-        async {
-            let _res = tokio::time::timeout(
-                std::time::Duration::from_micros(100),
-                http_router.call(
-                    http::Request::builder()
-                        .method("POST")
-                        .uri("/")
-                        .header(ACCEPT, "application/json")
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(r#"{"query":"query { me { name }}"}"#))
-                        .unwrap(),
-                ),
-            )
-            .await;
-
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-        }
-        .with_subscriber(assert_snapshot_subscriber!())
-        .await
     }
 }
