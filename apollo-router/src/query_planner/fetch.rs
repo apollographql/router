@@ -13,7 +13,6 @@ use super::execution::ExecutionParameters;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
-use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql;
