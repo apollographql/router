@@ -836,6 +836,9 @@ fn standardize_schema(mut schema: apollo_compiler::Schema) -> apollo_compiler::S
         for arg in &mut directive.arguments {
             standardize_value_for_comparison(arg.make_mut().value.make_mut());
         }
+        directive
+            .arguments
+            .sort_by_cached_key(|arg| arg.name.to_ascii_lowercase());
     }
 
     for ty in schema.types.values_mut() {
@@ -854,6 +857,9 @@ fn standardize_schema(mut schema: apollo_compiler::Schema) -> apollo_compiler::S
                             standardize_directive_for_comparison(directive.make_mut());
                         }
                     }
+                    field
+                        .arguments
+                        .sort_by_cached_key(|arg| arg.name.to_ascii_lowercase());
                     for directive in &mut field.directives {
                         standardize_directive_for_comparison(directive.make_mut());
                     }
@@ -876,6 +882,9 @@ fn standardize_schema(mut schema: apollo_compiler::Schema) -> apollo_compiler::S
                             standardize_directive_for_comparison(directive.make_mut());
                         }
                     }
+                    field
+                        .arguments
+                        .sort_by_cached_key(|arg| arg.name.to_ascii_lowercase());
                     for directive in &mut field.directives {
                         standardize_directive_for_comparison(directive.make_mut());
                     }
