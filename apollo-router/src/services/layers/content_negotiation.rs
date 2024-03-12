@@ -71,6 +71,17 @@ where
                             .to_string(),
                         ))
                         .expect("cannot fail");
+                    u64_counter!(
+                        "apollo_router_http_requests_total",
+                        "Total number of HTTP requests made.",
+                        1,
+                        status = StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16() as i64,
+                        error = format!(
+                            r#"'content-type' header must be one of: {:?} or {:?}"#,
+                            APPLICATION_JSON.essence_str(),
+                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                        )
+                    );
 
                     return Ok(ControlFlow::Break(response.into()));
                 }
