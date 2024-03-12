@@ -244,8 +244,8 @@ impl ValueExt for Value {
 
         for p in path.iter() {
             match p {
-                PathElement::Flatten(_type_conditions) => {
-                    // TODO
+                // Type conditions don't matter here since we're just creating a default value.
+                PathElement::Flatten(_) => {
                     return res_value;
                 }
 
@@ -296,13 +296,13 @@ impl ValueExt for Value {
 
     /// Insert a `Value` at a `Path`
     #[track_caller]
-    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
+    fn insert(&mut self, path: &Path, mut value: Value) -> Result<(), FetchError> {
         let mut current_node = self;
 
         for p in path.iter() {
             match p {
-                PathElement::Flatten(_type_condition) => {
-                    // TODO
+                PathElement::Flatten(type_condition) => {
+                    value = filter_type_conditions(value, type_condition);
                     if current_node.is_null() {
                         let a = Vec::new();
                         *current_node = Value::Array(a);
@@ -387,7 +387,6 @@ impl ValueExt for Value {
             &mut |_path, value| {
                 res = Ok(value);
             },
-            None,
         );
         res
     }
@@ -397,7 +396,7 @@ impl ValueExt for Value {
     where
         F: FnMut(&Path, &'a Value),
     {
-        iterate_path(schema, &mut Path::default(), &path.0, self, &mut f, None)
+        iterate_path(schema, &mut Path::default(), &path.0, self, &mut f)
     }
 
     #[track_caller]
@@ -405,7 +404,7 @@ impl ValueExt for Value {
     where
         F: FnMut(&Path, &'a mut Value),
     {
-        iterate_path_mut(schema, &mut Path::default(), &path.0, self, &mut f, None)
+        iterate_path_mut(schema, &mut Path::default(), &path.0, self, &mut f)
     }
 
     #[track_caller]
@@ -454,17 +453,39 @@ impl ValueExt for Value {
     }
 }
 
+fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>) -> Value {
+    if let Some(tc) = type_conditions {
+        match value {
+            Value::Object(ref o) => {
+                if let Some(Value::String(type_name)) = &o.get("__typename") {
+                    if !tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                        return Value::Null;
+                    }
+                }
+            }
+            Value::Array(v) => {
+                return Value::Array(
+                    v.into_iter()
+                        .map(|v| filter_type_conditions(v, type_conditions))
+                        .collect(),
+                );
+            }
+            _ => {}
+        }
+    }
+    value
+}
+
 fn iterate_path<'a, F>(
     schema: &Schema,
     parent: &mut Path,
     path: &'a [PathElement],
     data: &'a Value,
     f: &mut F,
-    type_conditions: Option<TypeConditions>,
 ) where
     F: FnMut(&Path, &'a Value),
 {
-    match path.get(0) {
+    match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten(type_conditions)) => {
             if let Some(array) = data.as_array() {
@@ -475,15 +496,7 @@ fn iterate_path<'a, F>(
                                 if let Some(Value::String(type_name)) = o.get("__typename") {
                                     if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                                         parent.push(PathElement::Index(i));
-                                        // TODO[clone]
-                                        iterate_path(
-                                            schema,
-                                            parent,
-                                            &path[1..],
-                                            value,
-                                            f,
-                                            type_conditions.clone(),
-                                        );
+                                        iterate_path(schema, parent, &path[1..], value, f);
                                         parent.pop();
                                     }
                                 }
@@ -491,15 +504,7 @@ fn iterate_path<'a, F>(
                         }
                     } else {
                         parent.push(PathElement::Index(i));
-                        // TODO[clone]
-                        iterate_path(
-                            schema,
-                            parent,
-                            &path[1..],
-                            value,
-                            f,
-                            type_conditions.clone(),
-                        );
+                        iterate_path(schema, parent, &path[1..], value, f);
                         parent.pop();
                     }
                 }
@@ -509,7 +514,7 @@ fn iterate_path<'a, F>(
             if let Value::Array(a) = data {
                 if let Some(value) = a.get(*i) {
                     parent.push(PathElement::Index(*i));
-                    iterate_path(schema, parent, &path[1..], value, f, type_conditions);
+                    iterate_path(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
             }
@@ -518,14 +523,13 @@ fn iterate_path<'a, F>(
             if let Value::Object(o) = data {
                 if let Some(value) = o.get(k.as_str()) {
                     parent.push(PathElement::Key(k.to_string()));
-                    iterate_path(schema, parent, &path[1..], value, f, type_conditions);
+                    iterate_path(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter().enumerate() {
                     parent.push(PathElement::Index(i));
-                    // TODO[igni] clone
-                    iterate_path(schema, parent, path, value, f, type_conditions.clone());
+                    iterate_path(schema, parent, path, value, f);
                     parent.pop();
                 }
             }
@@ -537,12 +541,11 @@ fn iterate_path<'a, F>(
                 // are used to essentially create a type-based choice in a "selection" path, but
                 // `parent` is a direct path to a specific position in the value and do not need
                 // fragments.
-                iterate_path(schema, parent, &path[1..], data, f, type_conditions);
+                iterate_path(schema, parent, &path[1..], data, f);
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter().enumerate() {
                     parent.push(PathElement::Index(i));
-                    // TODO[igni]
-                    iterate_path(schema, parent, path, value, f, type_conditions.clone());
+                    iterate_path(schema, parent, path, value, f);
                     parent.pop();
                 }
             }
@@ -550,33 +553,37 @@ fn iterate_path<'a, F>(
     }
 }
 
-// TODO[igni]: type conditions
 fn iterate_path_mut<'a, F>(
     schema: &Schema,
     parent: &mut Path,
     path: &'a [PathElement],
     data: &'a mut Value,
     f: &mut F,
-    type_conditions: Option<TypeConditions>,
 ) where
     F: FnMut(&Path, &'a mut Value),
 {
-    match path.get(0) {
+    match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten(type_conditions)) => {
             if let Some(array) = data.as_array_mut() {
                 for (i, value) in array.iter_mut().enumerate() {
-                    parent.push(PathElement::Index(i));
-                    // TODO[clone]
-                    iterate_path_mut(
-                        schema,
-                        parent,
-                        &path[1..],
-                        value,
-                        f,
-                        type_conditions.clone(),
-                    );
-                    parent.pop();
+                    if let Some(tc) = type_conditions {
+                        if !tc.is_empty() {
+                            if let Value::Object(o) = value {
+                                if let Some(Value::String(type_name)) = o.get("__typename") {
+                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                                        parent.push(PathElement::Index(i));
+                                        iterate_path_mut(schema, parent, &path[1..], value, f);
+                                        parent.pop();
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        parent.push(PathElement::Index(i));
+                        iterate_path_mut(schema, parent, &path[1..], value, f);
+                        parent.pop();
+                    }
                 }
             }
         }
@@ -584,7 +591,7 @@ fn iterate_path_mut<'a, F>(
             if let Value::Array(a) = data {
                 if let Some(value) = a.get_mut(*i) {
                     parent.push(PathElement::Index(*i));
-                    iterate_path_mut(schema, parent, &path[1..], value, f, type_conditions);
+                    iterate_path_mut(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
             }
@@ -593,14 +600,13 @@ fn iterate_path_mut<'a, F>(
             if let Value::Object(o) = data {
                 if let Some(value) = o.get_mut(k.as_str()) {
                     parent.push(PathElement::Key(k.to_string()));
-                    iterate_path_mut(schema, parent, &path[1..], value, f, type_conditions);
+                    iterate_path_mut(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter_mut().enumerate() {
                     parent.push(PathElement::Index(i));
-                    // TODO[clone]
-                    iterate_path_mut(schema, parent, path, value, f, type_conditions.clone());
+                    iterate_path_mut(schema, parent, path, value, f);
                     parent.pop();
                 }
             }
@@ -612,12 +618,11 @@ fn iterate_path_mut<'a, F>(
                 // are used to essentially create a type-based choice in a "selection" path, but
                 // `parent` is a direct path to a specific position in the value and do not need
                 // fragments.
-                iterate_path_mut(schema, parent, &path[1..], data, f, type_conditions);
+                iterate_path_mut(schema, parent, &path[1..], data, f);
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter_mut().enumerate() {
                     parent.push(PathElement::Index(i));
-                    // TODO[igni]
-                    iterate_path_mut(schema, parent, path, value, f, type_conditions.clone());
+                    iterate_path_mut(schema, parent, path, value, f);
                     parent.pop();
                 }
             }

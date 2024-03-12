@@ -263,6 +263,7 @@ impl FetchNode {
             }
         };
 
+        // todo: identify _entity requests, if variables is an empty array, the fetch is not necesssary.
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
@@ -453,7 +454,7 @@ impl FetchNode {
 
             (Value::Null, errors)
         } else {
-            // TODO[igni]
+            // TODO[igni]: type_conditions
             let current_slice =
                 if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
                     &current_dir.0[..current_dir.0.len() - 1]
