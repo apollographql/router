@@ -737,7 +737,7 @@ impl IntegrationTest {
             }
         }
 
-        self.dump_stack_traces();
+        //self.dump_stack_traces();
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
     }
 

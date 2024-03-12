@@ -246,18 +246,6 @@ impl FetchNode {
             ..
         } = self;
 
-        // The client closed the connection, we are still executing the request pipeline,
-        // but we won't send unused trafic to subgraph
-        if parameters
-            .context
-            .extensions()
-            .lock()
-            .get::<CanceledRequest>()
-            .is_some()
-        {
-            return (Value::Object(Object::default()), Vec::new());
-        }
-
         let Variables {
             variables,
             inverted_paths: paths,
