@@ -71,7 +71,6 @@ use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
-use crate::axum_factory::CanceledRequest;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::layers::instrument::InstrumentLayer;
@@ -378,16 +377,6 @@ impl Plugin for Telemetry {
 
                         let expose_trace_id = &config.exporters.tracing.response_trace_id;
                         if let Ok(response) = &response {
-                            if response
-                                .context
-                                .extensions()
-                                .lock()
-                                .get::<CanceledRequest>()
-                                .is_some()
-                            {
-                                ::tracing::error!("broken pipe: the client closed the connection");
-                            }
-
                             span.set_dyn_attributes(
                                 config
                                     .instrumentation

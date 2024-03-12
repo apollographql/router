@@ -688,6 +688,7 @@ async fn handle_graphql(
 struct CancelHandler<'a> {
     context: &'a Context,
     got_first_response: bool,
+    span: tracing::Span,
 }
 
 impl<'a> CancelHandler<'a> {
@@ -695,6 +696,7 @@ impl<'a> CancelHandler<'a> {
         CancelHandler {
             context,
             got_first_response: false,
+            span: tracing::Span::current(),
         }
     }
 
@@ -706,6 +708,8 @@ impl<'a> CancelHandler<'a> {
 impl<'a> Drop for CancelHandler<'a> {
     fn drop(&mut self) {
         if !self.got_first_response {
+            self.span
+                .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
             self.context.extensions().lock().insert(CanceledRequest);
         }
     }
@@ -717,8 +721,12 @@ pub(crate) struct CanceledRequest;
 mod tests {
     use std::str::FromStr;
 
-    use super::*;
+    use http::header::ACCEPT;
+    use http::header::CONTENT_TYPE;
+    use tower::Service;
 
+    use super::*;
+    use crate::assert_snapshot_subscriber;
     #[test]
     fn test_span_mode_default() {
         let config =
@@ -745,5 +753,36 @@ mod tests {
                 .unwrap();
         let mode = span_mode(&config);
         assert_eq!(mode, SpanMode::Deprecated);
+    }
+
+    #[tokio::test]
+    async fn request_cancel() {
+        let mut http_router = crate::TestHarness::builder()
+            .schema(include_str!("../testdata/supergraph.graphql"))
+            .build_http_service()
+            .await
+            .unwrap();
+
+        async {
+            let _res = tokio::time::timeout(
+                std::time::Duration::from_micros(100),
+                http_router.call(
+                    http::Request::builder()
+                        .method("POST")
+                        .uri("/")
+                        .header(ACCEPT, "application/json")
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(hyper::Body::from(r#"{"query":"query { me { name }}"}"#))
+                        .unwrap(),
+                ),
+            )
+            .await;
+
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!(
+            tracing_core::LevelFilter::ERROR
+        ))
+        .await
     }
 }
