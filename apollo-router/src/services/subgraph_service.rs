@@ -757,9 +757,7 @@ async fn call_batched_http(
             if batching.batch_include(service_name) {
                 if let Some(batch_query) = extensions_guard.get_mut::<BatchQuery>() {
                     if !batch_query.finished() {
-                        tracing::debug!(
-                        "in subgraph we have batch_query: {batch_query}, service: {service_name}"
-                    );
+                        tracing::debug!("in subgraph we have batch_query: {batch_query}, service: {service_name}");
                         batch_query.increment_subgraph_seen();
                         tracing::debug!("ready to process batch?: {}", batch_query.ready());
                         batch_responder = Some(batch_query.get_waiter(
