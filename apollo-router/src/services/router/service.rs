@@ -272,7 +272,8 @@ impl RouterService {
             .get::<CanceledRequest>()
             .is_some()
         {
-            parts.status = StatusCode::from_u16(499).expect("499 is not a standard status code but common enough");
+            parts.status = StatusCode::from_u16(499)
+                .expect("499 is not a standard status code but common enough");
         }
 
         match body.next().await {

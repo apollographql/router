@@ -717,12 +717,12 @@ pub(crate) struct CanceledRequest;
 mod tests {
     use std::str::FromStr;
 
-    use http::header::{ACCEPT, CONTENT_TYPE};
+    use http::header::ACCEPT;
+    use http::header::CONTENT_TYPE;
     use tower::Service;
 
-    use crate::assert_snapshot_subscriber;
-
     use super::*;
+    use crate::assert_snapshot_subscriber;
 
     #[test]
     fn test_span_mode_default() {
