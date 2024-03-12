@@ -15,10 +15,12 @@ pub(crate) mod query_planning_traversal;
 
 pub type QueryPlanCost = i64;
 
+#[derive(Debug, Default)]
 pub struct QueryPlan {
     node: Option<TopLevelPlanNode>,
 }
 
+#[derive(Debug, derive_more::From)]
 pub enum TopLevelPlanNode {
     Subscription(SubscriptionNode),
     Fetch(FetchNode),
@@ -29,12 +31,13 @@ pub enum TopLevelPlanNode {
     Condition(ConditionNode),
 }
 
+#[derive(Debug)]
 pub struct SubscriptionNode {
     primary: FetchNode,
     rest: Option<PlanNode>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PlanNode {
     Fetch(Arc<FetchNode>),
     Sequence(Arc<SequenceNode>),
@@ -44,6 +47,7 @@ pub enum PlanNode {
     Condition(Arc<ConditionNode>),
 }
 
+#[derive(Debug)]
 pub struct FetchNode {
     subgraph_name: NodeStr,
     /// Optional identifier for the fetch for defer support. All fetches of a given plan will be
@@ -77,14 +81,17 @@ pub struct FetchNode {
     output_rewrites: Vec<FetchDataRewrite>,
 }
 
+#[derive(Debug)]
 pub struct SequenceNode {
     nodes: Vec<PlanNode>,
 }
 
+#[derive(Debug)]
 pub struct ParallelNode {
     nodes: Vec<PlanNode>,
 }
 
+#[derive(Debug)]
 pub struct FlattenNode {
     path: Vec<FetchDataPathElement>,
     node: PlanNode,
@@ -106,6 +113,7 @@ pub struct FlattenNode {
 /// we implement more advanced server-side heuristics to decide if deferring is judicious or not.
 /// This allows the executor of the plan to consistently send a defer-abiding multipart response to
 /// the client.
+#[derive(Debug)]
 pub struct DeferNode {
     /// The "primary" part of a defer, that is the non-deferred part (though could be deferred
     /// itself for a nested defer).
@@ -117,6 +125,7 @@ pub struct DeferNode {
 }
 
 /// The primary block of a `DeferNode`.
+#[derive(Debug)]
 pub struct PrimaryDeferBlock {
     /// The part of the original query that "selects" the data to send in that primary response
     /// once the plan in `node` completes). Note that if the parent `DeferNode` is nested, then it
@@ -132,6 +141,7 @@ pub struct PrimaryDeferBlock {
 }
 
 /// A deferred block of a `DeferNode`.
+#[derive(Debug)]
 pub struct DeferredDeferBlock {
     /// References one or more fetch node(s) (by `id`) within `DeferNode.primary.node`. The plan of
     /// this deferred part should not be started until all such fetches return.
@@ -153,11 +163,13 @@ pub struct DeferredDeferBlock {
     node: Option<PlanNode>,
 }
 
+#[derive(Debug)]
 pub struct DeferredDependency {
     /// A `FetchNode` ID.
     id: NodeStr,
 }
 
+#[derive(Debug)]
 pub struct ConditionNode {
     condition_variable: Name,
     if_clause: Option<PlanNode>,
@@ -221,4 +233,12 @@ pub enum FetchDataPathElement {
 pub enum QueryPathElement {
     Field(Field),
     InlineFragment(InlineFragment),
+}
+
+impl QueryPlan {
+    fn new(node: impl Into<TopLevelPlanNode>) -> Self {
+        Self {
+            node: Some(node.into()),
+        }
+    }
 }

@@ -4,6 +4,8 @@ use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIV
 use crate::link::spec::Identity;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::QueryGraph;
+use crate::query_plan::operation::normalize_operation;
+use crate::query_plan::QueryPlan;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -12,11 +14,14 @@ use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use std::sync::Arc;
 
+#[derive(Debug, Clone)]
 pub struct QueryPlannerConfig {
     /// Whether the query planner should try to reused the named fragments of the planned query in
     /// subgraph fetches.
@@ -63,7 +68,7 @@ impl Default for QueryPlannerConfig {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct QueryPlanIncrementalDeliveryConfig {
     /// Enables @defer support by the query planner.
     ///
@@ -74,6 +79,7 @@ pub struct QueryPlanIncrementalDeliveryConfig {
     enable_defer: bool,
 }
 
+#[derive(Debug, Clone)]
 pub struct QueryPlannerDebugConfig {
     /// If used and the supergraph is built from a single subgraph, then user queries do not go
     /// through the normal query planning and instead a fetch to the one subgraph is built directly
@@ -140,11 +146,12 @@ pub struct QueryPlanner {
     abstract_types_with_inconsistent_runtime_types: IndexSet<AbstractTypeDefinitionPosition>,
     // TODO: Port _lastGeneratedPlanStatistics from the JS codebase in a way that keeps QueryPlanner
     // immutable.
+    // last_generated_plan_statistics: QueryPlanningStatistics,
 }
 
 impl QueryPlanner {
     pub fn new(
-        supergraph: Supergraph,
+        supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
         let supergraph_schema = supergraph.schema.clone();
@@ -245,6 +252,44 @@ impl QueryPlanner {
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
         })
+    }
+
+    // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
+    pub fn build_query_plan(
+        &self,
+        document: &Valid<ExecutableDocument>,
+        operation_name: Option<&str>,
+    ) -> Result<QueryPlan, FederationError> {
+        let operation = document
+            .get_operation(operation_name)
+            // TODO(@goto-bus-stop) this is not an internal error
+            .map_err(|_| FederationError::internal("requested operation does not exist"))?;
+
+        // TODO(@goto-bus-stop) this isn't valid GraphQL so it should never happen given a
+        // `Valid<ExecutableDocument>`?
+        // The JS code checks this *again* post-normalization. That should be enough
+        if operation.selection_set.selections.is_empty() {
+            return Ok(QueryPlan::default());
+        }
+
+        if self.config.debug.bypass_planner_for_single_subgraph {
+            todo!("return a single fetch node for the whole operation");
+        }
+
+        let normalized_operation = normalize_operation(
+            operation,
+            &document.fragments,
+            &self.api_schema,
+            &self.interface_types_with_interface_objects,
+        )?;
+
+        // TODO(@goto-bus-stop): some defer stuff
+
+        if normalized_operation.selection_set.selections.is_empty() {
+            return Ok(QueryPlan::default());
+        }
+
+        todo!("the rest of the owl")
     }
 }
 
@@ -393,6 +438,18 @@ type User
     #[test]
     fn it_does_not_crash() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        QueryPlanner::new(supergraph, Default::default()).unwrap();
+        let _planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        let _document = ExecutableDocument::parse_and_validate(
+            supergraph
+                .to_api_schema(Default::default())
+                .unwrap()
+                .schema(),
+            "{ userById(id: 1) { name email } }",
+            "operation.graphql",
+        )
+        .unwrap();
+        // This part does crash :)
+        // let _plan = planner.build_query_plan(&document, None).unwrap();
     }
 }
