@@ -321,7 +321,7 @@ mod test {
             .await;
 
             assert!(results
-                .get(0)
+                .first()
                 .expect("expected one result")
                 .as_ref()
                 .expect("license should be OK")

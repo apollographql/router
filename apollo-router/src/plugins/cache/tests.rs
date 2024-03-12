@@ -85,7 +85,7 @@ impl Mocks for Mock1 {
 
         match &*command.cmd {
             "GET" => {
-                if let Some(RedisValue::Bytes(b)) = command.args.get(0) {
+                if let Some(RedisValue::Bytes(b)) = command.args.first() {
                     if b == &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..]{
                         let set = self.set.lock();
                         if *set {
@@ -97,7 +97,7 @@ impl Mocks for Mock1 {
                 }
             }
             "SET" => {
-                if let Some(RedisValue::Bytes(b)) = command.args.get(0) {
+                if let Some(RedisValue::Bytes(b)) = command.args.first() {
                     if b ==
                         &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..] {
                             let mut set = self.set.lock();

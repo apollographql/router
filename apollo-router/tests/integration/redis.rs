@@ -145,7 +145,10 @@ mod test {
             .next()
             .await
             .unwrap()?;
-        assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
+        assert_eq!(
+            res.errors.first().unwrap().message,
+            "PersistedQueryNotFound"
+        );
 
         let r: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
         assert!(r.is_none());
