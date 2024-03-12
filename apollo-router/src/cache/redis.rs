@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,6 +11,7 @@ use fred::prelude::KeysInterface;
 use fred::prelude::RedisClient;
 use fred::prelude::RedisError;
 use fred::prelude::RedisErrorKind;
+use fred::types::ClusterRouting;
 use fred::types::Expiration;
 use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
@@ -17,6 +19,7 @@ use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
 use fred::types::TlsConfig;
 use fred::types::TlsHostMapping;
+use futures::FutureExt;
 use tower::BoxError;
 use url::Url;
 
@@ -49,6 +52,7 @@ pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
+    is_cluster: bool,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -138,6 +142,7 @@ impl RedisCacheStorage {
     pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
+        let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
 
         if let Some(username) = config.username {
             client_config.username = Some(username);
@@ -197,6 +202,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             namespace: config.namespace.map(Arc::new),
             ttl: config.ttl,
+            is_cluster,
         })
     }
 
@@ -245,6 +251,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             ttl: None,
             namespace: None,
+            is_cluster: false,
         })
     }
 
@@ -389,20 +396,56 @@ impl RedisCacheStorage {
 
             Some(vec![res])
         } else {
-            self.inner
-                .mget(
-                    keys.into_iter()
-                        .map(|k| self.make_key(k))
-                        .collect::<Vec<_>>(),
-                )
-                .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!("get error: {}", e);
+            if self.is_cluster {
+                let len = keys.len();
+                let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
+                for (index, key) in keys.into_iter().enumerate() {
+                    let key = self.make_key(key);
+                    let hash = ClusterRouting::hash_key(key.as_bytes());
+                    let entry = h.entry(hash).or_default();
+                    entry.0.push(index);
+                    entry.1.push(key);
+                }
+
+                let results: Vec<(Vec<usize>, Result<Vec<Option<RedisValue<V>>>, RedisError>)> =
+                    futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
+                        self.inner.mget(keys).map(|values| (indexes, values))
+                    }))
+                    .await;
+
+                let mut res = Vec::with_capacity(len);
+                for (indexes, result) in results.into_iter() {
+                    match result {
+                        Err(e) => {
+                            tracing::error!("mget error: {}", e);
+                            return None;
+                        }
+                        Ok(values) => {
+                            for (index, value) in indexes.into_iter().zip(values.into_iter()) {
+                                res.push((index, value));
+                            }
+                        }
                     }
-                    e
-                })
-                .ok()
+                }
+                res.sort_by(|(i, _), (j, _)| i.cmp(j));
+                Some(res.into_iter().map(|(_, v)| v).collect())
+            } else {
+                self.inner
+                    .mget(
+                        keys.into_iter()
+                            .map(|k| self.make_key(k))
+                            .collect::<Vec<_>>(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        if !e.is_not_found() {
+                            tracing::error!("mget error: {}", e);
+                        }
+
+                        e
+                    })
+                    .ok()
+            }
         }
     }
 

@@ -627,7 +627,7 @@ fn extract_cache_keys(
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let key = format!(
-            "subgraph:{}:{}:{}:{{{}:{}}}",
+            "subgraph:{}:{}:{}:{}:{}",
             subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
         );
 
