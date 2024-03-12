@@ -397,6 +397,9 @@ impl RedisCacheStorage {
             Some(vec![res])
         } else {
             if self.is_cluster {
+                // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
+                // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
+                // across multipe nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
                 let len = keys.len();
                 let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
                 for (index, key) in keys.into_iter().enumerate() {
@@ -407,12 +410,15 @@ impl RedisCacheStorage {
                     entry.1.push(key);
                 }
 
+                // then we query all the key groups at the same time
                 let results: Vec<(Vec<usize>, Result<Vec<Option<RedisValue<V>>>, RedisError>)> =
                     futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
                         self.inner.mget(keys).map(|values| (indexes, values))
                     }))
                     .await;
 
+                // then we have to assemble the results, by making sure that the values are in the same order as
+                // the keys argument's order
                 let mut res = Vec::with_capacity(len);
                 for (indexes, result) in results.into_iter() {
                     match result {
