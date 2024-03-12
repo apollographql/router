@@ -245,7 +245,7 @@ mod tests {
             .map(|index| {
                 let (tx, rx) = oneshot::channel();
                 let graphql_request = graphql::Request::fake_builder()
-                    .operation_name("batch_test")
+                    .operation_name(format!("batch_test_{index}"))
                     .query(format!("query batch_test {{ slot{index} }}"))
                     .build();
 
@@ -271,8 +271,8 @@ mod tests {
         // Try to assemble them
         let (op_name, _context, request, txs) = Waiter::assemble_batch(waiters).await.unwrap();
 
-        // Make sure we've assembled the request correctly
-        assert_eq!(op_name, "batch_test");
+        // Make sure that the name of the entire batch is that of the first
+        assert_eq!(op_name, "batch_test_0");
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
@@ -283,7 +283,7 @@ mod tests {
         let expected: Vec<_> = (0..2)
             .map(|index| {
                 graphql::Request::fake_builder()
-                    .operation_name("batch_test")
+                    .operation_name(format!("batch_test_{index}"))
                     .query(format!("query batch_test {{ slot{index} }}"))
                     .build()
             })
