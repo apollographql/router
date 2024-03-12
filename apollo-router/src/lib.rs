@@ -75,6 +75,7 @@ mod router_factory;
 pub mod services;
 pub(crate) mod spec;
 mod state_machine;
+pub mod structured_errors;
 pub mod test_harness;
 pub mod tracer;
 mod uplink;
