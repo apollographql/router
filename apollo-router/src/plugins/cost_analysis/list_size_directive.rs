@@ -1,65 +1,61 @@
 use anyhow::anyhow;
 use apollo_compiler::ast;
+use apollo_compiler::executable;
 use tower::BoxError;
 
-type DirectiveArgument<'a> = Option<&'a apollo_compiler::Node<apollo_compiler::ast::Value>>;
-
-pub(crate) struct ListSizeDirective {
-    assumed_size: Option<f64>,
-    slicing_arguments: Vec<String>,
-    sized_fields: Vec<String>,
-    require_one_slicing_argument: bool,
+pub(crate) enum ListSizeDirective {
+    AssumedSize(f64),
+    ArgumentLimited(Vec<String>),
 }
 
 impl ListSizeDirective {
-    pub(crate) fn from_field(field: &ast::FieldDefinition) -> Result<Self, BoxError> {
+    pub(crate) fn from_field(field: &ast::FieldDefinition) -> Result<ListSizeDirective, BoxError> {
         let list_size_directive = field.directives.get("listSize")
             .ok_or(anyhow!("Expected listSize directive"))?;
-        let assumed_size = ListSizeDirective::parse_arg(list_size_directive.argument_by_name("assumedSize"));
-        let slicing_arguments = ListSizeDirective::parse_args(list_size_directive.argument_by_name("slicingArguments"));
-        let sized_fields = ListSizeDirective::parse_args( list_size_directive.argument_by_name("sizedFields"));
-        let require_one_slicing_argument = ListSizeDirective::parse_arg(list_size_directive.argument_by_name("requireOneSlicingArgument"))
-            .unwrap_or(false);
 
-        println!("Assumed size: {:?}\nSlicing arguments: {:?}\nSizedFields: {:?}\nRequire slicing arguments?: {}", assumed_size, slicing_arguments, sized_fields, require_one_slicing_argument);
+        let assumed_size = list_size_directive.argument_by_name("assumedSize").map(|arg| arg.as_ref());
+        let slicing_arguments = list_size_directive.argument_by_name("slicingArguments").map(|arg| arg.as_ref());
+        let require_one_slicing_argument = list_size_directive.argument_by_name("requireOneSlicingArgument").map(|arg| arg.as_ref());
 
-        Ok(Self {
-            assumed_size,
-            slicing_arguments,
-            sized_fields,
-            require_one_slicing_argument,
-        })
-    }
-
-    fn parse_arg<T: std::str::FromStr>(arg: DirectiveArgument) -> Option<T> {
-        println!("Arg: {:?}", arg);
-        arg.and_then(|arg| arg.as_str())
-            .and_then(|arg| {
-                println!("{}", arg);
-                arg.parse().ok()
-            })
-    }
-
-    fn parse_args(arg: DirectiveArgument) -> Vec<String> {
-        arg.and_then(|arg| arg.as_list())
-            .map(|args| args.iter()
-                .flat_map(|arg| arg.as_str())
-                .map(|str| str.to_string())
-                .collect::<Vec<String>>()
-            )
-            .unwrap_or_default()
+        match (assumed_size, require_one_slicing_argument, slicing_arguments) {
+            // Assumed size
+            (Some(executable::Value::Float(f)), _, _) => {
+                let size = f.try_to_f64()
+                    .map_err(|_| anyhow!("Expected valid float value"))?;
+                Ok(ListSizeDirective::AssumedSize(size))
+            }
+            (Some(executable::Value::Int(i)), _, _) => {
+                let size = i.try_to_f64()
+                    .map_err(|_| anyhow!("Expected valid float value"))?;
+                Ok(ListSizeDirective::AssumedSize(size))
+            }
+            (Some(_), _, _) => {
+                Err(anyhow!("Expected numeric value for assumed size argument").into())
+            },
+            // Slicing arguments
+            (None, Some(executable::Value::Boolean(true)), None) => {
+                Err(anyhow!("slicingArguments is required by requireOneSlicingArgument: true but not passed").into())
+            }
+            (None, _, Some(executable::Value::List(slicing_args))) => {
+                let slicing_args = slicing_args.iter()
+                    .flat_map(|arg| arg.as_str())
+                    .map(str::to_owned)
+                    .collect();
+                Ok(ListSizeDirective::ArgumentLimited(slicing_args))
+            }
+            (None, None, None) => {
+                Err(anyhow!("One of assumedSize or slicingArguments is required").into())
+            }
+            (None, _, _) => {
+                Err(anyhow!("Invalid argument format. slicingArguments must be of type [String]").into())
+            }
+        }
     }
 
     pub(crate) fn max_list_size(&self) -> Result<f64, BoxError> {
-        if let Some(assumed_size) = self.assumed_size {
-            return Ok(assumed_size);
+        match self {
+            ListSizeDirective::AssumedSize(size) => Ok(*size),
+            _ => todo!()
         }
-        if self.require_one_slicing_argument && self.slicing_arguments.len() < 1 {
-            return Err(anyhow!("Slicing arguments are required, but none were provided").into());
-        }
-        // TODO: Handle slicing args
-        // TODO: Handle sized fields
-
-        Err(anyhow!("Invalid argument configuration for listSize").into())
     }
 }
