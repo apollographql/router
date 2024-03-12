@@ -79,6 +79,144 @@ async fn test_type_conditions_disabled() {
     insta::assert_json_snapshot!(response);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
+    let harness = setup_no_articles(json! {{
+        "experimental_type_conditioned_fetching": true,
+        // will make debugging easier
+        "plugins": {
+            "experimental.expose_query_plan": true
+        },
+        "include_subgraph_errors": {
+            "all": true
+        }
+    }});
+    let supergraph_service = harness.build_supergraph().await.unwrap();
+    let mut variables = JsonMap::new();
+    variables.insert("movieResultParam", "movieResultEnabled".into());
+    variables.insert("articleResultParam", "articleResultEnabled".into());
+    let request = supergraph::Request::fake_builder()
+        .query(QUERY.to_string())
+        .header("Apollo-Expose-Query-Plan", "true")
+        .variables(variables)
+        .build()
+        .expect("expecting valid request");
+
+    let response = supergraph_service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+
+fn setup_no_articles(configuration: serde_json::Value) -> TestHarness<'static> {
+    let search_service =  MockSubgraph::builder().with_json(json!{{
+        "query":"query Search__searchSubgraph__0{search{__typename ...on MovieResult{sections{__typename ...on EntityCollectionSection{__typename id}...on GallerySection{__typename id}}id}...on ArticleResult{id sections{__typename ...on GallerySection{__typename id}...on EntityCollectionSection{__typename id}}}}}",
+        "operationName":"Search__searchSubgraph__0"
+    }},
+json!{{
+        "data":{
+            "search":[
+                {
+                    "__typename":"MovieResult",
+                    "id":"c5f4985f-8fb6-4414-a3f5-56f7f58dd043",
+                    "sections":[
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                        }
+                    ]
+                },
+                {
+                    "__typename":"MovieResult",
+                    "id":"ff140d35-ce5d-48fe-bad7-1cfb2c3e310a",
+                    "sections":[
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                        },
+                        {
+                            "__typename":"GallerySection",
+                            "id":"2f772201-42ca-4376-9871-2252cc052262"
+                        }
+                    ]
+                }
+            ]
+        }
+    }}).build();
+
+    let artwork_service = MockSubgraph::builder()
+    // Enabled has 1 query: on MovieResult only
+    .with_json(json!{{
+        "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
+        "operationName":"Search__artworkSubgraph__1",
+        "variables":{
+            "movieResultParam":"movieResultEnabled",
+            "representations":[
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                },
+                {
+                    "__typename":"EntityCollectionSection",
+                    "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                },
+                {
+                    "__typename":"GallerySection",
+                    "id":"2f772201-42ca-4376-9871-2252cc052262"
+                }
+            ]
+        }
+    }},
+json!{{
+    "data":{
+        "_entities":[
+            {
+                "title": "d9077ad2-d79a-45b5-b5ee-25ded226f03c title",
+                "artwork":"movieResultEnabled artwork"
+            },
+            {
+                "title": "9f1f1ebb-21d3-4afe-bb7d-6de706f78f02 title",
+                "artwork":"movieResultEnabled artwork"
+            },
+            {
+                "title": "24cea0de-2ac8-4cbe-85b6-8b1b80647c12 title",
+                "artwork":"movieResultEnabled artwork"
+            },
+            {
+                "artwork":"movieResultEnabled artwork"
+            }
+        ]
+    }
+    }}).build();
+
+    let mut mocks = MockedSubgraphs::default();
+    mocks.insert("searchSubgraph", search_service);
+    mocks.insert("artworkSubgraph", artwork_service);
+
+    let schema = include_str!("fixtures/type_conditions.graphql");
+    TestHarness::builder()
+        .try_log_level("info")
+        .configuration_json(configuration)
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(mocks)
+}
+
+
 fn setup(configuration: serde_json::Value) -> TestHarness<'static> {
     let search_service =  MockSubgraph::builder().with_json(json!{{
         "query":"query Search__searchSubgraph__0{search{__typename ...on MovieResult{sections{__typename ...on EntityCollectionSection{__typename id}...on GallerySection{__typename id}}id}...on ArticleResult{id sections{__typename ...on GallerySection{__typename id}...on EntityCollectionSection{__typename id}}}}}",

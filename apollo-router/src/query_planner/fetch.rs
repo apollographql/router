@@ -263,7 +263,6 @@ impl FetchNode {
             }
         };
 
-        // todo: identify _entity requests, if variables is an empty array, the fetch is not necesssary.
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
