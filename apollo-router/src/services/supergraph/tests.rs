@@ -3579,14 +3579,6 @@ const ENUM_SCHEMA: &str = r#"schema
 
 #[tokio::test]
 async fn invalid_input_enum() {
-    /*let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": null }}}}
-            ).build()),
-        ("orga", MockSubgraph::default())
-    ].into_iter().collect());*/
-
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
