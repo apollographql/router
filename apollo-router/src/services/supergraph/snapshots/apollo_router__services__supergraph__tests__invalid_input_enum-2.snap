@@ -8,7 +8,7 @@ expression: response
       "message": "invalid type for variable: 'input'",
       "extensions": {
         "name": "input",
-        "code": "GRAPHQL_VALIDATION_FAILED"
+        "code": "VALIDATION_INVALID_TYPE_VARIABLE"
       }
     }
   ]

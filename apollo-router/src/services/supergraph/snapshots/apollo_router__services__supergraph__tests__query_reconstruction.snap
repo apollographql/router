@@ -8,7 +8,7 @@ expression: stream.next_response().await.unwrap()
       "message": "invalid type for variable: 'userId'",
       "extensions": {
         "name": "userId",
-        "code": "GRAPHQL_VALIDATION_FAILED"
+        "code": "VALIDATION_INVALID_TYPE_VARIABLE"
       }
     }
   ]
