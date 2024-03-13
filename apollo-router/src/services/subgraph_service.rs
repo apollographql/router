@@ -45,6 +45,8 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
+use crate::plugins::subscription::DEFAULT_HEARTBEAT_INTERVAL;
+use crate::plugins::subscription::HeartbeatIntervalWs;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::HeartbeatInterval;
@@ -574,11 +576,18 @@ async fn call_websocket(
         );
     }
 
+    let heartbeat_interval = match subgraph_cfg.heartbeat_interval {
+        HeartbeatIntervalWs::Disabled(_) => None,
+        HeartbeatIntervalWs::Enabled(_) => Some(DEFAULT_HEARTBEAT_INTERVAL),
+        HeartbeatIntervalWs::Duration(duration) => Some(duration),
+    };
+
     let mut gql_stream = GraphqlWebSocket::new(
         convert_websocket_stream(ws_stream, subscription_hash.clone()),
         subscription_hash,
         subgraph_cfg.protocol,
         connection_params,
+        heartbeat_interval,
     )
     .await
     .map_err(|_| FetchError::SubrequestWsError {
@@ -1648,6 +1657,7 @@ mod tests {
                         WebSocketConfiguration {
                             path: Some(String::from("/ws")),
                             protocol: WebSocketProtocol::default(),
+                            heartbeat_interval: HeartbeatIntervalWs::default(),
                         },
                     )]
                     .into(),

@@ -43,6 +43,7 @@ use crate::Endpoint;
 use crate::ListenAddr;
 
 type HmacSha256 = Hmac<sha2::Sha256>;
+pub(crate) const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
 #[cfg(not(test))]
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
@@ -185,7 +186,30 @@ pub(crate) enum Disabled {
 
 impl Default for HeartbeatInterval {
     fn default() -> Self {
-        Self::Duration(Duration::from_secs(5))
+        Self::Duration(DEFAULT_HEARTBEAT_INTERVAL)
+    }
+}
+
+// Differs from HeartbeatInterval since it's disable by default
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub(crate) enum HeartbeatIntervalWs {
+    Disabled(Disabled),
+    Enabled(Enabled),
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "String")]
+    Duration(Duration),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Enabled {
+    Enabled,
+}
+
+impl Default for HeartbeatIntervalWs {
+    fn default() -> Self {
+        Self::Disabled(Disabled::Disabled)
     }
 }
 
@@ -205,6 +229,8 @@ pub(crate) struct WebSocketConfiguration {
     pub(crate) path: Option<String>,
     /// Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)
     pub(crate) protocol: WebSocketProtocol,
+    /// Heartbeat interval for graphql-ws protocol (default: disabled)
+    pub(crate) heartbeat_interval: HeartbeatIntervalWs,
 }
 
 fn default_path() -> String {

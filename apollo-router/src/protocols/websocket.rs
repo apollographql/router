@@ -219,6 +219,7 @@ pub(crate) struct GraphqlWebSocket<S> {
     stream: S,
     id: String,
     protocol: WebSocketProtocol,
+    heartbeat_interval: Option<tokio::time::Interval>,
     // Booleans for state machine when closing the stream
     completed: bool,
     terminated: bool,
@@ -234,6 +235,7 @@ where
         id: String,
         protocol: WebSocketProtocol,
         connection_params: Option<Value>,
+        heartbeat_interval: Option<tokio::time::Duration>,
     ) -> Result<Self, graphql::Error> {
         let connection_init_msg = match connection_params {
             Some(connection_params) => ClientMessage::ConnectionInit {
@@ -285,10 +287,21 @@ where
                 .build());
         }
 
+        let heartbeat_interval = if protocol == WebSocketProtocol::GraphqlWs {
+            heartbeat_interval.map(|duration| {
+                let mut interval = tokio::time::interval(duration);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                interval
+            })
+        } else {
+            None
+        };
+
         Ok(Self {
             stream,
             id,
             protocol,
+            heartbeat_interval,
             completed: false,
             terminated: false,
         })
@@ -313,12 +326,12 @@ where
     stream
         .with(|client_message: ClientMessage| {
             // It applies to the Sink
-            future::ready(match serde_json::to_string(&client_message) {
+            future::ready(match serde_json::to_string(&dbg!(client_message)) {
                 Ok(client_message_str) => Ok(Message::Text(client_message_str)),
                 Err(err) => Err(Error::SerdeError(err)),
             })
         })
-        .map(move |msg| match msg {
+        .map(move |msg| match dbg!(msg) {
             // It applies to the Stream
             Ok(Message::Text(text)) => serde_json::from_str(&text),
             Ok(Message::Binary(bin)) => serde_json::from_slice(&bin),
@@ -372,11 +385,15 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         let mut this = self.as_mut().project();
+        let mut stream = Pin::new(&mut this.stream);
 
-        match Pin::new(&mut this.stream).poll_next(cx) {
+        match stream.as_mut().poll_next(cx) {
             Poll::Ready(message) => match message {
                 Some(server_message) => match server_message {
                     Ok(server_message) => {
+                        if let Some(heartbeat_interval) = this.heartbeat_interval {
+                            heartbeat_interval.reset();
+                        }
                         if let Some(id) = &server_message.id() {
                             if this.id != id {
                                 tracing::error!("we should not receive data from other subscriptions, closing the stream");
@@ -386,8 +403,7 @@ where
                         if let ServerMessage::Ping { .. } = server_message {
                             // Send pong asynchronously
                             let _ = Pin::new(
-                                &mut Pin::new(&mut this.stream)
-                                    .send(ClientMessage::Pong { payload: None }),
+                                &mut stream.as_mut().send(ClientMessage::Pong { payload: None }),
                             )
                             .poll(cx);
                         }
@@ -414,8 +430,29 @@ where
                 },
                 None => Poll::Ready(None),
             },
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                if let Some(heartbeat_interval) = this.heartbeat_interval {
+                    match heartbeat_interval.poll_tick(cx) {
+                        Poll::Ready(_) => send_heartbeat(this.stream, cx),
+                        Poll::Pending => (),
+                    };
+                }
+                Poll::Pending
+            }
         }
+    }
+}
+
+fn send_heartbeat(mut stream: Pin<&mut impl Sink<ClientMessage>>, cx: &mut std::task::Context<'_>) {
+    match stream.as_mut().poll_flush(cx) {
+        Poll::Ready(Ok(_)) => match stream.as_mut().poll_ready(cx) {
+            Poll::Ready(Ok(_)) => {
+                // Ignore error
+                let _ = stream.start_send(ClientMessage::Ping { payload: None });
+            }
+            _ => (),
+        },
+        _ => (),
     }
 }
 
@@ -800,6 +837,7 @@ mod tests {
             Some(serde_json_bytes::json!({
                 "token": "XXX"
             })),
+            None,
         )
         .await
         .unwrap();
@@ -864,6 +902,7 @@ mod tests {
             convert_websocket_stream(ws_stream, sub_uuid.to_string()),
             sub_uuid.to_string(),
             WebSocketProtocol::SubscriptionsTransportWs,
+            None,
             None,
         )
         .await
