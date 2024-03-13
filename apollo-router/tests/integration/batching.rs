@@ -1,64 +1,51 @@
 use apollo_router::graphql::Request;
+use insta::assert_yaml_snapshot;
 use itertools::Itertools;
 use tower::BoxError;
-use wiremock::ResponseTemplate;
+
+const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
+const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
-    const REQUEST_COUNT: usize = 3;
-
-    fn expect_batch(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
-
-        // We should have gotten REQUEST_COUNT elements
-        assert_eq!(requests.len(), REQUEST_COUNT);
-
-        // Each element should have be for entryA and should have a field selection
-        // of index.
-        // Note: The router appends info to the query, so we append it at this check
-        for (index, request) in requests.into_iter().enumerate() {
-            assert_eq!(
-                request.query,
-                Some(format!("query op{index}__a__0{{entryA{{index}}}}"))
-            );
-        }
-
-        ResponseTemplate::new(200).set_body_json(
-            (0..REQUEST_COUNT)
-                .map(|index| {
-                    serde_json::json!({
-                        "data": {
-                            "entryA": {
-                                "index": index
-                            }
-                        }
-                    })
-                })
-                .collect::<Vec<_>>(),
-        )
-    }
+    const REQUEST_COUNT: usize = 5;
 
     let requests: Vec<_> = (0..REQUEST_COUNT)
         .map(|index| {
             Request::fake_builder()
-                .query(format!("query op{index}{{ entryA {{ index }} }}"))
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                ))
                 .build()
         })
         .collect();
-    let responses = helper::run_test(&requests[..], Some(expect_batch), None).await?;
+    let responses = helper::run_test(
+        CONFIG,
+        &requests[..],
+        Some(helper::expect_batch),
+        None::<helper::Handler>,
+    )
+    .await?;
 
     // Make sure that we got back what we wanted
-    for (index, response) in responses.into_iter().enumerate() {
-        assert_eq!(response.errors, Vec::new());
-        assert_eq!(
-            response.data,
-            Some(serde_json_bytes::json!({
-                "entryA": {
-                    "index": index
-                }
-            }))
-        );
-    }
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - data:
+        entryA:
+          index: 1
+    - data:
+        entryA:
+          index: 2
+    - data:
+        entryA:
+          index: 3
+    - data:
+        entryA:
+          index: 4
+    "###);
 
     Ok(())
 }
@@ -67,87 +54,210 @@ async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
 async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 3;
 
-    fn expect_batch(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
-
-        // We should have gotten REQUEST_COUNT elements
-        assert_eq!(requests.len(), REQUEST_COUNT);
-
-        // See which subgraph we're in
-        let subgraph = {
-            let re = regex::Regex::new("entry([AB])").unwrap();
-            let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
-
-            captures[1].to_string()
-        };
-
-        // Each element should have be for entryA and should have a field selection
-        // of index.
-        // Note: The router appends info to the query, so we append it at this check
-        for (index, request) in requests.into_iter().enumerate() {
-            assert_eq!(
-                request.query,
-                Some(format!(
-                    "query op{index}__{}__0{{entry{}{{index}}}}",
-                    subgraph.to_lowercase(),
-                    subgraph
-                ))
-            );
-        }
-
-        ResponseTemplate::new(200).set_body_json(
-            (0..REQUEST_COUNT)
-                .map(|index| {
-                    serde_json::json!({
-                        "data": {
-                            format!("entry{subgraph}"): {
-                                "index": index
-                            }
-                        }
-                    })
-                })
-                .collect::<Vec<_>>(),
-        )
-    }
-
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
-            .query(format!("query op{index}{{ entryA {{ index }} }}"))
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
-            .query(format!("query op{index}{{ entryB {{ index }} }}"))
+            .query(format!(
+                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
             .build()
     });
 
     // Interleave requests so that we can verify that they get properly separated
     let requests: Vec<_> = requests_a.interleave(requests_b).collect();
-
-    let responses = helper::run_test(&requests, Some(expect_batch), Some(expect_batch)).await?;
+    let responses = helper::run_test(
+        CONFIG,
+        &requests,
+        Some(helper::expect_batch),
+        Some(helper::expect_batch),
+    )
+    .await?;
 
     // Make sure that we got back what we wanted
-    for (index, response) in responses.into_iter().enumerate() {
-        // Responses interleaved
-        let subgraph = if index % 2 == 0 { "A" } else { "B" };
-        let index = index / 2;
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - data:
+        entryB:
+          index: 0
+    - data:
+        entryA:
+          index: 1
+    - data:
+        entryB:
+          index: 1
+    - data:
+        entryA:
+          index: 2
+    - data:
+        entryB:
+          index: 2
+    "###);
 
-        assert_eq!(response.errors, Vec::new());
-        assert_eq!(
-            response.data,
-            Some(serde_json_bytes::json!({
-                format!("entry{subgraph}"): {
-                    "index": index
-                }
-            }))
-        );
-    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 4;
+
+    let requests: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                ))
+                .build()
+        })
+        .collect();
+    let responses = helper::run_test(
+        CONFIG,
+        &requests[..],
+        Some(helper::fail_second_batch_request),
+        None::<helper::Handler>,
+    )
+    .await?;
+
+    // Make sure that we got back what we wanted
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - errors:
+        - message: expected error in A
+    - data:
+        entryA:
+          index: 2
+    - data:
+        entryA:
+          index: 3
+    "###);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 3;
+
+    let requests_a = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests_b = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+
+    // Interleave requests so that we can verify that they get properly separated
+    let requests: Vec<_> = requests_a.interleave(requests_b).collect();
+    let responses = helper::run_test(
+        CONFIG,
+        &requests,
+        Some(helper::fail_second_batch_request),
+        Some(helper::fail_second_batch_request),
+    )
+    .await?;
+
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - data:
+        entryB:
+          index: 0
+    - errors:
+        - message: expected error in A
+    - errors:
+        - message: expected error in B
+    - data:
+        entryA:
+          index: 2
+    - data:
+        entryB:
+          index: 2
+    "###);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_handles_short_timeouts() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 2;
+
+    let requests_a = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests_b = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+
+    // Interleave requests so that we can verify that they get properly separated
+    // Have the B subgraph timeout
+    let requests: Vec<_> = requests_a.interleave(requests_b).collect();
+    let responses = helper::run_test(
+        SHORT_TIMEOUTS_CONFIG,
+        &requests,
+        Some(helper::expect_batch),
+        Some(helper::delay_response),
+    )
+    .await?;
+
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - errors:
+        - message: "HTTP fetch failed from 'b': request timed out"
+          path: []
+          extensions:
+            code: SUBREQUEST_HTTP_ERROR
+            service: b
+            reason: request timed out
+    - data:
+        entryA:
+          index: 1
+    - errors:
+        - message: "HTTP fetch failed from 'b': request timed out"
+          path: []
+          extensions:
+            code: SUBREQUEST_HTTP_ERROR
+            service: b
+            reason: request timed out
+    "###);
 
     Ok(())
 }
 
 /// Utility methods for these tests
 mod helper {
+    use std::time::Duration;
+
     use apollo_router::graphql::Request;
     use apollo_router::graphql::Response;
     use tower::BoxError;
@@ -158,7 +268,8 @@ mod helper {
 
     use crate::integration::common::IntegrationTest;
 
-    const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
+    /// Helper type for specifying a valid handler
+    pub type Handler = fn(&wiremock::Request) -> ResponseTemplate;
 
     /// Helper method for creating a wiremock handler from a handler
     ///
@@ -182,10 +293,11 @@ mod helper {
     }
 
     /// Set up the integration test stack
-    pub async fn run_test<F: Respond + 'static>(
+    pub async fn run_test<A: Respond + 'static, B: Respond + 'static>(
+        config: &'static str,
         requests: &[Request],
-        handler_a: Option<F>,
-        handler_b: Option<F>,
+        handler_a: Option<A>,
+        handler_b: Option<B>,
     ) -> Result<Vec<Response>, BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
@@ -197,16 +309,17 @@ mod helper {
         };
 
         // Create a wiremock server for each handler
-        let mock_server = MockServer::start().await;
-        mock_server.register(make_handler!("/a", handler_a)).await;
-        mock_server.register(make_handler!("/b", handler_b)).await;
+        let mock_server_a = MockServer::start().await;
+        let mock_server_b = MockServer::start().await;
+        mock_server_a.register(make_handler!("/a", handler_a)).await;
+        mock_server_b.register(make_handler!("/b", handler_b)).await;
 
         // Start up the router with the mocked subgraphs
         let mut router = IntegrationTest::builder()
-            .config(CONFIG)
+            .config(config)
             .supergraph("tests/fixtures/batching/schema.graphql")
-            .subgraph_override("a", format!("{}/a", mock_server.uri()))
-            .subgraph_override("b", format!("{}/b", mock_server.uri()))
+            .subgraph_override("a", format!("{}/a", mock_server_a.uri()))
+            .subgraph_override("b", format!("{}/b", mock_server_b.uri()))
             .build()
             .await;
 
@@ -218,6 +331,122 @@ mod helper {
         let (_span, response) = router.execute_query(&request).await;
 
         serde_json::from_slice::<Vec<Response>>(&response.bytes().await?).map_err(BoxError::from)
+    }
+
+    /// Subgraph handler for receiving a batch of requests
+    pub fn expect_batch(request: &wiremock::Request) -> ResponseTemplate {
+        let requests: Vec<Request> = request.body_json().unwrap();
+
+        // Extract info about this operation
+        let (subgraph, count): (String, usize) = {
+            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
+
+            (captures[1].to_string(), captures[2].parse().unwrap())
+        };
+
+        // We should have gotten `count` elements
+        assert_eq!(requests.len(), count);
+
+        // Each element should have be for the specified subgraph and should have a field selection
+        // of index.
+        // Note: The router appends info to the query, so we append it at this check
+        for (index, request) in requests.into_iter().enumerate() {
+            assert_eq!(
+                request.query,
+                Some(format!(
+                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    subgraph.to_lowercase(),
+                    subgraph
+                ))
+            );
+        }
+
+        ResponseTemplate::new(200).set_body_json(
+            (0..count)
+                .map(|index| {
+                    serde_json::json!({
+                        "data": {
+                            format!("entry{subgraph}"): {
+                                "index": index
+                            }
+                        }
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// Handler that always returns an error for the second batch field
+    pub fn fail_second_batch_request(request: &wiremock::Request) -> ResponseTemplate {
+        let requests: Vec<Request> = request.body_json().unwrap();
+
+        // Extract info about this operation
+        let (subgraph, count): (String, usize) = {
+            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
+
+            (captures[1].to_string(), captures[2].parse().unwrap())
+        };
+
+        // We should have gotten `count` elements
+        assert_eq!(requests.len(), count);
+
+        // Create the response with the second element as an error
+        let responses = {
+            let mut rs: Vec<_> = (0..count)
+                .map(|index| {
+                    serde_json::json!({
+                        "data": {
+                            format!("entry{subgraph}"): {
+                                "index": index
+                            }
+                        }
+                    })
+                })
+                .collect();
+
+            rs[1] = serde_json::json!({ "errors": [{ "message": format!("expected error in {subgraph}") }] });
+            rs
+        };
+
+        // Respond with an error on the second element but valid data for the rest
+        ResponseTemplate::new(200).set_body_json(responses)
+    }
+
+    /// Subgraph handler that delays the response
+    ///
+    /// Useful for testing timeouts at the batch level
+    pub fn delay_response(request: &wiremock::Request) -> ResponseTemplate {
+        let requests: Vec<Request> = request.body_json().unwrap();
+
+        // Extract info about this operation
+        let (subgraph, count): (String, usize) = {
+            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
+
+            (captures[1].to_string(), captures[2].parse().unwrap())
+        };
+
+        // We should have gotten `count` elements
+        assert_eq!(requests.len(), count);
+
+        // Respond as normal but with a long delay
+        ResponseTemplate::new(200)
+            .set_body_json(
+                (0..count)
+                    .map(|index| {
+                        serde_json::json!({
+                            "data": {
+                                format!("entry{subgraph}"): {
+                                    "index": index
+                                }
+                            }
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .set_delay(Duration::from_secs(10))
     }
 
     /// Subgraph handler that always fails

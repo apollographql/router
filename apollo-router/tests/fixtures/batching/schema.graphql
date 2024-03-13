@@ -51,6 +51,6 @@ type Query
   @join__type(graph: A)
   @join__type(graph: B)
 {
-  entryA: Structure @join__field(graph: A)
-  entryB: Structure @join__field(graph: B)
+  entryA(count: Int): Structure @join__field(graph: A)
+  entryB(count: Int): Structure @join__field(graph: B)
 }
