@@ -1973,8 +1973,7 @@ expression: "&schema"
           "description": "Subgraph URL mappings",
           "type": "object",
           "additionalProperties": {
-            "type": "string",
-            "format": "uri"
+            "type": "string"
           }
         }
       ]
