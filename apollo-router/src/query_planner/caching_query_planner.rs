@@ -374,7 +374,7 @@ where
                                 context
                                     .extensions()
                                     .lock()
-                                    .insert(Arc::new(plan.usage_reporting.clone()));
+                                    .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                             }
                             Ok(QueryPlannerResponse {
                                 content,
@@ -412,7 +412,7 @@ where
                         context
                             .extensions()
                             .lock()
-                            .insert(Arc::new(plan.usage_reporting.clone()));
+                            .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                     }
 
                     Ok(QueryPlannerResponse::builder()
@@ -427,14 +427,16 @@ where
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(Arc::new(pe.usage_reporting.clone()));
+                                .insert::<Arc<UsageReporting>>(Arc::new(
+                                    pe.usage_reporting.clone(),
+                                ));
                         }
                         QueryPlannerError::SpecError(e) => {
                             request
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(Arc::new(UsageReporting {
+                                .insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
                                     stats_report_key: e.get_error_key().to_string(),
                                     referenced_fields_by_type: HashMap::new(),
                                 }));
