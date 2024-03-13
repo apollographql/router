@@ -24,6 +24,7 @@ use tower::BoxError;
 use tracing_futures::Instrument;
 use url::Url;
 
+use super::Header;
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
 
@@ -40,6 +41,7 @@ pub(super) struct JwksConfig {
     pub(super) issuer: Option<String>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
     pub(super) poll_interval: Duration,
+    pub(super) headers: Vec<Header>,
 }
 
 #[derive(Clone)]
@@ -56,9 +58,9 @@ impl JwksManager {
         let downloads = list
             .iter()
             .cloned()
-            .map(|JwksConfig { url, .. }| {
+            .map(|JwksConfig { url, headers, .. }| {
                 let span = tracing::info_span!("fetch jwks", url = %url);
-                get_jwks(url.clone())
+                get_jwks(url.clone(), headers.clone())
                     .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
                     .instrument(span)
             })
@@ -110,7 +112,7 @@ async fn poll(
             repeat((config, jwks_map)).then(|(config, jwks_map)| async move {
                 tokio::time::sleep(config.poll_interval).await;
 
-                if let Some(jwks) = get_jwks(config.url.clone()).await {
+                if let Some(jwks) = get_jwks(config.url.clone(), config.headers.clone()).await {
                     if let Ok(mut map) = jwks_map.write() {
                         map.insert(config.url, jwks);
                     }
@@ -140,7 +142,7 @@ async fn poll(
 // This function is expected to return an Optional value, but we'd like to let
 // users know the various failure conditions. Hence the various clumsy map_err()
 // scattered through the processing.
-pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
+pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
     let data = if url.scheme() == "file" {
         let path = url
             .to_file_path()
@@ -166,10 +168,16 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
             .ok()?
             .clone();
 
-        my_client
+        let mut builder = my_client
             .get(url)
             .header(ACCEPT, APPLICATION_JSON.essence_str())
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+
+        for header in headers.into_iter() {
+            builder = builder.header(header.name, header.value);
+        }
+
+        builder
             .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
             .send()
             .await
