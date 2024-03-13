@@ -19,6 +19,7 @@ use hyper::service::make_service_fn;
 use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::TlsAcceptor;
+#[cfg(unix)]
 use hyperlocal::UnixServerExt;
 use mime::APPLICATION_JSON;
 use rustls::server::AllowAnyAuthenticatedClient;
