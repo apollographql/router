@@ -640,7 +640,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                             context
                                 .extensions()
                                 .lock()
-                                .insert(pe.usage_reporting.clone());
+                                .insert(Arc::new(pe.usage_reporting.clone()));
                         }
                         QueryPlannerError::SpecError(e) => {
                             context.extensions().lock().insert(Arc::new(UsageReporting {
