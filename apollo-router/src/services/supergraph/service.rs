@@ -394,7 +394,7 @@ async fn subscription_task(
     let operation_signature = context
         .extensions()
         .lock()
-        .get::<UsageReporting>()
+        .get::<Arc<UsageReporting>>()
         .map(|usage_reporting| usage_reporting.stats_report_key.clone())
         .unwrap_or_default();
 
@@ -704,7 +704,7 @@ impl PluggableSupergraphServiceBuilder {
             &configuration,
             IndexMap::new(),
         )
-        .await;
+        .await?;
 
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.

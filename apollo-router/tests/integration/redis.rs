@@ -6,6 +6,7 @@ mod test {
     use apollo_router::services::supergraph;
     use apollo_router::Context;
     use apollo_router::MockedSubgraphs;
+    use fred::cmd;
     use fred::prelude::*;
     use futures::StreamExt;
     use http::Method;
@@ -42,7 +43,8 @@ mod test {
                                 "limit": 2
                             },
                             "redis": {
-                                "urls": ["redis://127.0.0.1:6379"]
+                                "urls": ["redis://127.0.0.1:6379"],
+                                "ttl": "10s"
                             }
                         }
                     }
@@ -60,6 +62,12 @@ mod test {
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
         let s: String = client.get(known_cache_key).await.unwrap();
+        let exp: i64 = client
+            .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
+            .await
+            .and_then(|frame| frame.try_into())
+            .and_then(|value: RedisValue| value.convert())
+            .unwrap();
         let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
         // ignore the usage reporting field for which the order of elements in `referenced_fields_by_type` can change
         let query_plan = query_plan_res
@@ -74,6 +82,44 @@ mod test {
             .get("root");
 
         insta::assert_json_snapshot!(query_plan);
+
+        // test expiration refresh
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let supergraph = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                "urls": ["redis://127.0.0.1:6379"],
+                                "ttl": "10s"
+                            }
+                        }
+                    }
+                }
+            }))?
+            .schema(include_str!("../fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await?;
+
+        let request = supergraph::Request::fake_builder()
+            .query(r#"{ topProducts { name name2:name } }"#)
+            .method(Method::POST)
+            .build()?;
+        let _ = supergraph.oneshot(request).await?.next_response().await;
+        let new_exp: i64 = client
+            .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
+            .await
+            .and_then(|frame| frame.try_into())
+            .and_then(|value: RedisValue| value.convert())
+            .unwrap();
+
+        assert!(exp < new_exp);
+
         client.quit().await?;
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
@@ -101,7 +147,8 @@ mod test {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"]
+                            "urls": ["redis://127.0.0.1:6379"],
+                            "ttl": "10s"
                         }
                     }
                 }
@@ -145,7 +192,10 @@ mod test {
             .next()
             .await
             .unwrap()?;
-        assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
+        assert_eq!(
+            res.errors.first().unwrap().message,
+            "PersistedQueryNotFound"
+        );
 
         let r: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
         assert!(r.is_none());
@@ -740,5 +790,59 @@ mod test {
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connection_failure_blocks_startup() {
+        let _ = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                // invalid port
+                                "urls": ["redis://127.0.0.1:6378"]
+                            }
+                        }
+                    }
+                }
+            }))
+            .unwrap()
+            .schema(include_str!("../fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let e = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                // invalid port
+                                "urls": ["redis://127.0.0.1:6378"],
+                                "required_to_start": true
+                            }
+                        }
+                    }
+                }
+            }))
+            .unwrap()
+            .schema(include_str!("../fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
+        );
     }
 }

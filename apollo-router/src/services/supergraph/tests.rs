@@ -1312,7 +1312,7 @@ async fn root_typename_with_defer_in_defer() {
     let res = stream.next_response().await.unwrap();
     assert_eq!(
         res.incremental
-            .get(0)
+            .first()
             .unwrap()
             .data
             .as_ref()

@@ -460,7 +460,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Router Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
+        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
 Please try composing your subgraphs with federation 2: this should help precisely pinpoint the problems and, once fixed, generate a correct federation 2 supergraph.
 
 Details:
@@ -822,7 +822,7 @@ mod test {
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
             &config.apollo.schema_id,
-            "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909"
+            "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318"
         );
     }
 }

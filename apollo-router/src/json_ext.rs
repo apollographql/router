@@ -452,7 +452,7 @@ fn iterate_path<'a, F>(
 ) where
     F: FnMut(&Path, &'a Value),
 {
-    match path.get(0) {
+    match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten) => {
             if let Some(array) = data.as_array() {
@@ -516,7 +516,7 @@ fn iterate_path_mut<'a, F>(
 ) where
     F: FnMut(&Path, &'a mut Value),
 {
-    match path.get(0) {
+    match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten) => {
             if let Some(array) = data.as_array_mut() {

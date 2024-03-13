@@ -13,6 +13,7 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
+use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -72,24 +73,24 @@ where
         schema: Arc<Schema>,
         configuration: &Configuration,
         plugins: Plugins,
-    ) -> CachingQueryPlanner<T> {
+    ) -> Result<CachingQueryPlanner<T>, BoxError> {
         let cache = Arc::new(
             DeduplicatingCache::from_configuration(
                 &configuration.supergraph.query_planning.cache,
                 "query planner",
             )
-            .await,
+            .await?,
         );
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
-        Self {
+        Ok(Self {
             cache,
             delegate,
             schema,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
-        }
+        })
     }
 
     pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
@@ -261,7 +262,9 @@ where
         Box::pin(async move {
             let context = request.context.clone();
             qp.plan(request).await.map(|response| {
-                if let Some(usage_reporting) = context.extensions().lock().get::<UsageReporting>() {
+                if let Some(usage_reporting) =
+                    context.extensions().lock().get::<Arc<UsageReporting>>()
+                {
                     let _ = response.context.insert(
                         "apollo_operation_id",
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
@@ -371,7 +374,7 @@ where
                                 context
                                     .extensions()
                                     .lock()
-                                    .insert(plan.usage_reporting.clone());
+                                    .insert(Arc::new(plan.usage_reporting.clone()));
                             }
                             Ok(QueryPlannerResponse {
                                 content,
@@ -409,7 +412,7 @@ where
                         context
                             .extensions()
                             .lock()
-                            .insert(plan.usage_reporting.clone());
+                            .insert(Arc::new(plan.usage_reporting.clone()));
                     }
 
                     Ok(QueryPlannerResponse::builder()
@@ -424,13 +427,17 @@ where
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(pe.usage_reporting.clone());
+                                .insert(Arc::new(pe.usage_reporting.clone()));
                         }
                         QueryPlannerError::SpecError(e) => {
-                            request.context.extensions().lock().insert(UsageReporting {
-                                stats_report_key: e.get_error_key().to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            });
+                            request
+                                .context
+                                .extensions()
+                                .lock()
+                                .insert(Arc::new(UsageReporting {
+                                    stats_report_key: e.get_error_key().to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                }));
                         }
                         _ => {}
                     }
@@ -567,7 +574,9 @@ mod tests {
         let schema = Arc::new(Schema::parse(include_str!("testdata/schema.graphql")).unwrap());
 
         let mut planner =
-            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new()).await;
+            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new())
+                .await
+                .unwrap();
 
         let configuration = Configuration::default();
 
@@ -627,7 +636,8 @@ mod tests {
                     usage_reporting: UsageReporting {
                         stats_report_key: "this is a test report key".to_string(),
                         referenced_fields_by_type: Default::default(),
-                    },
+                    }
+                    .into(),
                     query: Arc::new(Query::empty()),
                 };
                 let qp_content = QueryPlannerContent::Plan {
@@ -651,7 +661,8 @@ mod tests {
 
         let mut planner =
             CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
-                .await;
+                .await
+                .unwrap();
 
         let context = Context::new();
         context.extensions().lock().insert::<ParsedDocument>(doc);
@@ -668,7 +679,7 @@ mod tests {
                 .context
                 .extensions()
                 .lock()
-                .contains_key::<UsageReporting>());
+                .contains_key::<Arc<UsageReporting>>());
         }
     }
 
