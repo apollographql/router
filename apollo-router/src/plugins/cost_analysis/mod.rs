@@ -67,7 +67,7 @@ impl Plugin for CostAnalysis {
 
                     match analyzer.estimate(&query_doc) {
                         Ok(_) => Ok(ControlFlow::Continue(req)),
-                        Err(error) => {
+                        Err(_error) => {
                             let res = Response::infallible_builder()
                                 // TODO .error(error)
                                 .status_code(StatusCode::BAD_REQUEST)

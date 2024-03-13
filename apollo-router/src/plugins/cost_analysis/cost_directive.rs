@@ -12,22 +12,23 @@ impl CostDirective {
         Self { weight }
     }
 
-    pub(crate) fn from_field(field: &ast::FieldDefinition) -> Result<Option<Self>, BoxError> {
-        let weight = field.directives.get("cost")
+    pub(crate) fn from_directives(
+        directives: &ast::DirectiveList,
+    ) -> Result<Option<Self>, BoxError> {
+        let weight = directives
+            .get("cost")
             .and_then(|cost| cost.argument_by_name("weight"))
             .map(|arg| arg.as_ref());
 
         match weight {
-            Some(executable::Value::Float(f)) => {
-                f.try_to_f64()
-                    .map(|weight| Some(CostDirective::new(weight)))
-                    .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into())
-            }
-            Some(executable::Value::Int(i)) => {
-                i.try_to_f64()
-                    .map(|weight| Some(CostDirective::new(weight)))
-                    .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into())
-            }
+            Some(executable::Value::Float(f)) => f
+                .try_to_f64()
+                .map(|weight| Some(CostDirective::new(weight)))
+                .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into()),
+            Some(executable::Value::Int(i)) => i
+                .try_to_f64()
+                .map(|weight| Some(CostDirective::new(weight)))
+                .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into()),
             Some(executable::Value::String(s)) => {
                 // This is the expected branch, since the spec defines weight as a String.
                 // The spec mentions the String could be either a serialized float, as
@@ -38,7 +39,7 @@ impl CostDirective {
                     .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into())
             }
             Some(_) => Err(anyhow!("Argument weight must be a valid float").into()),
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 

@@ -28,46 +28,25 @@ impl<'a> CostAnalyzer<'a> {
         Ok(self.cost)
     }
 
-    fn traverse_list_field(
-        &mut self,
-        field_def: &ast::FieldDefinition,
-        field: &ast::Field,
-    ) -> Result<(), BoxError> {
-        let directive = ListSizeDirective::from_field(field_def)?;
-        let max_size = directive.max_list_size()?;
-
-        let mut subtree_analyzer = CostAnalyzer::new(self.supergraph_schema);
-        traverse::field(&mut subtree_analyzer, field_def, field)?;
-
-        self.cost += max_size * subtree_analyzer.cost;
-
-        Ok(())
-    }
-
-    fn traverse_individual_field(
-        &mut self,
-        field_def: &ast::FieldDefinition,
-        field: &ast::Field,
-    ) -> Result<(), BoxError> {
+    fn get_type_cost(
+        &self,
+        ty: &ast::Type,
+        directives: &ast::DirectiveList,
+    ) -> Result<f64, BoxError> {
         let ty = self
             .supergraph_schema
             .types
-            .get(field_def.ty.inner_named_type())
-            .ok_or(anyhow!("Field definition not recognized in schema"))?;
-        let default_cost = if ty.is_interface() || ty.is_object() {
-            1.0
-        } else {
-            0.0
-        };
+            .get(ty.inner_named_type())
+            .ok_or(anyhow!("Type not recognized in schema: {:?}", ty))?;
 
-        let directive = CostDirective::from_field(field_def)?;
+        let directive = CostDirective::from_directives(directives)?;
         if let Some(cost) = directive {
-            self.cost += cost.weight();
+            Ok(cost.weight())
+        } else if ty.is_interface() || ty.is_object() {
+            Ok(1.0)
         } else {
-            self.cost += default_cost;
+            Ok(0.0)
         }
-
-        traverse::field(self, field_def, field)
     }
 }
 
@@ -76,45 +55,32 @@ impl<'a> traverse::Visitor for CostAnalyzer<'a> {
         self.supergraph_schema
     }
 
-    fn operation(
-        &mut self,
-        root_type: &str,
-        def: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
-        match def.operation_type {
-            ast::OperationType::Mutation => {
-                self.cost += 10.0;
-            }
-            ast::OperationType::Query => {
-                self.cost += 1.0;
-            }
-            ast::OperationType::Subscription => {
-                // no-op
-            }
-        }
-
-        traverse::operation(self, root_type, def)
-    }
-
     fn field(
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
         field: &ast::Field,
     ) -> Result<(), BoxError> {
-        let cost_directive = CostDirective::from_field(field_def)?;
-        if let Some(cost_directive) = cost_directive {
-            self.cost += cost_directive.weight();
-            return Ok(());
+        self.cost += self.get_type_cost(&field_def.ty, &field_def.directives)?;
+
+        for arg in field.arguments.iter() {
+            if let Some(arg_def) = field_def.argument_by_name(&arg.name) {
+                self.cost += self.get_type_cost(&arg_def.ty, &arg_def.directives)?;
+            }
         }
 
-        if field_def.ty.is_list() {
-            self.traverse_list_field(field_def, field)?;
+        if !field_def.ty.is_list() {
+            traverse::field(self, field_def, field)
         } else {
-            self.traverse_individual_field(field_def, field)?;
-        }
+            let directive = ListSizeDirective::from_directives(&field_def.directives)?;
 
-        Ok(())
+            let mut subtree_analyzer = CostAnalyzer::new(self.supergraph_schema);
+            traverse::field(&mut subtree_analyzer, field_def, field)?;
+
+            self.cost += directive.max_list_size() * subtree_analyzer.cost;
+
+            Ok(())
+        }
     }
 }
 
@@ -142,7 +108,7 @@ mod tests {
         let mut analyzer = CostAnalyzer::new(&schema);
         let cost = analyzer.estimate(&query).unwrap();
 
-        assert_eq!(cost, 1.0)
+        assert_eq!(cost, 0.0)
     }
 
     #[test]
@@ -168,7 +134,7 @@ mod tests {
         let mut analyzer = CostAnalyzer::new(&schema);
         let cost = analyzer.estimate(&query).unwrap();
 
-        assert_eq!(cost, 10.0)
+        assert_eq!(cost, 0.0)
     }
 
     #[test]
@@ -194,12 +160,11 @@ mod tests {
         let mut analyzer = CostAnalyzer::new(&schema);
         let cost = analyzer.estimate(&query).unwrap();
 
-        assert_eq!(cost, 26.0)
+        assert_eq!(cost, 25.0)
     }
 
     #[test]
     fn custom_cost_inside_list() {
-        // https://ibm.github.io/graphql-specs/cost-spec.html#example-c3975
         let schema_str = r#"
             directive @cost(weight: String!) on 
                 | ARGUMENT_DEFINITION
@@ -239,7 +204,7 @@ mod tests {
         let mut analyzer = CostAnalyzer::new(&schema);
         let cost = analyzer.estimate(&query).unwrap();
 
-        assert_eq!(analyzer.cost, 11.0)
+        assert_eq!(cost, 11.0)
     }
 
     #[ignore = "slicingArguments is not yet implemented"]
@@ -317,18 +282,27 @@ mod tests {
             }
         "#;
         // https://ibm.github.io/graphql-specs/cost-spec.html#example-e5fe6
-        let query_str = "
-            query Example {
+        let light_query_str = "
+            query LightQuery {
                 topProducts
             }
         ";
+        let heavy_query_str = r#"
+            query HeavyQuery {
+                topProducts(filter: { f: "a filter" })
+            }
+        "#;
 
         let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").unwrap();
-        let query = ast::Document::parse(query_str, "").unwrap();
+        let light_query = ast::Document::parse(light_query_str, "").unwrap();
+        let heavy_query = ast::Document::parse(heavy_query_str, "").unwrap();
 
         let mut analyzer = CostAnalyzer::new(&schema);
-        let cost = analyzer.estimate(&query).unwrap();
 
-        assert_eq!(cost, 6.0)
+        let light_cost = analyzer.estimate(&light_query).unwrap();
+        assert_eq!(light_cost, 5.0);
+
+        let heavy_cost = analyzer.estimate(&heavy_query).unwrap();
+        assert_eq!(heavy_cost, 20.0);
     }
 }
