@@ -3,11 +3,11 @@ mod cost_directive;
 mod list_size_directive;
 
 use std::ops::ControlFlow;
-use std::path::PathBuf;
 
 use apollo_compiler::ast::Document;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use futures::StreamExt;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -16,13 +16,13 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
-use crate::services::execution::BoxService;
-use crate::services::execution::Request;
-use crate::services::execution::Response;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::cost_analysis::cost_analyzer::CostAnalyzer;
 use crate::register_plugin;
+use crate::services::execution::BoxService;
+use crate::services::execution::Request;
+use crate::services::execution::Response;
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -43,13 +43,14 @@ impl Plugin for CostAnalysis {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let supergraph_schema = apollo_compiler::Schema::parse_and_validate(
-            init.supergraph_sdl.to_string(),
-            PathBuf::from("synthetic"),
-        )
-        .expect("failed to parse supergraph schema");
-        
-        Ok(CostAnalysis { config: init.config, supergraph_schema })
+        let supergraph_schema =
+            apollo_compiler::Schema::parse_and_validate(init.supergraph_sdl.to_string(), "")
+                .expect("failed to parse supergraph schema");
+
+        Ok(CostAnalysis {
+            config: init.config,
+            supergraph_schema,
+        })
     }
 
     fn execution_service(&self, service: BoxService) -> BoxService {
@@ -60,11 +61,11 @@ impl Plugin for CostAnalysis {
 
             ServiceBuilder::new()
                 .checkpoint(move |req: Request| {
-                    let query_doc = Document::parse(req.query_plan.query.string.clone(), PathBuf::from("synthetic"))
+                    let query_doc = Document::parse(req.query_plan.query.string.clone(), "")
                         .expect("query string could not be parsed");
-                    let mut analyzer = CostAnalyzer::new(&supergraph_schema, &query_doc);
+                    let mut analyzer = CostAnalyzer::new(&supergraph_schema);
 
-                    match analyzer.get_cost() {
+                    match analyzer.estimate(&query_doc) {
                         Ok(_) => Ok(ControlFlow::Continue(req)),
                         Err(error) => {
                             let res = Response::infallible_builder()
@@ -75,6 +76,10 @@ impl Plugin for CostAnalysis {
                             Ok(ControlFlow::Break(res))
                         }
                     }
+                })
+                .map_response(|res: Response| {
+                    // TODO: Dynamic cost analysis
+                    res.map(|gql_stream| gql_stream.map(|gql_res| gql_res).boxed())
                 })
                 .service(service)
                 .boxed()

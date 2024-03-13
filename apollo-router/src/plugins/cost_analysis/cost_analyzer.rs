@@ -1,6 +1,6 @@
+use anyhow::anyhow;
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::schema;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
@@ -11,43 +11,63 @@ use crate::spec::query::traverse;
 
 pub(crate) struct CostAnalyzer<'a> {
     supergraph_schema: &'a Valid<Schema>,
-    query: &'a ast::Document,
     cost: f64,
 }
 
 impl<'a> CostAnalyzer<'a> {
-    pub(crate) fn new(supergraph_schema: &'a Valid<Schema>, query: &'a ast::Document) -> Self {
-        Self { supergraph_schema, query, cost: 0.0 }
+    pub(crate) fn new(supergraph_schema: &'a Valid<Schema>) -> Self {
+        Self {
+            supergraph_schema,
+            cost: 0.0,
+        }
     }
 
-    pub(crate) fn get_cost(&mut self) -> Result<(), BoxError> {
-        traverse::document(self, self.query)
+    pub(crate) fn estimate(&mut self, query: &ast::Document) -> Result<f64, BoxError> {
+        self.cost = 0.0;
+        traverse::document(self, query)?;
+        Ok(self.cost)
     }
 
-    fn record_list_cost(&mut self, field: &ast::FieldDefinition) -> Result<(), BoxError> {
-        let directive = ListSizeDirective::from_field(field)?;
+    fn traverse_list_field(
+        &mut self,
+        field_def: &ast::FieldDefinition,
+        field: &ast::Field,
+    ) -> Result<(), BoxError> {
+        let directive = ListSizeDirective::from_field(field_def)?;
         let max_size = directive.max_list_size()?;
 
-        self.cost += max_size;
+        let mut subtree_analyzer = CostAnalyzer::new(self.supergraph_schema);
+        traverse::field(&mut subtree_analyzer, field_def, field)?;
+
+        self.cost += max_size * subtree_analyzer.cost;
 
         Ok(())
     }
 
-    fn record_individual_field_cost(&mut self, field: &ast::FieldDefinition, ty: &schema::ExtendedType) -> Result<(), BoxError> {
+    fn traverse_individual_field(
+        &mut self,
+        field_def: &ast::FieldDefinition,
+        field: &ast::Field,
+    ) -> Result<(), BoxError> {
+        let ty = self
+            .supergraph_schema
+            .types
+            .get(field_def.ty.inner_named_type())
+            .ok_or(anyhow!("Field definition not recognized in schema"))?;
         let default_cost = if ty.is_interface() || ty.is_object() {
             1.0
         } else {
             0.0
         };
 
-        let directive = CostDirective::from_field(field)?;
+        let directive = CostDirective::from_field(field_def)?;
         if let Some(cost) = directive {
             self.cost += cost.weight();
         } else {
             self.cost += default_cost;
         }
 
-        Ok(())
+        traverse::field(self, field_def, field)
     }
 }
 
@@ -64,10 +84,10 @@ impl<'a> traverse::Visitor for CostAnalyzer<'a> {
         match def.operation_type {
             ast::OperationType::Mutation => {
                 self.cost += 10.0;
-            },
+            }
             ast::OperationType::Query => {
                 self.cost += 1.0;
-            },
+            }
             ast::OperationType::Subscription => {
                 // no-op
             }
@@ -80,19 +100,21 @@ impl<'a> traverse::Visitor for CostAnalyzer<'a> {
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
-        def: &ast::Field,
+        field: &ast::Field,
     ) -> Result<(), BoxError> {
-        if let Ok(Some(cost_directive)) = CostDirective::from_field(field_def) {
+        let cost_directive = CostDirective::from_field(field_def)?;
+        if let Some(cost_directive) = cost_directive {
             self.cost += cost_directive.weight();
-        } else if let Some(ty) = self.supergraph_schema.types.get(field_def.ty.inner_named_type()) {
-            if field_def.ty.is_list() {
-                self.record_list_cost(field_def)?;
-            } else {
-                self.record_individual_field_cost(field_def, ty)?;
-            }
+            return Ok(());
         }
 
-        traverse::field(self, field_def, def)
+        if field_def.ty.is_list() {
+            self.traverse_list_field(field_def, field)?;
+        } else {
+            self.traverse_individual_field(field_def, field)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -116,10 +138,11 @@ mod tests {
 
         let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ast::Document::parse(query_str, "").unwrap();
-        let mut analyzer = CostAnalyzer::new(&schema, &query);
 
-        traverse::document(&mut analyzer, &query).unwrap();
-        assert_eq!(analyzer.cost, 1.0)
+        let mut analyzer = CostAnalyzer::new(&schema);
+        let cost = analyzer.estimate(&query).unwrap();
+
+        assert_eq!(cost, 1.0)
     }
 
     #[test]
@@ -141,10 +164,11 @@ mod tests {
 
         let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ast::Document::parse(query_str, "").unwrap();
-        let mut analyzer = CostAnalyzer::new(&schema, &query);
 
-        traverse::document(&mut analyzer, &query).unwrap();
-        assert_eq!(analyzer.cost, 10.0)
+        let mut analyzer = CostAnalyzer::new(&schema);
+        let cost = analyzer.estimate(&query).unwrap();
+
+        assert_eq!(cost, 10.0)
     }
 
     #[test]
@@ -166,15 +190,25 @@ mod tests {
 
         let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ast::Document::parse(query_str, "").unwrap();
-        let mut analyzer = CostAnalyzer::new(&schema, &query);
 
-        traverse::document(&mut analyzer, &query).unwrap();
-        assert_eq!(analyzer.cost, 26.0)
+        let mut analyzer = CostAnalyzer::new(&schema);
+        let cost = analyzer.estimate(&query).unwrap();
+
+        assert_eq!(cost, 26.0)
     }
 
     #[test]
-    fn list_query_cost() {
-        let schema_str = "
+    fn custom_cost_inside_list() {
+        // https://ibm.github.io/graphql-specs/cost-spec.html#example-c3975
+        let schema_str = r#"
+            directive @cost(weight: String!) on 
+                | ARGUMENT_DEFINITION
+                | ENUM
+                | FIELD_DEFINITION
+                | INPUT_FIELD_DEFINITION
+                | OBJECT
+                | SCALAR
+
             directive @listSize(
                 assumedSize: Int,
                 slicingArguments: [String!],
@@ -182,23 +216,29 @@ mod tests {
                 requireOneSlicingArgument: Boolean = true
                 ) on FIELD_DEFINITION
 
-            type Query {
-                a: Int
-                b: [Int] @listSize(assumedSize: 10)
+            type User {
+                name: String
+                age: Int @cost(weight: "2.0")
             }
-        ";
+
+            type Query {
+                users: [User] @listSize(assumedSize: 5)
+            }
+        "#;
         let query_str = "
-            {
-                a
-                b
+            query Example {
+                users {
+                    age
+                }
             }
         ";
 
         let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ast::Document::parse(query_str, "").unwrap();
-        let mut analyzer = CostAnalyzer::new(&schema, &query);
 
-        traverse::document(&mut analyzer, &query).unwrap();
+        let mut analyzer = CostAnalyzer::new(&schema);
+        let cost = analyzer.estimate(&query).unwrap();
+
         assert_eq!(analyzer.cost, 11.0)
     }
 
@@ -242,10 +282,11 @@ mod tests {
 
         let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ast::Document::parse(query_str, "").unwrap();
-        let mut analyzer = CostAnalyzer::new(&schema, &query);
 
-        traverse::document(&mut analyzer, &query).unwrap();
-        assert_eq!(analyzer.cost, 11.0)
+        let mut analyzer = CostAnalyzer::new(&schema);
+        let cost = analyzer.estimate(&query).unwrap();
+
+        assert_eq!(cost, 11.0)
     }
 
     #[test]
@@ -284,9 +325,10 @@ mod tests {
 
         let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ast::Document::parse(query_str, "").unwrap();
-        let mut analyzer = CostAnalyzer::new(&schema, &query);
 
-        traverse::document(&mut analyzer, &query).unwrap();
-        assert_eq!(analyzer.cost, 6.0)
+        let mut analyzer = CostAnalyzer::new(&schema);
+        let cost = analyzer.estimate(&query).unwrap();
+
+        assert_eq!(cost, 6.0)
     }
 }
