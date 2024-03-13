@@ -40,6 +40,7 @@ impl Plugin for OverrideSubgraphUrl {
             urls: urls
                 .into_iter()
                 .map(|(k, url)| {
+                    #[cfg(unix)]
                     // there is no standard for unix socket URLs apparently
                     if let Some(path) = url.strip_prefix("unix://") {
                         // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
@@ -51,6 +52,8 @@ impl Plugin for OverrideSubgraphUrl {
                     } else {
                         Uri::from_str(&url).map(|url| (k, url))
                     }
+                    #[cfg(not(unix))]
+                    Uri::from_str(&url).map(|url| (k, url))
                 })
                 .collect::<Result<_, _>>()?,
         })

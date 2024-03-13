@@ -16,6 +16,7 @@ use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_rustls::HttpsConnector;
+#[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
 use pin_project_lite::pin_project;
@@ -49,8 +50,12 @@ use crate::Context;
 
 type HTTPClient =
     Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
+#[cfg(unix)]
 type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, Body>>;
+#[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
+#[cfg(not(unix))]
+type MixedClient = HTTPClient;
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -87,6 +92,7 @@ pub(crate) struct HttpClientService {
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
     http_client: HTTPClient,
+    #[cfg(unix)]
     unix_client: UnixHTTPClient,
     service: Arc<String>,
 }
@@ -156,6 +162,7 @@ impl HttpClientService {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
+            #[cfg(unix)]
             unix_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(UnixConnector)),
@@ -238,10 +245,14 @@ impl tower::Service<HttpRequest> for HttpClientService {
             }
         });
 
+        #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
             Some("unix") => Either::B(self.unix_client.clone()),
             _ => Either::A(self.http_client.clone()),
         };
+        #[cfg(not(unix))]
+        let client = self.http_client.clone();
+
         let service_name = self.service.clone();
 
         let path = schema_uri.path();

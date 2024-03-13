@@ -108,6 +108,7 @@ impl Schema {
                 if url.is_empty() {
                     return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                 }
+                #[cfg(unix)]
                 // there is no standard for unix socket URLs apparently
                 let url = if let Some(path) = url.strip_prefix("unix://") {
                     // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
@@ -120,6 +121,10 @@ impl Schema {
                     Uri::from_str(url)
                         .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
                 };
+                #[cfg(not(unix))]
+                let url = Uri::from_str(url)
+                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+
                 if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
                         "must not have several subgraphs with same name '{name}'"

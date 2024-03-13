@@ -272,12 +272,10 @@ uname = "0.1.1"
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
+hyperlocal = { version = "0.8.0", default-features = false, features = ["client"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemallocator = "0.5"
-
-[target.'cfg(unix)'.dependencies]
-hyperlocal = { version = "0.8.0", default-features = false, features = ["client"] }
 
 [dev-dependencies]
 axum = { version = "0.6.20", features = [
