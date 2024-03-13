@@ -72,7 +72,7 @@ impl<'a> traverse::Visitor for CostAnalyzer<'a> {
         if !field_def.ty.is_list() {
             traverse::field(self, field_def, field)
         } else {
-            let directive = ListSizeDirective::from_directives(&field_def.directives)?;
+            let directive = ListSizeDirective::from_field(&field_def, &field)?;
 
             let mut subtree_analyzer = CostAnalyzer::new(self.supergraph_schema);
             traverse::field(&mut subtree_analyzer, field_def, field)?;
@@ -207,7 +207,6 @@ mod tests {
         assert_eq!(cost, 11.0)
     }
 
-    #[ignore = "slicingArguments is not yet implemented"]
     #[test]
     fn ibm_spec_example_1() {
         // https://ibm.github.io/graphql-specs/cost-spec.html#example-c3975
