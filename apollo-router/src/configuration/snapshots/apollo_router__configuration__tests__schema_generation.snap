@@ -98,6 +98,11 @@ expression: "&schema"
                       "default": false,
                       "type": "boolean"
                     },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -1968,8 +1973,7 @@ expression: "&schema"
           "description": "Subgraph URL mappings",
           "type": "object",
           "additionalProperties": {
-            "type": "string",
-            "format": "uri"
+            "type": "string"
           }
         }
       ]
@@ -2157,6 +2161,11 @@ expression: "&schema"
             "required_to_start": {
               "description": "Prevents the router from starting if it cannot connect to Redis",
               "default": false,
+              "type": "boolean"
+            },
+            "reset_ttl": {
+              "description": "When a TTL is set on a key, reset it when reading the data from that key",
+              "default": true,
               "type": "boolean"
             },
             "timeout": {
@@ -2641,6 +2650,11 @@ expression: "&schema"
                     "required_to_start": {
                       "description": "Prevents the router from starting if it cannot connect to Redis",
                       "default": false,
+                      "type": "boolean"
+                    },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
                       "type": "boolean"
                     },
                     "timeout": {
