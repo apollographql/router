@@ -508,7 +508,7 @@ impl BridgeQueryPlanner {
 
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(super::QueryPlan {
-                        usage_reporting,
+                        usage_reporting: Arc::new(usage_reporting),
                         root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
@@ -632,13 +632,13 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                             context
                                 .extensions()
                                 .lock()
-                                .insert(pe.usage_reporting.clone());
+                                .insert(Arc::new(pe.usage_reporting.clone()));
                         }
                         QueryPlannerError::SpecError(e) => {
-                            context.extensions().lock().insert(UsageReporting {
+                            context.extensions().lock().insert(Arc::new(UsageReporting {
                                 stats_report_key: e.get_error_key().to_string(),
                                 referenced_fields_by_type: HashMap::new(),
-                            });
+                            }));
                         }
                         _ => (),
                     }
