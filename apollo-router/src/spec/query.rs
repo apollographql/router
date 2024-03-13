@@ -149,7 +149,8 @@ impl Query {
                         defer_conditions,
                     }) {
                         Some(subselection) => {
-                            let mut output = Object::with_capacity(subselection.selection_set.len());
+                            let mut output =
+                                Object::with_capacity(subselection.selection_set.len());
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
