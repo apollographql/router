@@ -684,7 +684,11 @@ mod tests {
         let pq_layer = PersistedQueryLayer::new(&config).await.unwrap();
 
         let schema = Arc::new(
-            Schema::parse_test(include_str!("../../../testdata/supergraph.graphql")).unwrap(),
+            Schema::parse_test(
+                include_str!("../../../testdata/supergraph.graphql"),
+                &Default::default(),
+            )
+            .unwrap(),
         );
 
         let query_analysis_layer = QueryAnalysisLayer::new(schema, Arc::new(config)).await;

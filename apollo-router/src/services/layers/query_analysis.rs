@@ -172,10 +172,14 @@ impl QueryAnalysisLayer {
                 })
             }
             Err(errors) => {
-                request.context.extensions().lock().insert(UsageReporting {
-                    stats_report_key: errors.get_error_key().to_string(),
-                    referenced_fields_by_type: HashMap::new(),
-                });
+                request
+                    .context
+                    .extensions()
+                    .lock()
+                    .insert(Arc::new(UsageReporting {
+                        stats_report_key: errors.get_error_key().to_string(),
+                        referenced_fields_by_type: HashMap::new(),
+                    }));
                 Err(SupergraphResponse::builder()
                     .errors(errors.into_graphql_errors().unwrap_or_default())
                     .status_code(StatusCode::BAD_REQUEST)

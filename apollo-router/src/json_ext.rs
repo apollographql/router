@@ -871,6 +871,7 @@ mod tests {
              y: Int
            }
         "#,
+            &Default::default(),
         )
         .unwrap()
     }

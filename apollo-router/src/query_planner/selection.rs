@@ -280,7 +280,7 @@ mod tests {
 
     macro_rules! select {
         ($schema:expr, $content:expr $(,)?) => {{
-            let schema = Schema::parse_test(&$schema).unwrap();
+            let schema = Schema::parse_test(&$schema, &Default::default()).unwrap();
             let response = Response::builder()
                 .data($content)
                 .build();
@@ -381,7 +381,7 @@ mod tests {
             type MainObject { mainObjectList: [SubObject] }
             type SubObject { key: String name: String }",
         );
-        let schema = Schema::parse_test(&schema).unwrap();
+        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
             "__typename": "MainObject",
@@ -478,7 +478,7 @@ mod tests {
               id: Int!
             }",
         );
-        let schema = Schema::parse_test(&schema).unwrap();
+        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
           "__typename": "Entity",

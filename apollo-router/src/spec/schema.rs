@@ -35,7 +35,7 @@ pub(crate) struct Schema {
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let schema = Self::parse(s, configuration)?;
+        let schema = Self::parse(s)?;
         let api_schema = Self::parse(
             &schema
                 .create_api_schema(configuration)
@@ -46,7 +46,6 @@ impl Schema {
                         "The supergraph schema failed to produce a valid API schema: {err}"
                     ))
                 })?,
-            configuration,
         )?;
         Ok(schema.with_api_schema(api_schema))
     }
@@ -378,7 +377,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse_test(&schema).unwrap()
+            Schema::parse_test(&schema, &Default::default()).unwrap()
         }
 
         fn gen_schema_interfaces(schema: &str) -> Schema {
@@ -402,7 +401,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse_test(&schema).unwrap()
+            Schema::parse_test(&schema, &Default::default()).unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
         assert!(schema.is_subtype("UnionType", "Foo"));
@@ -458,7 +457,7 @@ mod tests {
             @join__graph(name: "products" url: "http://localhost:4003/graphql")
             REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
         }"#;
-        let schema = Schema::parse_test(schema).unwrap();
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
 
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
@@ -507,7 +506,7 @@ mod tests {
     #[test]
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
-        let schema = Schema::parse_test(schema).unwrap();
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         let has_in_stock_field = |schema: &Schema| {
             schema
                 .definitions
@@ -523,14 +522,19 @@ mod tests {
     #[test]
     fn federation_version() {
         // @core directive
-        let schema =
-            Schema::parse_test(include_str!("../testdata/minimal_supergraph.graphql")).unwrap();
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(schema.federation_version(), Some(1));
 
         // @link directive
-        let schema =
-            Schema::parse_test(include_str!("../testdata/minimal_fed2_supergraph.graphql"))
-                .unwrap();
+        let schema = Schema::parse_test(
+            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(schema.federation_version(), Some(2));
     }
 
@@ -539,7 +543,7 @@ mod tests {
         #[cfg(not(windows))]
         {
             let schema = include_str!("../testdata/starstuff@current.graphql");
-            let schema = Schema::parse_test(schema).unwrap();
+            let schema = Schema::parse_test(schema, &Default::default()).unwrap();
 
             assert_eq!(
                 schema.schema_id,
@@ -561,7 +565,7 @@ mod tests {
     #[test]
     fn inaccessible_on_non_core() {
         let schema = include_str!("../testdata/inaccessible_on_non_core.graphql");
-        match Schema::parse_test(schema) {
+        match Schema::parse_test(schema, &Default::default()) {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
@@ -578,7 +582,7 @@ mod tests {
     #[test]
     fn unclosed_brace_error_does_not_panic() {
         let schema = "schema {";
-        let result = Schema::parse_test(schema);
+        let result = Schema::parse_test(schema, &Default::default());
         assert!(result.is_err());
     }
 }

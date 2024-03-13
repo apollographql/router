@@ -424,7 +424,7 @@ impl Plugin for Telemetry {
                                 .context
                                 .extensions()
                                 .lock()
-                                .get::<UsageReporting>()
+                                .get::<Arc<UsageReporting>>()
                                 .map(|u| {
                                     u.stats_report_key == "## GraphQLValidationFailure\n"
                                         || u.stats_report_key == "## GraphQLParseFailure\n"
