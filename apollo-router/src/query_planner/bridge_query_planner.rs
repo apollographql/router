@@ -17,6 +17,7 @@ use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::QueryPlannerDebugConfig;
+use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -518,29 +519,10 @@ impl BridgeQueryPlanner {
                     // todo - are we generating the sig and refs from the original query and comparing it to the sig and refs
                     // generated from the filtered query in JS code? Is that ok? Do we need to re-parse the filtered query here?
                     
-                    // todo call some util function related to apollo to generate this
                     let generated_usage_reporting = UsageReporting {
-                        stats_report_key: "# Testing\nquery Testing($recipeId:ID!){recipe(id:$recipeId){id}}".to_string(),
-                        referenced_fields_by_type: HashMap::from([(
-                            "Recipe".into(),
-                            router_bridge::planner::ReferencedFieldsForType {
-                                field_names: vec!["id".into(),],
-                                is_interface: false,
-                            },
-                        ),(
-                            "Query".into(),
-                            router_bridge::planner::ReferencedFieldsForType {
-                                field_names: vec!["recipe".into(),],
-                                is_interface: false,
-                            },
-                        )]),
+                        stats_report_key: BridgeQueryPlanner::generate_apollo_reporting_signature(doc),
+                        referenced_fields_by_type: BridgeQueryPlanner::generate_apollo_reporting_refs(doc),
                     };
-                    /*
-                    let defs = &self.schema.api_schema().definitions; // todo: should we use self.schema instead?
-                    let (name, operation) = doc.executable.named_operations.first().unwrap();
-                    println!("executable operation name: {}", name);
-                    println!("executable operation: {}", operation);
-                    */
 
                     if matches!(
                         self.configuration.experimental_apollo_metrics_generation_mode,
@@ -594,6 +576,65 @@ impl BridgeQueryPlanner {
                 Err(QueryPlannerError::EmptyPlan(usage_reporting))
             }
         }
+    }
+
+    // todo move this somewhere else? somewhere where it's possible to do fuzzing?
+    fn generate_apollo_reporting_signature(doc: &ParsedDocument) -> String {
+        // todo this implementation is temporary and needs a lot of work
+
+        let definitions = doc.ast.definitions.clone();
+        let operation_def = definitions[0].as_operation_definition().unwrap().clone();
+
+        let operation_body = operation_def.to_string();
+        let operation_name = operation_def.name.as_ref().unwrap().to_string();
+        // println!("operation_body: {}", operation_body);
+        // println!("operation_name: {}", operation_name);
+
+        let whitespace_regex = regex::Regex::new(r"\s+").unwrap();
+        let stripped_body = whitespace_regex.replace_all(&operation_body, " ").to_string();
+
+        format!("# {}\n{}", operation_name, stripped_body)
+    }
+
+    // todo move this somewhere else? somewhere where it's possible to do fuzzing?
+    fn generate_apollo_reporting_refs(doc: &ParsedDocument) -> HashMap<String, ReferencedFieldsForType> {
+        // todo this implementation is temporary and needs a lot of work
+
+        let (_name, operation) = doc.executable.named_operations.first().unwrap();
+
+        let query_fields = operation.selection_set.selections
+            .iter()
+            .map(|x| x.as_field().unwrap().name.to_string())
+            .collect();
+
+        let mut ref_fields = HashMap::from([
+            (operation.selection_set.ty.to_string(), ReferencedFieldsForType {
+                field_names: query_fields,
+                is_interface: false,
+            })
+        ]);
+
+        for selection in operation.selection_set.selections.iter() {
+            let field = selection.as_field().unwrap();
+
+            /*
+            println!("field name: {}", field.name);
+            println!("field type: {}", field.definition.ty);
+            println!("field selection set type: {}", field.selection_set.ty);
+            */
+
+            let child_fields = field.selection_set.selections
+                .iter()
+                .map(|x| x.as_field().unwrap().name.to_string())
+                .collect();
+
+            ref_fields.insert(field.selection_set.ty.to_string(), ReferencedFieldsForType {
+                field_names: child_fields,
+                is_interface: false, // todo use value from below (or maybe the bridge always sends "false"?)
+            });
+        }
+
+        ref_fields
     }
 }
 
