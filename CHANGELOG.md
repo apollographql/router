@@ -45,9 +45,11 @@ telemetry:
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4764
 
+# [1.41.1] - 2024-03-08
 
-
-# [1.41.0] - 2024-03-08
+> [!NOTE]
+>
+> v1.41.1 replaces a failed publish of v1.41.0.  The version number had to be moved from v1.41.0 to v1.41.1, but the release is otherwise the same.  Apologies for the confusion!
 
 ## 🚀 Features
 
@@ -88,6 +90,12 @@ telemetry:
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4702
+
+# [1.41.0] - 2024-03-08
+
+> [!NOTE]
+>
+> The release of v1.41.0 failed unexpectedly late in the deployment process due to a preventable publishing failure.  The release has been yanked from Crates.io on account of not being published successfully across all deployment targets.  This release is fully replaced by v1.41.1.  Apologies for the confusion!
 
 # [1.40.2] - 2024-03-06
 
