@@ -55,7 +55,6 @@ fuzz_target!(|data: &[u8]| {
         }
         let mut file = OpenOptions::new()
             .read(true)
-            .write(true)
             .create(true)
             .append(true)
             .open("router_errors.txt")
@@ -108,7 +107,6 @@ fuzz_target!(|data: &[u8]| {
         if router_response != gateway_response {
             let mut file = OpenOptions::new()
                 .read(true)
-                .write(true)
                 .create(true)
                 .append(true)
                 .open("router_errors.txt")

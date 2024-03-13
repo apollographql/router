@@ -33,6 +33,7 @@ pub(crate) enum Error {
     #[error("fetch failed from all {url_count} uplink endpoints")]
     FetchFailedMultiple { url_count: usize },
 
+    #[allow(clippy::enum_variant_names)]
     #[error("uplink error: code={code} message={message}")]
     UplinkError { code: String, message: String },
 
