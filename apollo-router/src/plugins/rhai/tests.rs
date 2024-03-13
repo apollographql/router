@@ -147,7 +147,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
     }
 
     assert_eq!(
-        body.errors.get(0).unwrap().message.as_str(),
+        body.errors.first().unwrap().message.as_str(),
         "rhai execution error: 'Runtime error: An error occured (line 30, position 5)\nin call to function 'execution_request''"
     );
     Ok(())

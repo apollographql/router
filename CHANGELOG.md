@@ -4,6 +4,75 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+
+# [1.41.1] - 2024-03-08
+
+> [!NOTE]
+>
+> v1.41.1 replaces a failed publish of v1.41.0.  The version number had to be moved from v1.41.0 to v1.41.1, but the release is otherwise the same.  Apologies for the confusion!
+
+## 🚀 Features
+
+### Entity caching: Add tracing spans around Redis interactions ([PR #4667](https://github.com/apollographql/router/pull/4667))
+
+This adds `cache_lookup` and `cache_store` spans to traces which show Redis calls related to our recently announced [entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching/) feature.  This also changes the behavior slightly so that storing in Redis does not stop the execution of the rest of the query.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4667
+
+### Use Gzip compression when downloading Persisted Query manifests ([PR #4622](https://github.com/apollographql/router/pull/4622))
+
+Router will now request Gzip compression when downloading Persisted Query manifests for improved network efficiency.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4622
+
+### Redis: add a fail open option ([Issue #4334](https://github.com/apollographql/router/issues/4334))
+
+This option configures the Router's behavior in case it cannot connect to Redis:
+- By default, the router will start and all requests will be handled in a degraded state.
+- Alternatively, this option can be configured to prevent the router from starting if it can't connect to Redis.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4534
+
+## 🐛 Fixes
+
+### Default header now correctly set when `experimental_response_trace_id` is enabled ([Issue #4699](https://github.com/apollographql/router/issues/4699))
+
+When configuring the `experimental_response_trace_id` without an explicit header it now correctly takes the default one `apollo-trace-id`.
+
+Example of configuration:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4702
+
+# [1.41.0] - 2024-03-08
+
+> [!NOTE]
+>
+> The release of v1.41.0 failed unexpectedly late in the deployment process due to a preventable publishing failure.  The release has been yanked from Crates.io on account of not being published successfully across all deployment targets.  This release is fully replaced by v1.41.1.  Apologies for the confusion!
+
+# [1.40.2] - 2024-03-06
+
+## 🔒 Security
+
+### Apply `limits.http_max_request_bytes` on streaming request body decompression ([PR #4759](https://github.com/apollographql/router/pull/4759))
+
+This release fixes a Denial-of-Service (DoS) type vulnerability which exists in affected versions of the Router according to our [published security advistory](https://github.com/apollographql/router/security/advisories/GHSA-cgqf-3cq5-wvcj).  The fix changes the evaluation of the `limits.http_max_request_bytes` configuration to take place on a stream of bytes, allowing it to be applied to compressed HTTP payloads, prior to decompression.  Previously, the limit was only being applied after the entirety of the compressed payload was decompressed, which could result in significant memory consumption which exceeded configured expectations while compressed payloads were expanded.
+
+## 🐛 Fixes
+
+### Re-activate the macOS Intel builder ([PR #4723](https://github.com/apollographql/router/pull/4723))
+
+We have re-activated macOS Intel (x86) builds in CircleCI, despite their upcoming deprecation, while we take a different approach to solving this and maintaining Intel support for the time-being.   This became necessary since cross-compiling the router from ARM to x86 resulted in issues with V8 snapshots and runtime issues on the macOS Intel binaries produced by those Apple Silicon build machines.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4723
+
 # [1.40.1] - 2024-02-16
 
 ## 🐛 Fixes

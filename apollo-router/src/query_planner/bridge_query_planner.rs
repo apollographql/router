@@ -8,6 +8,9 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use futures::future::BoxFuture;
+use opentelemetry_api::metrics::MeterProvider as _;
+use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::KeyValue;
 use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
@@ -30,6 +33,7 @@ use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::metrics::meter_provider;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
@@ -62,6 +66,23 @@ pub(crate) struct BridgeQueryPlanner {
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
+    _federation_instrument: ObservableGauge<u64>,
+}
+
+fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
+    meter_provider()
+        .meter("apollo/router")
+        .u64_observable_gauge("apollo.router.supergraph.federation")
+        .with_callback(move |observer| {
+            observer.observe(
+                1,
+                &[KeyValue::new(
+                    "federation.version",
+                    federation_version.unwrap_or(0),
+                )],
+            );
+        })
+        .init()
 }
 
 impl BridgeQueryPlanner {
@@ -70,14 +91,6 @@ impl BridgeQueryPlanner {
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
         let schema = Schema::parse(&sdl, &configuration)?;
-
-        let federation_version = schema.federation_version().unwrap_or(0);
-        u64_counter!(
-            "apollo.router.lifecycle.federation_version",
-            "The federation major version inferred from the supergraph schema",
-            1,
-            "version" = federation_version
-        );
 
         let planner = Planner::new(
             sdl,
@@ -178,45 +191,37 @@ impl BridgeQueryPlanner {
                             "API schema generation mismatch: JS returns API schema but Rust errors out"
                         );
                     }
-                    (Ok(left), Ok(right)) if left != right => {
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                            generation.is_matched = false,
-                            "API schema generation mismatch: apollo-federation and router-bridge write different schema"
-                        );
+                    (Ok(left), Ok(right)) => {
+                        // To compare results, we re-parse, standardize, and print with apollo-rs,
+                        // so the formatting is identical.
+                        if let (Ok(left), Ok(right)) = (
+                            apollo_compiler::Schema::parse(left, "js.graphql"),
+                            apollo_compiler::Schema::parse(right, "rust.graphql"),
+                        ) {
+                            let left = standardize_schema(left).to_string();
+                            let right = standardize_schema(right).to_string();
 
-                        let differences = diff::lines(left, right);
-                        let mut output = String::new();
-                        for diff_line in differences {
-                            match diff_line {
-                                diff::Result::Left(l) => {
-                                    let trimmed = l.trim();
-                                    if !trimmed.starts_with('#') && !trimmed.is_empty() {
-                                        writeln!(&mut output, "-{l}")
-                                            .expect("write will never fail");
-                                    } else {
-                                        writeln!(&mut output, " {l}")
-                                            .expect("write will never fail");
-                                    }
-                                }
-                                diff::Result::Both(l, _) => {
-                                    writeln!(&mut output, " {l}").expect("write will never fail");
-                                }
-                                diff::Result::Right(r) => {
-                                    let trimmed = r.trim();
-                                    if trimmed != "---" && !trimmed.is_empty() {
-                                        writeln!(&mut output, "+{r}")
-                                            .expect("write will never fail");
-                                    }
-                                }
+                            if left == right {
+                                tracing::warn!(
+                                    monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                                    generation.is_matched = true,
+                                );
+                            } else {
+                                tracing::warn!(
+                                    monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                                    generation.is_matched = false,
+                                    "API schema generation mismatch: apollo-federation and router-bridge write different schema"
+                                );
+
+                                let differences = diff::lines(&left, &right);
+                                tracing::debug!(
+                                    "different API schema between apollo-federation and router-bridge:\n{}",
+                                    render_diff(&differences),
+                                );
                             }
                         }
-                        tracing::debug!(
-                            "different API schema between apollo-federation and router-bridge:\n{}",
-                            output
-                        );
                     }
-                    (Err(_), Err(_)) | (Ok(_), Ok(_)) => {
+                    (Err(_), Err(_)) => {
                         tracing::warn!(
                             monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
                             generation.is_matched = true,
@@ -238,12 +243,14 @@ impl BridgeQueryPlanner {
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
+        let federation_instrument = federation_version_instrument(schema.federation_version());
         Ok(Self {
             planner,
             schema,
             introspection,
             enable_authorization_directives,
             configuration,
+            _federation_instrument: federation_instrument,
         })
     }
 
@@ -294,12 +301,14 @@ impl BridgeQueryPlanner {
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
+        let federation_instrument = federation_version_instrument(schema.federation_version());
         Ok(Self {
             planner,
             schema,
             introspection,
             enable_authorization_directives,
             configuration,
+            _federation_instrument: federation_instrument,
         })
     }
 
@@ -710,7 +719,7 @@ impl BridgeQueryPlanner {
             // It can happen if you have a statically skipped query like { get @skip(if: true) { id name }} because it will be statically filtered with {}
             if selections
                 .operations
-                .get(0)
+                .first()
                 .map(|op| op.selection_set.is_empty())
                 .unwrap_or_default()
             {
@@ -727,7 +736,7 @@ impl BridgeQueryPlanner {
             // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
             if let Some(output_keys) = selections
                 .operations
-                .get(0)
+                .first()
                 .and_then(|op| op.is_only_typenames_with_output_keys())
             {
                 let operation_name = selections.operations[0].kind().to_string();
@@ -802,6 +811,162 @@ impl QueryPlan {
     }
 }
 
+fn standardize_schema(mut schema: apollo_compiler::Schema) -> apollo_compiler::Schema {
+    use apollo_compiler::schema::ExtendedType;
+
+    fn standardize_value_for_comparison(value: &mut apollo_compiler::ast::Value) {
+        use apollo_compiler::ast::Value;
+        match value {
+            Value::Object(object) => {
+                for (_name, value) in object.iter_mut() {
+                    standardize_value_for_comparison(value.make_mut());
+                }
+                object.sort_by_key(|(name, _value)| name.clone());
+            }
+            Value::List(list) => {
+                for value in list {
+                    standardize_value_for_comparison(value.make_mut());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn standardize_directive_for_comparison(directive: &mut apollo_compiler::ast::Directive) {
+        for arg in &mut directive.arguments {
+            standardize_value_for_comparison(arg.make_mut().value.make_mut());
+        }
+        directive
+            .arguments
+            .sort_by_cached_key(|arg| arg.name.to_ascii_lowercase());
+    }
+
+    for ty in schema.types.values_mut() {
+        match ty {
+            ExtendedType::Object(object) => {
+                let object = object.make_mut();
+                object.fields.sort_keys();
+                for field in object.fields.values_mut() {
+                    let field = field.make_mut();
+                    for arg in &mut field.arguments {
+                        let arg = arg.make_mut();
+                        if let Some(value) = &mut arg.default_value {
+                            standardize_value_for_comparison(value.make_mut());
+                        }
+                        for directive in &mut arg.directives {
+                            standardize_directive_for_comparison(directive.make_mut());
+                        }
+                    }
+                    field
+                        .arguments
+                        .sort_by_cached_key(|arg| arg.name.to_ascii_lowercase());
+                    for directive in &mut field.directives {
+                        standardize_directive_for_comparison(directive.make_mut());
+                    }
+                }
+                for directive in &mut object.directives.0 {
+                    standardize_directive_for_comparison(directive.make_mut());
+                }
+            }
+            ExtendedType::Interface(interface) => {
+                let interface = interface.make_mut();
+                interface.fields.sort_keys();
+                for field in interface.fields.values_mut() {
+                    let field = field.make_mut();
+                    for arg in &mut field.arguments {
+                        let arg = arg.make_mut();
+                        if let Some(value) = &mut arg.default_value {
+                            standardize_value_for_comparison(value.make_mut());
+                        }
+                        for directive in &mut arg.directives {
+                            standardize_directive_for_comparison(directive.make_mut());
+                        }
+                    }
+                    field
+                        .arguments
+                        .sort_by_cached_key(|arg| arg.name.to_ascii_lowercase());
+                    for directive in &mut field.directives {
+                        standardize_directive_for_comparison(directive.make_mut());
+                    }
+                }
+                for directive in &mut interface.directives.0 {
+                    standardize_directive_for_comparison(directive.make_mut());
+                }
+            }
+            ExtendedType::InputObject(input_object) => {
+                let input_object = input_object.make_mut();
+                input_object.fields.sort_keys();
+                for field in input_object.fields.values_mut() {
+                    let field = field.make_mut();
+                    if let Some(value) = &mut field.default_value {
+                        standardize_value_for_comparison(value.make_mut());
+                    }
+                    for directive in &mut field.directives {
+                        standardize_directive_for_comparison(directive.make_mut());
+                    }
+                }
+                for directive in &mut input_object.directives {
+                    standardize_directive_for_comparison(directive.make_mut());
+                }
+            }
+            ExtendedType::Enum(enum_) => {
+                let enum_ = enum_.make_mut();
+                enum_.values.sort_keys();
+                for directive in &mut enum_.directives {
+                    standardize_directive_for_comparison(directive.make_mut());
+                }
+            }
+            ExtendedType::Union(union_) => {
+                let union_ = union_.make_mut();
+                for directive in &mut union_.directives {
+                    standardize_directive_for_comparison(directive.make_mut());
+                }
+            }
+            ExtendedType::Scalar(scalar) => {
+                let scalar = scalar.make_mut();
+                for directive in &mut scalar.directives {
+                    standardize_directive_for_comparison(directive.make_mut());
+                }
+            }
+        }
+    }
+
+    schema
+        .directive_definitions
+        .sort_by_cached_key(|key, _value| key.to_ascii_lowercase());
+    schema
+        .types
+        .sort_by_cached_key(|key, _value| key.to_ascii_lowercase());
+
+    schema
+}
+
+fn render_diff(differences: &[diff::Result<&str>]) -> String {
+    let mut output = String::new();
+    for diff_line in differences {
+        match diff_line {
+            diff::Result::Left(l) => {
+                let trimmed = l.trim();
+                if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                    writeln!(&mut output, "-{l}").expect("write will never fail");
+                } else {
+                    writeln!(&mut output, " {l}").expect("write will never fail");
+                }
+            }
+            diff::Result::Both(l, _) => {
+                writeln!(&mut output, " {l}").expect("write will never fail");
+            }
+            diff::Result::Right(r) => {
+                let trimmed = r.trim();
+                if trimmed != "---" && !trimmed.is_empty() {
+                    writeln!(&mut output, "+{r}").expect("write will never fail");
+                }
+            }
+        }
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -812,6 +977,7 @@ mod tests {
 
     use super::*;
     use crate::json_ext::Path;
+    use crate::metrics::FutureMetricsExt as _;
     use crate::spec::query::subselections::SubSelectionKey;
     use crate::spec::query::subselections::SubSelectionValue;
 
@@ -867,6 +1033,43 @@ mod tests {
             "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
                  Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
         );
+    }
+
+    #[test(tokio::test)]
+    async fn federation_versions() {
+        async {
+            let _planner = BridgeQueryPlanner::new(
+                include_str!("../testdata/minimal_supergraph.graphql").into(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_gauge!(
+                "apollo.router.supergraph.federation",
+                1,
+                federation.version = 1
+            );
+        }
+        .with_metrics()
+        .await;
+
+        async {
+            let _planner = BridgeQueryPlanner::new(
+                include_str!("../testdata/minimal_fed2_supergraph.graphql").into(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_gauge!(
+                "apollo.router.supergraph.federation",
+                1,
+                federation.version = 2
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[test(tokio::test)]
