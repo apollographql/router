@@ -209,6 +209,8 @@ where
                     Err(_) => break,
                 };
 
+                // need to do it here too
+
                 match res {
                     Ok(QueryPlannerResponse { content, .. }) => {
                         if let Some(content) = content.clone() {
@@ -377,6 +379,9 @@ where
                             context,
                             errors,
                         }) => {
+                            // if plan is QueryPlannerContent, clone and optionally replace content.plan.usage_reporting here
+                            // use Query::?
+
                             if let Some(content) = content.clone() {
                                 tokio::spawn(async move {
                                     entry.insert(Ok(content)).await;
@@ -422,6 +427,7 @@ where
             match res {
                 Ok(content) => {
                     if let QueryPlannerContent::Plan { plan, .. } = &content {
+                        // no need to re-generate here because it will be in the cache
                         context
                             .extensions()
                             .lock()

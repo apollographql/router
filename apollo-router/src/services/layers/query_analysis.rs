@@ -151,6 +151,11 @@ impl QueryAnalysisLayer {
             .lock()
             .insert::<ParsedDocument>(doc);
 
+        let maybe_usage = request.context.extensions().lock().get::<router_bridge::planner::UsageReporting>().cloned();
+        if let Some(usage) = maybe_usage {
+            println!("Usage data: {:?}", usage);
+        }
+
         Ok(SupergraphRequest {
             supergraph_request: request.supergraph_request,
             context: request.context,

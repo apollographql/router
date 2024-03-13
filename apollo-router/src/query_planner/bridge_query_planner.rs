@@ -25,6 +25,7 @@ use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
+use crate::configuration::ApolloMetricsGenerationMode;
 use crate::configuration::GraphQLValidationMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -393,6 +394,7 @@ impl BridgeQueryPlanner {
         key: CacheKeyMetadata,
         selections: Query,
         plan_options: PlanOptions,
+        doc: &ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         fn is_validation_error(errors: &PlanErrors) -> bool {
             errors.errors.iter().all(|err| err.validation_error)
@@ -482,7 +484,10 @@ impl BridgeQueryPlanner {
         }
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
-        let operation_signature = if original_query != filtered_query {
+        let operation_signature = if matches!(
+            self.configuration.experimental_apollo_metrics_generation_mode,
+            ApolloMetricsGenerationMode::Legacy | ApolloMetricsGenerationMode::Both
+        ) && original_query != filtered_query {
             Some(
                 self.planner
                     .operation_signature(original_query, operation)
@@ -504,6 +509,63 @@ impl BridgeQueryPlanner {
             } => {
                 if let Some(sig) = operation_signature {
                     usage_reporting.stats_report_key = sig;
+                }
+
+                if matches!(
+                    self.configuration.experimental_apollo_metrics_generation_mode,
+                    ApolloMetricsGenerationMode::New | ApolloMetricsGenerationMode::Both
+                ) {
+                    // todo - are we generating the sig and refs from the original query and comparing it to the sig and refs
+                    // generated from the filtered query in JS code? Is that ok? Do we need to re-parse the filtered query here?
+                    
+                    // todo call some util function related to apollo to generate this
+                    let generated_usage_reporting = UsageReporting {
+                        stats_report_key: "# Testing\nquery Testing($recipeId:ID!){recipe(id:$recipeId){id}}".to_string(),
+                        referenced_fields_by_type: HashMap::from([(
+                            "Recipe".into(),
+                            router_bridge::planner::ReferencedFieldsForType {
+                                field_names: vec!["id".into(),],
+                                is_interface: false,
+                            },
+                        ),(
+                            "Query".into(),
+                            router_bridge::planner::ReferencedFieldsForType {
+                                field_names: vec!["recipe".into(),],
+                                is_interface: false,
+                            },
+                        )]),
+                    };
+                    /*
+                    let defs = &self.schema.api_schema().definitions; // todo: should we use self.schema instead?
+                    let (name, operation) = doc.executable.named_operations.first().unwrap();
+                    println!("executable operation name: {}", name);
+                    println!("executable operation: {}", operation);
+                    */
+
+                    if matches!(
+                        self.configuration.experimental_apollo_metrics_generation_mode,
+                        ApolloMetricsGenerationMode::Both
+                    ) {
+                        // todo metrics on failure, remove logging
+
+                        if usage_reporting.stats_report_key != generated_usage_reporting.stats_report_key {
+                            println!("stats_report_key is different: [{}] vs [{}]", usage_reporting.stats_report_key, generated_usage_reporting.stats_report_key);
+                        } else {
+                            println!("stats_report_key's are identical");
+                        }
+
+                        if usage_reporting.referenced_fields_by_type != generated_usage_reporting.referenced_fields_by_type {
+                            println!("referenced_fields_by_type is different: [{:?}] vs [{:?}]", usage_reporting.referenced_fields_by_type, generated_usage_reporting.referenced_fields_by_type);
+                        } else {
+                            println!("referenced_fields_by_type's are identical");
+                        }
+                    } else if matches!(
+                        self.configuration.experimental_apollo_metrics_generation_mode,
+                        ApolloMetricsGenerationMode::New
+                    ) {
+                        usage_reporting.stats_report_key = generated_usage_reporting.stats_report_key;
+                        usage_reporting.referenced_fields_by_type = generated_usage_reporting.referenced_fields_by_type;
+                    }
                 }
 
                 Ok(QueryPlannerContent::Plan {
@@ -772,6 +834,7 @@ impl BridgeQueryPlanner {
             key.metadata,
             selections,
             key.plan_options,
+            &doc,
         )
         .await
     }
@@ -1099,6 +1162,7 @@ mod tests {
                 CacheKeyMetadata::default(),
                 selections,
                 PlanOptions::default(),
+                &doc,
             )
             .await
             .unwrap_err();

@@ -1236,6 +1236,9 @@ impl Telemetry {
         let metrics = if let Some(usage_reporting) =
             context.extensions().lock().get::<UsageReporting>().cloned()
         {
+            // todo remove
+            println!("metrics: {:?}", usage_reporting);
+
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
