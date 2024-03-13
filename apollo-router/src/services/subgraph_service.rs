@@ -45,11 +45,8 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
-use crate::plugins::subscription::DEFAULT_HEARTBEAT_INTERVAL;
-use crate::plugins::subscription::HeartbeatIntervalWs;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
-use crate::plugins::subscription::HeartbeatInterval;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
@@ -332,12 +329,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             subscription_id,
                             callback_url,
                             verifier,
-                            heartbeat_interval_ms: match heartbeat_interval {
-                                HeartbeatInterval::Disabled(_) => 0,
-                                HeartbeatInterval::Duration(duration) => {
-                                    duration.as_millis() as u64
-                                }
-                            },
+                            heartbeat_interval_ms: heartbeat_interval
+                                .into_option()
+                                .map(|duration| duration.as_millis() as u64)
+                                .unwrap_or(0),
                         };
                         body.extensions.insert(
                             "subscription",
@@ -576,18 +571,12 @@ async fn call_websocket(
         );
     }
 
-    let heartbeat_interval = match subgraph_cfg.heartbeat_interval {
-        HeartbeatIntervalWs::Disabled(_) => None,
-        HeartbeatIntervalWs::Enabled(_) => Some(DEFAULT_HEARTBEAT_INTERVAL),
-        HeartbeatIntervalWs::Duration(duration) => Some(duration),
-    };
-
     let mut gql_stream = GraphqlWebSocket::new(
         convert_websocket_stream(ws_stream, subscription_hash.clone()),
         subscription_hash,
         subgraph_cfg.protocol,
         connection_params,
-        heartbeat_interval,
+        subgraph_cfg.heartbeat_interval.into_option(),
     )
     .await
     .map_err(|_| FetchError::SubrequestWsError {
@@ -1063,7 +1052,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
-    use crate::plugins::subscription::Disabled;
+    use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -1648,7 +1637,7 @@ mod tests {
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
-                    heartbeat_interval: HeartbeatInterval::Disabled(Disabled::Disabled),
+                    heartbeat_interval: HeartbeatInterval::new_disabled(),
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
@@ -1657,7 +1646,7 @@ mod tests {
                         WebSocketConfiguration {
                             path: Some(String::from("/ws")),
                             protocol: WebSocketProtocol::default(),
-                            heartbeat_interval: HeartbeatIntervalWs::default(),
+                            heartbeat_interval: HeartbeatInterval::new_disabled(),
                         },
                     )]
                     .into(),

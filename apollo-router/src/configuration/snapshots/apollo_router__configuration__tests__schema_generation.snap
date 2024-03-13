@@ -2404,12 +2404,19 @@ expression: "&schema"
               "properties": {
                 "heartbeat_interval": {
                   "description": "Heartbeat interval for callback mode (default: 5secs)",
-                  "default": "5s",
+                  "default": "enabled",
                   "anyOf": [
                     {
                       "type": "string",
                       "enum": [
                         "disabled"
+                      ]
+                    },
+                    {
+                      "description": "enable with default interval of 5s",
+                      "type": "string",
+                      "enum": [
+                        "enabled"
                       ]
                     },
                     {
@@ -2475,6 +2482,7 @@ expression: "&schema"
                           ]
                         },
                         {
+                          "description": "enable with default interval of 5s",
                           "type": "string",
                           "enum": [
                             "enabled"
@@ -2523,6 +2531,7 @@ expression: "&schema"
                             ]
                           },
                           {
+                            "description": "enable with default interval of 5s",
                             "type": "string",
                             "enum": [
                               "enabled"
