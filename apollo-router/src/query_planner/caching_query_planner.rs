@@ -262,7 +262,9 @@ where
         Box::pin(async move {
             let context = request.context.clone();
             qp.plan(request).await.map(|response| {
-                if let Some(usage_reporting) = context.extensions().lock().get::<UsageReporting>() {
+                if let Some(usage_reporting) =
+                    context.extensions().lock().get::<Arc<UsageReporting>>()
+                {
                     let _ = response.context.insert(
                         "apollo_operation_id",
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
@@ -357,10 +359,14 @@ where
                     let err_res = Query::check_errors(&doc);
 
                     if let Err(error) = err_res {
-                        request.context.extensions().lock().insert(UsageReporting {
-                            stats_report_key: error.get_error_key().to_string(),
-                            referenced_fields_by_type: HashMap::new(),
-                        });
+                        request
+                            .context
+                            .extensions()
+                            .lock()
+                            .insert(Arc::new(UsageReporting {
+                                stats_report_key: error.get_error_key().to_string(),
+                                referenced_fields_by_type: HashMap::new(),
+                            }));
                         let e = Arc::new(QueryPlannerError::SpecError(error));
                         let err = e.clone();
                         tokio::spawn(async move {
@@ -443,10 +449,14 @@ where
                                 .insert(pe.usage_reporting.clone());
                         }
                         QueryPlannerError::SpecError(e) => {
-                            request.context.extensions().lock().insert(UsageReporting {
-                                stats_report_key: e.get_error_key().to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            });
+                            request
+                                .context
+                                .extensions()
+                                .lock()
+                                .insert(Arc::new(UsageReporting {
+                                    stats_report_key: e.get_error_key().to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                }));
                         }
                         _ => {}
                     }
@@ -689,7 +699,7 @@ mod tests {
                 .context
                 .extensions()
                 .lock()
-                .contains_key::<UsageReporting>());
+                .contains_key::<Arc<UsageReporting>>());
         }
     }
 

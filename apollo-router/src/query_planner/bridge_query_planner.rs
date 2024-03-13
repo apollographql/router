@@ -643,10 +643,10 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                                 .insert(pe.usage_reporting.clone());
                         }
                         QueryPlannerError::SpecError(e) => {
-                            context.extensions().lock().insert(UsageReporting {
+                            context.extensions().lock().insert(Arc::new(UsageReporting {
                                 stats_report_key: e.get_error_key().to_string(),
                                 referenced_fields_by_type: HashMap::new(),
-                            });
+                            }));
                         }
                         _ => (),
                     }
