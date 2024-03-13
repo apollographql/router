@@ -172,6 +172,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
 
+    /// Set the Apollo usage report signature and referenced field generation implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
+
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -219,6 +223,21 @@ pub(crate) enum GraphQLValidationMode {
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ApiSchemaMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
+    Both,
+}
+
+/// Apollo usage report signature and referenced field generation modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ApolloMetricsGenerationMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
@@ -312,6 +331,7 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
@@ -340,6 +360,7 @@ impl Configuration {
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
+            experimental_apollo_metrics_generation_mode:  experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -389,6 +410,7 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -401,6 +423,8 @@ impl Configuration {
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
+                .unwrap_or_default(),
+            experimental_apollo_metrics_generation_mode: experimental_apollo_metrics_generation_mode
                 .unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
