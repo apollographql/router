@@ -187,7 +187,6 @@ impl Variables {
                 }
             });
 
-            dbg!(&values);
             if values.is_empty() {
                 return None;
             }
