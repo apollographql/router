@@ -528,18 +528,52 @@ impl BridgeQueryPlanner {
                         self.configuration.experimental_apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::Both
                     ) {
-                        // todo metrics on failure, remove logging
-
                         if usage_reporting.stats_report_key != generated_usage_reporting.stats_report_key {
-                            println!("stats_report_key is different: [{}] vs [{}]", usage_reporting.stats_report_key, generated_usage_reporting.stats_report_key);
+                            println!(
+                                "stats_report_key's are different:\n{}\n{}",  
+                                generated_usage_reporting.stats_report_key,
+                                usage_reporting.stats_report_key,
+                            ); // todo remove
+                            tracing::warn!(
+                                monotonic_counter.apollo.router.operations.telemetry.studio.signature = 1u64,
+                                generation.is_matched = false,
+                                "Mismatch between the Apollo usage reporting signature generated in router and router-bridge"
+                            );
+                            tracing::debug!(
+                                "Different signatures generated between router and router-bridge:\n{}\n{}",
+                                generated_usage_reporting.stats_report_key,
+                                usage_reporting.stats_report_key,
+                            );
                         } else {
-                            println!("stats_report_key's are identical");
+                            println!("stats_report_key's are identical"); // todo remove
+                            tracing::info!(
+                                monotonic_counter.apollo.router.operations.telemetry.studio.signature = 1u64,
+                                generation.is_matched = true,
+                            );
                         }
 
                         if usage_reporting.referenced_fields_by_type != generated_usage_reporting.referenced_fields_by_type {
-                            println!("referenced_fields_by_type is different: [{:?}] vs [{:?}]", usage_reporting.referenced_fields_by_type, generated_usage_reporting.referenced_fields_by_type);
+                            println!(
+                                "referenced_fields_by_type's are different:\n{:?}\n{:?}",  
+                                generated_usage_reporting.referenced_fields_by_type,
+                                usage_reporting.referenced_fields_by_type,
+                            ); // todo remove
+                            tracing::warn!(
+                                monotonic_counter.apollo.router.operations.telemetry.studio.references = 1u64,
+                                generation.is_matched = false,
+                                "Mismatch between the Apollo usage report referenced fields generated in router and router-bridge"
+                            );
+                            tracing::debug!(
+                                "Different referenced fields generated between router and router-bridge:\n{:?}\n{:?}",
+                                generated_usage_reporting.referenced_fields_by_type,
+                                usage_reporting.referenced_fields_by_type,
+                            );
                         } else {
-                            println!("referenced_fields_by_type's are identical");
+                            println!("referenced_fields_by_type's are identical"); // todo remove
+                            tracing::info!(
+                                monotonic_counter.apollo.router.operations.telemetry.studio.references = 1u64,
+                                generation.is_matched = true,
+                            );
                         }
                     } else if matches!(
                         self.configuration.experimental_apollo_metrics_generation_mode,
