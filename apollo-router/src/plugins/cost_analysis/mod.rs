@@ -4,6 +4,7 @@ mod list_size_directive;
 
 use std::ops::ControlFlow;
 
+use anyhow::anyhow;
 use apollo_compiler::ast::Document;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
@@ -45,7 +46,7 @@ impl Plugin for CostAnalysis {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let supergraph_schema =
             apollo_compiler::Schema::parse_and_validate(init.supergraph_sdl.to_string(), "")
-                .expect("failed to parse supergraph schema");
+                .map_err(|e| anyhow!("Failed to parse supergraph SDL. {:?}", e))?;
 
         Ok(CostAnalysis {
             config: init.config,
@@ -62,14 +63,14 @@ impl Plugin for CostAnalysis {
             ServiceBuilder::new()
                 .checkpoint(move |req: Request| {
                     let query_doc = Document::parse(req.query_plan.query.string.clone(), "")
-                        .expect("query string could not be parsed");
+                        .map_err(|e| anyhow!("Failed to parse query. {:?}", e))?;
                     let mut analyzer = CostAnalyzer::new(&supergraph_schema);
 
                     match analyzer.estimate(&query_doc) {
                         Ok(_) => Ok(ControlFlow::Continue(req)),
                         Err(_error) => {
                             let res = Response::infallible_builder()
-                                // TODO .error(error)
+                                // TODO(tninesling): .error(error)
                                 .status_code(StatusCode::BAD_REQUEST)
                                 .context(req.context)
                                 .build();
@@ -78,8 +79,14 @@ impl Plugin for CostAnalysis {
                     }
                 })
                 .map_response(|res: Response| {
-                    // TODO: Dynamic cost analysis
-                    res.map(|gql_stream| gql_stream.map(|gql_res| gql_res).boxed())
+                    res.map(|gql_stream| {
+                        gql_stream
+                            .map(|gql_res| {
+                                // TODO(tninesling): Apply actual counts to cost analysis
+                                gql_res
+                            })
+                            .boxed()
+                    })
                 })
                 .service(service)
                 .boxed()

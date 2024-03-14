@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::anyhow;
 use apollo_compiler::ast;
 use tower::BoxError;
@@ -32,33 +34,27 @@ impl ListSizeDirective {
         let slicing_arguments = list_size_directive
             .argument_by_name("slicingArguments")
             .and_then(|arg| arg.as_list())
-            .map(|args| args.iter().flat_map(|arg| arg.as_str()).collect::<Vec<_>>());
+            .map(|args| {
+                args.iter()
+                    .flat_map(|arg| arg.as_str())
+                    .collect::<HashSet<_>>()
+            });
 
         if let Some(slicing_arguments) = slicing_arguments {
-            let mut max_size: Option<f64> = None;
-
-            let values = field
+            let max_size = field
                 .arguments
                 .iter()
                 .filter(|arg| slicing_arguments.contains(&arg.name.as_str()))
-                .map(|arg| arg.value.to_f64());
-
-            for value in values {
-                max_size = match (value, max_size) {
-                    (Some(v), Some(max)) => Some(max.max(v)),
-                    (Some(v), None) => Some(v),
-                    (None, existing) => existing,
-                }
-            }
+                .flat_map(|arg| arg.value.to_f64())
+                .reduce(|x, y| x.max(y));
 
             if let Some(v) = max_size {
                 return Ok(Self { max_size: v });
-            } else {
-                return Err(anyhow!(
-                    "Found slicingArguments, but no passed argument had valid f64"
-                )
-                .into());
             }
+
+            return Err(
+                anyhow!("Found slicingArguments, but no passed argument had valid f64").into(),
+            );
         }
 
         // TODO(tninesling): The spec also defines a sizedFields argument, which

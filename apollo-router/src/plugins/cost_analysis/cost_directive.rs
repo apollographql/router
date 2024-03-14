@@ -15,31 +15,18 @@ impl CostDirective {
     pub(crate) fn from_directives(
         directives: &ast::DirectiveList,
     ) -> Result<Option<Self>, BoxError> {
-        let weight = directives
-            .get("cost")
-            .and_then(|cost| cost.argument_by_name("weight"))
-            .map(|arg| arg.as_ref());
+        if let Some(cost_directive) = directives.get("cost") {
+            let weight = cost_directive
+                .argument_by_name("weight")
+                .and_then(|arg| arg.as_str());
 
-        match weight {
-            Some(executable::Value::Float(f)) => f
-                .try_to_f64()
-                .map(|weight| Some(CostDirective::new(weight)))
-                .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into()),
-            Some(executable::Value::Int(i)) => i
-                .try_to_f64()
-                .map(|weight| Some(CostDirective::new(weight)))
-                .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into()),
-            Some(executable::Value::String(s)) => {
-                // This is the expected branch, since the spec defines weight as a String.
-                // The spec mentions the String could be either a serialized float, as
-                // parsed here, or an expression that evaluates to a float (which is omitted
-                // for now).
-                s.parse()
-                    .map(|weight| Some(CostDirective::new(weight)))
-                    .map_err(|_| anyhow!("Argument weight cannot be parsed as a valid f64.").into())
+            if let Some(w) = weight {
+                Ok(Some(CostDirective::new(w.parse::<f64>()?)))
+            } else {
+                Err(anyhow!("Cost directive is missing required parameter: weight.").into())
             }
-            Some(_) => Err(anyhow!("Argument weight must be a valid float").into()),
-            None => Ok(None),
+        } else {
+            Ok(None)
         }
     }
 
