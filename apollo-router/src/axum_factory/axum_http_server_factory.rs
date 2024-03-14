@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum::error_handling::HandleErrorLayer;
 use axum::extract::Extension;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -32,14 +33,15 @@ use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_http::decompression::DecompressionBody;
 use tower_http::trace::TraceLayer;
 
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
 use super::listeners::ListenersAndRouters;
-use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
 use super::ENDPOINT_CALLBACK;
@@ -57,6 +59,7 @@ use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::http::service::BodyStream;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
@@ -173,11 +176,9 @@ where
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder()
-                                .status(status_code)
-                                .body::<hyper::Body>(
-                                    serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                                )?,
+                            response: http::Response::builder().status(status_code).body::<Body>(
+                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                            )?,
                             context: req.context,
                         })
                     }
@@ -422,6 +423,10 @@ pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
         .unwrap_or_default()
 }
 
+async fn decompression_error(_error: BoxError) -> axum::response::Response {
+    (StatusCode::BAD_REQUEST, "cannot decompress request body").into_response()
+}
+
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -436,8 +441,16 @@ where
     })?;
     let span_mode = span_mode(configuration);
 
+    let decompression = ServiceBuilder::new()
+        .layer(HandleErrorLayer::<_, ()>::new(decompression_error))
+        .layer(
+            tower_http::decompression::RequestDecompressionLayer::new()
+                .br(true)
+                .gzip(true)
+                .deflate(true),
+        );
     let mut main_route = main_router::<RF>(configuration)
-        .layer(middleware::from_fn(decompress_request_body))
+        .layer(decompression)
         .layer(middleware::from_fn_with_state(
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
@@ -530,19 +543,21 @@ async fn license_handler<B>(
     }
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
+pub(super) fn main_router<RF>(
+    configuration: &Configuration,
+) -> axum::Router<(), DecompressionBody<Body>>
 where
     RF: RouterFactory,
 {
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
         get({
-            move |Extension(service): Extension<RF>, request: Request<Body>| {
+            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
                 handle_graphql(service.create().boxed(), request)
             }
         })
         .post({
-            move |Extension(service): Extension<RF>, request: Request<Body>| {
+            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
                 handle_graphql(service.create().boxed(), request)
             }
         }),
@@ -552,12 +567,14 @@ where
         router = router.route(
             "/",
             get({
-                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                move |Extension(service): Extension<RF>,
+                      request: Request<DecompressionBody<Body>>| {
                     handle_graphql(service.create().boxed(), request)
                 }
             })
             .post({
-                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                move |Extension(service): Extension<RF>,
+                      request: Request<DecompressionBody<Body>>| {
                     handle_graphql(service.create().boxed(), request)
                 }
             }),
@@ -569,9 +586,13 @@ where
 
 async fn handle_graphql(
     service: router::BoxService,
-    http_request: Request<Body>,
+    http_request: Request<DecompressionBody<Body>>,
 ) -> impl IntoResponse {
     let _guard = SessionCountGuard::start();
+
+    let (parts, body) = http_request.into_parts();
+
+    let http_request = http::Request::from_parts(parts, Body::wrap_stream(BodyStream::new(body)));
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();

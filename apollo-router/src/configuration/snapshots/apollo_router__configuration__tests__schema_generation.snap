@@ -98,6 +98,11 @@ expression: "&schema"
                       "default": false,
                       "type": "boolean"
                     },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -269,6 +274,29 @@ expression: "&schema"
                         },
                         "nullable": true
                       },
+                      "headers": {
+                        "description": "List of headers to add to the JWKS request",
+                        "type": "array",
+                        "items": {
+                          "description": "Insert a header",
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "value"
+                          ],
+                          "properties": {
+                            "name": {
+                              "description": "The name of the header",
+                              "type": "string"
+                            },
+                            "value": {
+                              "description": "The value for the header",
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
                       "issuer": {
                         "description": "Expected issuer for tokens verified by that JWKS",
                         "type": "string",
@@ -288,6 +316,59 @@ expression: "&schema"
                       }
                     },
                     "additionalProperties": false
+                  }
+                },
+                "sources": {
+                  "description": "Alternative sources to extract the JWT",
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "type"
+                        ],
+                        "properties": {
+                          "name": {
+                            "description": "HTTP header expected to contain JWT",
+                            "default": "authorization",
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "header"
+                            ]
+                          },
+                          "value_prefix": {
+                            "description": "Header value prefix",
+                            "default": "Bearer",
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "properties": {
+                          "name": {
+                            "description": "Name of the cookie containing the JWT",
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "cookie"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
                   }
                 }
               },
@@ -1897,8 +1978,7 @@ expression: "&schema"
           "description": "Subgraph URL mappings",
           "type": "object",
           "additionalProperties": {
-            "type": "string",
-            "format": "uri"
+            "type": "string"
           }
         }
       ]
@@ -2086,6 +2166,11 @@ expression: "&schema"
             "required_to_start": {
               "description": "Prevents the router from starting if it cannot connect to Redis",
               "default": false,
+              "type": "boolean"
+            },
+            "reset_ttl": {
+              "description": "When a TTL is set on a key, reset it when reading the data from that key",
+              "default": true,
               "type": "boolean"
             },
             "timeout": {
@@ -2570,6 +2655,11 @@ expression: "&schema"
                     "required_to_start": {
                       "description": "Prevents the router from starting if it cannot connect to Redis",
                       "default": false,
+                      "type": "boolean"
+                    },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
                       "type": "boolean"
                     },
                     "timeout": {

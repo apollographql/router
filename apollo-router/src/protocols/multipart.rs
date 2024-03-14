@@ -93,25 +93,26 @@ impl Stream for Multipart {
                     let buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
                         Bytes::from_static(
-                            &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql\r\n"[..]
+                            &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql"[..]
                         )
                     } else {
                         Bytes::from_static(
-                            &b"content-type: application/json\r\n\r\n{}\r\n--graphql\r\n"[..],
+                            &b"\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql"[..],
                         )
                     };
 
                     Poll::Ready(Some(Ok(buf)))
                 }
                 Some(MessageKind::Message(mut response)) => {
+                    let is_still_open =
+                        response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
                         Vec::from(&b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..])
                     } else {
-                        Vec::from(&b"content-type: application/json\r\n\r\n"[..])
+                        Vec::from(&b"\r\ncontent-type: application/json\r\n\r\n"[..])
                     };
-                    let is_still_open =
-                        response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
+
                     match self.mode {
                         ProtocolMode::Subscription => {
                             let resp = SubscriptionPayload {
@@ -128,7 +129,13 @@ impl Stream for Multipart {
                                 },
                             };
 
-                            serde_json::to_writer(&mut buf, &resp)?;
+                            // Gracefully closed at the server side
+                            if !is_still_open && resp.payload.is_none() && resp.errors.is_empty() {
+                                self.is_terminated = true;
+                                return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
+                            } else {
+                                serde_json::to_writer(&mut buf, &resp)?;
+                            }
                         }
                         ProtocolMode::Defer => {
                             serde_json::to_writer(&mut buf, &response)?;
@@ -136,7 +143,7 @@ impl Stream for Multipart {
                     }
 
                     if is_still_open {
-                        buf.extend_from_slice(b"\r\n--graphql\r\n");
+                        buf.extend_from_slice(b"\r\n--graphql");
                     } else {
                         self.is_terminated = true;
                         buf.extend_from_slice(b"\r\n--graphql--\r\n");
@@ -153,7 +160,7 @@ impl Stream for Multipart {
                         )
                     } else {
                         Bytes::from_static(
-                            &b"content-type: application/json\r\n\r\n{}\r\n--graphql--\r\n"[..],
+                            &b"\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql--\r\n"[..],
                         )
                     };
                     self.is_terminated = true;
@@ -204,14 +211,15 @@ mod tests {
                     "test",
                     serde_json_bytes::Value::String("test_extension".into()),
                 )
+                .subscribed(true)
                 .build(),
+            graphql::Response::builder().build(),
         ];
         let gql_responses = stream::iter(responses);
 
         let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
-        let heartbeat = String::from(
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql\r\n",
-        );
+        let heartbeat =
+            String::from("\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql");
         let mut curr_index = 0;
         while let Some(resp) = protocol.next().await {
             let res = String::from_utf8(resp.unwrap().to_vec()).unwrap();
@@ -220,25 +228,28 @@ mod tests {
             } else {
                 match curr_index {
                     0 => {
-                        assert_eq!(res, "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql\r\n");
+                        assert_eq!(res, "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql");
                     }
                     1 => {
                         assert_eq!(
                             res,
-                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":\"bar\"}}\r\n--graphql\r\n"
+                            "\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"bar\"}}\r\n--graphql"
                         );
                     }
                     2 => {
                         assert_eq!(
                             res,
-                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foobar\"}}\r\n--graphql\r\n"
+                            "\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foobar\"}}\r\n--graphql"
                         );
                     }
                     3 => {
                         assert_eq!(
                             res,
-                            "content-type: application/json\r\n\r\n{\"payload\":{\"data\":null,\"extensions\":{\"test\":\"test_extension\"}}}\r\n--graphql--\r\n"
+                            "\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":null,\"extensions\":{\"test\":\"test_extension\"}}}\r\n--graphql"
                         );
+                    }
+                    4 => {
+                        assert_eq!(res, "--\r\n");
                     }
                     _ => {
                         panic!("should not happen, test failed");

@@ -23,11 +23,8 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 scalar join__FieldSet
 
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev/")
-  INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev/")
-  PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev/")
-  REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev/")
   UPLOADS @join__graph(name: "uploads", url: "http://127.0.0.1:4005/")
+  UPLOADS_CLONE @join__graph(name: "uploads_clone", url: "http://127.0.0.1:4006/")
 }
 
 scalar link__Import
@@ -44,53 +41,11 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Product
-  @join__type(graph: INVENTORY, key: "upc")
-  @join__type(graph: PRODUCTS, key: "upc")
-  @join__type(graph: REVIEWS, key: "upc")
-{
-  upc: String!
-  weight: Int @join__field(graph: INVENTORY, external: true) @join__field(graph: PRODUCTS)
-  price: Int @join__field(graph: INVENTORY, external: true) @join__field(graph: PRODUCTS)
-  inStock: Boolean @join__field(graph: INVENTORY)
-  shippingEstimate: Int @join__field(graph: INVENTORY, requires: "price weight")
-  name: String @join__field(graph: PRODUCTS)
-  reviews: [Review] @join__field(graph: REVIEWS)
-  reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
-}
-
-type Query
-  @join__type(graph: ACCOUNTS)
-  @join__type(graph: INVENTORY)
-  @join__type(graph: PRODUCTS)
-  @join__type(graph: REVIEWS)
-{
-  me: User @join__field(graph: ACCOUNTS)
-  topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
-}
-
-type Review
-  @join__type(graph: REVIEWS, key: "id")
-{
-  id: ID!
-  body: String
-  author: User @join__field(graph: REVIEWS, provides: "username")
-  product: Product
-}
-
-type User
-  @join__type(graph: ACCOUNTS, key: "id")
-  @join__type(graph: REVIEWS, key: "id")
-{
-  id: ID!
-  name: String @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS) @join__field(graph: REVIEWS, external: true)
-  reviews: [Review] @join__field(graph: REVIEWS)
-}
-
 
 scalar Upload
   @join__type(graph: UPLOADS)
+scalar UploadClone
+  @join__type(graph: UPLOADS_CLONE)
 
 type File
   @join__type(graph: UPLOADS)
@@ -100,9 +55,35 @@ type File
   encoding: String!
   body: String!
 }
+type FileClone
+  @join__type(graph: UPLOADS_CLONE)
+{
+  filename: String!
+  mimetype: String!
+  encoding: String!
+  body: String!
+}
+
+input NestedUpload
+  @join__type(graph: UPLOADS)
+{
+  file: Upload!
+}
+
+type Query
+  @join__type(graph: UPLOADS)
+  @join__type(graph: UPLOADS_CLONE)
+{
+  empty: String
+}
 
 type Mutation
   @join__type(graph: UPLOADS)
+  @join__type(graph: UPLOADS_CLONE)
 {
   singleUpload(file: Upload): File @join__field(graph: UPLOADS)
+  singleUploadNonNull(file: Upload!): File! @join__field(graph: UPLOADS)
+  singleUploadClone(file: UploadClone): FileClone @join__field(graph: UPLOADS_CLONE)
+  multiUpload(files: [Upload!]!): [File!]! @join__field(graph: UPLOADS)
+  nestedUpload(nested: NestedUpload): File @join__field(graph: UPLOADS)
 }
