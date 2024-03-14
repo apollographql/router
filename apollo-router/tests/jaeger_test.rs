@@ -387,26 +387,26 @@ fn verify_router_span_fields(
     assert_eq!(
         router_span
             .select_path("$.tags[?(@.key == 'client.name')].value")?
-            .get(0),
+            .first(),
         Some(&&Value::String("custom_name".to_string()))
     );
     assert_eq!(
         router_span
             .select_path("$.tags[?(@.key == 'client.version')].value")?
-            .get(0),
+            .first(),
         Some(&&Value::String("1.0".to_string()))
     );
     if custom_span_instrumentation {
         assert_eq!(
             router_span
                 .select_path("$.tags[?(@.key == 'http.request.method')].value")?
-                .get(0),
+                .first(),
             Some(&&Value::String("POST".to_string()))
         );
         assert_eq!(
             router_span
                 .select_path("$.tags[?(@.key == 'http.request.header.x-not-present')].value")?
-                .get(0),
+                .first(),
             Some(&&Value::String("nope".to_string()))
         );
     }
@@ -427,20 +427,20 @@ fn verify_root_span_fields(trace: &Value, operation_name: Option<&str>) -> Resul
         assert_eq!(
             request_span
                 .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
-                .get(0),
+                .first(),
             Some(&&Value::String(operation_name.to_string()))
         );
     } else {
         assert!(request_span
             .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
-            .get(0)
+            .first()
             .is_none(),);
     }
 
     assert_eq!(
         request_span
             .select_path("$.tags[?(@.key == 'graphql.operation.type')].value")?
-            .get(0),
+            .first(),
         Some(&&Value::String("query".to_string()))
     );
 
@@ -460,20 +460,20 @@ fn verify_supergraph_span_fields(
         assert_eq!(
             supergraph_span
                 .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
-                .get(0),
+                .first(),
             Some(&&Value::String(operation_name.to_string()))
         );
     } else {
         assert!(supergraph_span
             .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
-            .get(0)
+            .first()
             .is_none(),);
     }
     if custom_span_instrumentation {
         assert_eq!(
             supergraph_span
                 .select_path("$.tags[?(@.key == 'graphql.operation.type')].value")?
-                .get(0),
+                .first(),
             Some(&&Value::String("query".to_string()))
         );
     }
@@ -481,7 +481,7 @@ fn verify_supergraph_span_fields(
     assert_eq!(
         supergraph_span
             .select_path("$.tags[?(@.key == 'graphql.document')].value")?
-            .get(0),
+            .first(),
         Some(&&Value::String(
             query
                 .as_object()
