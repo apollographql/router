@@ -1,12 +1,18 @@
 //! Calls out to nodejs query planner
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::Name;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Node;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -43,6 +49,7 @@ use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
+use crate::services::OperationKind;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -491,7 +498,7 @@ impl BridgeQueryPlanner {
         ) && original_query != filtered_query {
             Some(
                 self.planner
-                    .operation_signature(original_query, operation)
+                    .operation_signature(original_query, operation.clone())
                     .await
                     .map_err(QueryPlannerError::RouterBridgeError)?,
             )
@@ -520,8 +527,8 @@ impl BridgeQueryPlanner {
                     // generated from the filtered query in JS code? Is that ok? Do we need to re-parse the filtered query here?
                     
                     let generated_usage_reporting = UsageReporting {
-                        stats_report_key: BridgeQueryPlanner::generate_apollo_reporting_signature(doc),
-                        referenced_fields_by_type: BridgeQueryPlanner::generate_apollo_reporting_refs(doc),
+                        stats_report_key: BridgeQueryPlanner::generate_apollo_reporting_signature(doc, operation.clone()),
+                        referenced_fields_by_type: BridgeQueryPlanner::generate_apollo_reporting_refs(doc, operation, &self.schema.definitions),
                     };
 
                     if matches!(
@@ -613,62 +620,101 @@ impl BridgeQueryPlanner {
     }
 
     // todo move this somewhere else? somewhere where it's possible to do fuzzing?
-    fn generate_apollo_reporting_signature(doc: &ParsedDocument) -> String {
+    fn generate_apollo_reporting_signature(doc: &ParsedDocument, operation_name: Option<String>) -> String {
         // todo this implementation is temporary and needs a lot of work
-
+        
         let definitions = doc.ast.definitions.clone();
         let operation_def = definitions[0].as_operation_definition().unwrap().clone();
 
         let operation_body = operation_def.to_string();
-        let operation_name = operation_def.name.as_ref().unwrap().to_string();
+        // let operation_name = operation_def.name.as_ref().unwrap().to_string();
         // println!("operation_body: {}", operation_body);
         // println!("operation_name: {}", operation_name);
 
         let whitespace_regex = regex::Regex::new(r"\s+").unwrap();
         let stripped_body = whitespace_regex.replace_all(&operation_body, " ").to_string();
 
-        format!("# {}\n{}", operation_name, stripped_body)
+        format!("# {}\n{}", operation_name.unwrap_or_default(), stripped_body)
     }
 
     // todo move this somewhere else? somewhere where it's possible to do fuzzing?
-    fn generate_apollo_reporting_refs(doc: &ParsedDocument) -> HashMap<String, ReferencedFieldsForType> {
-        // todo this implementation is temporary and needs a lot of work
+    // todo probably needs a refactor (after testing/fixing)
+    fn generate_apollo_reporting_refs(doc: &ParsedDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
+        let maybe_op = doc.executable.get_operation(operation_name.as_deref()).ok();
 
-        let (_name, operation) = doc.executable.named_operations.first().unwrap();
+        if let Some(operation) = maybe_op {
+            let mut ref_fields = HashMap::new();
+            let mut fragment_names: HashSet<Name> = HashSet::new();
 
-        let query_fields = operation.selection_set.selections
-            .iter()
-            .map(|x| x.as_field().unwrap().name.to_string())
-            .collect();
+            fn extract_fields(parent_type: String, selection_set: &SelectionSet, schema: &Valid<apollo_compiler::Schema>, ref_fields: &mut HashMap<String, ReferencedFieldsForType>, fragments: &mut HashSet<Name>) {
+                // Extract child fields
+                let child_fields: Vec<&Node<Field>> = selection_set.selections
+                    .iter()
+                    .filter_map(|selection| selection.as_field())
+                    .collect();
 
-        let mut ref_fields = HashMap::from([
-            (operation.selection_set.ty.to_string(), ReferencedFieldsForType {
-                field_names: query_fields,
-                is_interface: false,
-            })
-        ]);
+                if !child_fields.is_empty() {
+                    let field_names: Vec<String> = child_fields.iter().map(|field| field.name.to_string()).collect();
+                    let field_schema_type = schema.types.get(parent_type.as_str());
+                    let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
 
-        for selection in operation.selection_set.selections.iter() {
-            let field = selection.as_field().unwrap();
+                    let fields_for_type = ref_fields.entry(parent_type).or_insert(ReferencedFieldsForType {
+                        field_names: vec![],
+                        is_interface: is_interface,
+                    });
+                    // todo sort? use a temporary hashset instead?
+                    for name in field_names {
+                        if !fields_for_type.field_names.contains(&name) {
+                            fields_for_type.field_names.push(name);
+                        }
+                    }
 
-            /*
-            println!("field name: {}", field.name);
-            println!("field type: {}", field.definition.ty);
-            println!("field selection set type: {}", field.selection_set.ty);
-            */
+                    child_fields.iter().for_each(|field| {
+                        let field_type = field.selection_set.ty.to_string();
+                        extract_fields(field_type, &field.selection_set, schema, ref_fields, fragments);
+                    });
+                }
 
-            let child_fields = field.selection_set.selections
-                .iter()
-                .map(|x| x.as_field().unwrap().name.to_string())
-                .collect();
+                // Extract fields from inline fragments
+                selection_set.selections
+                    .iter()
+                    .filter_map(|selection| selection.as_inline_fragment())
+                    .for_each(|frag| {
+                        if let Some(fragment_type) = frag.type_condition.clone() {
+                            let frag_type_name = fragment_type.to_string();
+                            extract_fields(frag_type_name, &frag.selection_set, schema, ref_fields, fragments);
+                        } else {
+                            // todo not sure what to do for anonymous fragments - use parent_type?
+                        }
+                    });
 
-            ref_fields.insert(field.selection_set.ty.to_string(), ReferencedFieldsForType {
-                field_names: child_fields,
-                is_interface: false, // todo use value from below (or maybe the bridge always sends "false"?)
+                // Extract names of any used fragment spreads (these will be extracted later)
+                selection_set.selections
+                    .iter()
+                    .filter_map(|selection| selection.as_fragment_spread())
+                    .for_each(|frag| {
+                        fragments.insert(frag.fragment_name.clone());
+                    });
+            }
+
+            let operation_kind = OperationKind::from(operation.operation_type);
+            extract_fields(operation_kind.as_str().into(), &operation.selection_set, schema, &mut ref_fields, &mut fragment_names);
+    
+            // Extract field from referenced fragment spreads
+            // todo handle nested named fragments - need to keep track of seen fragments, pop fragments off the set when processed and push new ones on if they haven't already been seen
+            fragment_names.iter().for_each(|name| {
+                if let Some(fragment) = doc.executable.fragments.get(name) {
+                    let mut temp_set: HashSet<Name> = HashSet::new();
+                    let fragment_type = fragment.selection_set.ty.to_string();
+                    extract_fields(fragment_type, &fragment.selection_set, schema, &mut ref_fields, &mut temp_set);
+                }
             });
-        }
 
-        ref_fields
+            ref_fields
+        } else {
+            // todo not sure what to do if operation can't be found - maybe empty map is ok?
+            HashMap::new()
+        }
     }
 }
 
@@ -1641,5 +1687,466 @@ mod tests {
             router_bridge_version.contains('='),
             "router-bridge in Cargo.toml is not pinned with a '=' prefix"
         );
+    }
+
+    // todo more/better tests
+    #[test(tokio::test)]
+    async fn test_sig_and_ref_generation_1() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicTypesResponse {
+            nullableId: ID
+            nonNullId: ID!
+            nullableInt: Int
+            nonNullInt: Int!
+            nullableString: String
+            nonNullString: String!
+            nullableFloat: Float
+            nonNullFloat: Float!
+            nullableBoolean: Boolean
+            nonNullBoolean: Boolean!
+          }
+          
+          enum SomeEnum {
+            SOME_VALUE_1
+            SOME_VALUE_2
+            SOME_VALUE_3
+          }
+          
+          interface AnInterface {
+            sharedField: String!
+          }
+          
+          type InterfaceImplementation1 implements AnInterface {
+            sharedField: String!
+            implementation1Field: Int!
+          }
+          
+          type InterfaceImplementation2 implements AnInterface {
+            sharedField: String!
+            implementation2Field: Float!
+          }
+          
+          type UnionType1 {
+            unionType1Field: String!
+            nullableString: String
+          }
+          
+          type UnionType2 {
+            unionType2Field: String!
+            nullableString: String
+          }
+          
+          union UnionType = UnionType1 | UnionType2
+          
+          type ObjectTypeResponse {
+            stringField: String!
+            intField: Int!
+            nullableField: String
+          }
+          
+          input NestedInputType {
+            someFloat: Float!
+            someNullableFloat: Float
+          }
+          
+          input InputType {
+            inputString: String!
+            inputInt: Int!
+            inputBoolean: Boolean
+            nestedType: NestedInputType!
+            enumInput: SomeEnum
+            listInput: [Int!]!
+            nestedTypeList: [NestedInputType]
+          }
+          
+          input NestedEnumInputType {
+            someEnum: SomeEnum
+          }
+          
+          input AnotherInputType {
+            anotherInput: ID!
+          }
+          
+          input InputTypeWithDefault {
+            nonNullId: ID!
+            nonNullIdWithDefault: ID! = "id"
+            nullableId: ID
+            nullableIdWithDefault: ID = "id"
+          }
+          
+          input EnumInputType {
+            enumInput: SomeEnum!
+            enumListInput: [SomeEnum!]!
+            nestedEnumType: [NestedEnumInputType]
+          }
+          
+          type EverythingResponse {
+            basicTypes: BasicTypesResponse
+            enumResponse: SomeEnum
+            interfaceResponse: AnInterface
+            interfaceImplementationResponse: InterfaceImplementation2
+            unionResponse: UnionType
+            unionType2Response: UnionType2
+            listOfBools: [Boolean!]!
+            listOfInterfaces: [AnInterface]
+            listOfUnions: [UnionType]
+            objectTypeWithInputField(boolInput: Boolean): ObjectTypeResponse
+            listOfObjects: [ObjectTypeResponse]
+          }
+          
+          type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Query {
+            inputTypeQuery(input: InputType!): EverythingResponse!
+            scalarInputQuery(
+              listInput: [String!]!, 
+              stringInput: String!, 
+              nullableStringInput: String, 
+              intInput: Int!, 
+              floatInput: Float!, 
+              boolInput: Boolean!, 
+              enumInput: SomeEnum,
+              idInput: ID!
+            ): EverythingResponse!
+            noInputQuery: EverythingResponse!
+            basicInputTypeQuery(input: NestedInputType!): EverythingResponse!
+            anotherInputTypeQuery(input: AnotherInputType): EverythingResponse!
+            enumInputQuery(enumInput: SomeEnum, inputType: EnumInputType): EverythingResponse!
+            basicResponseQuery: BasicResponse!
+            scalarResponseQuery: String
+            defaultArgQuery(stringInput: String! = "default", inputType: AnotherInputType = { anotherInput: "inputDefault" }): BasicResponse!
+            inputTypehDefaultQuery(input: InputTypeWithDefault): BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query UnusedQuery {
+            noInputQuery {
+              enumResponse
+            }
+          }
+          
+          fragment UnusedFragment on EverythingResponse {
+            enumResponse
+          }
+          
+          fragment Fragment2 on EverythingResponse {
+            basicTypes {
+              nullableFloat
+            }
+          }
+          
+          query        TransformedQuery    {
+          
+          
+            scalarInputQuery(idInput: "a1", listInput: [], boolInput: true, intInput: 1, stringInput: "x", floatInput: 1.2)      @skip(if: false)   @include(if: true) {
+              ...Fragment2,
+          
+          
+              objectTypeWithInputField(boolInput: true, secondInput: false) {
+                stringField
+                __typename
+                intField
+              }
+          
+              enumResponse
+              interfaceResponse {
+                sharedField
+                ... on InterfaceImplementation2 {
+                  implementation2Field
+                }
+                ... on InterfaceImplementation1 {
+                  implementation1Field
+                }
+              }
+              ...Fragment1,
+            }
+          }
+          
+          fragment Fragment1 on EverythingResponse {
+            basicTypes {
+              nonNullFloat
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        //let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc);
+        //let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
+        //assert_eq!(expected_sig, generated_sig);
+
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("TransformedQuery".into()), &schema.api_schema().definitions);
+        let expected_refs = HashMap::from([
+            ("Query".into(), ReferencedFieldsForType {
+                field_names: vec!["scalarInputQuery".into()],
+                is_interface: false,
+            }),
+            ("BasicTypesResponse".into(), ReferencedFieldsForType {
+                field_names: vec!["nullableFloat".into(), "nonNullFloat".into()],
+                is_interface: false,
+            }),
+            ("EverythingResponse".into(), ReferencedFieldsForType {
+                field_names: vec![
+                    "basicTypes".into(), 
+                    "objectTypeWithInputField".into(),
+                    "enumResponse".into(),
+                    "interfaceResponse".into(),
+                ],
+                is_interface: false,
+            }),
+            ("AnInterface".into(), ReferencedFieldsForType {
+                field_names: vec!["sharedField".into()],
+                is_interface: true,
+            }),
+            ("ObjectTypeResponse".into(), ReferencedFieldsForType {
+                field_names: vec!["stringField".into(), "__typename".into(), "intField".into()],
+                is_interface: false,
+            }),
+            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
+                field_names: vec!["implementation1Field".into()],
+                is_interface: false,
+            }),
+            ("InterfaceImplementation2".into(), ReferencedFieldsForType {
+                field_names: vec!["implementation2Field".into()],
+                is_interface: false,
+            }),
+        ]);
+        assert_eq!(expected_refs, generated_refs);
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_and_ref_generation_2() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicTypesResponse {
+            nullableId: ID
+            nonNullId: ID!
+            nullableInt: Int
+            nonNullInt: Int!
+            nullableString: String
+            nonNullString: String!
+            nullableFloat: Float
+            nonNullFloat: Float!
+            nullableBoolean: Boolean
+            nonNullBoolean: Boolean!
+          }
+          
+          enum SomeEnum {
+            SOME_VALUE_1
+            SOME_VALUE_2
+            SOME_VALUE_3
+          }
+          
+          interface AnInterface {
+            sharedField: String!
+          }
+          
+          type InterfaceImplementation1 implements AnInterface {
+            sharedField: String!
+            implementation1Field: Int!
+          }
+          
+          type InterfaceImplementation2 implements AnInterface {
+            sharedField: String!
+            implementation2Field: Float!
+          }
+          
+          type UnionType1 {
+            unionType1Field: String!
+            nullableString: String
+          }
+          
+          type UnionType2 {
+            unionType2Field: String!
+            nullableString: String
+          }
+          
+          union UnionType = UnionType1 | UnionType2
+          
+          type ObjectTypeResponse {
+            stringField: String!
+            intField: Int!
+            nullableField: String
+          }
+          
+          input NestedInputType {
+            someFloat: Float!
+            someNullableFloat: Float
+          }
+          
+          input InputType {
+            inputString: String!
+            inputInt: Int!
+            inputBoolean: Boolean
+            nestedType: NestedInputType!
+            enumInput: SomeEnum
+            listInput: [Int!]!
+            nestedTypeList: [NestedInputType]
+          }
+          
+          input NestedEnumInputType {
+            someEnum: SomeEnum
+          }
+          
+          input AnotherInputType {
+            anotherInput: ID!
+          }
+          
+          input InputTypeWithDefault {
+            nonNullId: ID!
+            nonNullIdWithDefault: ID! = "id"
+            nullableId: ID
+            nullableIdWithDefault: ID = "id"
+          }
+          
+          input EnumInputType {
+            enumInput: SomeEnum!
+            enumListInput: [SomeEnum!]!
+            nestedEnumType: [NestedEnumInputType]
+          }
+          
+          type EverythingResponse {
+            basicTypes: BasicTypesResponse
+            enumResponse: SomeEnum
+            interfaceResponse: AnInterface
+            interfaceImplementationResponse: InterfaceImplementation2
+            unionResponse: UnionType
+            unionType2Response: UnionType2
+            listOfBools: [Boolean!]!
+            listOfInterfaces: [AnInterface]
+            listOfUnions: [UnionType]
+            objectTypeWithInputField(boolInput: Boolean): ObjectTypeResponse
+            listOfObjects: [ObjectTypeResponse]
+          }
+          
+          type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Query {
+            inputTypeQuery(input: InputType!): EverythingResponse!
+            scalarInputQuery(
+              listInput: [String!]!, 
+              stringInput: String!, 
+              nullableStringInput: String, 
+              intInput: Int!, 
+              floatInput: Float!, 
+              boolInput: Boolean!, 
+              enumInput: SomeEnum,
+              idInput: ID!
+            ): EverythingResponse!
+            noInputQuery: EverythingResponse!
+            basicInputTypeQuery(input: NestedInputType!): EverythingResponse!
+            anotherInputTypeQuery(input: AnotherInputType): EverythingResponse!
+            enumInputQuery(enumInput: SomeEnum, inputType: EnumInputType): EverythingResponse!
+            basicResponseQuery: BasicResponse!
+            scalarResponseQuery: String
+            defaultArgQuery(stringInput: String! = "default", inputType: AnotherInputType = { anotherInput: "inputDefault" }): BasicResponse!
+            inputTypehDefaultQuery(input: InputTypeWithDefault): BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query Query($secondInput: Boolean!) {
+            scalarResponseQuery
+            noInputQuery {
+              basicTypes {
+                nonNullId
+                nonNullInt
+              }
+              enumResponse
+              interfaceImplementationResponse {
+                sharedField
+                implementation2Field
+              }
+              interfaceResponse {
+                ... on InterfaceImplementation1 {
+                  implementation1Field
+                  sharedField
+                }
+                ... on InterfaceImplementation2 {
+                  implementation2Field
+                  sharedField
+                }
+              }
+              listOfUnions {
+                ... on UnionType1 {
+                  nullableString
+                }
+              }
+              objectTypeWithInputField(secondInput: $secondInput) {
+                intField
+              }
+            }
+            basicInputTypeQuery(input: { someFloat: 1 }) {
+              unionResponse {
+                ... on UnionType1 {
+                  nullableString
+                }
+              }
+              unionType2Response {
+                unionType2Field
+              }
+              listOfObjects {
+                stringField
+              }
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        //let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc);
+        //let expected_sig = "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}";
+        //assert_eq!(expected_sig, generated_sig);
+
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("Query".into()), &schema.api_schema().definitions);
+        let expected_refs = HashMap::from([
+            ("Query".into(), ReferencedFieldsForType {
+                field_names: vec!["scalarResponseQuery".into(), "noInputQuery".into(), "basicInputTypeQuery".into()],
+                is_interface: false,
+            }),
+            ("BasicTypesResponse".into(), ReferencedFieldsForType {
+                field_names: vec!["nonNullId".into(), "nonNullInt".into()],
+                is_interface: false,
+            }),
+            ("ObjectTypeResponse".into(), ReferencedFieldsForType {
+                field_names: vec!["intField".into(), "stringField".into()],
+                is_interface: false,
+            }),
+            ("UnionType2".into(), ReferencedFieldsForType {
+                field_names: vec!["unionType2Field".into()],
+                is_interface: false,
+            }),
+            ("EverythingResponse".into(), ReferencedFieldsForType {
+                field_names: vec![
+                    "basicTypes".into(),
+                    "enumResponse".into(),
+                    "interfaceImplementationResponse".into(),
+                    "interfaceResponse".into(),
+                    "listOfUnions".into(),
+                    "objectTypeWithInputField".into(),
+                    "unionResponse".into(),
+                    "unionType2Response".into(),
+                    "listOfObjects".into(),
+                ],
+                is_interface: false,
+            }),
+            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
+                field_names: vec!["implementation1Field".into(), "sharedField".into()],
+                is_interface: false,
+            }),
+            ("UnionType1".into(), ReferencedFieldsForType {
+                field_names: vec!["nullableString".into()],
+                is_interface: false,
+            }),
+            ("InterfaceImplementation2".into(), ReferencedFieldsForType {
+                field_names: vec!["sharedField".into(), "implementation2Field".into()],
+                is_interface: false,
+            }),
+        ]);
+        assert_eq!(expected_refs, generated_refs);
     }
 }
