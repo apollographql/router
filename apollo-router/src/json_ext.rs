@@ -501,6 +501,20 @@ fn iterate_path<'a, F>(
                                     }
                                 }
                             }
+
+                            if let Value::Array(array) = value {
+                                for (i, value) in array.iter().enumerate() {
+                                    if let Value::Object(o) = value {
+                                        if let Some(Value::String(type_name)) = o.get("__typename") {
+                                            if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                                                parent.push(PathElement::Index(i));
+                                                iterate_path(schema, parent, &path[1..], value, f);
+                                                parent.pop();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     } else {
                         parent.push(PathElement::Index(i));
