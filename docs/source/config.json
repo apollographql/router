@@ -33,6 +33,7 @@
         ]
       },
       "Debugging": {
+        "Errors": "/errors",
         "Telemetry": "/configuration/telemetry/overview",
         "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
       },

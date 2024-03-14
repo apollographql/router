@@ -149,7 +149,8 @@ impl Query {
                         defer_conditions,
                     }) {
                         Some(subselection) => {
-                            let mut output = Object::default();
+                            let mut output =
+                                Object::with_capacity(subselection.selection_set.len());
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
@@ -197,7 +198,7 @@ impl Query {
                         }
                     }
                 } else if let Some(operation) = original_operation {
-                    let mut output = Object::default();
+                    let mut output = Object::with_capacity(operation.selection_set.len());
 
                     let all_variables = if operation.variables.is_empty() {
                         variables
@@ -579,7 +580,7 @@ impl Query {
                         }
 
                         if output.is_null() {
-                            *output = Value::Object(Object::default());
+                            *output = Value::Object(Object::with_capacity(selection_set.len()));
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
