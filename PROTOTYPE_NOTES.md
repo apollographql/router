@@ -67,7 +67,7 @@ batching:
       accounts:
         enabled: true
 ```
-Note: `batching` must be enabled and `subgraphs` is a list of named subgraphs which must be enabled. `batching` enables client-side batching and everything under the optional `subgraph` key configures subgraph batching. If a subgraph is not named (i.e.: not present in the sbugraphs list) then batching is not enabled for that subgraph. A subgraph may also be present but if `enabled` is `false`, that will also disable batching for that subgraph.
+> Note: `batching` must be enabled and `subgraphs` is a list of named subgraphs which must be enabled. `batching` enables client-side batching and everything under the optional `subgraph` key configures subgraph batching. If a subgraph is not named (i.e., not present in the subgraphs list), then batching is not enabled for that subgraph. A subgraph may also be present, but if `enabled` is `false`, that will also disable batching for that subgraph.
 
 ### Operation
 
