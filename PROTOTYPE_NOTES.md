@@ -30,7 +30,7 @@ If you want to use a pre-built router, you can access the prototype assets as fo
 | Docker image | [REPLACE ME] |
 | Helm chart | [REPLACE ME] |
 
-Note: These assets are only available until [REPLACE ME]
+> Note: These assets are only available until [REPLACE ME]
 
 ### Configuration
 
