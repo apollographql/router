@@ -112,7 +112,7 @@ impl SubscriptionModeConfig {
             if callback_cfg.subgraphs.contains(service_name) || callback_cfg.subgraphs.is_empty() {
                 let callback_cfg = CallbackMode {
                     public_url: callback_cfg.public_url.clone(),
-                    heartbeat_interval: callback_cfg.heartbeat_interval.clone(),
+                    heartbeat_interval: callback_cfg.heartbeat_interval,
                     listen: callback_cfg.listen.clone(),
                     path: callback_cfg.path.clone(),
                     subgraphs: HashSet::new(), // We don't need it
@@ -168,7 +168,7 @@ pub(crate) struct CallbackMode {
     pub(crate) subgraphs: HashSet<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub(crate) enum HeartbeatInterval {
     Disabled(Disabled),
@@ -186,22 +186,22 @@ impl HeartbeatInterval {
     pub(crate) fn new_disabled() -> Self {
         Self::Disabled(Disabled::Disabled)
     }
-    pub(crate) fn into_option(&self) -> Option<Duration> {
+    pub(crate) fn into_option(self) -> Option<Duration> {
         match self {
             Self::Disabled(_) => None,
             Self::Enabled(_) => Some(Duration::from_secs(5)),
-            Self::Duration(duration) => Some(*duration),
+            Self::Duration(duration) => Some(duration),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Disabled {
     Disabled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Enabled {
     Enabled,

@@ -445,19 +445,15 @@ where
 }
 
 fn send_heartbeat(mut stream: Pin<&mut impl Sink<ClientMessage>>, cx: &mut std::task::Context<'_>) {
-    match stream.as_mut().poll_flush(cx) {
-        Poll::Ready(Ok(_)) => match stream.as_mut().poll_ready(cx) {
-            Poll::Ready(Ok(_)) => {
-                // Ignore error
-                let _ = stream.start_send(ClientMessage::Ping {
-                    payload: Some(serde_json_bytes::Value::String(
-                        "APOLLO_ROUTER_HEARTBEAT".into()
-                    ))
-                });
-            }
-            _ => (),
-        },
-        _ => (),
+    if stream.as_mut().poll_flush(cx).map(|result| result.is_ok()) == Poll::Ready(true)
+        && stream.as_mut().poll_ready(cx).map(|result| result.is_ok()) == Poll::Ready(true)
+    {
+        // Ignore error
+        let _ = stream.start_send(ClientMessage::Ping {
+            payload: Some(serde_json_bytes::Value::String(
+                "APOLLO_ROUTER_HEARTBEAT".into(),
+            )),
+        });
     }
 }
 
