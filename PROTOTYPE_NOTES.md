@@ -54,7 +54,7 @@ batching:
 ```
 > Note: both `batching` and `batching.subgraph.all` must be enabled. `batching` enables client-side batching and everything under the optional `subgraph` key configures subgraph batching.
 
-#### Names Subgraphs
+#### Named Subgraphs
 
 This snippet enables client-side and subgraph batching for only the name `accounts` subgraph.
 
