@@ -29,7 +29,7 @@ pub(crate) struct QueryKey {
 /// A plan for a given GraphQL query
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QueryPlan {
-    pub(crate) usage_reporting: UsageReporting,
+    pub(crate) usage_reporting: Arc<UsageReporting>,
     pub(crate) root: PlanNode,
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<String>,
@@ -46,10 +46,12 @@ impl QueryPlan {
         usage_reporting: Option<UsageReporting>,
     ) -> Self {
         Self {
-            usage_reporting: usage_reporting.unwrap_or_else(|| UsageReporting {
-                stats_report_key: "this is a test report key".to_string(),
-                referenced_fields_by_type: Default::default(),
-            }),
+            usage_reporting: usage_reporting
+                .unwrap_or_else(|| UsageReporting {
+                    stats_report_key: "this is a test report key".to_string(),
+                    referenced_fields_by_type: Default::default(),
+                })
+                .into(),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),

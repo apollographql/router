@@ -395,7 +395,7 @@ async fn subscription_task(
     let operation_signature = context
         .extensions()
         .lock()
-        .get::<UsageReporting>()
+        .get::<Arc<UsageReporting>>()
         .map(|usage_reporting| usage_reporting.stats_report_key.clone())
         .unwrap_or_default();
 

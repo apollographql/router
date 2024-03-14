@@ -224,7 +224,7 @@ pub(crate) enum ServiceBuildError {
     /// couldn't build Query Planner Service: {0}
     QueryPlannerError(QueryPlannerError),
 
-    /// API schema generation failed: {0}
+    /// The supergraph schema failed to produce a valid API schema: {0}
     ApiSchemaError(FederationError),
 
     /// schema error: {0}

@@ -1,0 +1,20 @@
+managedFederation:
+  apiKey: KEY
+  apiSecretName: SECRET
+extraVolumeMounts:
+  - mountPath: /test-ebs
+    name: test-volume
+
+extraVolumes:
+  - name: test-volume
+    # This AWS EBS volume must already exist.
+    awsElasticBlockStore:
+      volumeID: "<volume id>"
+      fsType: ext4
+router:
+  configuration:
+    telemetry:
+      metrics:
+        prometheus:
+          enabled: true
+          listen: 0.0.0.0:1234

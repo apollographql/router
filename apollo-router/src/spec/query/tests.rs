@@ -3508,7 +3508,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3531,7 +3531,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3561,7 +3561,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3596,7 +3596,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3653,7 +3653,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3676,7 +3676,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3706,7 +3706,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3741,7 +3741,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -5327,7 +5327,7 @@ fn parse_introspection_query() {
     assert!(Query::parse(query, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 
@@ -5342,7 +5342,7 @@ fn parse_introspection_query() {
     assert!(Query::parse(query, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 
@@ -5353,7 +5353,7 @@ fn parse_introspection_query() {
     assert!(Query::parse(query, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 }
