@@ -463,11 +463,12 @@ impl RedisCacheStorage {
             }
 
             // then we query all the key groups at the same time
-            let results = //: Vec<(Vec<usize>, Result<Vec<Option<RedisValue<V>>>, RedisError>)> =
-                futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
-                    self.inner.mget(keys).map(|values:Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
-                }))
-                .await;
+            let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
+                self.inner
+                    .mget(keys)
+                    .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
+            }))
+            .await;
 
             // then we have to assemble the results, by making sure that the values are in the same order as
             // the keys argument's order
