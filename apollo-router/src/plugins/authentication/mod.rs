@@ -573,7 +573,11 @@ fn authenticate(
 
     let mut jwt = None;
     for source in &config.sources {
-        match extract_jwt(source, config.ignore_other_prefixes, request.router_request.headers()) {
+        match extract_jwt(
+            source,
+            config.ignore_other_prefixes,
+            request.router_request.headers()
+        ) {
             None => continue,
             Some(Err(error)) => {
                 return failure_message(request.context, error, StatusCode::BAD_REQUEST)
