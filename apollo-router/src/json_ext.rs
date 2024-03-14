@@ -881,6 +881,17 @@ impl Path {
     pub fn starts_with(&self, other: &Path) -> bool {
         self.0.starts_with(&other.0[..])
     }
+
+    // Removes the empty key if at root (used for TypedConditions)
+    pub fn remove_empty_key_root(&self) -> Self {
+        if let Some(PathElement::Key(k)) = self.0.first() {
+            if k.is_empty() {
+                return Path(self.iter().skip(1).cloned().collect());
+            }
+        }
+
+        self.clone()
+    }
 }
 
 impl FromIterator<PathElement> for Path {
