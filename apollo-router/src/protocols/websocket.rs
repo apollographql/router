@@ -289,7 +289,8 @@ where
 
         let heartbeat_interval = if protocol == WebSocketProtocol::GraphqlWs {
             heartbeat_interval.map(|duration| {
-                let mut interval = tokio::time::interval(duration);
+                let mut interval =
+                    tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 interval
             })
@@ -326,12 +327,12 @@ where
     stream
         .with(|client_message: ClientMessage| {
             // It applies to the Sink
-            future::ready(match serde_json::to_string(&dbg!(client_message)) {
+            future::ready(match serde_json::to_string(&client_message) {
                 Ok(client_message_str) => Ok(Message::Text(client_message_str)),
                 Err(err) => Err(Error::SerdeError(err)),
             })
         })
-        .map(move |msg| match dbg!(msg) {
+        .map(move |msg| match msg {
             // It applies to the Stream
             Ok(Message::Text(text)) => serde_json::from_str(&text),
             Ok(Message::Binary(bin)) => serde_json::from_slice(&bin),
@@ -448,7 +449,11 @@ fn send_heartbeat(mut stream: Pin<&mut impl Sink<ClientMessage>>, cx: &mut std::
         Poll::Ready(Ok(_)) => match stream.as_mut().poll_ready(cx) {
             Poll::Ready(Ok(_)) => {
                 // Ignore error
-                let _ = stream.start_send(ClientMessage::Ping { payload: None });
+                let _ = stream.start_send(ClientMessage::Ping {
+                    payload: Some(serde_json_bytes::Value::String(
+                        "APOLLO_ROUTER_HEARTBEAT".into()
+                    ))
+                });
             }
             _ => (),
         },
