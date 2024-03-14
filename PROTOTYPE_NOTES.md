@@ -19,7 +19,7 @@ You can choose to build from source or from one of our pre-built options.
 
 ##### Source
 
-The prototype router is publicly available on the main router repo on branch `subgraph-batching-prototype`. It can be accessed and built as normally.
+The prototype router is publicly available on the main router repo on branch `subgraph-batching-prototype`. It can be accessed and built as normal.
 
 ##### Binary
 
