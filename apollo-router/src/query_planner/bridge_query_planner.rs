@@ -621,23 +621,41 @@ impl BridgeQueryPlanner {
 
     // todo move this somewhere else? somewhere where it's possible to do fuzzing?
     fn generate_apollo_reporting_signature(doc: &ParsedDocument, operation_name: Option<String>) -> String {
-        // todo this implementation is temporary and needs a lot of work
+        match doc.executable.get_operation(operation_name.as_deref()).ok() {
+            None => {
+                // todo print the whole document after transforming (that's what the JS impl does).
+                // See apollo-utils packages/dropUnusedDefinitions/src/index.ts
+                "".to_string()
+            },
+            Some(operation) => {
+                let operation_body = operation.to_string();
+
+                // todo replace all ListValues with [], all ObjectValues with {} (for now), all IntValues and FloatValue
+                //  with 0, and all StringValues with "". See apollo-utils packages/stripSensitiveLiterals/src/index.ts
+
+                // todo remove alias names (for now). See apollo-utils packages/removeAliases/src/index.ts
+
+                // todo alphabetically sort operation variables, selection set selections, field arguments, fragment 
+                // directives, and directive arguments. See apollo-utils packages/sortAST/src/index.ts
         
-        let definitions = doc.ast.definitions.clone();
-        let operation_def = definitions[0].as_operation_definition().unwrap().clone();
-
-        let operation_body = operation_def.to_string();
-        // let operation_name = operation_def.name.as_ref().unwrap().to_string();
-        // println!("operation_body: {}", operation_body);
-        // println!("operation_name: {}", operation_name);
-
-        let whitespace_regex = regex::Regex::new(r"\s+").unwrap();
-        let stripped_body = whitespace_regex.replace_all(&operation_body, " ").to_string();
-
-        format!("# {}\n{}", operation_name.unwrap_or_default(), stripped_body)
+                // todo convert string nodes to hex and then back again so that we preserve whitespace in those, or figure
+                // out another way to preserve them. See apollo-utils packages/printWithReducedWhitespace/src/index.ts
+                let whitespace_regex = regex::Regex::new(r"\s+").unwrap();
+                let stripped_body = whitespace_regex.replace_all(&operation_body, " ").to_string();
+                let trailing_space_regex = regex::Regex::new(r"([^_a-zA-Z0-9]) ").unwrap();
+                let stripped_body = trailing_space_regex.replace_all(&stripped_body, "").to_string();
+                let leading_space_regex = regex::Regex::new(r" ([^_a-zA-Z0-9])").unwrap();
+                let stripped_body = leading_space_regex.replace_all(&stripped_body, "").to_string();
+        
+                // todo does this work for anonymous operations?
+                // todo insert used named fragment bodies (after formatting them as well) before the operation body
+                format!("# {}\n{}", operation_name.unwrap_or_default(), stripped_body)
+            }
+        }
+        
     }
 
-    // todo move this somewhere else? somewhere where it's possible to do fuzzing?
+    // todo move this somewhere else? somewhere where it's possible to do fuzzing?:
     fn generate_apollo_reporting_refs(doc: &ParsedDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
         match doc.executable.get_operation(operation_name.as_deref()).ok() {
             None => HashMap::new(),
@@ -1805,7 +1823,7 @@ mod tests {
             listOfBools: [Boolean!]!
             listOfInterfaces: [AnInterface]
             listOfUnions: [UnionType]
-            objectTypeWithInputField(boolInput: Boolean): ObjectTypeResponse
+            objectTypeWithInputField(boolInput: Boolean, secondInput: Boolean!): ObjectTypeResponse
             listOfObjects: [ObjectTypeResponse]
           }
           
@@ -1888,9 +1906,9 @@ mod tests {
 
         let doc = Query::parse_document(query, &schema, &configuration);
 
-        //let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc);
-        //let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
-        //assert_eq!(expected_sig, generated_sig);
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("TransformedQuery".into()));
+        let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
+        assert_eq!(expected_sig, generated_sig);
 
         let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("TransformedQuery".into()), &schema.api_schema().definitions);
         let expected_refs = HashMap::from([
@@ -1928,7 +1946,6 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        // todo ignore order of field_names vectors somehow
         assert_eq!(expected_refs, generated_refs);
     }
 
@@ -2033,7 +2050,7 @@ mod tests {
             listOfBools: [Boolean!]!
             listOfInterfaces: [AnInterface]
             listOfUnions: [UnionType]
-            objectTypeWithInputField(boolInput: Boolean): ObjectTypeResponse
+            objectTypeWithInputField(boolInput: Boolean, secondInput: Boolean!): ObjectTypeResponse
             listOfObjects: [ObjectTypeResponse]
           }
           
@@ -2113,9 +2130,9 @@ mod tests {
 
         let doc = Query::parse_document(query, &schema, &configuration);
 
-        //let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc);
-        //let expected_sig = "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}";
-        //assert_eq!(expected_sig, generated_sig);
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("Query".into()));
+        let expected_sig = "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}";
+        assert_eq!(expected_sig, generated_sig);
 
         let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("Query".into()), &schema.api_schema().definitions);
         let expected_refs = HashMap::from([
@@ -2162,7 +2179,6 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        // todo ignore order of field_names vectors somehow
         assert_eq!(expected_refs, generated_refs);
     }
 }
