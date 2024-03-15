@@ -6,10 +6,11 @@ description: Create and customize instruments to collect data and report measure
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
 
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
+
 An **instrument** is used to collect data and report measurements to a metric backend. The Apollo Router supports the following metric instruments: 
 
 * Counter
-* Gauge
 * Histogram 
 
 Instruments in the router are configurable in `router.yaml` as `telemetry.instruments`.
@@ -90,7 +91,6 @@ telemetry:
       supergraph:
         acme.graphql.requests:
           value: unit
-          event: on_error
           type: counter
           unit: count
           description: "supergraph requests"
@@ -98,7 +98,6 @@ telemetry:
       subgraph:
         acme.graphql.subgraph.errors:
           value: unit
-          event: on_error
           type: counter
           unit: count
           description: "my description"
@@ -184,7 +183,6 @@ The `value` of an instrument is the value which will be drawn from. This can be 
 
 * `duration` - the duration of the pipeline service.
 * `unit` - the number of times the pipeline service has been executed.
-* `active` - the number of in-progress requests in the pipeline service.
 * `custom` - a custom value extracted from the pipeline service. See [selectors](./selectors) for more information.
 
 ```yaml title="future.router.yaml"
@@ -219,11 +217,9 @@ The value must be of the expected type for the instrument. For example, a counte
 
 #### `type`
 
-Instruments come in four different types:
+Instruments come in two different types:
 
 * `counter` - A monotonic counter. For example, requests served, tasks completed, or errors occurred.
-* `up_down_counter` - A bidirectional counter that is modified by a delta.  For example, the number of items in a queue.   
-* `gauge` - A value that is sampled at a specific point in time. For example, active requests or CPU usage. 
 * `histogram` - A histogram of values. For example, request durations or response body sizes.
 
 ```yaml title="future.router.yaml"
@@ -233,7 +229,7 @@ telemetry:
       router:
         acme.metric: 
           # ...
-          type: counter # counter, up_down_counter, gauge, histogram
+          type: counter # counter, histogram
 ```
 
 #### `unit`
@@ -321,11 +317,11 @@ telemetry:
 |---------------------------------------|------------------------------------------------------------------------------|------------|----------------------------------------------|
 | `<attribute-name>`                    |                                                                              |            | The name of the custom attribute.            |
 | `<instrument-name>`                   |                                                                              |            | The name of the custom instrument.           |
-| `attributes`                          | [standard attributes](./standard-attributes) or [selectors](./selectors) |            | The attributes of the custom instrument.     |
-| `condition`                           | [conditions](./conditions)                                                 |            | The a condition for mutating the instrument. |
+| `attributes`                          | [standard attributes](./standard-attributes) or [selectors](./selectors)     |            | The attributes of the custom instrument.     |
+| `condition`                           | [conditions](./conditions)                                                   |            | The a condition for mutating the instrument. |
 | `default_attribute_requirement_level` | `required`\|`recommended`                                                    | `required` | The default attribute requirement level.     |
-| `type`                                | `counter`\|`up_down_counter`\|`gauge`\|`histogram`                           |            | The name of the custom instrument.           |
-| `unit`                                |                                                                              |            | A unit name, for example `By` or `{request}`.        |
+| `type`                                | `counter`\|`histogram`                                                       |            | The name of the custom instrument.           |
+| `unit`                                |                                                                              |            | A unit name, for example `By` or `{request}`.|
 | `description`                         |                                                                              |            | The description of the custom instrument.    |
-| `value`                               | `unit`\|`duration`\|`active`\|`<custom>`                                     |            | The value of the instrument.                 |
+| `value`                               | `unit`\|`duration`\|`<custom>`                                               |            | The value of the instrument.                 |
 

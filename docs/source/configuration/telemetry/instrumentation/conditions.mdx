@@ -6,7 +6,7 @@ description: Set conditions for when events or instruments are triggered in the 
 
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
 
-You can set conditions for when an [instrument](./instruments) should be mutated or an [event](./events) should be triggered.
+You can set conditions for when an [instrument](./instruments) should be mutated <!--or an [event](./events) -->should be triggered.
 
 
 ## Condition configuration
@@ -29,6 +29,17 @@ telemetry:
               - eq:
                   - "foo"
                   - response_header: x-resp-header
+```
+
+#### `exist`
+
+The `exist` condition is testing if [selectors](./selectors) is present.
+
+For example, the following condition checks the value of `x-req-header` exists:
+
+```yaml
+exist:
+  - request_header: x-req-header
 ```
 
 #### `eq`
@@ -105,6 +116,7 @@ The available basic conditions:
 | Condition | Description                                             |
 |----------|----------------------------------------------------------|
 | `eq`     | An equality test between selectors or values             |
+| `exist`  | A check to see if the selectors value exists             |
 | `not`    | A negated equality test between selectors or values      |
 | `all`    | A list of conditions that must all be true               |
 | `any`    | A list of conditions of which at least one must be true  |
