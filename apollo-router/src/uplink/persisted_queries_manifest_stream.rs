@@ -147,7 +147,7 @@ mod test {
                 .await;
 
                 let persisted_query_manifest = results
-                    .get(0)
+                    .first()
                     .unwrap_or_else(|| panic!("expected one result from {}", url))
                     .as_ref()
                     .unwrap_or_else(|_| panic!("schema should be OK from {}", url))

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use clap::CommandFactory;
-use clap::Parser;
 use http::header::CONTENT_TYPE;
 use http::header::USER_AGENT;
 use jsonschema::output::BasicOutput;
@@ -96,6 +95,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
 
     async fn create<'a>(
         &'a mut self,
+        is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
@@ -103,6 +103,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create(
+                is_telemetry_disabled,
                 configuration.clone(),
                 schema.clone(),
                 previous_router,
@@ -110,10 +111,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
             )
             .await
             .map(|factory| {
-                // TODO: We should have a way to access the original CLI args here so that we can just see what the
-                // value of `anonymous_telemetry_disabled` really is instead of parsing it twice.
-                let telemetry_disabled = Opt::parse().is_telemetry_disabled();
-                if !telemetry_disabled {
+                if !is_telemetry_disabled {
                     let schema = factory.supergraph_creator.schema();
 
                     tokio::task::spawn(async move {
