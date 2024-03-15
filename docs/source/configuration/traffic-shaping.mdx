@@ -185,6 +185,13 @@ Use the table below to look up the resulting protocol of a subgraph connection, 
 | `experimental_http2: disable` | HTTP/1.1           | HTTP/1.1 with TLS           |
 | `experimental_http2: enable`  | HTTP/1.1           | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
 | `experimental_http2: http2only` | h2c              | HTTP/2 with TLS              |
+| `experimental_http2` not set | HTTP/1.1 | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
+
+<Note>
+
+Configuring `experimental_http2: http2only` for a subgraph that doesn't support HTTP/2 results in a failed subgraph connection.
+
+</Note>
 
 ### Ordering
 
