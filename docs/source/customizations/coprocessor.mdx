@@ -825,6 +825,8 @@ When `stage` is `SupergraphResponse`, if present and `true` then there will be s
 
 An object mapping of all HTTP header names and values for the corresponding request or response.
 
+Headers should be handled like HTTP headers in general and normalized before your coprocessor operates on them. 
+
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `headers`, the router replaces the existing headers with that value.
 ⚠️ `content-length` sent by Coprocessors are discarded by the router. (Wrong `content-length` values could lead to failure for HTTP requests to be sent)
 
