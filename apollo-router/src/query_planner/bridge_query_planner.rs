@@ -9,11 +9,11 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
-use apollo_compiler::executable::Field;
+use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Node;
 use futures::future::BoxFuture;
+use indexmap::IndexSet;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
@@ -638,82 +638,96 @@ impl BridgeQueryPlanner {
     }
 
     // todo move this somewhere else? somewhere where it's possible to do fuzzing?
-    // todo probably needs a refactor (after testing/fixing)
     fn generate_apollo_reporting_refs(doc: &ParsedDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
-        let maybe_op = doc.executable.get_operation(operation_name.as_deref()).ok();
-
-        if let Some(operation) = maybe_op {
-            let mut ref_fields = HashMap::new();
-            let mut fragment_names: HashSet<Name> = HashSet::new();
-
-            fn extract_fields(parent_type: String, selection_set: &SelectionSet, schema: &Valid<apollo_compiler::Schema>, ref_fields: &mut HashMap<String, ReferencedFieldsForType>, fragments: &mut HashSet<Name>) {
-                // Extract child fields
-                let child_fields: Vec<&Node<Field>> = selection_set.selections
-                    .iter()
-                    .filter_map(|selection| selection.as_field())
-                    .collect();
-
-                if !child_fields.is_empty() {
-                    let field_names: Vec<String> = child_fields.iter().map(|field| field.name.to_string()).collect();
-                    let field_schema_type = schema.types.get(parent_type.as_str());
-                    let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
-
-                    let fields_for_type = ref_fields.entry(parent_type).or_insert(ReferencedFieldsForType {
-                        field_names: vec![],
-                        is_interface: is_interface,
-                    });
-                    // todo sort? use a temporary hashset instead?
-                    for name in field_names {
-                        if !fields_for_type.field_names.contains(&name) {
-                            fields_for_type.field_names.push(name);
-                        }
+        match doc.executable.get_operation(operation_name.as_deref()).ok() {
+            None => HashMap::new(),
+            Some(operation) => {
+                let mut fields_by_type: HashMap<String, IndexSet<String>> = HashMap::new();
+                let mut fields_by_interface: HashMap<String, bool> = HashMap::new();
+                let mut seen_fragments: HashSet<Name> = HashSet::new();
+    
+                fn extract_fields(parent_type: &String, selection_set: &SelectionSet, doc: &ParsedDocument, schema: &Valid<apollo_compiler::Schema>, fields_by_type: &mut HashMap<String, IndexSet<String>>, fields_by_interface: &mut HashMap<String, bool>, seen_fragments: &mut HashSet<Name>) {
+                    if !fields_by_interface.contains_key(parent_type) {
+                        let field_schema_type = schema.types.get(parent_type.as_str());
+                        let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
+                        fields_by_interface.insert(parent_type.clone(), is_interface);
                     }
 
-                    child_fields.iter().for_each(|field| {
-                        let field_type = field.selection_set.ty.to_string();
-                        extract_fields(field_type, &field.selection_set, schema, ref_fields, fragments);
-                    });
-                }
+                    for selection in &selection_set.selections {
+                        match selection {
+                            Selection::Field(field) => {
+                                fields_by_type
+                                    .entry(parent_type.clone())
+                                    .or_insert(IndexSet::new())
+                                    .insert(field.name.to_string());
 
-                // Extract fields from inline fragments
-                selection_set.selections
-                    .iter()
-                    .filter_map(|selection| selection.as_inline_fragment())
-                    .for_each(|frag| {
-                        if let Some(fragment_type) = frag.type_condition.clone() {
-                            let frag_type_name = fragment_type.to_string();
-                            extract_fields(frag_type_name, &frag.selection_set, schema, ref_fields, fragments);
-                        } else {
-                            // todo not sure what to do for anonymous fragments - use parent_type?
+                                let field_type = field.selection_set.ty.to_string();
+                                extract_fields(
+                                    &field_type, 
+                                    &field.selection_set, 
+                                    doc, 
+                                    schema, 
+                                    fields_by_type, 
+                                    fields_by_interface, 
+                                    seen_fragments
+                                );
+                            },
+                            Selection::InlineFragment(fragment) => {
+                                if let Some(fragment_type) = &fragment.type_condition {
+                                    let frag_type_name = fragment_type.to_string();
+                                    extract_fields(
+                                        &frag_type_name, 
+                                        &fragment.selection_set, 
+                                        doc, 
+                                        schema, 
+                                        fields_by_type, 
+                                        fields_by_interface, 
+                                        seen_fragments
+                                    );
+                                } else {
+                                    // todo not sure what to do for fragments without a type - ignore? use parent_type?
+                                }
+                            },
+                            Selection::FragmentSpread(fragment) => {
+                                if !seen_fragments.contains(&fragment.fragment_name) {
+                                    seen_fragments.insert(fragment.fragment_name.clone());
+
+                                    if let Some(fragment) = doc.executable.fragments.get(&fragment.fragment_name) {
+                                        let fragment_type = fragment.selection_set.ty.to_string();
+                                        extract_fields(
+                                            &fragment_type, 
+                                            &fragment.selection_set, 
+                                            doc, 
+                                            schema, 
+                                            fields_by_type, 
+                                            fields_by_interface, 
+                                            seen_fragments
+                                        );
+                                    }
+                                }
+                            }
                         }
-                    });
-
-                // Extract names of any used fragment spreads (these will be extracted later)
-                selection_set.selections
-                    .iter()
-                    .filter_map(|selection| selection.as_fragment_spread())
-                    .for_each(|frag| {
-                        fragments.insert(frag.fragment_name.clone());
-                    });
-            }
-
-            let operation_kind = OperationKind::from(operation.operation_type);
-            extract_fields(operation_kind.as_str().into(), &operation.selection_set, schema, &mut ref_fields, &mut fragment_names);
-    
-            // Extract field from referenced fragment spreads
-            // todo handle nested named fragments - need to keep track of seen fragments, pop fragments off the set when processed and push new ones on if they haven't already been seen
-            fragment_names.iter().for_each(|name| {
-                if let Some(fragment) = doc.executable.fragments.get(name) {
-                    let mut temp_set: HashSet<Name> = HashSet::new();
-                    let fragment_type = fragment.selection_set.ty.to_string();
-                    extract_fields(fragment_type, &fragment.selection_set, schema, &mut ref_fields, &mut temp_set);
+                    }
                 }
-            });
+    
+                let operation_kind = OperationKind::from(operation.operation_type);
+                extract_fields(&operation_kind.as_str().into(), &operation.selection_set, doc, schema, &mut fields_by_type, &mut fields_by_interface, &mut seen_fragments);
 
-            ref_fields
-        } else {
-            // todo not sure what to do if operation can't be found - maybe empty map is ok?
-            HashMap::new()
+                fields_by_type.iter()
+                    .filter_map(|(type_name, field_names)| {
+                        if field_names.is_empty() {
+                            None
+                        } else {
+                            let refs = ReferencedFieldsForType {
+                                field_names: field_names.iter().cloned().collect(),
+                                is_interface: *fields_by_interface.get(type_name).unwrap_or(&false),
+                            };
+
+                            Some((type_name.clone(), refs))
+                        }
+                    })
+                    .collect()
+            }
         }
     }
 }
@@ -1914,6 +1928,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
+        // todo ignore order of field_names vectors somehow
         assert_eq!(expected_refs, generated_refs);
     }
 
@@ -2147,6 +2162,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
+        // todo ignore order of field_names vectors somehow
         assert_eq!(expected_refs, generated_refs);
     }
 }

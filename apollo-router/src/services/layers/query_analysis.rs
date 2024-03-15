@@ -109,6 +109,7 @@ impl QueryAnalysisLayer {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
                 let doc = span.in_scope(|| self.parse_document(&query));
 
+                // todo remove
                 println!("query_analysis query: {}", &query);
                 println!("query_analysis op_name: [{}]", op_name.clone().unwrap_or_default());
 
