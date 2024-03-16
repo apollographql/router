@@ -24,7 +24,6 @@ use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
 use crate::error::FetchError;
-use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -288,9 +287,7 @@ impl Query {
         let executable_document = match ast.to_executable_validate(schema) {
             Ok(doc) => doc,
             Err(WithErrors { errors, .. }) => {
-                return Err(SpecError::ValidationError(ValidationErrors {
-                    errors: errors.iter().map(|e| e.to_json()).collect(),
-                }));
+                return Err(SpecError::ValidationError(errors.into()));
             }
         };
 

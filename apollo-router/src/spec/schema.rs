@@ -17,7 +17,6 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -63,11 +62,7 @@ impl Schema {
     ) -> Result<Valid<apollo_compiler::Schema>, SchemaError> {
         Self::parse_ast(sdl)?
             .to_schema_validate()
-            .map_err(|WithErrors { errors, .. }| {
-                SchemaError::Validate(ValidationErrors {
-                    errors: errors.iter().map(|e| e.to_json()).collect(),
-                })
-            })
+            .map_err(|WithErrors { errors, .. }| SchemaError::Validate(errors.into()))
     }
 
     pub(crate) fn parse(sdl: &str) -> Result<Self, SchemaError> {

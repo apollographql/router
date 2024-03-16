@@ -292,6 +292,10 @@ pub(crate) enum QueryPlannerError {
 
     /// Unauthorized field or type
     Unauthorized(Vec<Path>),
+
+    /// Federation error: {0}
+    // TODO: make `FederationError` serializable and store it as-is?
+    FederationError(String),
 }
 
 impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
@@ -588,6 +592,14 @@ impl IntoGraphQLErrors for ParseErrors {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ValidationErrors {
     pub(crate) errors: Vec<apollo_compiler::execution::GraphQLError>,
+}
+
+impl From<apollo_compiler::validation::DiagnosticList> for ValidationErrors {
+    fn from(errors: apollo_compiler::validation::DiagnosticList) -> Self {
+        ValidationErrors {
+            errors: errors.iter().map(|e| e.to_json()).collect(),
+        }
+    }
 }
 
 impl IntoGraphQLErrors for ValidationErrors {
