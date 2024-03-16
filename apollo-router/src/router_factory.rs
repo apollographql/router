@@ -833,12 +833,12 @@ mod test {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let mut config = json!({ "apollo": {} });
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        inject_schema_id(schema.api_schema().schema_id.as_deref(), &mut config);
+        inject_schema_id(schema.schema_id.as_deref(), &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
             &config.apollo.schema_id,
-            "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318"
+            "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
         );
     }
 }

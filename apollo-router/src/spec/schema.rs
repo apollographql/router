@@ -28,15 +28,19 @@ pub(crate) struct Schema {
     pub(crate) definitions: Valid<apollo_compiler::Schema>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
-    api_schema: Option<Box<Schema>>,
+    api_schema: Option<ApiSchema>,
     pub(crate) schema_id: Option<String>,
 }
+
+/// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
+#[derive(Debug)]
+pub(crate) struct ApiSchema(pub(crate) Valid<apollo_compiler::Schema>);
 
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let schema = Self::parse(s)?;
-        let api_schema = Self::parse(
+        let api_schema = Self::parse_compiler_schema(
             &schema
                 .create_api_schema(configuration)
                 // Avoid adding an error branch that's only used in tests--stick the error
@@ -65,17 +69,21 @@ impl Schema {
         })
     }
 
+    pub(crate) fn parse_compiler_schema(
+        sdl: &str,
+    ) -> Result<Valid<apollo_compiler::Schema>, SchemaError> {
+        Self::parse_ast(sdl)?
+            .to_schema_validate()
+            .map_err(|WithErrors { errors, .. }| {
+                SchemaError::Validate(ValidationErrors {
+                    errors: errors.iter().map(|e| e.to_json()).collect(),
+                })
+            })
+    }
+
     pub(crate) fn parse(sdl: &str) -> Result<Self, SchemaError> {
         let start = Instant::now();
-        let ast = Self::parse_ast(sdl)?;
-        let definitions = match ast.to_schema_validate() {
-            Ok(schema) => schema,
-            Err(WithErrors { errors, .. }) => {
-                return Err(SchemaError::Validate(ValidationErrors {
-                    errors: errors.iter().map(|e| e.to_json()).collect(),
-                }));
-            }
-        };
+        let definitions = Self::parse_compiler_schema(sdl)?;
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
@@ -152,13 +160,11 @@ impl Schema {
         Ok(api_schema.schema().to_string())
     }
 
-    pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
-        self.api_schema = Some(Box::new(api_schema));
+    pub(crate) fn with_api_schema(mut self, api_schema: Valid<apollo_compiler::Schema>) -> Self {
+        self.api_schema = Some(ApiSchema(api_schema));
         self
     }
-}
 
-impl Schema {
     /// Extracts a string containing the entire [`Schema`].
     pub(crate) fn as_string(&self) -> &Arc<String> {
         &self.raw_sdl
@@ -180,10 +186,6 @@ impl Schema {
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
         self.definitions.get_interface(abstract_type).is_some()
-    }
-
-    pub(crate) fn is_union(&self, abstract_type: &str) -> bool {
-        self.definitions.get_union(abstract_type).is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
@@ -216,10 +218,10 @@ impl Schema {
         self.subgraphs.get(service_name)
     }
 
-    pub(crate) fn api_schema(&self) -> &Schema {
+    pub(crate) fn api_schema(&self) -> &ApiSchema {
         match &self.api_schema {
             Some(schema) => schema,
-            None => self,
+            None => panic!("missing API schema"),
         }
     }
 
@@ -227,7 +229,7 @@ impl Schema {
         if let Some(name) = self.definitions.root_operation(kind.into()) {
             name.as_str()
         } else {
-            kind.as_str()
+            kind.default_type_name()
         }
     }
 
@@ -345,6 +347,14 @@ impl Schema {
 
 #[derive(Debug)]
 pub(crate) struct InvalidObject;
+
+impl std::ops::Deref for ApiSchema {
+    type Target = Valid<apollo_compiler::Schema>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -522,15 +532,14 @@ mod tests {
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        let has_in_stock_field = |schema: &Schema| {
+        let has_in_stock_field = |schema: &apollo_compiler::Schema| {
             schema
-                .definitions
                 .get_object("Product")
                 .unwrap()
                 .fields
                 .contains_key("inStock")
         };
-        assert!(has_in_stock_field(&schema));
+        assert!(has_in_stock_field(&schema.definitions));
         assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
     }
 
@@ -564,13 +573,6 @@ mod tests {
                 schema.schema_id,
                 Some(
                     "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
-                )
-            );
-
-            assert_eq!(
-                schema.api_schema().schema_id,
-                Some(
-                    "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
                 )
             );
         }

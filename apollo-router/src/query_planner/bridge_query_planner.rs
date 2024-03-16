@@ -183,7 +183,7 @@ impl BridgeQueryPlanner {
                 api_schema?
             }
         };
-        let api_schema = Schema::parse(&api_schema_string)?;
+        let api_schema = Schema::parse_compiler_schema(&api_schema_string)?;
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
@@ -238,7 +238,7 @@ impl BridgeQueryPlanner {
         );
 
         let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema)?;
+        let api_schema = Schema::parse_compiler_schema(&api_schema.schema)?;
         let schema = Arc::new(Schema::parse(&schema)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
@@ -444,7 +444,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 Some(d) => d.clone(),
             };
 
-            let schema = &this.schema.api_schema().definitions;
+            let schema = this.schema.api_schema();
             match add_defer_labels(schema, &doc.ast) {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
@@ -570,7 +570,7 @@ impl BridgeQueryPlanner {
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
             let executable_document = new_doc
-                .to_executable_validate(&self.schema.api_schema().definitions)
+                .to_executable_validate(self.schema.api_schema())
                 .map_err(|e| {
                     SpecError::ValidationError(ValidationErrors {
                         errors: e.errors.iter().map(|e| e.to_json()).collect(),
@@ -920,7 +920,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let schema = Schema::parse(EXAMPLE_SCHEMA).unwrap();
+        let schema = Schema::parse_test(EXAMPLE_SCHEMA, &Default::default()).unwrap();
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
         let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
@@ -1307,12 +1307,7 @@ mod tests {
             .await
             .unwrap();
 
-        let doc = Query::parse_document(
-            original_query,
-            planner.schema().api_schema(),
-            &configuration,
-        )
-        .unwrap();
+        let doc = Query::parse_document(original_query, &planner.schema(), &configuration).unwrap();
 
         planner
             .get(

@@ -36,6 +36,7 @@ use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
+use crate::spec::schema::ApiSchema;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
@@ -124,7 +125,7 @@ impl Query {
         response: &mut Response,
         operation_name: Option<&str>,
         variables: Object,
-        schema: &Schema,
+        schema: &ApiSchema,
         defer_conditions: BooleanValues,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
@@ -157,7 +158,7 @@ impl Query {
                                         .then(|| *op.kind())
                                 });
                             if let Some(operation_kind) = operation_kind_if_root_typename {
-                                output.insert(TYPENAME, operation_kind.as_str().into());
+                                output.insert(TYPENAME, operation_kind.default_type_name().into());
                             }
 
                             response.data = Some(
@@ -204,7 +205,10 @@ impl Query {
                             .collect()
                     };
 
-                    let operation_type_name = schema.root_operation_name(operation.kind);
+                    let operation_type_name = schema
+                        .root_operation(operation.kind.into())
+                        .map(|name| name.as_str())
+                        .unwrap_or(operation.kind.default_type_name());
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
@@ -248,7 +252,7 @@ impl Query {
                 response.data = match operation_kind_if_root_typename {
                     Some(operation_kind) => {
                         let mut output = Object::default();
-                        output.insert(TYPENAME, operation_kind.as_str().into());
+                        output.insert(TYPENAME, operation_kind.default_type_name().into());
                         Some(output.into())
                     }
                     None => Some(Value::default()),
@@ -280,7 +284,7 @@ impl Query {
                 return Err(SpecError::ParsingError(errors.to_string()));
             }
         };
-        let schema = &schema.api_schema().definitions;
+        let schema = schema.api_schema();
         let executable_document = match ast.to_executable_validate(schema) {
             Ok(doc) => doc,
             Err(WithErrors { errors, .. }) => {
@@ -502,7 +506,7 @@ impl Query {
             executable::Type::Named(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
-                match parameters.schema.definitions.types.get(type_name) {
+                match parameters.schema.types.get(type_name) {
                     Some(ExtendedType::Scalar(_)) => {
                         *output = input.clone();
                         return Ok(());
@@ -537,7 +541,7 @@ impl Query {
                             // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
                             // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
                             let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                                parameters.schema.definitions.types.get(input_type)
+                                parameters.schema.types.get(input_type)
                             else {
                                 parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
@@ -564,10 +568,12 @@ impl Query {
 
                         let current_type = if parameters
                             .schema
-                            .is_interface(field_type.inner_named_type().as_str())
+                            .get_interface(field_type.inner_named_type())
+                            .is_some()
                             || parameters
                                 .schema
-                                .is_union(field_type.inner_named_type().as_str())
+                                .get_union(field_type.inner_named_type())
+                                .is_some()
                         {
                             typename.as_ref().unwrap_or(field_type)
                         } else {
@@ -639,12 +645,7 @@ impl Query {
                                 ))
                             });
                         if let Some(input_str) = input_value.as_str() {
-                            if parameters
-                                .schema
-                                .definitions
-                                .get_object(input_str)
-                                .is_some()
-                            {
+                            if parameters.schema.get_object(input_str).is_some() {
                                 output.insert((*field_name).clone(), input_value);
                             } else {
                                 return Err(InvalidValue);
@@ -1089,7 +1090,7 @@ struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
     nullified: Vec<Path>,
-    schema: &'a Schema,
+    schema: &'a ApiSchema,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

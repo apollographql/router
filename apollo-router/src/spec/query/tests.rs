@@ -5312,7 +5312,6 @@ fn parse_introspection_query() {
 
     let schema = with_supergraph_boilerplate(schema, "Query");
     let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
-    let api_schema = schema.api_schema();
 
     let query = "{
         __type(name: \"Bar\") {
@@ -5325,7 +5324,7 @@ fn parse_introspection_query() {
           }
         }
       }";
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, &schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5340,7 +5339,7 @@ fn parse_introspection_query() {
         }
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, &schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5351,7 +5350,7 @@ fn parse_introspection_query() {
         __typename
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, &schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5888,7 +5887,7 @@ fn filtered_defer_fragment() {
         &mut response,
         None,
         Object::new(),
-        &schema,
+        schema.api_schema(),
         BooleanValues { bits: 0 },
     );
 
@@ -5898,7 +5897,7 @@ fn filtered_defer_fragment() {
         &mut response,
         None,
         Object::new(),
-        &schema,
+        schema.api_schema(),
         BooleanValues { bits: 0 },
     );
 
