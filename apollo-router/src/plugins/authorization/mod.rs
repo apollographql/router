@@ -179,7 +179,7 @@ impl AuthorizationPlugin {
             is_authenticated,
             scopes,
             policies,
-        } = Self::generate_cache_metadata(&doc.ast, &schema.definitions, false);
+        } = Self::generate_cache_metadata(&doc.ast, schema.definitions(), false);
         if is_authenticated {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
@@ -423,7 +423,7 @@ impl AuthorizationPlugin {
         is_authenticated: bool,
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) =
-            AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map, dry_run)
+            AuthenticatedVisitor::new(schema.definitions(), doc, &schema.implementers_map, dry_run)
         {
             let modified_query = transform::document(&mut visitor, doc)
                 .map_err(|e| SpecError::ParsingError(e.to_string()))?;
@@ -458,7 +458,7 @@ impl AuthorizationPlugin {
         scopes: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = ScopeFilteringVisitor::new(
-            &schema.definitions,
+            schema.definitions(),
             doc,
             &schema.implementers_map,
             scopes.iter().cloned().collect(),
@@ -493,7 +493,7 @@ impl AuthorizationPlugin {
         policies: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = PolicyFilteringVisitor::new(
-            &schema.definitions,
+            schema.definitions(),
             doc,
             &schema.implementers_map,
             policies.iter().cloned().collect(),

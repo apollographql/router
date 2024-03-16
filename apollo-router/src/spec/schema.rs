@@ -22,10 +22,9 @@ use crate::query_planner::OperationKind;
 use crate::Configuration;
 
 /// A GraphQL schema.
-#[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    pub(crate) definitions: Valid<apollo_compiler::Schema>,
+    pub(crate) federation_supergraph: apollo_federation::Supergraph,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<ApiSchema>,
@@ -40,17 +39,7 @@ impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let schema = Self::parse(s)?;
-        let api_schema = Self::parse_compiler_schema(
-            &schema
-                .create_api_schema(configuration)
-                // Avoid adding an error branch that's only used in tests--stick the error
-                // string in an existing generic one
-                .map_err(|err| {
-                    SchemaError::Api(format!(
-                        "The supergraph schema failed to produce a valid API schema: {err}"
-                    ))
-                })?,
-        )?;
+        let api_schema = Self::parse_compiler_schema(&schema.create_api_schema(configuration)?)?;
         Ok(schema.with_api_schema(api_schema))
     }
 
@@ -128,15 +117,20 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
+        let federation_supergraph = apollo_federation::Supergraph::from_schema(definitions)?;
 
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
-            definitions,
+            federation_supergraph,
             subgraphs,
             implementers_map,
             api_schema: None,
             schema_id,
         })
+    }
+
+    pub(crate) fn definitions(&self) -> &Valid<apollo_compiler::Schema> {
+        self.federation_supergraph.schema.schema()
     }
 
     pub(crate) fn schema_id(sdl: &str) -> String {
@@ -150,10 +144,8 @@ impl Schema {
         configuration: &Configuration,
     ) -> Result<String, apollo_federation::error::FederationError> {
         use apollo_federation::ApiSchemaOptions;
-        use apollo_federation::Supergraph;
 
-        let schema = Supergraph::from_schema(self.definitions.clone())?;
-        let api_schema = schema.to_api_schema(ApiSchemaOptions {
+        let api_schema = self.federation_supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: configuration.supergraph.defer_support,
             ..Default::default()
         })?;
@@ -171,11 +163,11 @@ impl Schema {
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
-        self.definitions.is_subtype(abstract_type, maybe_subtype)
+        self.definitions().is_subtype(abstract_type, maybe_subtype)
     }
 
     pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
-        self.definitions
+        self.definitions()
             .get_interface(interface)
             .map(|interface| {
                 // FIXME: this looks backwards
@@ -185,7 +177,7 @@ impl Schema {
     }
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
-        self.definitions.get_interface(abstract_type).is_some()
+        self.definitions().get_interface(abstract_type).is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
@@ -226,7 +218,7 @@ impl Schema {
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        if let Some(name) = self.definitions.root_operation(kind.into()) {
+        if let Some(name) = self.definitions().root_operation(kind.into()) {
             name.as_str()
         } else {
             kind.default_type_name()
@@ -236,7 +228,7 @@ impl Schema {
     /// Return the federation major version based on the @link or @core directives in the schema,
     /// or None if there are no federation directives.
     pub(crate) fn federation_version(&self) -> Option<i64> {
-        for directive in &self.definitions.schema_definition.directives {
+        for directive in &self.definitions().schema_definition.directives {
             let join_url = if directive.name == "core" {
                 let Some(feature) = directive
                     .argument_by_name("feature")
@@ -269,7 +261,7 @@ impl Schema {
     }
 
     pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
-        self.definitions
+        self.definitions()
             .schema_definition
             .directives
             .iter()
@@ -342,6 +334,25 @@ impl Schema {
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| default.to_string())
             })
+    }
+}
+
+impl std::fmt::Debug for Schema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            raw_sdl,
+            federation_supergraph: _, // skip
+            subgraphs,
+            implementers_map,
+            api_schema: _, // skip
+            schema_id,
+        } = self;
+        f.debug_struct("Schema")
+            .field("raw_sdl", raw_sdl)
+            .field("subgraphs", subgraphs)
+            .field("implementers_map", implementers_map)
+            .field("schema_id", schema_id)
+            .finish()
     }
 }
 
@@ -539,7 +550,7 @@ mod tests {
                 .fields
                 .contains_key("inStock")
         };
-        assert!(has_in_stock_field(&schema.definitions));
+        assert!(has_in_stock_field(schema.definitions()));
         assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
     }
 

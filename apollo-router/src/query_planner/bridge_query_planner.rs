@@ -342,10 +342,10 @@ impl BridgeQueryPlanner {
             Ok(mut plan) => {
                 plan.data
                     .query_plan
-                    .hash_subqueries(&self.schema.definitions);
+                    .hash_subqueries(self.schema.definitions());
                 plan.data
                     .query_plan
-                    .extract_authorization_metadata(&self.schema.definitions, &key);
+                    .extract_authorization_metadata(self.schema.definitions(), &key);
                 plan
             }
             Err(err) => {
