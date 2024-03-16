@@ -172,6 +172,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
 
+    /// Set the query planner implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_query_planner_mode: QueryPlannerMode,
+
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -226,6 +230,21 @@ pub(crate) enum ApolloMetricsGenerationMode {
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
     #[default]
+    Both,
+}
+
+/// Query planner modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum QueryPlannerMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
     Both,
 }
 
@@ -314,6 +333,7 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        experimental_query_planner_mode: Option<QueryPlannerMode>,
         experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
@@ -342,6 +362,7 @@ impl Configuration {
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:  experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -391,6 +412,7 @@ impl Configuration {
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -405,6 +427,7 @@ impl Configuration {
                 .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:
                 experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -501,6 +524,15 @@ impl Configuration {
                     error: "either set persisted_queries.log_unknown: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
             }
+        }
+
+        if self.experimental_query_planner_mode == QueryPlannerMode::New
+            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
+                error: "either change to some other query planner mode, or change to new metrics generation".into()
+            });
         }
 
         Ok(self)

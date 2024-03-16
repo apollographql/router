@@ -297,6 +297,10 @@ pub(crate) enum QueryPlannerError {
 
     /// Query planner pool error: {0}
     PoolProcessing(String),
+
+    /// Federation error: {0}
+    // TODO: make `FederationError` serializable and store it as-is?
+    FederationError(String),
 }
 
 impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
