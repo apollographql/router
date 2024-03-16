@@ -91,7 +91,7 @@ impl<T: Plugin> PluginTestHarness<T> {
                 .unwrap();
             (
                 schema.to_string(),
-                planner.schema().definitions.clone(),
+                planner.schema().definitions().clone(),
                 planner.subgraph_schemas(),
             )
         } else {

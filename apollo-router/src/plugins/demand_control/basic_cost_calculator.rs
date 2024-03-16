@@ -355,7 +355,7 @@ mod tests {
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        BasicCostCalculator::estimated(&query.executable, &schema.definitions).unwrap()
+        BasicCostCalculator::estimated(&query.executable, schema.definitions()).unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.

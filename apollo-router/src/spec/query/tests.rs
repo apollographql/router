@@ -3460,7 +3460,7 @@ fn it_parses_default_floats() {
 
     let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
     let value = schema
-        .definitions
+        .definitions()
         .get_input_object("WithAllKindsOfFloats")
         .unwrap()
         .fields["a_float_that_doesnt_fit_an_int"]
@@ -5835,7 +5835,7 @@ fn filtered_defer_fragment() {
     let ast = Parser::new()
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
-    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let doc = ast.to_executable(schema.definitions()).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 
@@ -5861,7 +5861,7 @@ fn filtered_defer_fragment() {
     let ast = Parser::new()
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
-    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let doc = ast.to_executable(schema.definitions()).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 

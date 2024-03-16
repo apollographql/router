@@ -518,7 +518,7 @@ pub(crate) async fn create_plugins(
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
-    let supergraph_schema = Arc::new(schema.definitions.clone());
+    let supergraph_schema = Arc::new(schema.definitions().clone());
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
