@@ -129,6 +129,7 @@ impl RouterHttpServer {
         license: Option<LicenseSource>,
         shutdown: Option<ShutdownSource>,
         uplink: Option<UplinkConfig>,
+        is_telemetry_disabled: Option<bool>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = generate_event_stream(
@@ -141,7 +142,11 @@ impl RouterHttpServer {
         );
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
-        let state_machine = StateMachine::new(server_factory, router_factory);
+        let state_machine = StateMachine::new(
+            is_telemetry_disabled.unwrap_or(false),
+            server_factory,
+            router_factory,
+        );
         let listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
