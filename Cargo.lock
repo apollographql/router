@@ -192,15 +192,14 @@ checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.13"
+version = "1.0.0-beta.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e779ed0ba21149a5ffc7266aedd34779da85405da2b2b4f4bc326b85375439a6"
+checksum = "00ed7af048c0beb66c9201c032b25a81b1b450397ddb2cb277ca57bcae2d9e13"
 dependencies = [
  "apollo-parser",
  "ariadne",
  "indexmap 2.2.3",
  "rowan",
- "salsa",
  "serde",
  "serde_json_bytes",
  "sptr",
@@ -221,9 +220,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c810d52e0d9ac684ac2b0583df9479a4efbe3035b466b4c374eeaa388f4a1e93"
+version = "0.0.9"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -231,7 +228,7 @@ dependencies = [
  "lazy_static",
  "petgraph",
  "salsa",
- "serde_json",
+ "serde_json_bytes",
  "strum 0.26.1",
  "strum_macros 0.26.1",
  "thiserror",
