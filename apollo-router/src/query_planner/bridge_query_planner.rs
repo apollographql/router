@@ -9,10 +9,14 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
+use apollo_compiler::executable::Fragment;
+use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Node;
 use futures::future::BoxFuture;
+use indexmap::IndexMap;
 use indexmap::IndexSet;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -492,6 +496,7 @@ impl BridgeQueryPlanner {
         }
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
+        // todo disable if running in ApolloMetricsGenerationMode::New mode
         let operation_signature = if matches!(
             self.configuration.experimental_apollo_metrics_generation_mode,
             ApolloMetricsGenerationMode::Legacy | ApolloMetricsGenerationMode::Both
@@ -619,43 +624,66 @@ impl BridgeQueryPlanner {
         }
     }
 
-    // todo move this somewhere else? somewhere where it's possible to do fuzzing?
+    // todo move process_operation_for_report, format_operation_for_report, generate_apollo_reporting_signature, and
+    // generate_apollo_reporting_refs somewhere else? somewhere where it's possible to do fuzzing?
+
+    fn process_operation_for_report(operation: &Node<Operation>, doc: &ParsedDocument) -> (Node<Operation>, IndexMap<Name, Node<Fragment>>) {
+        let mut processed = operation.clone();
+        let mut used_fragments = IndexMap::new();
+
+        // Sort operation variables and directives alphabetically.
+        // See apollo-utils packages/sortAST/src/index.ts
+        // processed.variables.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // todo replace all ListValues with [], all ObjectValues with {} (for now), all IntValues and FloatValue
+        //  with 0, and all StringValues with "". See apollo-utils packages/stripSensitiveLiterals/src/index.ts
+
+        // todo remove alias names (for now). See apollo-utils packages/removeAliases/src/index.ts
+
+        // todo alphabetically sort operation variables, selection set selections, field arguments, fragment 
+        // directives, and directive arguments. See apollo-utils packages/sortAST/src/index.ts
+
+        (processed, used_fragments)
+    }
+
+    fn format_operation_for_report(operation: &Node<Operation>, operation_name: Option<String>, fragments: IndexMap<Name, Node<Fragment>>) -> String {
+        let mut body_sections = fragments.iter()
+            .map(|(_name, fragment)| fragment.to_string())
+            .collect::<Vec<_>>();
+        body_sections.sort();
+        body_sections.push(operation.to_string());
+
+        let body = body_sections.join("\n");
+
+        // This is based on apollo-utils packages/printWithReducedWhitespace/src/index.ts
+        // Note that we don't need to do the StringValue -> hex -> StringValue processing because all StringValues
+        // are replaced with an empty string before we get here.
+        // todo can we combine these or make it more efficient somehow?
+        let stripped_body = regex::Regex::new(r"\s+").unwrap()
+            .replace_all(&body, " ").to_string();
+        let stripped_body = regex::Regex::new(r"([^_a-zA-Z0-9]) ").unwrap()
+            .replace_all(&stripped_body, "$1").to_string();
+        let stripped_body = regex::Regex::new(r" ([^_a-zA-Z0-9])").unwrap()
+            .replace_all(&stripped_body, "$1").to_string();
+
+        format!("# {}\n{}", operation_name.unwrap_or("-".into()), stripped_body)
+    }
+
     fn generate_apollo_reporting_signature(doc: &ParsedDocument, operation_name: Option<String>) -> String {
         match doc.executable.get_operation(operation_name.as_deref()).ok() {
             None => {
-                // todo print the whole document after transforming (that's what the JS impl does).
+                // todo Print the whole document after transforming (that's what the JS impl does) or return an error.
                 // See apollo-utils packages/dropUnusedDefinitions/src/index.ts
                 "".to_string()
             },
             Some(operation) => {
-                let operation_body = operation.to_string();
-
-                // todo replace all ListValues with [], all ObjectValues with {} (for now), all IntValues and FloatValue
-                //  with 0, and all StringValues with "". See apollo-utils packages/stripSensitiveLiterals/src/index.ts
-
-                // todo remove alias names (for now). See apollo-utils packages/removeAliases/src/index.ts
-
-                // todo alphabetically sort operation variables, selection set selections, field arguments, fragment 
-                // directives, and directive arguments. See apollo-utils packages/sortAST/src/index.ts
-        
-                // todo convert string nodes to hex and then back again so that we preserve whitespace in those, or figure
-                // out another way to preserve them. See apollo-utils packages/printWithReducedWhitespace/src/index.ts
-                let whitespace_regex = regex::Regex::new(r"\s+").unwrap();
-                let stripped_body = whitespace_regex.replace_all(&operation_body, " ").to_string();
-                let trailing_space_regex = regex::Regex::new(r"([^_a-zA-Z0-9]) ").unwrap();
-                let stripped_body = trailing_space_regex.replace_all(&stripped_body, "").to_string();
-                let leading_space_regex = regex::Regex::new(r" ([^_a-zA-Z0-9])").unwrap();
-                let stripped_body = leading_space_regex.replace_all(&stripped_body, "").to_string();
-        
-                // todo does this work for anonymous operations?
-                // todo insert used named fragment bodies (after formatting them as well) before the operation body
-                format!("# {}\n{}", operation_name.unwrap_or_default(), stripped_body)
+                let (processed_operation, used_fragments) = BridgeQueryPlanner::process_operation_for_report(operation, doc);
+                BridgeQueryPlanner::format_operation_for_report(&processed_operation, operation_name, used_fragments)
             }
         }
         
     }
 
-    // todo move this somewhere else? somewhere where it's possible to do fuzzing?:
     fn generate_apollo_reporting_refs(doc: &ParsedDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
         match doc.executable.get_operation(operation_name.as_deref()).ok() {
             None => HashMap::new(),
@@ -2180,5 +2208,32 @@ mod tests {
             }),
         ]);
         assert_eq!(expected_refs, generated_refs);
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_anonymous_operation() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Query {
+            noInputQuery: BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query {
+            noInputQuery {
+              id
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, None);
+        let expected_sig = "# -\n{noInputQuery{id}}";
+        assert_eq!(expected_sig, generated_sig);
     }
 }
