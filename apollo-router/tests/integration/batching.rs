@@ -223,7 +223,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
         SHORT_TIMEOUTS_CONFIG,
         &requests,
         Some(helper::expect_batch),
-        Some(helper::delay_response),
+        Some(helper::never_respond),
     )
     .await?;
 
@@ -250,6 +250,43 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
             service: b
             reason: request timed out
     "###);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 2;
+    const RHAI_CONFIG: &str = include_str!("../fixtures/batching/rhai_script.router.yaml");
+
+    let requests_a = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests_b = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+
+    // Interleave requests so that we can verify that they get properly separated
+    // Have the B subgraph get all of its requests cancelled by a rhai script
+    let requests: Vec<_> = requests_a.interleave(requests_b).collect();
+    let responses = helper::run_test(
+        RHAI_CONFIG,
+        &requests,
+        Some(helper::expect_batch),
+        None::<helper::Handler>,
+    )
+    .await?;
+
+    // TODO: Fill this in once we know how this response should look
+    assert_yaml_snapshot!(responses, @"");
 
     Ok(())
 }
@@ -414,14 +451,14 @@ mod helper {
         ResponseTemplate::new(200).set_body_json(responses)
     }
 
-    /// Subgraph handler that delays the response
+    /// Subgraph handler that delays indefinitely
     ///
     /// Useful for testing timeouts at the batch level
-    pub fn delay_response(request: &wiremock::Request) -> ResponseTemplate {
+    pub fn never_respond(request: &wiremock::Request) -> ResponseTemplate {
         let requests: Vec<Request> = request.body_json().unwrap();
 
         // Extract info about this operation
-        let (subgraph, count): (String, usize) = {
+        let (_, count): (String, usize) = {
             let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
@@ -432,21 +469,7 @@ mod helper {
         assert_eq!(requests.len(), count);
 
         // Respond as normal but with a long delay
-        ResponseTemplate::new(200)
-            .set_body_json(
-                (0..count)
-                    .map(|index| {
-                        serde_json::json!({
-                            "data": {
-                                format!("entry{subgraph}"): {
-                                    "index": index
-                                }
-                            }
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .set_delay(Duration::from_secs(10))
+        ResponseTemplate::new(200).set_delay(Duration::from_secs(365 * 24 * 60 * 60))
     }
 
     /// Subgraph handler that always fails
