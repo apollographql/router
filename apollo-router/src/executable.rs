@@ -681,6 +681,7 @@ impl Executable {
         }
 
         let router = RouterHttpServer::builder()
+            .is_telemetry_disabled(opt.is_telemetry_disabled())
             .configuration(configuration)
             .and_uplink(uplink_config)
             .schema(schema_source)
