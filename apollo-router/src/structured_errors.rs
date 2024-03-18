@@ -79,7 +79,7 @@ pub struct Attribute {
 /// This information is usually drawn from an external file to enable easy localization and documentation.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StructuredErrorDefinition {
+pub struct DocumentedErrorDefinition {
     /// The severity of the error
     pub level: Level,
     /// The error code, This will be of the form ERROR_ENUM_NAME__VARIANT_NAME
@@ -97,9 +97,9 @@ pub struct StructuredErrorDefinition {
     pub actions: Vec<String>,
 }
 
-impl StructuredErrorDefinition {
-    fn unknown() -> StructuredErrorDefinition {
-        StructuredErrorDefinition {
+impl DocumentedErrorDefinition {
+    fn unknown() -> DocumentedErrorDefinition {
+        DocumentedErrorDefinition {
             level: Level::Error,
             code: "MISSING_ERROR_DEFINITION".to_string(),
             ty: ErrorType::Unknown,
@@ -111,9 +111,9 @@ impl StructuredErrorDefinition {
     }
 }
 
-pub trait StructuredError: Display + std::error::Error + 'static {
+pub trait DocumentedError: Display + std::error::Error + 'static {
     /// Returns the definition for the error.
-    fn definition(&self) -> &'static StructuredErrorDefinition;
+    fn definition(&self) -> &'static DocumentedErrorDefinition;
 
     /// Returns the error code.
     fn code(&self) -> &'static str {
@@ -132,7 +132,7 @@ pub trait StructuredError: Display + std::error::Error + 'static {
 /// A utility method to validate the error definitions are in sync with the related yaml file.
 #[cfg(test)]
 pub(crate) fn validate_definitions(
-    definitions: &'static [StructuredErrorDefinition],
+    definitions: &'static [DocumentedErrorDefinition],
     expected_error_codes: HashSet<&String>,
     mut schema: schemars::schema::RootSchema,
 ) {
@@ -216,17 +216,17 @@ pub(crate) fn validate_definitions(
     }
 }
 
-// This contains a slice of StructuredErrorCast which allows casting from a dyn Error to a dyn StructuredError
+// This contains a slice of DocumentedErrorCast which allows casting from a dyn Error to a dyn DocumentedError
 #[distributed_slice]
-pub static STRUCTURED_ERROR_CAST: [&'static dyn StructuredErrorCast];
+pub static DOCUMENTED_ERROR_CAST: [&'static dyn DocumentedErrorCast];
 
-/// An extension trait that allows casting from a dyn Error to a `dyn StructuredError` using `as_structured_error_ref`
-pub trait AnyStructuredError<'a> {
-    fn as_structured_error_ref(self) -> Option<&'a (dyn StructuredError)>;
+/// An extension trait that allows casting from a dyn Error to a `dyn DocumentedError` using `as_structured_error_ref`
+pub trait AnyDocumentedError<'a> {
+    fn as_structured_error_ref(self) -> Option<&'a (dyn DocumentedError)>;
 }
-impl<'a> AnyStructuredError<'a> for &'a (dyn std::error::Error + 'static) {
-    fn as_structured_error_ref(self) -> Option<&'a (dyn StructuredError)> {
-        for cast in STRUCTURED_ERROR_CAST {
+impl<'a> AnyDocumentedError<'a> for &'a (dyn std::error::Error + 'static) {
+    fn as_structured_error_ref(self) -> Option<&'a (dyn DocumentedError)> {
+        for cast in DOCUMENTED_ERROR_CAST {
             if let Some(e) = cast.cast_structured_error_ref(self) {
                 return Some(e);
             }
@@ -235,31 +235,31 @@ impl<'a> AnyStructuredError<'a> for &'a (dyn std::error::Error + 'static) {
     }
 }
 
-/// A trait that allows casting from a `dyn Error` to a `dyn StructuredError`
-pub(crate) trait StructuredErrorCast: Sync + Send {
+/// A trait that allows casting from a `dyn Error` to a `dyn DocumentedError`
+pub(crate) trait DocumentedErrorCast: Sync + Send {
     fn cast_structured_error_ref<'a>(
         &'a self,
         error: &'a (dyn std::error::Error + 'static),
-    ) -> Option<&'a (dyn StructuredError)>;
+    ) -> Option<&'a (dyn DocumentedError)>;
 }
 
-/// The default and only implementation of `StructuredErrorCast`
-struct DefaultStructuredErrorCast<T>
+/// The default and only implementation of `DocumentedErrorCast`
+struct DefaultDocumentedErrorCast<T>
 where
-    T: StructuredError + Send + Sync + std::error::Error + 'static,
+    T: DocumentedError + Send + Sync + std::error::Error + 'static,
 {
     _phantom: std::marker::PhantomData<T>,
 }
 
-/// The default and only implementation of `StructuredErrorCast,` essentially does a `downcast_ref` to `T` and then returns it as a reference to `dyn StructuredError`
-impl<T> StructuredErrorCast for DefaultStructuredErrorCast<T>
+/// The default and only implementation of `DocumentedErrorCast,` essentially does a `downcast_ref` to `T` and then returns it as a reference to `dyn DocumentedError`
+impl<T> DocumentedErrorCast for DefaultDocumentedErrorCast<T>
 where
-    T: StructuredError + Send + Sync + std::error::Error + 'static,
+    T: DocumentedError + Send + Sync + std::error::Error + 'static,
 {
     fn cast_structured_error_ref<'a>(
         &'a self,
         error: &'a (dyn std::error::Error + 'static),
-    ) -> Option<&'a (dyn StructuredError)> {
+    ) -> Option<&'a (dyn DocumentedError)> {
         if let Some(e) = error.downcast_ref::<T>() {
             return Some(e);
         }
@@ -267,7 +267,7 @@ where
     }
 }
 
-/// Macro for creating errors that implement `StructuredError`. It automatically adds a bunch of required derives and provides the implementation of the `StructuredError` trait.
+/// Macro for creating errors that implement `DocumentedError`. It automatically adds a bunch of required derives and provides the implementation of the `DocumentedError` trait.
 /// Usage:
 /// ```
 /// error_type!("Test error docs", TestError, {
@@ -306,8 +306,8 @@ macro_rules! error_type {
             enum $name $definition
 
             impl $name {
-                 fn definitions() -> &'static [crate::structured_errors::StructuredErrorDefinition] where Self: Sized{
-                    static ALL_ERROR_DEFINITIONS: std::sync::OnceLock<Vec<crate::structured_errors::StructuredErrorDefinition>> = std::sync::OnceLock::new();
+                 fn definitions() -> &'static [crate::structured_errors::DocumentedErrorDefinition] where Self: Sized{
+                    static ALL_ERROR_DEFINITIONS: std::sync::OnceLock<Vec<crate::structured_errors::DocumentedErrorDefinition>> = std::sync::OnceLock::new();
                     ALL_ERROR_DEFINITIONS.get_or_init(|| {
                         // This only happens once.
                         // We load all the error definitions, and sort them in the order that they appear in the enum so that we can look them up O(1).
@@ -319,7 +319,7 @@ macro_rules! error_type {
                         let yaml_file_name = format!("{}.yaml", std::any::type_name::<$name>());
                         let embedded_file = crate::structured_errors::Asset::get(&yaml_file_name)
                             .expect(&format!("missing error definition file {}", yaml_file_name));
-                        let all_error_definitions: Vec<crate::structured_errors::StructuredErrorDefinition> =
+                        let all_error_definitions: Vec<crate::structured_errors::DocumentedErrorDefinition> =
                             serde_yaml::from_slice(&embedded_file.data).expect(&format!(
                                 "error parsing error definitions file {}",
                                 yaml_file_name
@@ -335,7 +335,7 @@ macro_rules! error_type {
 
                         definitions
                             .into_iter()
-                            .map(|v| v.unwrap_or_else(|| crate::structured_errors::StructuredErrorDefinition::unknown()))
+                            .map(|v| v.unwrap_or_else(|| crate::structured_errors::DocumentedErrorDefinition::unknown()))
                             .collect()
                     })
                 }
@@ -354,7 +354,7 @@ macro_rules! error_type {
 
             }
 
-            impl crate::structured_errors::StructuredError for $name {
+            impl crate::structured_errors::DocumentedError for $name {
                 /// Returns the error attributes as a serde_json::Value
                 fn attributes(&self) -> Result<crate::json_ext::Object, crate::structured_errors::Error> {
                     let object = serde_json_bytes::to_value(self).map_err(|e|crate::structured_errors::Error::Serialization {
@@ -375,14 +375,14 @@ macro_rules! error_type {
 
                 /// Returns the definition for the error.
                 /// This is O(1) lookup because the error definitions are sorted in the order that they appear in the enum.
-                fn definition(&self) -> &'static crate::structured_errors::StructuredErrorDefinition {
+                fn definition(&self) -> &'static crate::structured_errors::DocumentedErrorDefinition {
                     // O(1) lookup
                     &$name::definitions()[$name::ordinal(self)]
                 }
             }
 
-            #[linkme::distributed_slice(crate::structured_errors::STRUCTURED_ERROR_CAST)]
-            static [<$name:snake:upper _CAST>] : &'static dyn crate::structured_errors::StructuredErrorCast = &crate::structured_errors::DefaultStructuredErrorCast::<$name>{_phantom: std::marker::PhantomData{}};
+            #[linkme::distributed_slice(crate::structured_errors::DOCUMENTED_ERROR_CAST)]
+            static [<$name:snake:upper _CAST>] : &'static dyn crate::structured_errors::DocumentedErrorCast = &crate::structured_errors::DefaultDocumentedErrorCast::<$name>{_phantom: std::marker::PhantomData{}};
 
             impl Into<Vec<$name>> for $name {
                 fn into(self) -> Vec<$name> {
@@ -402,23 +402,23 @@ macro_rules! error_type {
 }
 
 
-/// An error formatter that can be used to convert errors that implement `StructuredError` to graphql errors
-pub trait ErrorFormatter: Send + Sync {
+/// An error formatter that can be used to convert errors that implement `DocumentedError` to graphql errors
+pub trait ErrorConverter: Send + Sync {
     /// Convert the error into a graphql error.
     fn to_graphql_error(
         &self,
-        error: &dyn StructuredError,
+        error: &dyn DocumentedError,
         locations: Vec<crate::graphql::Location>,
         path: Option<Path>,
     ) -> Result<crate::graphql::Error, Error>;
 }
 
 #[derive(Clone)]
-pub(crate) struct ErrorFormatterHandle(Arc<dyn ErrorFormatter>);
-impl ErrorFormatter for ErrorFormatterHandle {
+pub(crate) struct ErrorFormatterHandle(Arc<dyn ErrorConverter>);
+impl ErrorConverter for ErrorFormatterHandle {
     fn to_graphql_error(
         &self,
-        error: &dyn StructuredError,
+        error: &dyn DocumentedError,
         locations: Vec<crate::graphql::Location>,
         path: Option<Path>,
     ) -> Result<crate::graphql::Error, Error> {
@@ -433,9 +433,9 @@ mod test {
 
     use crate::json_ext::Object;
     use crate::json_ext::Path;
-    use crate::structured_errors::{AnyStructuredError, ErrorFormatterHandle};
-    use crate::structured_errors::ErrorFormatter;
-    use crate::structured_errors::StructuredError;
+    use crate::structured_errors::{AnyDocumentedError, ErrorFormatterHandle};
+    use crate::structured_errors::ErrorConverter;
+    use crate::structured_errors::DocumentedError;
     use crate::Context;
 
     error_type!("Test error docs", TestNestedError, {
@@ -465,7 +465,7 @@ mod test {
 
     #[derive(Debug, thiserror::Error, Display)]
     #[allow(dead_code)]
-    enum UnstructuredError {
+    enum UnDocumentedError {
         /// Some unstructured error
         Unstructured {
             source: Box<dyn std::error::Error + Send + Sync>,
@@ -480,26 +480,26 @@ mod test {
         line_number: usize,
     }
 
-    impl Into<Vec<TestError>> for UnstructuredError {
+    impl Into<Vec<TestError>> for UnDocumentedError {
         fn into(self) -> Vec<TestError> {
             match self {
-                UnstructuredError::ErrorList { errors } => errors
+                UnDocumentedError::ErrorList { errors } => errors
                     .into_iter()
                     .map(|e| TestError::DocError {
                         message: e.message,
                         line_number: e.line_number,
                     })
                     .collect(),
-                UnstructuredError::Unstructured { .. } => vec![TestError::BadRequest],
+                UnDocumentedError::Unstructured { .. } => vec![TestError::BadRequest],
             }
         }
     }
 
     struct SimpleErrorFormatter;
-    impl ErrorFormatter for SimpleErrorFormatter {
+    impl ErrorConverter for SimpleErrorFormatter {
         fn to_graphql_error(
             &self,
-            error: &dyn StructuredError,
+            error: &dyn DocumentedError,
             locations: Vec<crate::graphql::Location>,
             path: Option<Path>,
         ) -> Result<crate::graphql::Error, super::Error> {
@@ -574,7 +574,7 @@ mod test {
     fn test_error_formatting_with_source_chain() {
         let error = TestError::NotFound {
             attr: "test".to_string(),
-            source: Box::new(UnstructuredError::Unstructured {
+            source: Box::new(UnDocumentedError::Unstructured {
                 source: Box::new(TestNestedError::Nested),
             }),
         };
@@ -601,7 +601,7 @@ mod test {
         let context = Context::default();
         context.extensions().lock().insert(ErrorFormatterHandle(Arc::new(SimpleErrorFormatter)));
         assert_yaml_snapshot!(context
-            .to_graphql_errors(UnstructuredError::ErrorList {
+            .to_graphql_errors(UnDocumentedError::ErrorList {
             errors: vec![
                 DocError {
                     message: "Some message".to_string(),
