@@ -416,14 +416,17 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
                 let mut res = info;
                 let block = res.as_object_mut().unwrap();
                 block.insert("control".to_string(), serde_json::json!({ "break": 403 }));
-                block.insert("body".to_string(), serde_json::json!({
-                    "errors": [{
-                        "message": "Subgraph A is not allowed",
-                        "extensions": {
-                            "code": "ERR_NOT_ALLOWED",
-                        },
-                    }],
-                }));
+                block.insert(
+                    "body".to_string(),
+                    serde_json::json!({
+                        "errors": [{
+                            "message": "Subgraph A is not allowed",
+                            "extensions": {
+                                "code": "ERR_NOT_ALLOWED",
+                            },
+                        }],
+                    }),
+                );
 
                 res
             };

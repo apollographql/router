@@ -103,6 +103,8 @@ pub enum Telemetry {
 
 #[buildstructor]
 impl IntegrationTest {
+    // The lifetime is needed in the new method below, but clippy hates it
+    #[allow(clippy::needless_lifetimes)]
     #[builder]
     pub async fn new<'a>(
         config: &'a str,
