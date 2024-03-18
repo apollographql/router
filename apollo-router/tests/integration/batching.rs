@@ -2,6 +2,9 @@ use apollo_router::graphql::Request;
 use insta::assert_yaml_snapshot;
 use itertools::Itertools;
 use tower::BoxError;
+use wiremock::ResponseTemplate;
+
+use crate::integration::common::ValueExt as _;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
 const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
@@ -372,6 +375,83 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 2;
+    const COPROCESSOR_CONFIG: &str = include_str!("../fixtures/batching/coprocessor.router.yaml");
+
+    let requests_a = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests_b = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+
+    // Spin up a coprocessor for cancelling requests to A
+    let coprocessor = wiremock::MockServer::builder().start().await;
+    let subgraph_a_canceller = wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(|request: &wiremock::Request| {
+            let info: serde_json::Value = request.body_json().unwrap();
+            let subgraph = info
+                .as_object()
+                .unwrap()
+                .get("serviceName")
+                .unwrap()
+                .as_string()
+                .unwrap();
+
+            // Pass through the request if the subgraph isn't 'A'
+            let response = if subgraph != "a" {
+                info
+            } else {
+                // Patch it otherwise to stop execution
+                let mut res = info;
+                let block = res.as_object_mut().unwrap();
+                block.insert("control".to_string(), serde_json::json!({ "break": 403 }));
+                block.insert("body".to_string(), serde_json::json!({
+                    "errors": [{
+                        "message": "Subgraph A is not allowed",
+                        "extensions": {
+                            "code": "ERR_NOT_ALLOWED",
+                        },
+                    }],
+                }));
+
+                res
+            };
+            ResponseTemplate::new(200).set_body_json(response)
+        })
+        .named("coprocessor POST /");
+    coprocessor.register(subgraph_a_canceller).await;
+
+    // Make sure to patch the config with the coprocessor's port
+    let config = COPROCESSOR_CONFIG.replace("REPLACEME", &coprocessor.address().port().to_string());
+
+    // Interleave requests so that we can verify that they get properly separated
+    // Have the A subgraph get all of its requests cancelled by a coprocessor
+    let requests: Vec<_> = requests_a.interleave(requests_b).collect();
+    let responses = helper::run_test(
+        config.as_str(),
+        &requests,
+        None::<helper::Handler>,
+        Some(helper::expect_batch),
+    )
+    .await?;
+
+    // TODO: Fill this in once we know how this response should look
+    assert_yaml_snapshot!(responses, @"");
+
+    Ok(())
+}
+
 /// Utility methods for these tests
 mod helper {
     use std::time::Duration;
@@ -412,7 +492,7 @@ mod helper {
 
     /// Set up the integration test stack
     pub async fn run_test<A: Respond + 'static, B: Respond + 'static>(
-        config: &'static str,
+        config: &str,
         requests: &[Request],
         handler_a: Option<A>,
         handler_b: Option<B>,

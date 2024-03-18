@@ -104,8 +104,8 @@ pub enum Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
-    pub async fn new(
-        config: &'static str,
+    pub async fn new<'a>(
+        config: &'a str,
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
