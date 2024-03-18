@@ -254,6 +254,87 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
     Ok(())
 }
 
+// This test makes two simultaneous requests to the router, with the first
+// being never resolved. This is to make sure that the router doesn't hang while
+// processing a separate batch request.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 3;
+
+    let requests_a: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                ))
+                .build()
+        })
+        .collect();
+    let requests_b: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                ))
+                .build()
+        })
+        .collect();
+
+    let responses_a = helper::run_test(
+        SHORT_TIMEOUTS_CONFIG,
+        &requests_a,
+        Some(helper::expect_batch),
+        None::<helper::Handler>,
+    );
+    let responses_b = helper::run_test(
+        SHORT_TIMEOUTS_CONFIG,
+        &requests_b,
+        None::<helper::Handler>,
+        Some(helper::never_respond),
+    );
+
+    // Run both requests simultaneously
+    let (results_a, results_b) = futures::try_join!(responses_a, responses_b)?;
+
+    // verify the output
+    let responses = [results_a, results_b].concat();
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - data:
+        entryA:
+          index: 1
+    - data:
+        entryA:
+          index: 2
+    - errors:
+        - message: "HTTP fetch failed from 'b': request timed out"
+          path: []
+          extensions:
+            code: SUBREQUEST_HTTP_ERROR
+            service: b
+            reason: request timed out
+    - errors:
+        - message: "HTTP fetch failed from 'b': request timed out"
+          path: []
+          extensions:
+            code: SUBREQUEST_HTTP_ERROR
+            service: b
+            reason: request timed out
+    - errors:
+        - message: "HTTP fetch failed from 'b': request timed out"
+          path: []
+          extensions:
+            code: SUBREQUEST_HTTP_ERROR
+            service: b
+            reason: request timed out
+    "###);
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 2;
