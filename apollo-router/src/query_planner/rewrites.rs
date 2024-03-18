@@ -54,8 +54,9 @@ impl DataRewrite {
                 // `Key` and we ignore other cases (in theory, it could be `Fragment` needs
                 // to be supported someday if we ever need to rewrite full object values,
                 // but that can be added then).
-                // TODO[igni]
-                if let Some((parent, PathElement::Key(k))) = split_path_last_element(&setter.path) {
+                if let Some((parent, PathElement::Key(k, _))) =
+                    split_path_last_element(&setter.path)
+                {
                     data.select_values_and_paths_mut(schema, &parent, |_path, obj| {
                         if let Some(value) = obj.get_mut(k) {
                             *value = setter.set_value_to.clone()
@@ -66,8 +67,8 @@ impl DataRewrite {
             DataRewrite::KeyRenamer(renamer) => {
                 // As the name implies, this only applies to renaming "keys", so we're
                 // guaranteed the last element is one and can ignore other cases.
-                // TODO[igni]
-                if let Some((parent, PathElement::Key(k))) = split_path_last_element(&renamer.path)
+                if let Some((parent, PathElement::Key(k, _))) =
+                    split_path_last_element(&renamer.path)
                 {
                     data.select_values_and_paths_mut(schema, &parent, |_path, selected| {
                         if let Some(obj) = selected.as_object_mut() {
