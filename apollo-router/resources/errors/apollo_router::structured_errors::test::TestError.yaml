@@ -7,8 +7,8 @@
     - "Do something"
   attributes:
     name:
-        type: string
-        description: "The name of the entity."
+      type: string
+      description: "The name of the entity."
 
 - code: TEST_ERROR__NOT_FOUND
   level: error
@@ -23,3 +23,17 @@
       description: "Some attribute"
 
 
+- code: TEST_ERROR__DOC_ERROR
+  level: error
+  origin: router
+  type: internal
+  detail: "The documentation is not available."
+  actions:
+    - "Do something"
+  attributes:
+    line_number:
+      type: string
+      description: "The line number"
+    message:
+      type: string
+      description: "The doc message"

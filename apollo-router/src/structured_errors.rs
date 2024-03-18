@@ -85,7 +85,7 @@ pub struct StructuredErrorDefinition {
     /// The error code, This will be of the form ERROR_ENUM_NAME__VARIANT_NAME
     pub code: String,
     /// A course description of the error sufficient for client side branching logic.
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub ty: ErrorType,
     /// The origin that the error is related to, Free format, suggested values are mentioned in errors/schema.json
     pub origin: String,
@@ -95,6 +95,20 @@ pub struct StructuredErrorDefinition {
     pub attributes: HashMap<String, Attribute>,
     /// Action that the user may want to take.
     pub actions: Vec<String>,
+}
+
+impl StructuredErrorDefinition {
+    fn unknown() -> StructuredErrorDefinition {
+        StructuredErrorDefinition {
+            level: Level::Error,
+            code: "MISSING_ERROR_DEFINITION".to_string(),
+            ty: ErrorType::Unknown,
+            origin: "unknown".to_string(),
+            detail: Some("Missing error definition".to_string()),
+            attributes: HashMap::new(),
+            actions: vec![],
+        }
+    }
 }
 
 pub trait StructuredError: Display + std::error::Error + 'static {
@@ -321,7 +335,7 @@ macro_rules! error_type {
 
                         definitions
                             .into_iter()
-                            .map(|v| v.expect("error definition must have been found"))
+                            .map(|v| v.unwrap_or_else(|| crate::structured_errors::StructuredErrorDefinition::unknown()))
                             .collect()
                     })
                 }
@@ -370,6 +384,12 @@ macro_rules! error_type {
             #[linkme::distributed_slice(crate::structured_errors::STRUCTURED_ERROR_CAST)]
             static [<$name:snake:upper _CAST>] : &'static dyn crate::structured_errors::StructuredErrorCast = &crate::structured_errors::DefaultStructuredErrorCast::<$name>{_phantom: std::marker::PhantomData{}};
 
+            impl Into<Vec<$name>> for $name {
+                fn into(self) -> Vec<$name> {
+                    vec![self]
+                }
+            }
+
             #[cfg(test)]
             #[test]
             fn [<test_ $name:snake _definitions>]() {
@@ -381,40 +401,42 @@ macro_rules! error_type {
     };
 }
 
+
 /// An error formatter that can be used to convert errors that implement `StructuredError` to graphql errors
-pub trait ErrorFormatter : Send + Sync {
+pub trait ErrorFormatter: Send + Sync {
     /// Convert the error into a graphql error.
-    fn to_graphql_errors(
+    fn to_graphql_error(
         &self,
         error: &dyn StructuredError,
         locations: Vec<crate::graphql::Location>,
         path: Option<Path>,
-    ) -> Result<Vec<crate::graphql::Error>, Error>;
+    ) -> Result<crate::graphql::Error, Error>;
 }
 
-
 #[derive(Clone)]
-pub (crate) struct ErrorFormatterHandle(Arc<dyn ErrorFormatter>);
+pub(crate) struct ErrorFormatterHandle(Arc<dyn ErrorFormatter>);
 impl ErrorFormatter for ErrorFormatterHandle {
-    fn to_graphql_errors(
+    fn to_graphql_error(
         &self,
         error: &dyn StructuredError,
         locations: Vec<crate::graphql::Location>,
         path: Option<Path>,
-    ) -> Result<Vec<crate::graphql::Error>, Error> {
-        self.0.to_graphql_errors(error, locations, path)
+    ) -> Result<crate::graphql::Error, Error> {
+        self.0.to_graphql_error(error, locations, path)
     }
 }
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
     use displaydoc::Display;
     use insta::assert_yaml_snapshot;
 
     use crate::json_ext::Object;
     use crate::json_ext::Path;
-    use crate::structured_errors::AnyStructuredError;
+    use crate::structured_errors::{AnyStructuredError, ErrorFormatterHandle};
     use crate::structured_errors::ErrorFormatter;
     use crate::structured_errors::StructuredError;
+    use crate::Context;
 
     error_type!("Test error docs", TestNestedError, {
         /// Nested error
@@ -431,25 +453,56 @@ mod test {
         },
         /// Bad request
         BadRequest,
+
+        /// DocError
+        DocError {
+            /// The doc message
+            message: String,
+            /// The line number
+            line_number: usize
+        }
     });
 
     #[derive(Debug, thiserror::Error, Display)]
-    enum NonStructuredError {
+    #[allow(dead_code)]
+    enum UnstructuredError {
         /// Some unstructured error
         Unstructured {
-
             source: Box<dyn std::error::Error + Send + Sync>,
         },
+        /// Something that needs decomposing
+        ErrorList { errors: Vec<DocError> },
+    }
+
+    #[derive(Debug)]
+    struct DocError {
+        message: String,
+        line_number: usize,
+    }
+
+    impl Into<Vec<TestError>> for UnstructuredError {
+        fn into(self) -> Vec<TestError> {
+            match self {
+                UnstructuredError::ErrorList { errors } => errors
+                    .into_iter()
+                    .map(|e| TestError::DocError {
+                        message: e.message,
+                        line_number: e.line_number,
+                    })
+                    .collect(),
+                UnstructuredError::Unstructured { .. } => vec![TestError::BadRequest],
+            }
+        }
     }
 
     struct SimpleErrorFormatter;
     impl ErrorFormatter for SimpleErrorFormatter {
-        fn to_graphql_errors(
+        fn to_graphql_error(
             &self,
             error: &dyn StructuredError,
             locations: Vec<crate::graphql::Location>,
             path: Option<Path>,
-        ) -> Result<Vec<crate::graphql::Error>, super::Error> {
+        ) -> Result<crate::graphql::Error, super::Error> {
             let mut attributes = error.attributes()?;
             let mut cause = error.source();
             let mut trace = vec![];
@@ -481,12 +534,12 @@ mod test {
                 attributes.insert("trace".to_string(), trace.into());
             }
 
-            Ok(vec![crate::graphql::Error {
+            Ok(crate::graphql::Error {
                 message: error.message(),
                 extensions: attributes,
                 locations,
                 path,
-            }])
+            })
         }
     }
 
@@ -513,7 +566,7 @@ mod test {
             "{}".to_string()
         );
         assert_yaml_snapshot!(SimpleErrorFormatter
-            .to_graphql_errors(&error, Default::default(), None)
+            .to_graphql_error(&error, Default::default(), None)
             .unwrap());
     }
 
@@ -521,20 +574,54 @@ mod test {
     fn test_error_formatting_with_source_chain() {
         let error = TestError::NotFound {
             attr: "test".to_string(),
-            source: Box::new(NonStructuredError::Unstructured { source: Box::new(TestNestedError::Nested)}),
+            source: Box::new(UnstructuredError::Unstructured {
+                source: Box::new(TestNestedError::Nested),
+            }),
         };
         assert_eq!(error.code(), "TEST_ERROR__NOT_FOUND");
         assert_eq!(error.message(), "Not found");
         assert_eq!(
             error.definition().detail,
-            Some("The requested resource could not be found but may be available in the future.".to_string())
+            Some(
+                "The requested resource could not be found but may be available in the future."
+                    .to_string()
+            )
         );
         assert_eq!(
             serde_json::to_string(&error.attributes().unwrap()).unwrap(),
             "{\"attr\":\"test\"}".to_string()
         );
         assert_yaml_snapshot!(SimpleErrorFormatter
-            .to_graphql_errors(&error, Default::default(), None)
+            .to_graphql_error(&error, Default::default(), None)
             .unwrap());
+    }
+
+    #[test]
+    fn test_unstructured_formatting_via_context() {
+        let context = Context::default();
+        context.extensions().lock().insert(ErrorFormatterHandle(Arc::new(SimpleErrorFormatter)));
+        assert_yaml_snapshot!(context
+            .to_graphql_errors(UnstructuredError::ErrorList {
+            errors: vec![
+                DocError {
+                    message: "Some message".to_string(),
+                    line_number: 1,
+                },
+                DocError {
+                    message: "Some message2".to_string(),
+                    line_number: 2,
+                },
+            ],
+        }, Default::default(), None)
+            .expect("error formatting"));
+    }
+
+    #[test]
+    fn test_structured_formatting_via_context() {
+        let context = Context::default();
+        context.extensions().lock().insert(ErrorFormatterHandle(Arc::new(SimpleErrorFormatter)));
+        assert_yaml_snapshot!(context
+            .to_graphql_errors(TestError::BadRequest, Default::default(), None)
+            .expect("error formatting"));
     }
 }

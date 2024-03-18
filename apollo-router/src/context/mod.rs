@@ -81,11 +81,16 @@ impl Context {
         }
     }
 
-    pub fn to_graphql_errors<T: StructuredError>(&self, error: &T,
+    pub fn to_graphql_errors<E:StructuredError, T: Into<Vec<E>>>(&self, error: T,
                                 locations: Vec<crate::graphql::Location>,
                                 path: Option<Path>) -> Result<Vec<crate::graphql::Error>, crate::structured_errors::Error> {
+        let errors  = error.into();
+        let mut converted = Vec::with_capacity(errors.len());
         let formatter = self.extensions().lock().get::<ErrorFormatterHandle>().expect("Must have error formatter").clone();
-        formatter.to_graphql_errors(error, locations, path)
+        for error in errors {
+            converted.push(formatter.to_graphql_error(&error, locations.clone(), path.clone())?);
+        }
+        Ok(converted)
     }
 }
 
