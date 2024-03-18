@@ -18,8 +18,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use crate::json_ext::Value;
+use crate::json_ext::{Path, Value};
 use crate::services::layers::query_analysis::ParsedDocument;
+use crate::structured_errors::{ErrorFormatterHandle, ErrorFormatter, StructuredError};
 
 pub(crate) mod extensions;
 
@@ -78,6 +79,13 @@ impl Context {
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,
         }
+    }
+
+    pub fn to_graphql_errors<T: StructuredError>(&self, error: &T,
+                                locations: Vec<crate::graphql::Location>,
+                                path: Option<Path>) -> Result<Vec<crate::graphql::Error>, crate::structured_errors::Error> {
+        let formatter = self.extensions().lock().get::<ErrorFormatterHandle>().expect("Must have error formatter").clone();
+        formatter.to_graphql_errors(error, locations, path)
     }
 }
 

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::sync::Arc;
 
 use displaydoc::Display;
 use heck::ToShoutySnakeCase;
@@ -381,16 +382,29 @@ macro_rules! error_type {
 }
 
 /// An error formatter that can be used to convert errors that implement `StructuredError` to graphql errors
-pub trait ErrorFormatter {
+pub trait ErrorFormatter : Send + Sync {
     /// Convert the error into a graphql error.
-    fn format_error<T: StructuredError + ?Sized>(
+    fn to_graphql_errors(
         &self,
-        error: &T,
+        error: &dyn StructuredError,
         locations: Vec<crate::graphql::Location>,
         path: Option<Path>,
-    ) -> Result<crate::graphql::Error, Error>;
+    ) -> Result<Vec<crate::graphql::Error>, Error>;
 }
 
+
+#[derive(Clone)]
+pub (crate) struct ErrorFormatterHandle(Arc<dyn ErrorFormatter>);
+impl ErrorFormatter for ErrorFormatterHandle {
+    fn to_graphql_errors(
+        &self,
+        error: &dyn StructuredError,
+        locations: Vec<crate::graphql::Location>,
+        path: Option<Path>,
+    ) -> Result<Vec<crate::graphql::Error>, Error> {
+        self.0.to_graphql_errors(error, locations, path)
+    }
+}
 #[cfg(test)]
 mod test {
     use displaydoc::Display;
@@ -430,12 +444,12 @@ mod test {
 
     struct SimpleErrorFormatter;
     impl ErrorFormatter for SimpleErrorFormatter {
-        fn format_error<T: StructuredError + ?Sized>(
+        fn to_graphql_errors(
             &self,
-            error: &T,
+            error: &dyn StructuredError,
             locations: Vec<crate::graphql::Location>,
             path: Option<Path>,
-        ) -> Result<crate::graphql::Error, super::Error> {
+        ) -> Result<Vec<crate::graphql::Error>, super::Error> {
             let mut attributes = error.attributes()?;
             let mut cause = error.source();
             let mut trace = vec![];
@@ -467,12 +481,12 @@ mod test {
                 attributes.insert("trace".to_string(), trace.into());
             }
 
-            Ok(crate::graphql::Error {
+            Ok(vec![crate::graphql::Error {
                 message: error.message(),
                 extensions: attributes,
                 locations,
                 path,
-            })
+            }])
         }
     }
 
@@ -499,7 +513,7 @@ mod test {
             "{}".to_string()
         );
         assert_yaml_snapshot!(SimpleErrorFormatter
-            .format_error(&error, Default::default(), None)
+            .to_graphql_errors(&error, Default::default(), None)
             .unwrap());
     }
 
@@ -520,7 +534,7 @@ mod test {
             "{\"attr\":\"test\"}".to_string()
         );
         assert_yaml_snapshot!(SimpleErrorFormatter
-            .format_error(&error, Default::default(), None)
+            .to_graphql_errors(&error, Default::default(), None)
             .unwrap());
     }
 }
