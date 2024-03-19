@@ -11,7 +11,7 @@ use crate::register_plugin;
 use crate::services::execution::BoxService;
 
 /// Algorithm for calculating the cost of an incoming query.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum CostCalculationAlgorithm {
     /// A simple, statically-defined cost mapping for operations and types.
@@ -27,12 +27,11 @@ pub(crate) enum CostCalculationAlgorithm {
     /// - Union: 1
     /// - Scalar: 0
     /// - Enum: 0
-    #[default]
-    Default,
+    Basic,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct DemandControlConfig {
     enabled: bool,
     algorithm: CostCalculationAlgorithm,
