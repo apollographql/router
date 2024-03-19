@@ -1395,6 +1395,33 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_demand_control": {
+      "description": "Demand control configuration",
+      "type": "object",
+      "required": [
+        "algorithm",
+        "enabled"
+      ],
+      "properties": {
+        "algorithm": {
+          "description": "The algorithm used to calculate the cost of an incoming request",
+          "oneOf": [
+            {
+              "description": "A simple, statically-defined cost mapping for operations and types.\n\nOperation costs: - Mutation: 10 - Query: 0 - Subscription 0\n\nType costs: - Object: 1 - Interface: 1 - Union: 1 - Scalar: 0 - Enum: 0",
+              "type": "string",
+              "enum": [
+                "basic"
+              ]
+            }
+          ]
+        },
+        "enabled": {
+          "description": "Enable demand control",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
       "default": "both",
