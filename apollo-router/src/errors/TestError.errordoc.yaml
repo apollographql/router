@@ -32,7 +32,6 @@
     - "Do something"
   attributes:
     line_number:
-      expose: message
       type: string
       description: "The line number"
     message:
