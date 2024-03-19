@@ -66,10 +66,7 @@ impl Plugin for Record {
             enabled: init.config.enabled,
             supergraph_sdl: init.supergraph_sdl.clone(),
             storage_path: storage_path.clone().into(),
-            schema: Arc::new(Schema::parse(
-                init.supergraph_sdl.clone().as_str(),
-                &Configuration::default(),
-            )?),
+            schema: Arc::new(Schema::parse(init.supergraph_sdl.clone().as_str())?),
         };
 
         if init.config.enabled {

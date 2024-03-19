@@ -23,7 +23,6 @@ use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
-use crate::configuration::GraphQLValidationMode;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
 use crate::graphql::Error;
@@ -71,14 +70,6 @@ pub(crate) struct Query {
     pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
-    /// Validation errors, used for comparison with the JS implementation.
-    ///
-    /// `ValidationErrors` is not serde-serializable. If this comes from cache,
-    /// the plan ought also to be cached, so we should not need this value anyways.
-    /// XXX(@goto-bus-stop): Remove when only Rust validation is used
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    #[serde(skip)]
-    pub(crate) validation_error: Option<ValidationErrors>,
 
     /// This is a hash that depends on:
     /// - the query itself
@@ -119,7 +110,6 @@ impl Query {
                 conditional_defer_variable_names: IndexSet::new(),
             },
             is_original: true,
-            validation_error: None,
             schema_aware_hash: vec![],
         }
     }
@@ -280,27 +270,23 @@ impl Query {
         query: &str,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> ParsedDocument {
+    ) -> Result<ParsedDocument, SpecError> {
         let parser = &mut apollo_compiler::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
-        let (ast, parse_errors) = match parser.parse_ast(query, "query.graphql") {
-            Ok(ast) => (ast, None),
-            Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+        let ast = match parser.parse_ast(query, "query.graphql") {
+            Ok(ast) => ast,
+            Err(WithErrors { errors, .. }) => {
+                return Err(SpecError::ParsingError(errors.to_string()));
+            }
         };
         let schema = &schema.api_schema().definitions;
-        let validate =
-            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
-        // Stretch the meaning of "assume valid" to "we’ll check later"
-        let (executable_document, validation_errors) = if validate {
-            match ast.to_executable_validate(schema) {
-                Ok(doc) => (doc.into_inner(), None),
-                Err(WithErrors { partial, errors }) => (partial, Some(errors)),
-            }
-        } else {
-            match ast.to_executable(schema) {
-                Ok(doc) => (doc, None),
-                Err(WithErrors { partial, .. }) => (partial, None),
+        let executable_document = match ast.to_executable_validate(schema) {
+            Ok(doc) => doc,
+            Err(WithErrors { errors, .. }) => {
+                return Err(SpecError::ValidationError(ValidationErrors {
+                    errors: errors.iter().map(|e| e.to_json()).collect(),
+                }));
             }
         };
 
@@ -308,12 +294,10 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        Arc::new(ParsedDocumentInner {
+        Ok(Arc::new(ParsedDocumentInner {
             ast,
             executable: Arc::new(executable_document),
-            parse_errors,
-            validation_errors,
-        })
+        }))
     }
 
     pub(crate) fn parse(
@@ -323,8 +307,7 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let query = query.into();
 
-        let doc = Self::parse_document(&query, schema, configuration);
-        Self::check_errors(&doc)?;
+        let doc = Self::parse_document(&query, schema, configuration)?;
         let (fragments, operations, defer_stats, schema_aware_hash) =
             Self::extract_query_information(schema, &doc.executable, &doc.ast)?;
 
@@ -337,25 +320,8 @@ impl Query {
             filtered_query: None,
             defer_stats,
             is_original: true,
-            validation_error: None,
             schema_aware_hash,
         })
-    }
-
-    /// Check for parse errors in a query in the compiler.
-    pub(crate) fn check_errors(document: &ParsedDocument) -> Result<(), SpecError> {
-        match document.parse_errors.clone() {
-            Some(errors) => Err(SpecError::ParsingError(errors.to_string())),
-            None => Ok(()),
-        }
-    }
-
-    /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(document: &ParsedDocument) -> Result<(), ValidationErrors> {
-        match document.validation_errors.clone() {
-            Some(errors) => Err(ValidationErrors { errors }),
-            None => Ok(()),
-        }
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.

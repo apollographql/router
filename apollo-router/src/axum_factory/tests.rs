@@ -459,7 +459,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let response = client
         .post(url.as_str())
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -483,7 +483,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let response = client
         .get(url.as_str())
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -514,7 +514,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
-    let original_body = json!({ "query": "query" });
+    let original_body = json!({ "query": "query { me { name } }" });
     let mut encoder = GzipEncoder::new(Vec::new());
     encoder
         .write_all(original_body.to_string().as_bytes())
@@ -528,7 +528,10 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let example_response = expected_response.clone();
     let router_service = router::service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        assert_eq!(req.supergraph_request.into_body().query.unwrap(), "query");
+        assert_eq!(
+            req.supergraph_request.into_body().query.unwrap(),
+            "query { me { name } }"
+        );
         Ok(SupergraphResponse::new_from_graphql_response(
             example_response,
             req.context,
@@ -614,7 +617,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -629,7 +632,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -658,7 +661,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
     // Post query
     let err = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -671,7 +674,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
     // Get query
     let err = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -719,7 +722,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -740,7 +743,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
                 .unwrap()
                 .to_string(),
         )
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -755,7 +758,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -805,7 +808,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -820,7 +823,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -869,7 +872,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -884,7 +887,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -939,7 +942,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         // Post query
         let response = client
             .post(url.as_str())
-            .body(json!({ "query": "query" }).to_string())
+            .body(json!({ "query": "query { me { name } }" }).to_string())
             .send()
             .await
             .unwrap()
@@ -954,7 +957,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         // Get query
         let response = client
             .get(url.as_str())
-            .query(&json!({ "query": "query" }))
+            .query(&json!({ "query": "query { me { name } }" }))
             .send()
             .await
             .unwrap()
@@ -997,7 +1000,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .body(
             json!(
             {
-              "query": "query",
+              "query": "query { me { name } }",
             })
             .to_string(),
         )
@@ -1602,7 +1605,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test }",
+      "query": "query { me { name } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let response = client
@@ -1638,16 +1641,16 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         let body = stream::iter(vec![
             graphql::Response::builder()
                 .data(json!({
-                    "test": "hello",
+                    "me": "id",
                 }))
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
                 .incremental(vec![graphql::IncrementalResponse::builder()
                     .data(json!({
-                        "other": "world"
+                        "name": "Ada"
                     }))
-                    .path(Path::default())
+                    .path(Path::from("me"))
                     .build()])
                 .has_next(true)
                 .build(),
@@ -1663,7 +1666,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test ... @defer { other } }",
+      "query": "query { me { id ... @defer { name } } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let mut response = client
@@ -1683,13 +1686,13 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql"
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
         );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&second).unwrap(),
-        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql"
+        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"name\":\"Ada\"},\"path\":[\"me\"]}]}\r\n--graphql"
         );
 
     let third = response.chunk().await.unwrap().unwrap();
@@ -1706,7 +1709,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let router_service = router::service::from_supergraph_mock_callback(move |req| {
         let body = stream::iter(vec![graphql::Response::builder()
             .data(json!({
-                "test": "hello",
+                "me": "name",
             }))
             .has_next(false)
             .build()])
@@ -1721,7 +1724,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test }",
+      "query": "query { me { name } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let mut response = client
@@ -1741,7 +1744,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":false}\r\n--graphql--\r\n"
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
         );
 
     server.shutdown().await
@@ -2066,7 +2069,7 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::POST,
-        r#"{"query":"query"}"#,
+        r#"{"query":"query { me { name } }"}"#,
     )
     .await;
 
@@ -2079,7 +2082,7 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::GET,
-        r#"query=query"#,
+        r#"query=query%7Bme%7Bname%7D%7D"#,
     )
     .await;
 

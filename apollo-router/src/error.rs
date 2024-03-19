@@ -260,8 +260,8 @@ pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
-    /// invalid query
-    OperationValidationErrors(Vec<apollo_compiler::execution::GraphQLError>),
+    /// invalid query: {0}
+    OperationValidationErrors(ValidationErrors),
 
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
@@ -320,21 +320,9 @@ impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            QueryPlannerError::SpecError(err) => {
-                let gql_err = match err.custom_extension_details() {
-                    Some(extension_details) => Error::builder()
-                        .message(err.to_string())
-                        .extension_code(err.extension_code())
-                        .extensions(extension_details)
-                        .build(),
-                    None => Error::builder()
-                        .message(err.to_string())
-                        .extension_code(err.extension_code())
-                        .build(),
-                };
-
-                Ok(vec![gql_err])
-            }
+            QueryPlannerError::SpecError(err) => err
+                .into_graphql_errors()
+                .map_err(QueryPlannerError::SpecError),
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
@@ -466,9 +454,7 @@ impl From<SpecError> for QueryPlannerError {
 
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
-        QueryPlannerError::OperationValidationErrors(
-            err.errors.iter().map(|e| e.to_json()).collect(),
-        )
+        QueryPlannerError::OperationValidationErrors(ValidationErrors { errors: err.errors })
     }
 }
 
@@ -568,13 +554,7 @@ impl std::fmt::Display for ParseErrors {
     }
 }
 
-/// Collection of schema validation errors.
-#[derive(Debug)]
-pub(crate) struct ValidationErrors {
-    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
-}
-
-impl IntoGraphQLErrors for ValidationErrors {
+impl IntoGraphQLErrors for ParseErrors {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         Ok(self
             .errors
@@ -593,6 +573,37 @@ impl IntoGraphQLErrors for ValidationErrors {
                             })
                             .unwrap_or_default(),
                     )
+                    .extension_code("GRAPHQL_PARSING_FAILED")
+                    .build()
+            })
+            .collect())
+    }
+}
+
+/// Collection of schema validation errors.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ValidationErrors {
+    pub(crate) errors: Vec<apollo_compiler::execution::GraphQLError>,
+}
+
+impl IntoGraphQLErrors for ValidationErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self
+            .errors
+            .iter()
+            .map(|diagnostic| {
+                Error::builder()
+                    .message(diagnostic.message.to_string())
+                    .locations(
+                        diagnostic
+                            .locations
+                            .iter()
+                            .map(|loc| ErrorLocation {
+                                line: loc.line as u32,
+                                column: loc.column as u32,
+                            })
+                            .collect(),
+                    )
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
@@ -606,10 +617,14 @@ impl std::fmt::Display for ValidationErrors {
             if index > 0 {
                 f.write_str("\n")?;
             }
-            if let Some(location) = error.get_line_column() {
-                write!(f, "[{}:{}] {}", location.line, location.column, error.error)?;
+            if let Some(location) = error.locations.first() {
+                write!(
+                    f,
+                    "[{}:{}] {}",
+                    location.line, location.column, error.message
+                )?;
             } else {
-                write!(f, "{}", error.error)?;
+                write!(f, "{}", error.message)?;
             }
         }
         Ok(())

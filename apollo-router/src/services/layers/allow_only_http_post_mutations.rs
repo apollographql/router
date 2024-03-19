@@ -278,7 +278,6 @@ mod forbid_http_get_mutations_tests {
 
         let ast = ast::Document::parse(query, "").unwrap();
         let (_schema, executable) = ast.to_mixed_validate().unwrap();
-        let executable = executable.into_inner();
 
         let context = Context::new();
         context
@@ -287,8 +286,6 @@ mod forbid_http_get_mutations_tests {
             .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
                 ast,
                 executable: Arc::new(executable),
-                parse_errors: None,
-                validation_errors: None,
             }));
 
         SupergraphRequest::fake_builder()
