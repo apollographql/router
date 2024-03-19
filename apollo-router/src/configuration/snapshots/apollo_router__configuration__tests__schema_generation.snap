@@ -3254,6 +3254,11 @@ expression: "&schema"
                                   "default": true,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3276,6 +3281,11 @@ expression: "&schema"
                                 },
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
@@ -3342,6 +3352,11 @@ expression: "&schema"
                                   "default": false,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3365,6 +3380,11 @@ expression: "&schema"
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
+                                  "default": false,
                                   "type": "boolean"
                                 }
                               },
@@ -3447,6 +3467,11 @@ expression: "&schema"
                                   "default": true,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3469,6 +3494,11 @@ expression: "&schema"
                                 },
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
@@ -3535,6 +3565,11 @@ expression: "&schema"
                                   "default": false,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3558,6 +3593,11 @@ expression: "&schema"
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
+                                  "default": false,
                                   "type": "boolean"
                                 }
                               },

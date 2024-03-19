@@ -7,3 +7,4 @@ mod redis;
 mod rhai;
 mod subscription;
 mod validation;
+mod logging;
