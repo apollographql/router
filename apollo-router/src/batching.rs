@@ -5,129 +5,247 @@
 //! `Batch`, there are a series of utility functions for efficiently converting
 //! graphql Requests to/from batch representation in a variety of formats: JSON, bytes
 
-use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 use bytes::BufMut;
 use bytes::BytesMut;
 use hyper::Body;
-use parking_lot::Mutex;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tower::BoxError;
 
+use crate::error::FetchError;
 use crate::graphql;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct BatchQuery {
+    /// The index of this query relative to the entire batch
     index: usize,
-    // Shared Batch
-    shared: Arc<Mutex<Batch>>,
+
+    /// A channel sender for sending updates to the entire batch
+    sender: mpsc::Sender<BatchHandlerMessage>,
 }
 
 impl fmt::Display for BatchQuery {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "index: {}, ", self.index)?;
-        // Use try_lock. If the shared batch is locked, we won't display it.
-        // TODO: Maybe improve to handle the error...?
-        let guard = self.shared.try_lock().ok_or(fmt::Error)?;
-        write!(f, "size: {}, ", guard.size)?;
-        write!(f, "expected: {:?}, ", guard.expected)?;
-        write!(f, "seen: {:?}", guard.seen)?;
-        for (service, waiters) in guard.waiters.iter() {
-            write!(f, ", service: {}, waiters: {}", service, waiters.len())?;
-        }
-        Ok(())
+        // write!(f, "index: {}, ", self.index)?;
+        // // Use try_lock. If the shared batch is locked, we won't display it.
+        // // TODO: Maybe improve to handle the error...?
+        // let guard = self.shared.try_lock().ok_or(fmt::Error)?;
+        // write!(f, "size: {}, ", guard.size)?;
+        // write!(f, "expected: {:?}, ", guard.expected)?;
+        // write!(f, "seen: {:?}", guard.seen)?;
+        // for (service, waiters) in guard.waiters.iter() {
+        //     write!(f, ", service: {}, waiters: {}", service, waiters.len())?;
+        // }
+        // Ok(())
+        todo!()
     }
 }
 
 impl BatchQuery {
-    pub(crate) fn new(index: usize, shared: Arc<Mutex<Batch>>) -> Self {
-        Self { index, shared }
+    /// Inform the batch of the amount of fetches needed for this element of the batch query
+    pub(crate) async fn set_subgraph_fetches(&self, fetches: usize) {
+        // TODO: How should we handle the sender dying?
+        self.sender
+            .send(BatchHandlerMessage::UpdateFetchCountForIndex {
+                index: self.index,
+                count: fetches,
+            })
+            .await
+            .unwrap();
     }
 
-    pub(crate) fn ready(&self) -> bool {
-        self.shared.lock().ready()
-    }
-
-    pub(crate) fn finished(&self) -> bool {
-        self.shared.lock().finished()
-    }
-
-    pub(crate) fn get_waiter(
+    /// Signal to the batch handler that this specific batch query is ready to execute.
+    ///
+    /// The returned channel can be awaited to receive the GraphQL response, when ready.
+    pub(crate) async fn signal_ready(
         &self,
         request: SubgraphRequest,
-        body: graphql::Request,
-        context: Context,
-        service_name: &str,
     ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
-        tracing::info!("getting a waiter for {}", self.index);
-        self.shared
-            .lock()
-            .get_waiter(request, body, context, service_name.to_string())
-    }
+        // Create a receiver for this query so that it can eventually get the request meant for it
+        let (tx, rx) = oneshot::channel();
 
-    pub(crate) fn get_waiters(&self) -> HashMap<String, Vec<Waiter>> {
-        let mut guard = self.shared.lock();
-        guard.finished = true;
-        std::mem::take(&mut guard.waiters)
-    }
+        // TODO: How should we handle the sender dying?
+        self.sender
+            .send(BatchHandlerMessage::SignalReady {
+                index: self.index,
+                request,
+                response_sender: tx,
+            })
+            .await
+            .unwrap();
 
-    pub(crate) fn increment_subgraph_seen(&self) {
-        let mut shared_guard = self.shared.lock();
-        let value = shared_guard.seen.entry(self.index).or_default();
-        *value += 1;
-    }
-
-    pub(crate) fn set_subgraph_fetches(&self, fetches: usize) {
-        let mut shared_guard = self.shared.lock();
-        let value = shared_guard.expected.entry(self.index).or_default();
-        *value = fetches;
+        rx
     }
 }
 
-#[derive(Debug, Default)]
+enum BatchHandlerMessage {
+    /// Abort one of the sub requests
+    // TODO: How do we know which of the subfetches of the entire query to abort? Is it all of them?
+    Abort { index: usize, reason: String },
+
+    /// A query has reached the subgraph service and is ready to execute
+    SignalReady {
+        index: usize,
+        request: SubgraphRequest,
+        response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+    },
+
+    /// A query has passed query planning and now knows how many fetches are needed
+    /// to complete.
+    UpdateFetchCountForIndex { index: usize, count: usize },
+}
+
+#[derive(Debug)]
 pub(crate) struct Batch {
-    size: usize,
-    expected: HashMap<usize, usize>,
-    seen: HashMap<usize, usize>,
-    waiters: HashMap<String, Vec<Waiter>>,
-    finished: bool,
+    /// A sender channel to communicate with the batching handler
+    spawn_tx: mpsc::Sender<BatchHandlerMessage>,
+
+    /// The spawned batching handler task handle
+    ///
+    /// Note: This _must_ be aborted or else the spawned task will run forever
+    /// with no way to cancel it.
+    spawn_handle: JoinHandle<()>,
 }
 
 impl Batch {
-    pub(crate) fn new(size: usize) -> Self {
+    /// Creates a new batch, spawning an async task for handling updates to the
+    /// batch lifecycle.
+    pub(crate) fn spawn_handler(size: usize) -> Self {
+        // Create the message channel pair for sending update events to the spawned task
+        // TODO: Should the upper limit here be configurable?
+        let (spawn_tx, rx) = mpsc::channel(100);
+        let spawn_handle = tokio::spawn(async move {
+            /// Helper struct for keeping track of the expected vs seen pairs for a batch query
+            ///
+            /// Note: We also keep track of whether a fetch has been aborted so that later queries can quickly
+            /// short-circuit if needed.
+            #[derive(Clone)]
+            struct Fetches {
+                needed: usize,
+                seen: usize,
+
+                aborted: Option<String>,
+            }
+            impl Fetches {
+                fn is_ready(&self) -> bool {
+                    self.needed == self.seen
+                }
+            }
+
+            // We need to keep track of how many sub fetches are needed per query,
+            // but that information won't be known until each portion of the entire
+            // batch passes query planning.
+            // TODO: Is there a more efficient data structure for keeping track of all of these counts?
+            let mut fetches_per_query: Vec<Option<Fetches>> = vec![None; size];
+
+            // We also need to keep track of all requests we need to make and their send handles
+            let mut requests: Vec<
+                Vec<(
+                    SubgraphRequest,
+                    oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+                )>,
+            > = Vec::from_iter((0..size).map(|_| Vec::new()));
+
+            // Start handling messages from various portions of the request lifecycle
+            // TODO: Do we want to panic if all of the senders have dropped?
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    // Just clear out the fetch and error out the requests
+                    BatchHandlerMessage::Abort { index, reason } => {
+                        // Get all of the current waiting requests and short-circuit them
+                        if let Some(fetches) = fetches_per_query[index] {
+                            // Send back an error to every waiting request
+                            let send_error: Result<Vec<_>, _> = requests[index]
+                                .iter()
+                                .map(|(request, sender)| {
+                                    sender.send(Err(Box::new(
+                                        FetchError::SubrequestBatchingError {
+                                            // TODO: How should we get this? The field subgraph_name seems wrong
+                                            service: request.subgraph_name.unwrap(),
+                                            reason: format!("request aborted: {reason}"),
+                                        },
+                                    )))
+                                })
+                                .collect();
+
+                            // TODO: How should we handle send errors?
+                            send_error.unwrap();
+
+                            // Nuke this query of requests
+                            requests[index].clear();
+                        }
+
+                        // Mark the index as being aborted for future requests
+                        fetches_per_query[index] = Some(Fetches {
+                            needed: 0,
+                            seen: 0,
+                            aborted: Some(reason),
+                        });
+                    }
+
+                    // TODO: Do we want to handle if a query is outside of the range of the batch size?
+                    BatchHandlerMessage::UpdateFetchCountForIndex { index, count } => {
+                        fetches_per_query[index] = Some(Fetches {
+                            needed: count,
+                            seen: 0,
+                            aborted: None,
+                        });
+                    }
+
+                    // TODO: Do we want to handle if a query is outside of the range of the batch size?
+                    BatchHandlerMessage::SignalReady {
+                        index,
+                        request,
+                        response_sender,
+                    } => {
+                        // If we got a message that a subfetch from an aborted request has arrived, just short it out now
+                        // TODO: How do we handle the fetch not being present?
+                        if let Some(reason) = fetches_per_query[index].unwrap().aborted {
+                            // TODO: How should we handle send failure here?
+                            response_sender
+                                .send(Err(Box::new(FetchError::SubrequestBatchingError {
+                                    // TODO: How should we get this? The field subgraph_name seems wrong
+                                    service: request.subgraph_name.unwrap(),
+                                    reason: format!("request aborted: {reason}"),
+                                })))
+                                .unwrap();
+                        } else {
+                            requests[index].push((request, response_sender));
+                        }
+                    }
+                }
+
+                // If all of the fetches are ready, then we can start actually making the batched request
+                if fetches_per_query
+                    .iter()
+                    .all(|f| f.is_some() && f.unwrap().is_ready())
+                {
+                    break;
+                }
+            }
+
+            todo!("implement the fetching logic");
+        });
+
         Self {
-            size,
-            expected: HashMap::new(),
-            seen: HashMap::new(),
-            waiters: HashMap::new(),
-            finished: false,
+            spawn_tx,
+            spawn_handle,
         }
     }
 
-    fn ready(&self) -> bool {
-        self.expected.len() == self.size && self.expected == self.seen
-    }
-
-    fn finished(&self) -> bool {
-        self.finished
-    }
-
-    fn get_waiter(
-        &mut self,
-        request: SubgraphRequest,
-        body: graphql::Request,
-        context: Context,
-        service: String,
-    ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
-        let (tx, rx) = oneshot::channel();
-        let value = self.waiters.entry(service).or_default();
-        value.push(Waiter::new(request, body, context, tx));
-        rx
+    /// Create a batch query for a specific index in this batch
+    // TODO: Do we want to panic / error if the index is out of range?
+    pub(crate) fn query_for_index(&self, index: usize) -> BatchQuery {
+        BatchQuery {
+            index,
+            sender: self.spawn_tx.clone(),
+        }
     }
 }
 
@@ -215,13 +333,13 @@ impl Waiter {
 // their calls have failed.
 //
 // TODO: Figure out the implications, but panic for now if waiters is not empty
-impl Drop for Batch {
-    fn drop(&mut self) {
-        if !self.waiters.is_empty() {
-            panic!("TODO: waiters must be empty when a Batch is dropped");
-        }
-    }
-}
+// impl Drop for Batch {
+//     fn drop(&mut self) {
+//         if !self.waiters.is_empty() {
+//             panic!("TODO: waiters must be empty when a Batch is dropped");
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -235,6 +353,43 @@ mod tests {
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::Context;
+
+    // Possible example test
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn it_assembles_batch() {
+    //     // For this test we'll create a mock batch where each subrequest makes
+    //     // 2 times its index in fetches.
+    //     const BATCH_SIZE: usize = 4;
+
+    //     let batch = Batch::spawn_handler(BATCH_SIZE);
+    //     let queries: Vec<_> = (0..BATCH_SIZE)
+    //         .map(|index| batch.query_for_index(index))
+    //         .collect();
+
+    //     // Notify the handler about the needed fetch count for each subrequest
+    //     for (index, query) in queries.iter().enumerate() {
+    //         query.set_subgraph_fetches(index * 2);
+    //     }
+
+    //     // Add some delay to simulate the time between router stages
+    //     tokio::time::sleep(Duration::from_millis(200)).await;
+
+    //     // Notify that each query is ready
+    //     let receivers =
+    //         futures::future::join_all(queries.iter().map(BatchQuery::signal_ready)).await;
+
+    //     // Make sure that we get back the correct responses for them all
+    //     for (index, rx) in receivers.into_iter().enumerate() {
+    //         let result = rx.await.unwrap().unwrap();
+
+    //         assert_eq!(
+    //             result.response.body().data,
+    //             Some(serde_json_bytes::Value::String(
+    //                 format!("{index}: {}", index * 2).into()
+    //             ))
+    //         );
+    //     }
+    // }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_assembles_batch() {
