@@ -249,7 +249,6 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         root_type: &str,
         node: &ast::OperationDefinition,
     ) -> Result<(), BoxError> {
-        println!("queryhashvisitor {}", node.to_string());
         root_type.hash(self);
         self.hash_type_by_name(root_type);
 
