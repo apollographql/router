@@ -13,6 +13,7 @@ use apollo_compiler::executable::Fragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use futures::future::BoxFuture;
@@ -32,6 +33,7 @@ use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use tower::BoxError;
 use tower::Service;
 
 use super::PlanNode;
@@ -57,6 +59,8 @@ use crate::services::OperationKind;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::query::transform;
+use crate::spec::query::traverse;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -534,6 +538,12 @@ impl BridgeQueryPlanner {
                     let generated_usage_reporting = UsageReporting {
                         stats_report_key: BridgeQueryPlanner::generate_apollo_reporting_signature(doc, operation.clone()),
                         referenced_fields_by_type: BridgeQueryPlanner::generate_apollo_reporting_refs(doc, operation, &self.schema.definitions),
+                    };
+
+                    if let Some(mut visitor) = ReferencedFieldsVisitor::new(&self.schema.definitions, &doc.ast) {
+                        if traverse::document(&mut visitor, &doc.ast).is_ok() {
+                            println!("traversed");
+                        }
                     };
 
                     if matches!(
@@ -1210,6 +1220,114 @@ fn render_diff(differences: &[diff::Result<&str>]) -> String {
     }
     output
 }
+
+// todo move somewhere else and cleanup
+
+
+/// todo comment
+pub(crate) struct ReferencedFieldsVisitor<'a> {
+    schema: &'a schema::Schema,
+    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    pub(crate) referenced_fields: HashMap<String, ReferencedFieldsForType>,
+}
+
+impl<'a> ReferencedFieldsVisitor<'a> {
+    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
+        Some(Self {
+            schema,
+            fragments: transform::collect_fragments(executable),
+            referenced_fields: HashMap::new(),
+        })
+    }
+
+    /*
+    pub(crate) fn finish(self) -> Vec<u8> {
+        self.hasher.finalize().as_slice().into()
+    }
+    */
+}
+
+impl<'a> traverse::Visitor for ReferencedFieldsVisitor<'a> {
+    fn operation(
+        &mut self,
+        root_type: &str,
+        node: &ast::OperationDefinition,
+    ) -> Result<(), BoxError> {
+        println!("in visitor for operation {} {:?}", root_type, node);
+        Ok(())
+    }
+
+    /*
+    fn field(
+        &mut self,
+        parent_type: &str,
+        field_def: &ast::FieldDefinition,
+        node: &ast::Field,
+    ) -> Result<(), BoxError> {
+        let parent = parent_type.to_string();
+        let name = field_def.name.as_str().to_string();
+
+        if self.hashed_fields.insert((parent, name)) {
+            self.hash_type_by_name(parent_type);
+
+            field_def.name.hash(self);
+
+            for argument in &field_def.arguments {
+                self.hash_input_value_definition(argument);
+            }
+
+            for argument in &node.arguments {
+                self.hash_argument(argument);
+            }
+
+            self.hash_type(&field_def.ty);
+
+            for directive in &field_def.directives {
+                self.hash_directive(directive);
+            }
+        }
+
+        traverse::field(self, field_def, node)
+    }
+
+    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
+        node.name.hash(self);
+        self.hash_type_by_name(&node.type_condition);
+
+        traverse::fragment_definition(self, node)
+    }
+
+    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
+        node.fragment_name.hash(self);
+        let type_condition = &self
+            .fragments
+            .get(&node.fragment_name)
+            .ok_or("MissingFragment")?
+            .type_condition;
+        self.hash_type_by_name(type_condition);
+
+        traverse::fragment_spread(self, node)
+    }
+
+    fn inline_fragment(
+        &mut self,
+        parent_type: &str,
+        node: &ast::InlineFragment,
+    ) -> Result<(), BoxError> {
+        if let Some(type_condition) = &node.type_condition {
+            self.hash_type_by_name(type_condition);
+        }
+        traverse::inline_fragment(self, parent_type, node)
+    } 
+    */
+
+    fn schema(&self) -> &apollo_compiler::Schema {
+        self.schema
+    }
+}
+
+
+// end todo move somewhere else and cleanup
 
 #[cfg(test)]
 mod tests {
@@ -2211,6 +2329,33 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn test_sig_basic_regex() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Query {
+            noInputQuery: BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query MyQuery {
+            noInputQuery {
+              id
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("MyQuery".into()));
+        let expected_sig = "# MyQuery\nquery MyQuery{noInputQuery{id}}";
+        assert_eq!(expected_sig, generated_sig);
+    }
+
+    #[test(tokio::test)]
     async fn test_sig_anonymous_operation() {
         let configuration = Arc::new(Default::default());
 
@@ -2235,5 +2380,41 @@ mod tests {
         let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, None);
         let expected_sig = "# -\n{noInputQuery{id}}";
         assert_eq!(expected_sig, generated_sig);
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_temp_mult_queries() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Query {
+            noInputQuery: BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query MyQuery1 {
+            noInputQuery {
+              id
+            }
+          }
+          
+          query MyQuery2 {
+            noInputQuery {
+              id
+              nullableId
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        if let Some(mut visitor) = ReferencedFieldsVisitor::new(&schema.definitions, &doc.ast) {
+            if traverse::document(&mut visitor, &doc.ast).is_ok() {
+                println!("traversed");
+            }
+        };
     }
 }
