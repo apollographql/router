@@ -465,7 +465,7 @@ mod test {
 
     #[derive(Debug, thiserror::Error, Display)]
     #[allow(dead_code)]
-    enum UnDocumentedError {
+    enum UndocumentedError {
         /// Some unstructured error
         Unstructured {
             source: Box<dyn std::error::Error + Send + Sync>,
@@ -480,17 +480,17 @@ mod test {
         line_number: usize,
     }
 
-    impl Into<Vec<TestError>> for UnDocumentedError {
+    impl Into<Vec<TestError>> for UndocumentedError {
         fn into(self) -> Vec<TestError> {
             match self {
-                UnDocumentedError::ErrorList { errors } => errors
+                UndocumentedError::ErrorList { errors } => errors
                     .into_iter()
                     .map(|e| TestError::DocError {
                         message: e.message,
                         line_number: e.line_number,
                     })
                     .collect(),
-                UnDocumentedError::Unstructured { .. } => vec![TestError::BadRequest],
+                UndocumentedError::Unstructured { .. } => vec![TestError::BadRequest],
             }
         }
     }
@@ -574,7 +574,7 @@ mod test {
     fn test_error_formatting_with_source_chain() {
         let error = TestError::NotFound {
             attr: "test".to_string(),
-            source: Box::new(UnDocumentedError::Unstructured {
+            source: Box::new(UndocumentedError::Unstructured {
                 source: Box::new(TestNestedError::Nested),
             }),
         };
@@ -601,7 +601,7 @@ mod test {
         let context = Context::default();
         context.extensions().lock().insert(ErrorFormatterHandle(Arc::new(SimpleErrorFormatter)));
         assert_yaml_snapshot!(context
-            .to_graphql_errors(UnDocumentedError::ErrorList {
+            .to_graphql_errors(UndocumentedError::ErrorList {
             errors: vec![
                 DocError {
                     message: "Some message".to_string(),
