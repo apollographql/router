@@ -30,10 +30,13 @@ pub(crate) enum CostCalculationAlgorithm {
     Basic,
 }
 
+/// Demand control configuration
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DemandControlConfig {
+    /// Enable demand control
     enabled: bool,
+    /// The algorithm used to calculate the cost of an incoming request
     #[allow(dead_code)]
     algorithm: CostCalculationAlgorithm,
 }
