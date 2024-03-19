@@ -34,6 +34,7 @@ pub(crate) enum CostCalculationAlgorithm {
 #[serde(deny_unknown_fields)]
 pub(crate) struct DemandControlConfig {
     enabled: bool,
+    #[allow(dead_code)]
     algorithm: CostCalculationAlgorithm,
 }
 
