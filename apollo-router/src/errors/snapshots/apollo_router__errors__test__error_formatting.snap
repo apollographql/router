@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/errors/mod.rs
+expression: "SimpleErrorFormatter.to_graphql_error(&error, Default::default(),\n        None).unwrap()"
+---
+message: Bad request
+extensions:
+  code: TEST_ERROR__BAD_REQUEST
+  level: Error

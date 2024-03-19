@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/errors/mod.rs
+expression: "SimpleErrorFormatter.to_graphql_error(&error, Default::default(),\n        None).unwrap()"
+---
+message: Not found
+extensions:
+  attr: test
+  code: TEST_ERROR__NOT_FOUND
+  level: Error
+  trace:
+    - code: UNKNOWN
+      message: Some unstructured error
+    - code: TEST_NESTED_ERROR__NESTED
+      message: Nested error

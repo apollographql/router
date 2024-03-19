@@ -1,0 +1,16 @@
+---
+source: apollo-router/src/errors/mod.rs
+expression: "context.to_graphql_errors(UndocumentedError::ErrorList {\n            errors: vec![DocError\n                { message : \"Some message\".to_string(), line_number : 1, },\n                DocError\n                { message : \"Some message2\".to_string(), line_number : 2, },],\n        }, Default::default(), None).expect(\"error formatting\")"
+---
+- message: DocError
+  extensions:
+    line_number: 1
+    message: Some message
+    code: TEST_ERROR__DOC_ERROR
+    level: Error
+- message: DocError
+  extensions:
+    line_number: 2
+    message: Some message2
+    code: TEST_ERROR__DOC_ERROR
+    level: Error
