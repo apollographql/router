@@ -1,4 +1,8 @@
 //! Demand control plugin.
+mod basic_cost_calculator;
+
+use apollo_compiler::executable::ExecutableDocument;
+use apollo_compiler::Schema;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -39,6 +43,10 @@ pub(crate) struct DemandControlConfig {
     /// The algorithm used to calculate the cost of an incoming request
     #[allow(dead_code)]
     algorithm: CostCalculationAlgorithm,
+}
+
+trait CostCalculator {
+    fn estimated(query: &ExecutableDocument, schema: &Schema) -> Result<f64, BoxError>;
 }
 
 #[derive(Clone, Debug)]
