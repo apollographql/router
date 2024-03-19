@@ -7,6 +7,7 @@ use tower::ServiceExt;
 
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::register_plugin;
 use crate::services::execution::BoxService;
 
 /// Algorithm for calculating the cost of an incoming query.
@@ -60,3 +61,5 @@ impl Plugin for DemandControl {
         }
     }
 }
+
+register_plugin!("apollo", "experimental_demand_control", DemandControl);
