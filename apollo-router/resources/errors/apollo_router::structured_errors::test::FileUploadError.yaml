@@ -1,0 +1,20 @@
+- code: FILE_UPLOADS_ERROR__MAX_FILE_SIZE_EXCEEDED
+  level: error
+  origin: subgraph
+  detail: "The request was invalid or cannot be otherwise served."
+  type: bad_request
+  actions:
+    - "Do something"
+  extensions:
+    file_uploads:
+      max_size:
+        type: string
+        description: "The maximum size of the file."
+  message_attributes:
+    file_name:
+      type: string
+      description: "The name of the file."
+    max_size:
+      type: string
+      description: "The maximum size of the file."
+

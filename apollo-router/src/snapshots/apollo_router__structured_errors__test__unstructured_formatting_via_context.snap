@@ -1,0 +1,22 @@
+---
+source: apollo-router/src/structured_errors.rs
+expression: "context.to_graphql_errors(UnstructuredError::ErrorList {\n            errors: vec![DocError\n                { message : \"Some message\".to_string(), line_number : 1, },\n                DocError\n                { message : \"Some message2\".to_string(), line_number : 2, },],\n        }, Default::default(), None).expect(\"error formatting\")"
+---
+- message: DocError
+  extensions:
+    message.attribute:
+    line_number: 1
+    message: Some message
+    code: TEST_ERROR__DOC_ERROR
+    level: Error
+- message: The maximum file upload size of 500Mb has been exceeded for file 'test.txt'
+  extensions:
+    code: FILE_UPLOADS_ERROR__MAX_FILE_SIZE_EXCEEDED
+    level: Error
+    file_uploads:
+      max_size: 50000000
+    message_attribute:
+      file_name: test.txt
+      max_size: 500Mb
+
+
