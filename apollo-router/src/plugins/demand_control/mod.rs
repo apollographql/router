@@ -12,7 +12,7 @@ use crate::services::execution::BoxService;
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum CostCalculationAlgorithm {
     /// A simple, statically-defined cost mapping for operations and types.
     ///
