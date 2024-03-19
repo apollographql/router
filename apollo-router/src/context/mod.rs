@@ -20,7 +20,7 @@ use tower::BoxError;
 
 use crate::json_ext::{Path, Value};
 use crate::services::layers::query_analysis::ParsedDocument;
-use crate::structured_errors::{ErrorFormatterHandle, ErrorConverter, DocumentedError};
+use crate::errors::{ErrorFormatterHandle, ErrorConverter, DocumentedError};
 
 pub(crate) mod extensions;
 
@@ -83,7 +83,7 @@ impl Context {
 
     pub fn to_graphql_errors<E: DocumentedError, T: Into<Vec<E>>>(&self, error: T,
                                                                   locations: Vec<crate::graphql::Location>,
-                                                                  path: Option<Path>) -> Result<Vec<crate::graphql::Error>, crate::structured_errors::Error> {
+                                                                  path: Option<Path>) -> Result<Vec<crate::graphql::Error>, crate::errors::Error> {
         let errors  = error.into();
         let mut converted = Vec::with_capacity(errors.len());
         let formatter = self.extensions().lock().get::<ErrorFormatterHandle>().expect("Must have error formatter").clone();

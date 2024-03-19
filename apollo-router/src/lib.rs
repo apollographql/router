@@ -75,10 +75,10 @@ mod router_factory;
 pub mod services;
 pub(crate) mod spec;
 mod state_machine;
-pub mod structured_errors;
 pub mod test_harness;
 pub mod tracer;
 mod uplink;
+pub mod errors;
 
 pub use crate::axum_factory::unsupported_set_axum_router_callback;
 pub use crate::configuration::Configuration;

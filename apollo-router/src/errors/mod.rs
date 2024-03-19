@@ -6,7 +6,6 @@ use std::sync::Arc;
 use displaydoc::Display;
 use heck::ToShoutySnakeCase;
 use linkme::distributed_slice;
-use rust_embed::RustEmbed;
 use schemars::schema::Schema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,10 +28,6 @@ pub enum Error {
         error_code: String,
     },
 }
-
-#[derive(RustEmbed)]
-#[folder = "resources/errors"]
-struct Asset;
 
 #[derive(Serialize, Deserialize, Display)]
 #[serde(rename_all = "snake_case")]
@@ -220,14 +215,16 @@ pub(crate) fn validate_definitions(
 #[distributed_slice]
 pub static DOCUMENTED_ERROR_CAST: [&'static dyn DocumentedErrorCast];
 
-/// An extension trait that allows casting from a dyn Error to a `dyn DocumentedError` using `as_structured_error_ref`
+/// An extension trait that allows casting from a dyn Error to a `dyn DocumentedError` using `as_documented_error_ref`
 pub trait AnyDocumentedError<'a> {
-    fn as_structured_error_ref(self) -> Option<&'a (dyn DocumentedError)>;
+
+    /// Casts a `&dyn Error` to a `&dyn DocumentedError`
+    fn as_documented_error_ref(self) -> Option<&'a (dyn DocumentedError)>;
 }
 impl<'a> AnyDocumentedError<'a> for &'a (dyn std::error::Error + 'static) {
-    fn as_structured_error_ref(self) -> Option<&'a (dyn DocumentedError)> {
+    fn as_documented_error_ref(self) -> Option<&'a (dyn DocumentedError)> {
         for cast in DOCUMENTED_ERROR_CAST {
-            if let Some(e) = cast.cast_structured_error_ref(self) {
+            if let Some(e) = cast.cast_documented_error_ref(self) {
                 return Some(e);
             }
         }
@@ -237,7 +234,7 @@ impl<'a> AnyDocumentedError<'a> for &'a (dyn std::error::Error + 'static) {
 
 /// A trait that allows casting from a `dyn Error` to a `dyn DocumentedError`
 pub(crate) trait DocumentedErrorCast: Sync + Send {
-    fn cast_structured_error_ref<'a>(
+    fn cast_documented_error_ref<'a>(
         &'a self,
         error: &'a (dyn std::error::Error + 'static),
     ) -> Option<&'a (dyn DocumentedError)>;
@@ -245,18 +242,18 @@ pub(crate) trait DocumentedErrorCast: Sync + Send {
 
 /// The default and only implementation of `DocumentedErrorCast`
 struct DefaultDocumentedErrorCast<T>
-where
-    T: DocumentedError + Send + Sync + std::error::Error + 'static,
+    where
+        T: DocumentedError + Send + Sync + std::error::Error + 'static,
 {
     _phantom: std::marker::PhantomData<T>,
 }
 
 /// The default and only implementation of `DocumentedErrorCast,` essentially does a `downcast_ref` to `T` and then returns it as a reference to `dyn DocumentedError`
 impl<T> DocumentedErrorCast for DefaultDocumentedErrorCast<T>
-where
-    T: DocumentedError + Send + Sync + std::error::Error + 'static,
+    where
+        T: DocumentedError + Send + Sync + std::error::Error + 'static,
 {
-    fn cast_structured_error_ref<'a>(
+    fn cast_documented_error_ref<'a>(
         &'a self,
         error: &'a (dyn std::error::Error + 'static),
     ) -> Option<&'a (dyn DocumentedError)> {
@@ -306,8 +303,8 @@ macro_rules! error_type {
             enum $name $definition
 
             impl $name {
-                 fn definitions() -> &'static [crate::structured_errors::DocumentedErrorDefinition] where Self: Sized{
-                    static ALL_ERROR_DEFINITIONS: std::sync::OnceLock<Vec<crate::structured_errors::DocumentedErrorDefinition>> = std::sync::OnceLock::new();
+                 fn definitions() -> &'static [crate::errors::DocumentedErrorDefinition] where Self: Sized{
+                    static ALL_ERROR_DEFINITIONS: std::sync::OnceLock<Vec<crate::errors::DocumentedErrorDefinition>> = std::sync::OnceLock::new();
                     ALL_ERROR_DEFINITIONS.get_or_init(|| {
                         // This only happens once.
                         // We load all the error definitions, and sort them in the order that they appear in the enum so that we can look them up O(1).
@@ -316,13 +313,11 @@ macro_rules! error_type {
                         // - No missing errors.
                         // - No extra errors that do not appear in the error enum.
                         let discriminants = Self::discriminants();
-                        let yaml_file_name = format!("{}.yaml", std::any::type_name::<$name>());
-                        let embedded_file = crate::structured_errors::Asset::get(&yaml_file_name)
-                            .expect(&format!("missing error definition file {}", yaml_file_name));
-                        let all_error_definitions: Vec<crate::structured_errors::DocumentedErrorDefinition> =
-                            serde_yaml::from_slice(&embedded_file.data).expect(&format!(
+                        let embedded_file = include_str!(stringify!($name.errordoc.yaml));
+                        let all_error_definitions: Vec<crate::errors::DocumentedErrorDefinition> =
+                            serde_yaml::from_str(embedded_file).expect(&format!(
                                 "error parsing error definitions file {}",
-                                yaml_file_name
+                                stringify!($name.errordoc.yaml)
                             ));
 
                         // Finally rearrange the definitions in the order that they appear in the enum.
@@ -335,7 +330,7 @@ macro_rules! error_type {
 
                         definitions
                             .into_iter()
-                            .map(|v| v.unwrap_or_else(|| crate::structured_errors::DocumentedErrorDefinition::unknown()))
+                            .map(|v| v.unwrap_or_else(|| crate::errors::DocumentedErrorDefinition::unknown()))
                             .collect()
                     })
                 }
@@ -354,10 +349,10 @@ macro_rules! error_type {
 
             }
 
-            impl crate::structured_errors::DocumentedError for $name {
+            impl crate::errors::DocumentedError for $name {
                 /// Returns the error attributes as a serde_json::Value
-                fn attributes(&self) -> Result<crate::json_ext::Object, crate::structured_errors::Error> {
-                    let object = serde_json_bytes::to_value(self).map_err(|e|crate::structured_errors::Error::Serialization {
+                fn attributes(&self) -> Result<crate::json_ext::Object, crate::errors::Error> {
+                    let object = serde_json_bytes::to_value(self).map_err(|e|crate::errors::Error::Serialization {
                         error_code: self.code().to_string(),
                         source: e,
                     })?;
@@ -367,7 +362,7 @@ macro_rules! error_type {
                             Ok(object)
                         },
                         serde_json_bytes::Value::Null => Ok(crate::json_ext::Object::new()),
-                        _ => Err(crate::structured_errors::Error::SerializedWasNotObject {
+                        _ => Err(crate::errors::Error::SerializedWasNotObject {
                             error_code: self.code().to_string()
                         })
                     }
@@ -375,14 +370,14 @@ macro_rules! error_type {
 
                 /// Returns the definition for the error.
                 /// This is O(1) lookup because the error definitions are sorted in the order that they appear in the enum.
-                fn definition(&self) -> &'static crate::structured_errors::DocumentedErrorDefinition {
+                fn definition(&self) -> &'static crate::errors::DocumentedErrorDefinition {
                     // O(1) lookup
                     &$name::definitions()[$name::ordinal(self)]
                 }
             }
 
-            #[linkme::distributed_slice(crate::structured_errors::DOCUMENTED_ERROR_CAST)]
-            static [<$name:snake:upper _CAST>] : &'static dyn crate::structured_errors::DocumentedErrorCast = &crate::structured_errors::DefaultDocumentedErrorCast::<$name>{_phantom: std::marker::PhantomData{}};
+            #[linkme::distributed_slice(crate::errors::DOCUMENTED_ERROR_CAST)]
+            static [<$name:snake:upper _CAST>] : &'static dyn crate::errors::DocumentedErrorCast = &crate::errors::DefaultDocumentedErrorCast::<$name>{_phantom: std::marker::PhantomData{}};
 
             impl Into<Vec<$name>> for $name {
                 fn into(self) -> Vec<$name> {
@@ -395,7 +390,7 @@ macro_rules! error_type {
             fn [<test_ $name:snake _definitions>]() {
                 let definitions = $name::definitions();
                 let descriminants = $name::discriminants();
-                crate::structured_errors::validate_definitions(definitions, descriminants.keys().collect(), schemars::schema_for!($name));
+                crate::errors::validate_definitions(definitions, descriminants.keys().collect(), schemars::schema_for!($name));
             }
         }
     };
@@ -433,9 +428,9 @@ mod test {
 
     use crate::json_ext::Object;
     use crate::json_ext::Path;
-    use crate::structured_errors::{AnyDocumentedError, ErrorFormatterHandle};
-    use crate::structured_errors::ErrorConverter;
-    use crate::structured_errors::DocumentedError;
+    use crate::errors::{AnyDocumentedError, ErrorFormatterHandle};
+    use crate::errors::ErrorConverter;
+    use crate::errors::DocumentedError;
     use crate::Context;
 
     error_type!("Test error docs", TestNestedError, {
@@ -507,7 +502,7 @@ mod test {
             let mut cause = error.source();
             let mut trace = vec![];
             while let Some(err) = cause {
-                if let Some(err) = err.as_structured_error_ref() {
+                if let Some(err) = err.as_documented_error_ref() {
                     let mut o = Object::new();
                     o.insert("code".to_string(), err.code().to_string().into());
                     o.insert("message".to_string(), err.message().into());

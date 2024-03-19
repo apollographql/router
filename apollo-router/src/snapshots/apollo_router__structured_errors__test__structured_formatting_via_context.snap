@@ -1,8 +1,0 @@
----
-source: apollo-router/src/structured_errors.rs
-expression: "context.to_graphql_errors(TestError::BadRequest, Default::default(),\n        None).expect(\"error formatting\")"
----
-- message: Bad request
-  extensions:
-    code: TEST_ERROR__BAD_REQUEST
-    level: Error
