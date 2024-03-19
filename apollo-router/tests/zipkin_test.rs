@@ -111,7 +111,7 @@ async fn find_valid_trace(
     let service_name = trace.select_path("$..localEndpoint.serviceName")?;
 
     assert_eq!(
-        service_name.get(0),
+        service_name.first(),
         Some(&&Value::String("router".to_string()))
     );
 
