@@ -9,7 +9,12 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
+use apollo_compiler::ast::OperationType;
+use apollo_compiler::ast::VariableDefinition;
+use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Fragment;
+use apollo_compiler::executable::FragmentSpread;
+use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
@@ -18,6 +23,7 @@ use apollo_compiler::Node;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
@@ -33,6 +39,7 @@ use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
+use trust_dns_resolver::proto::rr::rdata::name;
 
 use super::PlanNode;
 use super::QueryKey;
@@ -624,34 +631,15 @@ impl BridgeQueryPlanner {
         }
     }
 
-    // todo move process_operation_for_report, format_operation_for_report, generate_apollo_reporting_signature, and
+    // todo move format_operation_for_report, other trait/wrapper classes, generate_apollo_reporting_signature, and
     // generate_apollo_reporting_refs somewhere else? somewhere where it's possible to do fuzzing?
 
-    fn process_operation_for_report(operation: &Node<Operation>, doc: &ParsedDocument) -> (Node<Operation>, IndexMap<Name, Node<Fragment>>) {
-        let mut processed = operation.clone();
-        let mut used_fragments = IndexMap::new();
-
-        // Sort operation variables and directives alphabetically.
-        // See apollo-utils packages/sortAST/src/index.ts
-        // processed.variables.sort_by(|a, b| a.name.cmp(&b.name));
-
-        // todo replace all ListValues with [], all ObjectValues with {} (for now), all IntValues and FloatValue
-        //  with 0, and all StringValues with "". See apollo-utils packages/stripSensitiveLiterals/src/index.ts
-
-        // todo remove alias names (for now). See apollo-utils packages/removeAliases/src/index.ts
-
-        // todo alphabetically sort operation variables, selection set selections, field arguments, fragment 
-        // directives, and directive arguments. See apollo-utils packages/sortAST/src/index.ts
-
-        (processed, used_fragments)
-    }
-
-    fn format_operation_for_report(operation: &Node<Operation>, operation_name: Option<String>, fragments: IndexMap<Name, Node<Fragment>>) -> String {
+    fn format_operation_for_report(operation: &Node<Operation>, fragments: &IndexMap<Name, Node<Fragment>>) -> String {
         let mut body_sections = fragments.iter()
             .map(|(_name, fragment)| fragment.to_string())
             .collect::<Vec<_>>();
         body_sections.sort();
-        body_sections.push(operation.to_string());
+        body_sections.push(operation.apollo_signature_format());
 
         let body = body_sections.join("\n");
 
@@ -666,19 +654,25 @@ impl BridgeQueryPlanner {
         let stripped_body = regex::Regex::new(r" ([^_a-zA-Z0-9])").unwrap()
             .replace_all(&stripped_body, "$1").to_string();
 
-        format!("# {}\n{}", operation_name.unwrap_or("-".into()), stripped_body)
+        let op_name = match &operation.name {
+            None => "-".into(),
+            Some(node) => node.to_string(),
+        };
+        format!("# {}\n{}", op_name, stripped_body)
     }
 
     fn generate_apollo_reporting_signature(doc: &ParsedDocument, operation_name: Option<String>) -> String {
         match doc.executable.get_operation(operation_name.as_deref()).ok() {
             None => {
-                // todo Print the whole document after transforming (that's what the JS impl does) or return an error.
+                // todo Print the whole document after transforming (that's what the JS impl does).
                 // See apollo-utils packages/dropUnusedDefinitions/src/index.ts
+                // Or return an error - if the operation can't be found, would we have thrown an error before getting here?
                 "".to_string()
             },
             Some(operation) => {
-                let (processed_operation, used_fragments) = BridgeQueryPlanner::process_operation_for_report(operation, doc);
-                BridgeQueryPlanner::format_operation_for_report(&processed_operation, operation_name, used_fragments)
+                // todo figure out used fragments - do this in a "op and ref fields processor" class while generating refs to minimise 
+                // the number of times we loop through the whole operation
+                BridgeQueryPlanner::format_operation_for_report(&operation, &doc.executable.fragments)
             }
         }
         
@@ -894,6 +888,164 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         Box::pin(fut)
     }
 }
+
+// todo move
+
+trait ApolloSignatureFormatTrait {
+    fn apollo_signature_format(&self) -> String;
+}
+
+impl ApolloSignatureFormatTrait for Operation {
+    fn apollo_signature_format(&self) -> String {
+        // Entry point for operations
+
+        // Deconstruct to get a warning if we forget to serialize something
+        let Self {
+            operation_type,
+            name,
+            variables,
+            directives,
+            selection_set,
+        } = self;
+
+        let shorthand = *operation_type == OperationType::Query
+            && name.is_none()
+            && variables.is_empty()
+            && directives.is_empty();
+
+        let mut result = String::new();
+
+        if !shorthand {
+            result.push_str(operation_type.name());
+            if let Some(name) = &name {
+                result.push(' ');
+                result.push_str(name);
+            }
+
+            // print variables sorted by name
+            if !variables.is_empty() {
+                result.push('(');
+                let mut sorted_variables = variables.clone();
+                sorted_variables.sort_by(|a, b| a.name.cmp(&b.name));
+                for (index, variable) in sorted_variables.iter().enumerate() {
+                    if index != 0 {
+                        result.push_str(",");
+                    }
+                    result.push_str(&(variable.to_string()));
+                }
+                result.push(')');
+            }
+
+            // todo directives
+
+            result.push(' ');
+        }
+
+        result.push_str(&selection_set.apollo_signature_format());
+
+        result
+    }
+}
+
+impl ApolloSignatureFormatTrait for Field {
+    fn apollo_signature_format(&self) -> String {
+        let Self {
+            name,
+            arguments,
+            directives,
+            selection_set,
+            ..
+        } = self;
+
+        let mut result = String::new();
+        result.push_str(name);
+        
+        let mut sorted_args = arguments.clone();
+        if !sorted_args.is_empty() {
+            sorted_args.sort_by(|a, b| a.name.cmp(&b.name));
+
+            result.push_str("( ");
+            for arg in sorted_args.iter() {
+                result.push_str(&(arg.name));
+                result.push(':');
+                result.push_str(&(arg.value.to_string()));
+                result.push(' ');
+            }
+            result.push_str(") ");
+        }
+        
+        // todo directives
+
+        result.push_str(&selection_set.apollo_signature_format());
+
+        result
+    }
+}
+
+impl ApolloSignatureFormatTrait for FragmentSpread {
+    fn apollo_signature_format(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ApolloSignatureFormatTrait for InlineFragment {
+    fn apollo_signature_format(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ApolloSignatureFormatTrait for SelectionSet {
+    fn apollo_signature_format(&self) -> String {
+        // print selection set sorted by name with fields followed by named fragments followed by inline fragments
+        let mut fields: Vec<&Node<Field>> = Vec::new();
+        let mut named_fragments: Vec<&Node<FragmentSpread>> = Vec::new();
+        let mut inline_fragments: Vec<&Node<InlineFragment>> = Vec::new();
+        for selection in self.selections.iter() {       
+            match selection {
+                Selection::Field(field) => {
+                    fields.push(field);
+                }
+                Selection::FragmentSpread(fragment_spread) => {
+                    named_fragments.push(fragment_spread);
+                }
+                Selection::InlineFragment(inline_fragment) => {
+                    inline_fragments.push(inline_fragment);
+                }
+            }
+        }
+
+        let mut result = String::new();
+
+        if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
+            fields.sort_by(|&a, &b| a.name.cmp(&b.name));
+            named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
+            // todo sort inline fragments by ?
+
+            result.push_str("{ ");
+
+            for &field in fields.iter() {
+                result.push_str(&(field.apollo_signature_format()));
+                result.push(' ');
+            }
+
+            for &frag in inline_fragments.iter() {
+                result.push_str(&(frag.apollo_signature_format()));
+                result.push(' ');
+            }
+
+            for &frag in inline_fragments.iter() {
+                result.push_str(&(frag.apollo_signature_format()));
+                result.push(' ');
+            }
+
+            result.push_str(" } ");
+        }
+
+        result
+    }
+}
+
+// end todo move
 
 // Appease clippy::type_complexity
 pub(crate) type FilteredQuery = (Vec<Path>, ast::Document);
@@ -2211,6 +2363,33 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn test_sig_basic_regex() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+
+          type Query {
+            noInputQuery: BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query MyQuery {
+            noInputQuery {
+              id
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("MyQuery".into()));
+        let expected_sig = "# MyQuery\nquery MyQuery{noInputQuery{id}}";
+        assert_eq!(expected_sig, generated_sig);
+    }
+
+    #[test(tokio::test)]
     async fn test_sig_anonymous_operation() {
         let configuration = Arc::new(Default::default());
 
@@ -2234,6 +2413,49 @@ mod tests {
 
         let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, None);
         let expected_sig = "# -\n{noInputQuery{id}}";
+        assert_eq!(expected_sig, generated_sig);
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_ordered_variables() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Query {
+            scalarInputQuery(
+                listInput: [String!]!, 
+                stringInput: String!, 
+                nullableStringInput: String, 
+                intInput: Int!, 
+                floatInput: Float!, 
+                boolInput: Boolean!,
+                idInput: ID!
+              ): BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query VariableScalarInputQuery($idInput: ID!, $boolInput: Boolean!, $floatInput: Float!, $intInput: Int!, $listInput: [String!]!, $stringInput: String!, $nullableStringInput: String) {
+            scalarInputQuery(
+              idInput: $idInput
+              boolInput: $boolInput
+              floatInput: $floatInput
+              intInput: $intInput
+              listInput: $listInput
+              stringInput: $stringInput
+              nullableStringInput: $nullableStringInput
+            ) {
+              nullableId
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("VariableScalarInputQuery".into()));
+        let expected_sig = "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){scalarInputQuery(boolInput:$boolInput floatInput:$floatInput idInput:$idInput intInput:$intInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){nullableId}}";
         assert_eq!(expected_sig, generated_sig);
     }
 }
