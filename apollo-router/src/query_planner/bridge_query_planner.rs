@@ -116,6 +116,7 @@ impl BridgeQueryPlanner {
                         .query_planning
                         .experimental_paths_limit,
                 }),
+                generate_query_fragments: configuration.experimental_generate_query_fragments,
             },
         )
         .await;
@@ -294,6 +295,7 @@ impl BridgeQueryPlanner {
                                 .query_planning
                                 .experimental_paths_limit,
                         }),
+                        generate_query_fragments: configuration.experimental_generate_query_fragments,
                     },
                 )
                 .await?,
