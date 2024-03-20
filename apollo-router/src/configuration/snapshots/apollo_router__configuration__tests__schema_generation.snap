@@ -2407,6 +2407,7 @@ expression: "&schema"
                   "default": "enabled",
                   "anyOf": [
                     {
+                      "description": "disable heartbeat",
                       "type": "string",
                       "enum": [
                         "disabled"
@@ -2420,6 +2421,7 @@ expression: "&schema"
                       ]
                     },
                     {
+                      "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
                       "type": "string"
                     }
                   ]
@@ -2476,6 +2478,7 @@ expression: "&schema"
                       "default": "disabled",
                       "anyOf": [
                         {
+                          "description": "disable heartbeat",
                           "type": "string",
                           "enum": [
                             "disabled"
@@ -2489,6 +2492,7 @@ expression: "&schema"
                           ]
                         },
                         {
+                          "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
                           "type": "string"
                         }
                       ]
@@ -2525,6 +2529,7 @@ expression: "&schema"
                         "default": "disabled",
                         "anyOf": [
                           {
+                            "description": "disable heartbeat",
                             "type": "string",
                             "enum": [
                               "disabled"
@@ -2538,6 +2543,7 @@ expression: "&schema"
                             ]
                           },
                           {
+                            "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
                             "type": "string"
                           }
                         ]
