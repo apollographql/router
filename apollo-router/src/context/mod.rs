@@ -20,7 +20,7 @@ use tower::BoxError;
 
 use crate::json_ext::{Path, Value};
 use crate::services::layers::query_analysis::ParsedDocument;
-use crate::errors::{ErrorFormatterHandle, ErrorConverter, DocumentedError};
+use crate::errors::{ErrorFormatterHandle, ErrorFormatter, DocumentedError};
 
 pub(crate) mod extensions;
 

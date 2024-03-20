@@ -398,7 +398,7 @@ macro_rules! error_type {
 
 
 /// An error formatter that can be used to convert errors that implement `DocumentedError` to graphql errors
-pub trait ErrorConverter: Send + Sync {
+pub trait ErrorFormatter: Send + Sync {
     /// Convert the error into a graphql error.
     fn to_graphql_error(
         &self,
@@ -409,8 +409,8 @@ pub trait ErrorConverter: Send + Sync {
 }
 
 #[derive(Clone)]
-pub(crate) struct ErrorFormatterHandle(Arc<dyn ErrorConverter>);
-impl ErrorConverter for ErrorFormatterHandle {
+pub(crate) struct ErrorFormatterHandle(Arc<dyn ErrorFormatter>);
+impl ErrorFormatter for ErrorFormatterHandle {
     fn to_graphql_error(
         &self,
         error: &dyn DocumentedError,
@@ -429,7 +429,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::json_ext::Path;
     use crate::errors::{AnyDocumentedError, ErrorFormatterHandle};
-    use crate::errors::ErrorConverter;
+    use crate::errors::ErrorFormatter;
     use crate::errors::DocumentedError;
     use crate::Context;
 
@@ -491,7 +491,7 @@ mod test {
     }
 
     struct SimpleErrorFormatter;
-    impl ErrorConverter for SimpleErrorFormatter {
+    impl ErrorFormatter for SimpleErrorFormatter {
         fn to_graphql_error(
             &self,
             error: &dyn DocumentedError,
