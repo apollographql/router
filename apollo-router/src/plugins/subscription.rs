@@ -171,9 +171,11 @@ pub(crate) struct CallbackMode {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub(crate) enum HeartbeatInterval {
+    /// disable heartbeat
     Disabled(Disabled),
     /// enable with default interval of 5s
     Enabled(Enabled),
+    /// enable with custom interval, e.g. '100ms', '10s' or '1m'
     #[serde(with = "humantime_serde")]
     #[schemars(with = "String")]
     Duration(Duration),
