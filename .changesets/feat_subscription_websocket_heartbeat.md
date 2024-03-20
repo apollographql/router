@@ -1,9 +1,8 @@
-### feat(subscription): add configurable heartbeat for websocket protocol ([Issue #4621](https://github.com/apollographql/router/issues/4621))
+### Subscriptions: Add configurable "heartbeat" to subgraph WebSocket protocol ([Issue #4621](https://github.com/apollographql/router/issues/4621))
 
-Add the ability to enable heartbeat for cases where the subgraph drops idle connections.
-For example, https://netflix.github.io/dgs/
+To account for GraphQL Subscription WebSocket implementations (e.g., [DGS](https://netflix.github.io/dgs/)) which drop idle connections by design, the router adds the ability to configure a heartbeat to keep active connections alive.
 
-Example of configuration:
+An example of configuration:
 
 ```yaml
 subscription:
