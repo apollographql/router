@@ -521,9 +521,8 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         let mut this = self.as_mut().project();
-        let mut stream = Pin::new(&mut this.stream);
 
-        match stream.as_mut().poll_next(cx) {
+        match Pin::new(&mut this.stream).poll_next(cx) {
             Poll::Ready(message) => match message {
                 Some(server_message) => match server_message {
                     Ok(server_message) => {
@@ -536,7 +535,8 @@ where
                         if let ServerMessage::Ping { .. } = server_message {
                             // Send pong asynchronously
                             let _ = Pin::new(
-                                &mut stream.as_mut().send(ClientMessage::Pong { payload: None }),
+                                &mut Pin::new(&mut this.stream)
+                                    .send(ClientMessage::Pong { payload: None }),
                             )
                             .poll(cx);
                         }
