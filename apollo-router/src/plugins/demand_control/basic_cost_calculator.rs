@@ -8,12 +8,18 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
+use super::directives::IncludeDirective;
+use super::directives::SkipDirective;
 use super::CostCalculator;
 
 pub(crate) struct BasicCostCalculator {}
 
 impl BasicCostCalculator {
     fn score_field(field: &Field, schema: &Schema) -> Result<f64, BoxError> {
+        if BasicCostCalculator::skipped_by_directives(field) {
+            return Ok(0.0);
+        }
+
         let ty = field
             .inner_type_def(schema)
             .ok_or(anyhow!("Field {} was not found in schema", field))?;
@@ -66,6 +72,20 @@ impl BasicCostCalculator {
             Selection::FragmentSpread(s) => BasicCostCalculator::score_fragment_spread(s),
             Selection::InlineFragment(i) => BasicCostCalculator::score_inline_fragment(i, schema),
         }
+    }
+
+    fn skipped_by_directives(field: &Field) -> bool {
+        let include_directive = IncludeDirective::from_field(field);
+        if let Ok(Some(IncludeDirective { is_included: false })) = include_directive {
+            return true;
+        }
+
+        let skip_directive = SkipDirective::from_field(field);
+        if let Ok(Some(SkipDirective { is_skipped: true })) = skip_directive {
+            return true;
+        }
+
+        false
     }
 }
 
@@ -270,5 +290,65 @@ mod tests {
         // The query selects a list of authors, which is also assumed to have 100 items. So the cost
         // of the query overall is 101 * 100, or 10,100.
         assert_eq!(cost(schema, query), 10100.0)
+    }
+
+    #[test]
+    fn skip_directive_excludes_cost() {
+        let schema = "
+            type Query {
+                authors: [Author]
+            }
+
+            type Author {
+                books: [Book]
+                name: String
+            }
+
+            type Book {
+                title: String
+            }
+        ";
+        let query = "
+            {
+                authors {
+                    books @skip(if: true) {
+                        title
+                    }
+                    name
+                }
+            }
+        ";
+
+        assert_eq!(cost(schema, query), 100.0)
+    }
+
+    #[test]
+    fn include_directive_excludes_cost() {
+        let schema = "
+            type Query {
+                authors: [Author]
+            }
+
+            type Author {
+                books: [Book]
+                name: String
+            }
+
+            type Book {
+                title: String
+            }
+        ";
+        let query = "
+            {
+                authors {
+                    books @include(if: false) {
+                        title
+                    }
+                    name
+                }
+            }
+        ";
+
+        assert_eq!(cost(schema, query), 100.0)
     }
 }

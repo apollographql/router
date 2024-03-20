@@ -1,5 +1,6 @@
 //! Demand control plugin.
 mod basic_cost_calculator;
+mod directives;
 
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::Schema;
