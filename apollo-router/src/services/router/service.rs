@@ -613,33 +613,28 @@ impl RouterService {
         // Insert our batch configuration into Context extensions.
         // If the results len > 1, we always insert our batching configuration
         // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
-        let shared_batch_details: Option<Arc<Mutex<Batch>>> = if ok_results.len() > 1 {
-            context.extensions().lock().insert(self.batching.clone());
-            match &self.batching.subgraph {
-                Some(subgraph_batching_config) => {
-                    let enabled = match subgraph_batching_config {
-                        SubgraphBatchingConfig::All(all_config) => all_config.enabled,
-                        SubgraphBatchingConfig::Subgraphs(subgraphs) => {
-                            subgraphs.values().any(|v| v.enabled)
-                        }
-                    };
-                    if enabled {
-                        Some(Arc::new(Mutex::new(Batch::new(batch_size))))
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
+        let shared_batch_details = (ok_results.len() > 1)
+            .then(|| {
+                context.extensions().lock().insert(self.batching.clone());
 
-        let mut ok_results_it = ok_results.into_iter();
-        let first = ok_results_it
-            .next()
-            .expect("we should have at least one request");
-        let sg = http::Request::from_parts(parts, first);
+                self.batching.subgraph.as_ref()
+            })
+            .flatten()
+            .map(|subgraph_batching_config| match subgraph_batching_config {
+                SubgraphBatchingConfig::All(all_config) => all_config.enabled,
+                SubgraphBatchingConfig::Subgraphs(subgraphs) => {
+                    subgraphs.values().any(|v| v.enabled)
+                }
+            })
+            .and_then(|a| a.then_some(Arc::new(Batch::spawn_handler(batch_size))));
+
+        // HACK: We clone here just so that we can test the rest of the stack. Revisit once we have time.
+        // let mut ok_results_it = ok_results.into_iter();
+        // let first = ok_results_it
+        //     .next()
+        //     .expect("we should have at least one request");
+        // let sg = http::Request::from_parts(parts, first);
+        let sg = http::Request::from_parts(parts, ok_results[0].clone());
 
         // Building up the batch of supergraph requests is tricky.
         // Firstly note that any http extensions are only propagated for the first request sent
@@ -655,7 +650,7 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of extensions and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        for (index, graphql_request) in ok_results_it.enumerate() {
+        for (index, graphql_request) in ok_results.into_iter().enumerate() {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
@@ -677,8 +672,7 @@ impl RouterService {
                 new_context_guard.insert(self.batching.clone());
                 // We are only going to insert a BatchQuery if Subgraph processing is enabled
                 if let Some(shared_batch_details) = &shared_batch_details {
-                    new_context_guard
-                        .insert(BatchQuery::new(index + 1, shared_batch_details.clone()));
+                    new_context_guard.insert(shared_batch_details.query_for_index(index));
                 }
             }
 
@@ -689,20 +683,6 @@ impl RouterService {
             });
         }
 
-        if let Some(shared_batch_details) = shared_batch_details {
-            context
-                .extensions()
-                .lock()
-                .insert(BatchQuery::new(0, shared_batch_details));
-        }
-
-        results.insert(
-            0,
-            SupergraphRequest {
-                supergraph_request: sg,
-                context,
-            },
-        );
         Ok(results)
     }
 }

@@ -40,9 +40,7 @@ use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::batching::BatchQuery;
-use crate::batching::Waiter;
 use crate::configuration::Batching;
-use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
@@ -744,232 +742,222 @@ async fn call_batched_http(
     //
     // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
     // we have the context extensions lock held. That would be very bad...
-    // We set optional batch_responder and waiters_opt to control waiting behaviour without
-    // holding the extensions lock.
-    let mut batch_responder: Option<
-        tokio::sync::oneshot::Receiver<Result<SubgraphResponse, BoxError>>,
-    > = None;
-    let mut waiters_opt = None;
-    {
+    // We grab the (potential) BatchQuery and then operate on it later
+    let batch_query = {
         let mut extensions_guard = context.extensions().lock();
-        let batching_opt = extensions_guard.get::<Batching>();
-        if let Some(batching) = batching_opt {
-            if batching.batch_include(service_name) {
-                if let Some(batch_query) = extensions_guard.get_mut::<BatchQuery>() {
-                    if !batch_query.finished() {
-                        tracing::debug!("in subgraph we have batch_query: {batch_query}, service: {service_name}");
-                        batch_query.increment_subgraph_seen();
-                        tracing::debug!("ready to process batch?: {}", batch_query.ready());
-                        batch_responder = Some(batch_query.get_waiter(
-                            request.clone(),
-                            body.clone(),
-                            context.clone(),
-                            service_name,
-                        ));
-                        if batch_query.ready() {
-                            // This is where we start processing our accumulated batch data.
-                            // We can't do it whilst holding the context extensions lock, so signal we are
-                            // ready to proceed by updating waiters_opt.
-                            tracing::debug!("Batch data: {batch_query}");
-                            waiters_opt = Some(batch_query.get_waiters());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // We've dropped the extensions lock, check to see if we have batches to process or just a
-    // normal http call.
-    // TODO: Think about the impact on the router if a batch is never finished/ready. Can that happen?
-    // I think this is a limitation of this prototype. For instance, a query may be rejected for
-    // various reasons during execution or query planning (e.g.: authz), so we need to figure out
-    // how to handle that situation.
-    if let Some(receiver) = batch_responder {
-        // If waiters_opt is Some, then our batch is full and it's time to process it.
-        if let Some(waiters) = waiters_opt {
-            for (service, service_waiters) in waiters.into_iter() {
-                // Now we need to "batch up" our data and send it to our subgraphs
-                // We need our own batch aware version of call_http which only makes one call to each
-                // subgraph, but is able to decode the responses. I'll probably need to break call_http
-                // down into sub-functions, and I've started this, but it's not finished.
-                let (_operation_name, context, mut request, mut txs) =
-                    Waiter::assemble_batch(service_waiters).await?;
 
-                request
-                    .headers_mut()
-                    .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
-                request
-                    .headers_mut()
-                    .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
+        // We need to make sure to remove the BatchQuery from the context as it holds a sender to
+        // the owning batch
+        extensions_guard
+            .get::<Batching>()
+            .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
+            .and_then(|_| extensions_guard.remove::<BatchQuery>())
+    };
 
-                let schema_uri = request.uri();
-                let (host, port, path) = get_uri_details(schema_uri);
+    // If we have a batch query, then it's time for batching
+    let result = if let Some(query) = batch_query {
+        // Let the owning batch know that this query is ready to process, getting back the channel
+        // from which we'll eventually receive our response.
+        let response_rx = query.signal_ready(request, body).await;
 
-                // TODO: We have multiple operation names but we are just using the first operation
-                // name in the span. Should we report all operation names?
-                // CURRENT DECISION: hard code to "batch"
-                let subgraph_req_span = tracing::info_span!("subgraph_request",
-                    "otel.kind" = "CLIENT",
-                    "net.peer.name" = %host,
-                    "net.peer.port" = %port,
-                    "http.route" = %path,
-                    "http.url" = %schema_uri,
-                    "net.transport" = "ip_tcp",
-                    "apollo.subgraph.name" = %&service,
-                    "graphql.operation.name" = "batch"
-                );
+        // Park this query until we have our response and pass it back up
+        // TODO: Should we panic or create a special error type if this can't receive?
+        response_rx.await.unwrap()
 
-                // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
-                //
-                // "If the response uses a non-200 status code and the media type of the response payload is application/json
-                // then the client MUST NOT rely on the body to be a well-formed GraphQL response since the source of the response
-                // may not be the server but instead some intermediary such as API gateways, proxies, firewalls, etc."
-                //
-                // The TLDR of this is that it's really asking us to do the best we can with whatever information we have with some modifications depending on content type.
-                // Our goal is to give the user the most relevant information possible in the response errors
-                //
-                // Rules:
-                // 1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
-                // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
-                // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
+        // // We've dropped the extensions lock, check to see if we have batches to process or just a
+        // // normal http call.
+        // // TODO: Think about the impact on the router if a batch is never finished/ready. Can that happen?
+        // // I think this is a limitation of this prototype. For instance, a query may be rejected for
+        // // various reasons during execution or query planning (e.g.: authz), so we need to figure out
+        // // how to handle that situation.
+        // if let Some(receiver) = batch_responder {
+        //     // If waiters_opt is Some, then our batch is full and it's time to process it.
+        //     if let Some(waiters) = waiters_opt {
+        //         for (service, service_waiters) in waiters.into_iter() {
+        //             // Now we need to "batch up" our data and send it to our subgraphs
+        //             // We need our own batch aware version of call_http which only makes one call to each
+        //             // subgraph, but is able to decode the responses. I'll probably need to break call_http
+        //             // down into sub-functions, and I've started this, but it's not finished.
+        //             let (_operation_name, context, mut request, mut txs) =
+        //                 Waiter::assemble_batch(service_waiters).await?;
 
-                let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+        //             request
+        //                 .headers_mut()
+        //                 .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+        //             request
+        //                 .headers_mut()
+        //                 .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
 
-                let client = client_factory.create(&service);
+        //             let schema_uri = request.uri();
+        //             let (host, port, path) = get_uri_details(schema_uri);
 
-                // Update our batching metrics (just before we fetch)
-                tracing::info!(
-                    histogram.apollo.router.operations.batching.size = txs.len() as f64,
-                    mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
-                    subgraph = &service
-                );
+        //             // TODO: We have multiple operation names but we are just using the first operation
+        //             // name in the span. Should we report all operation names?
+        //             // CURRENT DECISION: hard code to "batch"
+        //             let subgraph_req_span = tracing::info_span!("subgraph_request",
+        //                 "otel.kind" = "CLIENT",
+        //                 "net.peer.name" = %host,
+        //                 "net.peer.port" = %port,
+        //                 "http.route" = %path,
+        //                 "http.url" = %schema_uri,
+        //                 "net.transport" = "ip_tcp",
+        //                 "apollo.subgraph.name" = %&service,
+        //                 "graphql.operation.name" = "batch"
+        //             );
 
-                tracing::info!(
-                    monotonic_counter.apollo.router.operations.batching = 1u64,
-                    mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
-                    subgraph = &service
-                );
+        //             // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
+        //             //
+        //             // "If the response uses a non-200 status code and the media type of the response payload is application/json
+        //             // then the client MUST NOT rely on the body to be a well-formed GraphQL response since the source of the response
+        //             // may not be the server but instead some intermediary such as API gateways, proxies, firewalls, etc."
+        //             //
+        //             // The TLDR of this is that it's really asking us to do the best we can with whatever information we have with some modifications depending on content type.
+        //             // Our goal is to give the user the most relevant information possible in the response errors
+        //             //
+        //             // Rules:
+        //             // 1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
+        //             // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
+        //             // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
-                // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
-                let (parts, content_type, body) =
-                    do_fetch(client, &context, &service, request, display_body)
-                        .instrument(subgraph_req_span)
-                        .await?;
+        //             let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
-                if display_body {
-                    if let Some(Ok(b)) = &body {
-                        tracing::info!(
-                            response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %&service, "Raw response body from subgraph {service:?} received"
-                        );
-                    }
-                }
+        //             let client = client_factory.create(&service);
 
-                tracing::debug!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
+        //             // Update our batching metrics (just before we fetch)
+        //             tracing::info!(
+        //                 histogram.apollo.router.operations.batching.size = txs.len() as f64,
+        //                 mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
+        //                 subgraph = &service
+        //             );
 
-                let value = serde_json::from_slice(&body.unwrap().unwrap()).map_err(|error| {
-                    FetchError::SubrequestMalformedResponse {
-                        service: service.to_string(),
-                        reason: error.to_string(),
-                    }
-                })?;
+        //             tracing::info!(
+        //                 monotonic_counter.apollo.router.operations.batching = 1u64,
+        //                 mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
+        //                 subgraph = &service
+        //             );
 
-                tracing::debug!("json value from body is: {value:?}");
+        //             // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
+        //             let (parts, content_type, body) =
+        //                 do_fetch(client, &context, &service, request, display_body)
+        //                     .instrument(subgraph_req_span)
+        //                     .await?;
 
-                let array = ensure_array!(value).map_err(|error| {
-                    FetchError::SubrequestMalformedResponse {
-                        service: service.to_string(),
-                        reason: error.to_string(),
-                    }
-                })?;
-                let mut graphql_responses = Vec::with_capacity(array.len());
-                for value in array {
-                    let object = ensure_object!(value).map_err(|error| {
-                        FetchError::SubrequestMalformedResponse {
-                            service: service.to_string(),
-                            reason: error.to_string(),
-                        }
-                    })?;
-                    // Map our Vec<u8> into Bytes
-                    // Map our serde conversion error to a FetchError
-                    let body = Some(serde_json::to_vec(&object).map(|v| v.into()).map_err(
-                        |error| FetchError::SubrequestMalformedResponse {
-                            service: service.to_string(),
-                            reason: error.to_string(),
-                        },
-                    ));
+        //             if display_body {
+        //                 if let Some(Ok(b)) = &body {
+        //                     tracing::info!(
+        //                         response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %&service, "Raw response body from subgraph {service:?} received"
+        //                     );
+        //                 }
+        //             }
 
-                    let graphql_response = http_response_to_graphql_response(
-                        service_name,
-                        content_type.clone(),
-                        body,
-                        &parts,
-                    );
-                    graphql_responses.push(graphql_response);
-                }
+        //             tracing::debug!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
 
-                tracing::debug!("we have a vec of graphql_responses: {graphql_responses:?}");
-                // Before we process our graphql responses, ensure that we have a tx for each
-                // response
-                if txs.len() != graphql_responses.len() {
-                    return Err(Box::new(FetchError::SubrequestBatchingError {
-                        service: service.to_string(),
-                        reason: format!(
-                            "number of txs ({}) is not equal to number of graphql responses ({})",
-                            txs.len(),
-                            graphql_responses.len()
-                        ),
-                    }));
-                }
-                for graphql_response in graphql_responses {
-                    // Build an http Response
-                    let mut resp = http::Response::builder()
-                        .status(parts.status)
-                        .version(parts.version)
-                        .body(graphql_response)?;
-                    *resp.headers_mut() = parts.headers.clone();
-                    tracing::debug!("we have a resp: {resp:?}");
-                    let subgraph_response =
-                        SubgraphResponse::new_from_response(resp, context.clone());
-                    // We have checked before we started looping that we had a tx for every
-                    // graphql_response, so None should be unreachable.
-                    // Use the popped tx to send a graphql_response message to each waiter.
-                    // We must have a tx for each response, so pop a tx and send the individual
-                    // response to the waiter
-                    match txs.pop() {
-                        Some(tx) => {
-                            tx.send(Ok(subgraph_response)).map_err(|error| {
-                                FetchError::SubrequestBatchingError {
-                                    service: service.to_string(),
-                                    reason: format!("tx send failed: {error:?}"),
-                                }
-                            })?;
-                        }
-                        None => {
-                            // This can't happen since we checked that our iterator lengths
-                            // are equal, but the compiler wants something.
-                            unreachable!();
-                        }
-                    }
-                }
-                // Confirm that txs is now empty (i.e.: all waiters are notified)
-                if !txs.is_empty() {
-                    panic!("we have remaining txs, this is a bug and should not occur");
-                }
-            }
-        }
-        tracing::debug!("we have a waiter");
-        // If we get an error whilst waiting, then something bad has happened
-        receiver
-            .await
-            .map_err(|err| FetchError::SubrequestBatchingError {
-                service: service_name.to_string(),
-                reason: format!("tx receive failed: {err}"),
-            })?
+        //             let value = serde_json::from_slice(&body.unwrap().unwrap()).map_err(|error| {
+        //                 FetchError::SubrequestMalformedResponse {
+        //                     service: service.to_string(),
+        //                     reason: error.to_string(),
+        //                 }
+        //             })?;
+
+        //             tracing::debug!("json value from body is: {value:?}");
+
+        //             let array = ensure_array!(value).map_err(|error| {
+        //                 FetchError::SubrequestMalformedResponse {
+        //                     service: service.to_string(),
+        //                     reason: error.to_string(),
+        //                 }
+        //             })?;
+        //             let mut graphql_responses = Vec::with_capacity(array.len());
+        //             for value in array {
+        //                 let object = ensure_object!(value).map_err(|error| {
+        //                     FetchError::SubrequestMalformedResponse {
+        //                         service: service.to_string(),
+        //                         reason: error.to_string(),
+        //                     }
+        //                 })?;
+        //                 // Map our Vec<u8> into Bytes
+        //                 // Map our serde conversion error to a FetchError
+        //                 let body = Some(serde_json::to_vec(&object).map(|v| v.into()).map_err(
+        //                     |error| FetchError::SubrequestMalformedResponse {
+        //                         service: service.to_string(),
+        //                         reason: error.to_string(),
+        //                     },
+        //                 ));
+
+        //                 let graphql_response = http_response_to_graphql_response(
+        //                     service_name,
+        //                     content_type.clone(),
+        //                     body,
+        //                     &parts,
+        //                 );
+        //                 graphql_responses.push(graphql_response);
+        //             }
+
+        //             tracing::debug!("we have a vec of graphql_responses: {graphql_responses:?}");
+        //             // Before we process our graphql responses, ensure that we have a tx for each
+        //             // response
+        //             if txs.len() != graphql_responses.len() {
+        //                 return Err(Box::new(FetchError::SubrequestBatchingError {
+        //                     service: service.to_string(),
+        //                     reason: format!(
+        //                         "number of txs ({}) is not equal to number of graphql responses ({})",
+        //                         txs.len(),
+        //                         graphql_responses.len()
+        //                     ),
+        //                 }));
+        //             }
+        //             for graphql_response in graphql_responses {
+        //                 // Build an http Response
+        //                 let mut resp = http::Response::builder()
+        //                     .status(parts.status)
+        //                     .version(parts.version)
+        //                     .body(graphql_response)?;
+        //                 *resp.headers_mut() = parts.headers.clone();
+        //                 tracing::debug!("we have a resp: {resp:?}");
+        //                 let subgraph_response =
+        //                     SubgraphResponse::new_from_response(resp, context.clone());
+        //                 // We have checked before we started looping that we had a tx for every
+        //                 // graphql_response, so None should be unreachable.
+        //                 // Use the popped tx to send a graphql_response message to each waiter.
+        //                 // We must have a tx for each response, so pop a tx and send the individual
+        //                 // response to the waiter
+        //                 match txs.pop() {
+        //                     Some(tx) => {
+        //                         tx.send(Ok(subgraph_response)).map_err(|error| {
+        //                             FetchError::SubrequestBatchingError {
+        //                                 service: service.to_string(),
+        //                                 reason: format!("tx send failed: {error:?}"),
+        //                             }
+        //                         })?;
+        //                     }
+        //                     None => {
+        //                         // This can't happen since we checked that our iterator lengths
+        //                         // are equal, but the compiler wants something.
+        //                         unreachable!();
+        //                     }
+        //                 }
+        //             }
+        //             // Confirm that txs is now empty (i.e.: all waiters are notified)
+        //             if !txs.is_empty() {
+        //                 panic!("we have remaining txs, this is a bug and should not occur");
+        //             }
+        //         }
+        //     }
+        //     tracing::debug!("we have a waiter");
+        //     // If we get an error whilst waiting, then something bad has happened
+        //     receiver
+        //         .await
+        //         .map_err(|err| FetchError::SubrequestBatchingError {
+        //             service: service_name.to_string(),
+        //             reason: format!("tx receive failed: {err}"),
+        //         })?
     } else {
         tracing::debug!("we called http");
         let client = client_factory.create(service_name);
         call_http(request, body, context, client, service_name).await
-    }
+    };
+
+    result
 }
 
 /// call_http makes http calls with modified graphql::Request (body)
