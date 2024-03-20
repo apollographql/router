@@ -26,14 +26,21 @@ The most important rule for whether or not a request is "simple" is whether it t
 
 However, the Apollo Router also handles `GET` requests which do not require a `Content-Type` header, so they can potentially be simple requests. So how can we ensure that we only execute `GET` requests that are _not_ simple requests? If we require the request to include an HTTP header that is never set automatically by the browser, then that is sufficient: requests that set HTTP headers other than the handful defined in the spec must be preflighted.
 
-## Configure CSRF prevention in the router
+## Configuring CSRF prevention in the router
 
 ### Enable CSRF prevention
 
 The Apollo Router **enables CSRF prevention by default**. When this feature is enabled, the router only executes GraphQL operations if at least one of the following conditions is true:
 
-- The incoming request includes a `Content-Type` header that specifies a type other than `text/plain`, `application/x-www-form-urlencoded`, or `multipart/form-data`. Notably, a `Content-Type` of `application/json` (including any suffix like `application/json; charset=utf-8`) is sufficient. This means that all `POST` requests (which must use `Content-Type: application/json`) will be executed. Additionally, all versions of [Apollo Client Web](/react/api/link/apollo-link-http) that support `GET` requests do include `Content-Type: application/json` headers, so any request from Apollo Client Web (`POST` or `GET`) will be executed.
-- There is a `X-Apollo-Operation-Name` header. This header is sent with all operations (`POST` or `GET`) by [Apollo iOS](/ios) (v0.13.0+) and [Apollo Kotlin](/kotlin) (all versions, including its former name "Apollo Android"), so any request from Apollo iOS or Apollo Kotlin will be executed.
+- The incoming request includes a `Content-Type` header that specifies a type other than `text/plain`, `application/x-www-form-urlencoded`, or `multipart/form-data`. 
+
+  <Note>
+  
+   A `Content-Type` of `application/json` is sufficient, including any suffix like `application/json; charset=utf-8`. Since all `POST` requests must use `Content-Type: application/json`, this means all `POST` requests will be executed. And because all versions of [Apollo Client Web](/react/api/link/apollo-link-http) that support `GET` requests include `Content-Type: application/json` headers, any request from Apollo Client Web (`POST` or `GET`) will also be executed.
+
+  </Note>
+
+- There is a `X-Apollo-Operation-Name` header. This header is sent with all `POST` or `GET` operations by [Apollo iOS](/ios) (v0.13.0+) and [Apollo Kotlin](/kotlin) (all versions, including its former name "Apollo Android"), so any request from Apollo iOS or Apollo Kotlin will be executed.
 - There is a `Apollo-Require-Preflight` header.
 
 <Note>
@@ -61,13 +68,17 @@ The check for `Content-Type` remains the same.
 
 ### Disable CSRF prevention
 
-**We highly recommend that you leave CSRF prevention enabled**. 
+<Caution>
 
-However, it is still possible to disable the plugin entirely:
+We highly recommend that you keep CSRF prevention enabled in the Apollo Router. 
+
+</Caution>
+
+Disabling CSRF in the Apollo Router might be appropriate for a GraphQL server that only contains public data and allows no mutation, or on a closed private network where browsers cannot reach untrusted websites.
+
+To disable CSRF prevention in the router, set `csrf.unsafe_disabled` to `true`:
 
 ```yaml title="router.yaml"
 csrf:
   unsafe_disabled: true
 ```
-
-This could be appropriate for a GraphQL server that only contains public data and allows no mutation, or on a closed private network where browsers cannot reach untrusted websites.
