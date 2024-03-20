@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -10,20 +11,11 @@ use std::time::Instant;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
 use apollo_compiler::ast::OperationType;
-use apollo_compiler::ast::VariableDefinition;
-use apollo_compiler::executable::Field;
-use apollo_compiler::executable::Fragment;
-use apollo_compiler::executable::FragmentSpread;
-use apollo_compiler::executable::InlineFragment;
-use apollo_compiler::executable::Operation;
-use apollo_compiler::executable::Selection;
-use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
-use itertools::Itertools;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
@@ -39,7 +31,6 @@ use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
-use trust_dns_resolver::proto::rr::rdata::name;
 
 use super::PlanNode;
 use super::QueryKey;
@@ -634,19 +625,19 @@ impl BridgeQueryPlanner {
     // todo move format_operation_for_report, other trait/wrapper classes, generate_apollo_reporting_signature, and
     // generate_apollo_reporting_refs somewhere else? somewhere where it's possible to do fuzzing?
 
-    fn format_operation_for_report(operation: &Node<Operation>, fragments: &IndexMap<Name, Node<Fragment>>) -> String {
+    fn format_operation_for_report(operation: &Node<apollo_compiler::executable::Operation>, fragments: &IndexMap<Name, Node<apollo_compiler::executable::Fragment>>) -> String {
         let mut body_sections = fragments.iter()
             .map(|(_name, fragment)| fragment.to_string())
             .collect::<Vec<_>>();
         body_sections.sort();
-        body_sections.push(operation.apollo_signature_format());
+        body_sections.push(ApolloReportingSignatureFormatter::Operation(operation).to_string());
 
         let body = body_sections.join("\n");
 
         // This is based on apollo-utils packages/printWithReducedWhitespace/src/index.ts
         // Note that we don't need to do the StringValue -> hex -> StringValue processing because all StringValues
         // are replaced with an empty string before we get here.
-        // todo can we combine these or make it more efficient somehow?
+        // todo can we combine these or make it more efficient somehow? or just do it in the string generation?
         let stripped_body = regex::Regex::new(r"\s+").unwrap()
             .replace_all(&body, " ").to_string();
         let stripped_body = regex::Regex::new(r"([^_a-zA-Z0-9]) ").unwrap()
@@ -686,7 +677,7 @@ impl BridgeQueryPlanner {
                 let mut fields_by_interface: HashMap<String, bool> = HashMap::new();
                 let mut seen_fragments: HashSet<Name> = HashSet::new();
     
-                fn extract_fields(parent_type: &String, selection_set: &SelectionSet, doc: &ParsedDocument, schema: &Valid<apollo_compiler::Schema>, fields_by_type: &mut HashMap<String, IndexSet<String>>, fields_by_interface: &mut HashMap<String, bool>, seen_fragments: &mut HashSet<Name>) {
+                fn extract_fields(parent_type: &String, selection_set: &apollo_compiler::executable::SelectionSet, doc: &ParsedDocument, schema: &Valid<apollo_compiler::Schema>, fields_by_type: &mut HashMap<String, IndexSet<String>>, fields_by_interface: &mut HashMap<String, bool>, seen_fragments: &mut HashSet<Name>) {
                     if !fields_by_interface.contains_key(parent_type) {
                         let field_schema_type = schema.types.get(parent_type.as_str());
                         let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
@@ -695,7 +686,7 @@ impl BridgeQueryPlanner {
 
                     for selection in &selection_set.selections {
                         match selection {
-                            Selection::Field(field) => {
+                            apollo_compiler::executable::Selection::Field(field) => {
                                 fields_by_type
                                     .entry(parent_type.clone())
                                     .or_insert(IndexSet::new())
@@ -712,7 +703,7 @@ impl BridgeQueryPlanner {
                                     seen_fragments
                                 );
                             },
-                            Selection::InlineFragment(fragment) => {
+                            apollo_compiler::executable::Selection::InlineFragment(fragment) => {
                                 if let Some(fragment_type) = &fragment.type_condition {
                                     let frag_type_name = fragment_type.to_string();
                                     extract_fields(
@@ -728,7 +719,7 @@ impl BridgeQueryPlanner {
                                     // todo not sure what to do for fragments without a type - ignore? use parent_type?
                                 }
                             },
-                            Selection::FragmentSpread(fragment) => {
+                            apollo_compiler::executable::Selection::FragmentSpread(fragment) => {
                                 if !seen_fragments.contains(&fragment.fragment_name) {
                                     seen_fragments.insert(fragment.fragment_name.clone());
 
@@ -891,158 +882,131 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
 // todo move
 
-trait ApolloSignatureFormatTrait {
-    fn apollo_signature_format(&self) -> String;
+enum ApolloReportingSignatureFormatter<'a> {
+    Operation(&'a Node<apollo_compiler::executable::Operation>),
+    SelectionSet(&'a apollo_compiler::executable::SelectionSet),
+    Field(&'a Node<apollo_compiler::executable::Field>),
+    FragmentSpread(&'a Node<apollo_compiler::executable::FragmentSpread>),
+    InlineFragment(&'a Node<apollo_compiler::executable::InlineFragment>),
 }
 
-impl ApolloSignatureFormatTrait for Operation {
-    fn apollo_signature_format(&self) -> String {
-        // Entry point for operations
-
-        // Deconstruct to get a warning if we forget to serialize something
-        let Self {
-            operation_type,
-            name,
-            variables,
-            directives,
-            selection_set,
-        } = self;
-
-        let shorthand = *operation_type == OperationType::Query
-            && name.is_none()
-            && variables.is_empty()
-            && directives.is_empty();
-
-        let mut result = String::new();
-
-        if !shorthand {
-            result.push_str(operation_type.name());
-            if let Some(name) = &name {
-                result.push(' ');
-                result.push_str(name);
-            }
-
-            // print variables sorted by name
-            if !variables.is_empty() {
-                result.push('(');
-                let mut sorted_variables = variables.clone();
-                sorted_variables.sort_by(|a, b| a.name.cmp(&b.name));
-                for (index, variable) in sorted_variables.iter().enumerate() {
-                    if index != 0 {
-                        result.push_str(",");
-                    }
-                    result.push_str(&(variable.to_string()));
-                }
-                result.push(')');
-            }
-
-            // todo directives
-
-            result.push(' ');
+impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ApolloReportingSignatureFormatter::Operation(operation) => format_operation(operation, f),
+            ApolloReportingSignatureFormatter::SelectionSet(selection_set) => format_selection_set(selection_set, f),
+            ApolloReportingSignatureFormatter::Field(field) => format_field(field, f),
+            ApolloReportingSignatureFormatter::FragmentSpread(fragment_spread) => format_fragment_spread(fragment_spread, f),
+            ApolloReportingSignatureFormatter::InlineFragment(inline_fragment) => format_inline_fragment(inline_fragment, f),
         }
-
-        result.push_str(&selection_set.apollo_signature_format());
-
-        result
     }
 }
 
-impl ApolloSignatureFormatTrait for Field {
-    fn apollo_signature_format(&self) -> String {
-        let Self {
-            name,
-            arguments,
-            directives,
-            selection_set,
-            ..
-        } = self;
+fn format_operation<'a>(operation: &Node<apollo_compiler::executable::Operation>, f: &mut fmt::Formatter) -> fmt::Result {
+    let shorthand = operation.operation_type == OperationType::Query
+        && operation.name.is_none()
+        && operation.variables.is_empty()
+        && operation.directives.is_empty();
 
-        let mut result = String::new();
-        result.push_str(name);
-        
-        let mut sorted_args = arguments.clone();
-        if !sorted_args.is_empty() {
-            sorted_args.sort_by(|a, b| a.name.cmp(&b.name));
-
-            result.push_str("( ");
-            for arg in sorted_args.iter() {
-                result.push_str(&(arg.name));
-                result.push(':');
-                result.push_str(&(arg.value.to_string()));
-                result.push(' ');
-            }
-            result.push_str(") ");
+    if !shorthand {
+        f.write_str(operation.operation_type.name())?;
+        if let Some(name) = &operation.name {
+            write!(f, " {}", name)?;
         }
-        
+
+        // print variables sorted by name
+        if !operation.variables.is_empty() {
+            f.write_str("(")?;
+            let mut sorted_variables = operation.variables.clone();
+            sorted_variables.sort_by(|a, b| a.name.cmp(&b.name));
+            for (index, variable) in sorted_variables.iter().enumerate() {
+                if index != 0 {
+                    f.write_str(",")?;
+                }
+                f.write_str(&(variable.to_string()))?;
+            }
+            f.write_str(")")?;
+        }
+
         // todo directives
 
-        result.push_str(&selection_set.apollo_signature_format());
-
-        result
+        f.write_str(" ")?;
     }
+
+    f.write_str(&ApolloReportingSignatureFormatter::SelectionSet(&operation.selection_set).to_string())
 }
 
-impl ApolloSignatureFormatTrait for FragmentSpread {
-    fn apollo_signature_format(&self) -> String {
-        self.to_string()
-    }
-}
-
-impl ApolloSignatureFormatTrait for InlineFragment {
-    fn apollo_signature_format(&self) -> String {
-        self.to_string()
-    }
-}
-
-impl ApolloSignatureFormatTrait for SelectionSet {
-    fn apollo_signature_format(&self) -> String {
-        // print selection set sorted by name with fields followed by named fragments followed by inline fragments
-        let mut fields: Vec<&Node<Field>> = Vec::new();
-        let mut named_fragments: Vec<&Node<FragmentSpread>> = Vec::new();
-        let mut inline_fragments: Vec<&Node<InlineFragment>> = Vec::new();
-        for selection in self.selections.iter() {       
-            match selection {
-                Selection::Field(field) => {
-                    fields.push(field);
-                }
-                Selection::FragmentSpread(fragment_spread) => {
-                    named_fragments.push(fragment_spread);
-                }
-                Selection::InlineFragment(inline_fragment) => {
-                    inline_fragments.push(inline_fragment);
-                }
+fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::SelectionSet, f: &mut fmt::Formatter) -> fmt::Result {
+    // print selection set sorted by name with fields followed by named fragments followed by inline fragments
+    let mut fields: Vec<&Node<apollo_compiler::executable::Field>> = Vec::new();
+    let mut named_fragments: Vec<&Node<apollo_compiler::executable::FragmentSpread>> = Vec::new();
+    let mut inline_fragments: Vec<&Node<apollo_compiler::executable::InlineFragment>> = Vec::new();
+    for selection in selection_set.selections.iter() {       
+        match selection {
+            apollo_compiler::executable::Selection::Field(field) => {
+                fields.push(field);
+            }
+            apollo_compiler::executable::Selection::FragmentSpread(fragment_spread) => {
+                named_fragments.push(fragment_spread);
+            }
+            apollo_compiler::executable::Selection::InlineFragment(inline_fragment) => {
+                inline_fragments.push(inline_fragment);
             }
         }
+    }
 
-        let mut result = String::new();
+    if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
+        fields.sort_by(|&a, &b| a.name.cmp(&b.name));
+        named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
+        // todo sort inline fragments by ?
 
-        if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
-            fields.sort_by(|&a, &b| a.name.cmp(&b.name));
-            named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
-            // todo sort inline fragments by ?
+        f.write_str("{ ")?;
 
-            result.push_str("{ ");
-
-            for &field in fields.iter() {
-                result.push_str(&(field.apollo_signature_format()));
-                result.push(' ');
-            }
-
-            for &frag in inline_fragments.iter() {
-                result.push_str(&(frag.apollo_signature_format()));
-                result.push(' ');
-            }
-
-            for &frag in inline_fragments.iter() {
-                result.push_str(&(frag.apollo_signature_format()));
-                result.push(' ');
-            }
-
-            result.push_str(" } ");
+        for &field in fields.iter() {
+            write!(f, " {}", &ApolloReportingSignatureFormatter::Field(&field).to_string())?;
         }
 
-        result
+        for &frag in named_fragments.iter() {
+            write!(f, " {}", &ApolloReportingSignatureFormatter::FragmentSpread(&frag).to_string())?;
+        }
+
+        for &frag in inline_fragments.iter() {
+            write!(f, " {}", &ApolloReportingSignatureFormatter::InlineFragment(&frag).to_string())?;
+        }
+
+        f.write_str(" } ")?;
     }
+
+    Ok(())
+}
+
+fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fmt::Formatter) -> fmt::Result {
+    f.write_str(&field.name)?;
+    
+    let mut sorted_args = field.arguments.clone();
+    if !sorted_args.is_empty() {
+        sorted_args.sort_by(|a, b| a.name.cmp(&b.name));
+
+        f.write_str("( ")?;
+        for arg in sorted_args.iter() {
+            write!(f, "{}:{} ", &(arg.name), &(arg.value.to_string()))?;
+        }
+        f.write_str(") ")?;
+    }
+    
+    // todo directives
+
+    f.write_str(&ApolloReportingSignatureFormatter::SelectionSet(&field.selection_set).to_string())
+}
+
+fn format_fragment_spread<'a>(fragment_spread: &Node<apollo_compiler::executable::FragmentSpread>, f: &mut fmt::Formatter) -> fmt::Result {
+    // todo
+    f.write_str(&fragment_spread.to_string())  
+}
+
+fn format_inline_fragment<'a>(inline_fragment: &Node<apollo_compiler::executable::InlineFragment>, f: &mut fmt::Formatter) -> fmt::Result {
+    // todo
+    f.write_str(&inline_fragment.to_string())  
 }
 
 // end todo move
