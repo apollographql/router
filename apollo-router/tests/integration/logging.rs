@@ -1,6 +1,8 @@
 use serde_json::json;
 use tower::BoxError;
-use crate::integration::common::{IntegrationTest, Telemetry};
+
+use crate::integration::common::IntegrationTest;
+use crate::integration::common::Telemetry;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_json() -> Result<(), BoxError> {

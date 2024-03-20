@@ -8,8 +8,10 @@ use std::fmt;
 use std::time::Instant;
 
 use opentelemetry::sdk::Resource;
+use opentelemetry_api::trace::SpanId;
+use opentelemetry_api::trace::TraceContextExt;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::KeyValue;
-use opentelemetry_api::trace::{SpanId, TraceContextExt, TraceId};
 use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
@@ -19,7 +21,8 @@ use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Context;
-use tracing_subscriber::registry::{LookupSpan, SpanRef};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::registry::SpanRef;
 
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
@@ -292,19 +295,24 @@ pub(crate) trait EventFormatter<S> {
 }
 
 #[inline]
-pub (crate) fn get_trace_and_span_id<S>(span: &SpanRef<S>) -> Option<(TraceId, SpanId)> where S: Subscriber + for<'lookup> LookupSpan<'lookup> {
+pub(crate) fn get_trace_and_span_id<S>(span: &SpanRef<S>) -> Option<(TraceId, SpanId)>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
     let ext = span.extensions();
     if let Some(otel_data) = ext.get::<OtelData>() {
         // The root span is being built and has no parent
-        if let (Some(trace_id), Some(span_id)) = (otel_data.builder.trace_id, otel_data.builder.span_id) {
-            return Some((trace_id, span_id))
+        if let (Some(trace_id), Some(span_id)) =
+            (otel_data.builder.trace_id, otel_data.builder.span_id)
+        {
+            return Some((trace_id, span_id));
         }
 
         // Child spans with a valid trace context
         let span = otel_data.parent_cx.span();
         let span_context = span.span_context();
         if span_context.is_valid() {
-            return Some((span_context.trace_id(), span_context.span_id()))
+            return Some((span_context.trace_id(), span_context.span_id()));
         }
     }
     None
