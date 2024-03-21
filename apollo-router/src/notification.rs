@@ -369,7 +369,6 @@ where
     }
 }
 
-#[cfg(test)]
 impl<K, V> Default for Notify<K, V>
 where
     K: Send + Hash + Eq + Clone + 'static,

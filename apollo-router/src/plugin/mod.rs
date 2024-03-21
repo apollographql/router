@@ -250,7 +250,6 @@ impl PluginFactory {
         (self.instance_factory)(configuration, supergraph_sdl, notify).await
     }
 
-    #[cfg(test)]
     pub(crate) async fn create_instance_without_schema(
         &self,
         configuration: &serde_json::Value,
