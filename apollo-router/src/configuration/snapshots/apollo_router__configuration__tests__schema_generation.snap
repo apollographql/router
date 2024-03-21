@@ -3353,7 +3353,7 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_span_id": {
-                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "description": "Include the span id (if any) with the log event. (default: false)",
                                   "default": false,
                                   "type": "boolean"
                                 },
@@ -3383,7 +3383,7 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_trace_id": {
-                                  "description": "Include the trace id (if any) with the log event. (default: true)",
+                                  "description": "Include the trace id (if any) with the log event. (default: false)",
                                   "default": false,
                                   "type": "boolean"
                                 }
@@ -3566,7 +3566,7 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_span_id": {
-                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "description": "Include the span id (if any) with the log event. (default: false)",
                                   "default": false,
                                   "type": "boolean"
                                 },
@@ -3596,7 +3596,7 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_trace_id": {
-                                  "description": "Include the trace id (if any) with the log event. (default: true)",
+                                  "description": "Include the trace id (if any) with the log event. (default: false)",
                                   "default": false,
                                   "type": "boolean"
                                 }
