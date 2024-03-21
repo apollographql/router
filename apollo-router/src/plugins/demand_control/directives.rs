@@ -12,17 +12,14 @@ pub(super) struct IncludeDirective {
 
 impl IncludeDirective {
     pub(super) fn from_field(field: &Field) -> Result<Option<Self>, BoxError> {
-        if let Some(directive) = field.directives.get("include") {
-            if let Some(condition) = directive.argument_by_name("if") {
-                Ok(Some(Self {
-                    is_included: condition.to_bool().unwrap_or(true),
-                }))
-            } else {
-                Err(anyhow!("Found @include directive with no if argument").into())
-            }
-        } else {
-            Ok(None)
-        }
+        let directive = field
+            .directives
+            .get("include")
+            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|arg| arg.to_bool())
+            .map(|cond| Self { is_included: cond });
+
+        Ok(directive)
     }
 }
 
@@ -39,24 +36,31 @@ impl RequiresDirective {
         // However, unlike the built-ins, end users can rename these directives when they import the
         // federation spec via `@link`. We'll need to follow-up with some solution that accounts for this
         // potential renaming.
-        if let Some(directive) = field.definition.directives.get("requires") {
-            if let Some(fields_str) = directive.argument_by_name("fields") {
-                let doc = ExecutableDocument::parse(
-                    schema,
-                    format!("{{ {} }}", fields_str.as_str().unwrap_or("")),
-                    "",
-                )
-                .map_err(|e| anyhow!("{}", e))?;
+        let required_selection = field
+            .definition
+            .directives
+            .get("requires")
+            .and_then(|requires| requires.argument_by_name("fields"))
+            .and_then(|arg| arg.as_str())
+            .map(|selection_without_braces| format!("{{ {} }}", selection_without_braces))
+            .map(|selection_str| {
+                RequiresDirective::parse_top_level_selection_set(selection_str, schema)
+            });
 
-                Ok(Some(RequiresDirective {
-                    fields: doc.anonymous_operation.unwrap().selection_set.clone(),
-                }))
-            } else {
-                Err(anyhow!("Found @requires directive with no fields argument").into())
-            }
-        } else {
-            Ok(None)
+        match required_selection {
+            Some(Ok(Some(selection))) => Ok(Some(RequiresDirective { fields: selection })),
+            Some(Err(e)) => Err(e),
+            None | Some(Ok(None)) => Ok(None),
         }
+    }
+
+    fn parse_top_level_selection_set(
+        str: String,
+        schema: &Valid<Schema>,
+    ) -> Result<Option<SelectionSet>, BoxError> {
+        let doc = ExecutableDocument::parse(schema, str, "").map_err(|e| anyhow!(e))?;
+
+        Ok(doc.anonymous_operation.map(|op| op.selection_set.clone()))
     }
 }
 
@@ -66,16 +70,13 @@ pub(super) struct SkipDirective {
 
 impl SkipDirective {
     pub(super) fn from_field(field: &Field) -> Result<Option<Self>, BoxError> {
-        if let Some(directive) = field.directives.get("skip") {
-            if let Some(condition) = directive.argument_by_name("if") {
-                Ok(Some(Self {
-                    is_skipped: condition.to_bool().unwrap_or(false),
-                }))
-            } else {
-                Err(anyhow!("Found @skip directive with no if argument").into())
-            }
-        } else {
-            Ok(None)
-        }
+        let directive = field
+            .directives
+            .get("skip")
+            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|arg| arg.to_bool())
+            .map(|cond| Self { is_skipped: cond });
+
+        Ok(directive)
     }
 }

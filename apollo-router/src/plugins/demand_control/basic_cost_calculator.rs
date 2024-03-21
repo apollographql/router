@@ -22,7 +22,8 @@ impl BasicCostCalculator {
     /// directives change how the query is fetched. In the case of the federation
     /// directive `@requires`, the cost of the required selection is added to the
     /// cost of the current field. There's a chance this double-counts the cost of
-    /// a selection if two fields require the same thing.
+    /// a selection if two fields require the same thing, or if a field is selected
+    /// along with a field that it requires.
     ///
     /// ```graphql
     /// type Query {
@@ -44,8 +45,12 @@ impl BasicCostCalculator {
             .inner_type_def(schema)
             .ok_or(anyhow!("Field {} was not found in schema", field))?;
 
+        // Determine how many instances we're scoring. If there's no user-provided
+        // information, assume lists have 100 items.
         let instance_count = if field.ty().is_list() { 100.0 } else { 1.0 };
 
+        // Determine the cost for this particular field. Scalars are free, non-scalars are not.
+        // For fields with selections, add in the cost of the selections as well.
         let mut type_cost = if ty.is_interface() || ty.is_object() || ty.is_union() {
             1.0
         } else {
@@ -53,6 +58,9 @@ impl BasicCostCalculator {
         };
         type_cost += BasicCostCalculator::score_selection_set(&field.selection_set, schema)?;
 
+        // If the field is marked with `@requires`, the required selection may not be included
+        // in the query's selection. Adding that requirement's cost to the field ensures it's
+        // accounted for.
         let requirements = RequiresDirective::from_field(field, schema)?.map(|d| d.fields);
         let requirements_cost = match requirements {
             Some(selection_set) => {
@@ -76,14 +84,8 @@ impl BasicCostCalculator {
     }
 
     fn score_operation(operation: &Operation, schema: &Valid<Schema>) -> Result<f64, BoxError> {
-        let mut cost = 0.0;
-        if operation.is_mutation() {
-            cost += 10.0;
-        }
-
-        for selection in operation.selection_set.selections.iter() {
-            cost += BasicCostCalculator::score_selection(selection, schema)?;
-        }
+        let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
+        cost += BasicCostCalculator::score_selection_set(&operation.selection_set, schema)?;
 
         Ok(cost)
     }
