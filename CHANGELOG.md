@@ -4,6 +4,86 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.43.0] - 2024-03-21
+
+## 🚀 Features
+
+### Subscriptions: Add configurable "heartbeat" to subgraph WebSocket protocol ([Issue #4621](https://github.com/apollographql/router/issues/4621))
+
+To account for GraphQL Subscription WebSocket implementations (e.g., [DGS](https://netflix.github.io/dgs/)) which drop idle connections by design, the router adds the ability to configure a heartbeat to keep active connections alive.
+
+An example of configuration:
+
+```yaml
+subscription:
+  mode:
+    passthrough:
+      all:
+        path: /graphql
+        heartbeat_interval: enable # Optional
+ ```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/4802
+
+### Unix socket support for subgraphs ([Issue #3504](https://github.com/apollographql/router/issues/3504))
+
+> ⚠️ This is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+>
+> If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
+
+The Router now supports Unix sockets for **subgraph** connections by specifying URLs in the `unix:///path/to/router.sock` format in the supergraph schema, in addition to being valid within [the existing `override_subgraph_url` configuration options](https://www.apollographql.com/docs/router/configuration/overview/#subgraph-routing-urls).
+
+The Router will use _stream_ Unix sockets, rather than datagram. It supports compression but not TLS.  Due to the lack of standard for Unix socket URLs (and lack of support in the common URL types in Rust) a transformation is applied to to the socket path to parse it: the host is encoded in hexadecimal and stored in the `authority` part. This will have no consequence on the way the router functions, but [subgraph services](https://www.apollographql.com/docs/router/customizations/overview/#the-request-lifecycle) will receive URLs with the hex-encoded host.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4757
+
+### Add an option to refresh expiration on Redis GET ([Issue #4473](https://github.com/apollographql/router/issues/4473))
+
+This adds the option to refresh the time-to-live (TTL) on Redis entries when they are accessed. We want the query plan cache to act like an LRU cache (least-recently used), so if a TTL is set in its Redis configuration, it should reset every time it is accessed.
+
+The option is also available for automated persisted queries (APQ), but it is disabled for entity caching, since that cache directly manages its own TTL.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4604
+
+### Helm: Support configuring `ContainerResource` on Horizontal Pod Autoscaler (HPA) targets ([PR #4776](https://github.com/apollographql/router/pull/4776))
+
+The Helm chart for the Router adds support for configuring `ContainerResource` on Horizontal Pod Autoscaler (HPA) targets. See [this Kubernetes blog](https://kubernetes.io/blog/2023/05/02/hpa-container-resource-metric/) for more on the ContainerResource type metric.
+
+By [@caugustus](https://github.com/caugustus) in https://github.com/apollographql/router/pull/4776
+
+## 🐛 Fixes
+
+### Fix chunk formatting in multipart protocol ([Issue #4634](https://github.com/apollographql/router/issues/4634))
+
+This PR changes the way we're sending chunks in the stream. Instead of finishing the chunk with `\r\n` we don't send this at the end of our current chunk but instead at the beginning of the next one. For the end users nothing changes but it let us to close the stream with the right final boundary by appending `--\r\n` directly to the last chunk.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4681
+
+### Use `Object::with_capacity` with selection set length in `format_response` ([PR #4775](https://github.com/apollographql/router/pull/4775))
+
+This preallocates output object size in response formatting, bringing a small performance improvement.
+
+By [@xuorig](https://github.com/xuorig) in https://github.com/apollographql/router/pull/4775
+
+### Zipkin service name not populated ([Issue #4807](https://github.com/apollographql/router/issues/4807))
+
+Zipkin trace exporter now respects service name configuration from YAML or environment variables.
+
+For instance to set the service name to `my-app`, you can use the following configuration in your `router.yaml` file:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      common:
+        service_name: my-app
+      zipkin:
+        enabled: true
+        endpoint: default
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4816
+
 # [1.42.0] - 2024-03-12
 
 ## 🚀 Features
