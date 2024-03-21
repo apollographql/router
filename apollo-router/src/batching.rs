@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower::BoxError;
 
+use crate::error::FetchError;
 use crate::graphql;
 use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
@@ -222,12 +223,23 @@ impl Batch {
                     // Just clear out the fetch and error out the requests
                     BatchHandlerMessage::Cancel { index, reason } => {
                         // Log the reason for cancelling, update the state
-
                         tracing::info!("Cancelling index: {index}, {reason}");
+
                         // TODO: Handle missing index
                         if let Some(state) = batch_state.get_mut(&index) {
-                            // TODO: Is this correct? How do we notify any committed waiters?
-                            // NOTE: Go through requests[index] and notify all response_senders
+                            // Short-circuit any requests that are waiting for this cancelled request to complete.
+                            let cancelled_requests = std::mem::take(&mut requests[index]);
+                            for (request, _, sender) in cancelled_requests {
+                                sender
+                                    .send(Err(Box::new(FetchError::SubrequestBatchingError {
+                                        service: request.subgraph_name.unwrap(),
+                                        reason: format!("request cancelled: {reason}"),
+                                    })))
+                                    .unwrap();
+                            }
+
+                            // Clear out everything that has committed, now that they are cancelled, and
+                            // mark everything as having been cancelled.
                             state.committed.clear();
                             state.cancelled = state.registered.clone();
                         }
@@ -345,15 +357,12 @@ pub(crate) async fn assemble_batch(
         graphql::Request,
         oneshot::Sender<Result<SubgraphResponse, BoxError>>,
     )>,
-) -> Result<
-    (
-        String,
-        Context,
-        http::Request<Body>,
-        Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
-    ),
-    BoxError,
-> {
+) -> (
+    String,
+    Context,
+    http::Request<Body>,
+    Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
+) {
     // Extract the collection of parts from the requests
     let (mut txs, request_pairs): (Vec<_>, Vec<_>) = requests
         .into_iter()
@@ -365,7 +374,8 @@ pub(crate) async fn assemble_batch(
     let bytes = hyper::body::to_bytes(
         serde_json::to_string(&gql_requests).expect("JSON serialization should not fail"),
     )
-    .await?;
+    .await
+    .expect("byte serialization should not fail");
 
     // Grab the common info from the first request
     let context = requests
@@ -386,11 +396,13 @@ pub(crate) async fn assemble_batch(
         .unwrap_or_default();
     let (parts, _) = first_request.into_parts();
 
+    // The senders will be in reverse since they were pushed on in reverse order
+    txs.reverse();
+
     // Generate the final request and pass it up
     // TODO: The previous implementation reversed the txs here. Is that necessary?
     let request = http::Request::from_parts(parts, Body::from(bytes));
-    txs.reverse();
-    Ok((operation_name, context, request, txs))
+    (operation_name, context, request, txs)
 }
 
 // If a Batch is dropped and it still contains waiters, it's important to notify those waiters that
@@ -485,8 +497,8 @@ mod tests {
             })
             .unzip();
 
-        // Try to assemble them
-        let (op_name, _context, request, txs) = assemble_batch(requests).await.unwrap();
+        // Assemble them
+        let (op_name, _context, request, txs) = assemble_batch(requests).await;
 
         // Make sure that the name of the entire batch is that of the first
         assert_eq!(op_name, "batch_test_0");

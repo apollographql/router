@@ -749,7 +749,7 @@ pub(crate) async fn process_batches(
         // We need our own batch aware version of call_http which only makes one call to each
         // subgraph, but is able to decode the responses. I'll probably need to break call_http
         // down into sub-functions, and I've started this, but it's not finished.
-        let (_operation_name, context, mut request, mut txs) = assemble_batch(requests).await?;
+        let (_operation_name, context, mut request, mut txs) = assemble_batch(requests).await;
 
         request
             .headers_mut()

@@ -353,7 +353,7 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index}_failMe{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
@@ -369,8 +369,106 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     )
     .await?;
 
-    // TODO: Fill this in once we know how this response should look
-    assert_yaml_snapshot!(responses, @"");
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - errors:
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+    - data:
+        entryA:
+          index: 1
+    - errors:
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+    "###);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 2;
+    const RHAI_CONFIG: &str = include_str!("../fixtures/batching/rhai_script.router.yaml");
+
+    let requests_a = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests_b = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query {}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
+                (index == 1)
+                    .then_some("failMe".to_string())
+                    .unwrap_or(format!("op{index}"))
+            ))
+            .build()
+    });
+
+    // Custom validation for subgraph B
+    fn handle_b(request: &wiremock::Request) -> ResponseTemplate {
+        let requests: Vec<Request> = request.body_json().unwrap();
+
+        // We should have gotten all of the regular elements minus the second
+        assert_eq!(requests.len(), REQUEST_COUNT - 1);
+
+        // Each element should have be for the specified subgraph and should have a field selection
+        // of index. The index should be 0..n without 1.
+        // Note: The router appends info to the query, so we append it at this check
+        for (request, index) in requests.into_iter().zip((0..).filter(|&i| i != 1)) {
+            assert_eq!(
+                request.query,
+                Some(format!(
+                    "query op{index}__b__0{{entryB(count:{REQUEST_COUNT}){{index}}}}",
+                ))
+            );
+        }
+
+        ResponseTemplate::new(200).set_body_json(
+            (0..REQUEST_COUNT)
+                .filter(|&i| i != 1)
+                .map(|index| {
+                    serde_json::json!({
+                        "data": {
+                            "entryB": {
+                                "index": index
+                            }
+                        }
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    // Interleave requests so that we can verify that they get properly separated
+    // Have the B subgraph get all of its requests cancelled by a rhai script
+    let requests: Vec<_> = requests_a.interleave(requests_b).collect();
+    let responses = helper::run_test(
+        RHAI_CONFIG,
+        &requests,
+        Some(helper::expect_batch),
+        Some(handle_b),
+    )
+    .await?;
+
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - data:
+        entryB:
+          index: 0
+    - data:
+        entryA:
+          index: 1
+    - errors:
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+    "###);
 
     Ok(())
 }
