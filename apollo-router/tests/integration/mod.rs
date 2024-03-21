@@ -7,7 +7,6 @@ pub(crate) use common::ValueExt;
 mod docs;
 mod file_upload;
 mod lifecycle;
-mod logging;
 mod operation_limits;
 mod redis;
 mod rhai;

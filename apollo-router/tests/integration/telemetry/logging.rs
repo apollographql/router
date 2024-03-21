@@ -8,7 +8,7 @@ use crate::integration::common::Telemetry;
 async fn test_json() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
-        .config(include_str!("../fixtures/logging/json.router.yaml"))
+        .config(include_str!("fixtures/json.router.yaml"))
         .build()
         .await;
 
@@ -28,7 +28,7 @@ async fn test_json() -> Result<(), BoxError> {
 async fn test_text() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
-        .config(include_str!("../fixtures/logging/text.router.yaml"))
+        .config(include_str!("fixtures/text.router.yaml"))
         .build()
         .await;
 
