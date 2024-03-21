@@ -498,7 +498,7 @@ impl BridgeQueryPlanner {
         ) && original_query != filtered_query {
             Some(
                 self.planner
-                    .operation_signature(original_query, operation.clone())
+                    .operation_signature(original_query.clone(), operation.clone())
                     .await
                     .map_err(QueryPlannerError::RouterBridgeError)?,
             )
@@ -523,11 +523,17 @@ impl BridgeQueryPlanner {
                     self.configuration.experimental_apollo_metrics_generation_mode,
                     ApolloMetricsGenerationMode::New | ApolloMetricsGenerationMode::Both
                 ) {
-                    // todo - are we generating the sig and refs from the original query and comparing it to the sig and refs
-                    // generated from the filtered query in JS code? Is that ok? Do we need to re-parse the filtered query here?
+                    // If the query is filtered, we want to generate the signature using the original query and generate the
+                    // reference using the filtered query. To do this, we need to re-parse the original query here.
+                    // todo test this somehow
+                    let signature_doc = if original_query != filtered_query {
+                        Query::parse_document(&original_query, &self.schema, &self.configuration)
+                    } else {
+                        doc.clone()
+                    };
                     
                     let generated_usage_reporting = UsageReporting {
-                        stats_report_key: BridgeQueryPlanner::generate_apollo_reporting_signature(doc, operation.clone()),
+                        stats_report_key: BridgeQueryPlanner::generate_apollo_reporting_signature(&signature_doc, operation.clone()),
                         referenced_fields_by_type: BridgeQueryPlanner::generate_apollo_reporting_refs(doc, operation, &self.schema.definitions),
                     };
 
