@@ -37,8 +37,11 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
+                                            None,
                                         ),
-                                        Flatten,
+                                        Flatten(
+                                            None,
+                                        ),
                                     ],
                                 ),
                                 node: Fetch(
@@ -96,8 +99,11 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
+                                            None,
                                         ),
-                                        Flatten,
+                                        Flatten(
+                                            None,
+                                        ),
                                     ],
                                 ),
                                 node: Fetch(
@@ -171,6 +177,7 @@ Sequence {
                                     [
                                         Key(
                                             "product",
+                                            None,
                                         ),
                                     ],
                                 ),
@@ -227,6 +234,7 @@ Sequence {
                                     [
                                         Key(
                                             "product",
+                                            None,
                                         ),
                                     ],
                                 ),

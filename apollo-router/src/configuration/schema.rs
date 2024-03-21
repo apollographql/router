@@ -251,6 +251,10 @@ pub(crate) fn validate_yaml_configuration(
         .collect();
 
     if !unknown_fields.is_empty() {
+        // If you end up here while contributing,
+        // It might mean you forgot to update
+        // `impl<'de> serde::Deserialize<'de> for Configuration
+        // In `/apollo-router/src/configuration/mod.rs`
         return Err(ConfigurationError::InvalidConfiguration {
             message: "unknown fields",
             error: format!(
