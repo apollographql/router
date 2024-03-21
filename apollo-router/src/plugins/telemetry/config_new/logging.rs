@@ -388,9 +388,9 @@ pub(crate) struct TextFormat {
     pub(crate) display_current_span: bool,
     /// Include all of the containing span information with the log event. (default: true)
     pub(crate) display_span_list: bool,
-    /// Include the trace id (if any) with the log event. (default: true)
+    /// Include the trace id (if any) with the log event. (default: false)
     pub(crate) display_trace_id: bool,
-    /// Include the span id (if any) with the log event. (default: true)
+    /// Include the span id (if any) with the log event. (default: false)
     pub(crate) display_span_id: bool,
 }
 
