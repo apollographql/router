@@ -624,11 +624,12 @@ async fn plan_query(
     //
     // We remove the BatchQuery here and then reinsert it after we've done our call to fix that.
     let batching = context.extensions().lock().remove::<BatchQuery>();
-    if let Some(batch_query) = batching {
+    if let Some(mut batch_query) = batching {
         if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
-            let no_requires_fetches = plan.root.subgraph_fetches(false);
-            batch_query.set_subgraph_fetches(no_requires_fetches).await;
-            tracing::info!("subgraph fetches (no requires): {}", no_requires_fetches);
+            let mut query_hashes = vec![];
+            plan.root.query_hashes(&mut query_hashes);
+            batch_query.set_query_hashes(query_hashes).await;
+            tracing::info!("batch registered: {}", batch_query);
         }
 
         context.extensions().lock().insert(batch_query);

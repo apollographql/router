@@ -26,7 +26,6 @@ use http_body::Body as _;
 use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
-use parking_lot::Mutex;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -36,7 +35,6 @@ use tracing::Instrument;
 
 use super::ClientRequestAccepts;
 use crate::batching::Batch;
-use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -672,6 +670,9 @@ impl RouterService {
                 new_context_guard.insert(self.batching.clone());
                 // We are only going to insert a BatchQuery if Subgraph processing is enabled
                 if let Some(shared_batch_details) = &shared_batch_details {
+                    // We need to keep our shared details somewhere or they will drop, let's
+                    // insert them into our various contexts
+                    new_context_guard.insert(shared_batch_details.clone());
                     new_context_guard.insert(shared_batch_details.query_for_index(index));
                 }
             }
