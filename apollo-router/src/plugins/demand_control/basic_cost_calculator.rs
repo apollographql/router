@@ -5,17 +5,37 @@ use apollo_compiler::executable::FragmentSpread;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
 use super::directives::IncludeDirective;
+use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::CostCalculator;
 
 pub(crate) struct BasicCostCalculator {}
 
 impl BasicCostCalculator {
-    fn score_field(field: &Field, schema: &Schema) -> Result<f64, BoxError> {
+    /// Scores a field within a GraphQL operation, handling some expected cases where
+    /// directives change how the query is fetched. In the case of the federation
+    /// directive `@requires`, the cost of the required selection is added to the
+    /// cost of the current field. There's a chance this double-counts the cost of
+    /// a selection if two fields require the same thing.
+    ///
+    /// ```graphql
+    /// type Query {
+    ///     foo: Foo @external
+    ///     bar: Bar @requires(fields: "foo")
+    ///     baz: Baz @requires(fields: "foo")
+    /// }
+    /// ```
+    ///
+    /// This should be okay, as we don't want this implementation to have to know about
+    /// any deduplication happening in the query planner, and we're estimating an upper
+    /// bound for cost anyway.
+    fn score_field(field: &Field, schema: &Valid<Schema>) -> Result<f64, BoxError> {
         if BasicCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
         }
@@ -31,11 +51,17 @@ impl BasicCostCalculator {
         } else {
             0.0
         };
-        for selection in field.selection_set.selections.iter() {
-            type_cost += BasicCostCalculator::score_selection(selection, schema)?;
-        }
+        type_cost += BasicCostCalculator::score_selection_set(&field.selection_set, schema)?;
 
-        Ok(instance_count * type_cost)
+        let requirements = RequiresDirective::from_field(field, schema)?.map(|d| d.fields);
+        let requirements_cost = match requirements {
+            Some(selection_set) => {
+                BasicCostCalculator::score_selection_set(&selection_set, schema)?
+            }
+            None => 0.0,
+        };
+
+        Ok(instance_count * type_cost + requirements_cost)
     }
 
     fn score_fragment_spread(_fragment_spread: &FragmentSpread) -> Result<f64, BoxError> {
@@ -44,16 +70,12 @@ impl BasicCostCalculator {
 
     fn score_inline_fragment(
         inline_fragment: &InlineFragment,
-        schema: &Schema,
+        schema: &Valid<Schema>,
     ) -> Result<f64, BoxError> {
-        let mut cost = 0.0;
-        for selection in inline_fragment.selection_set.selections.iter() {
-            cost += BasicCostCalculator::score_selection(selection, schema)?;
-        }
-        Ok(cost)
+        BasicCostCalculator::score_selection_set(&inline_fragment.selection_set, schema)
     }
 
-    fn score_operation(operation: &Operation, schema: &Schema) -> Result<f64, BoxError> {
+    fn score_operation(operation: &Operation, schema: &Valid<Schema>) -> Result<f64, BoxError> {
         let mut cost = 0.0;
         if operation.is_mutation() {
             cost += 10.0;
@@ -66,12 +88,23 @@ impl BasicCostCalculator {
         Ok(cost)
     }
 
-    fn score_selection(selection: &Selection, schema: &Schema) -> Result<f64, BoxError> {
+    fn score_selection(selection: &Selection, schema: &Valid<Schema>) -> Result<f64, BoxError> {
         match selection {
             Selection::Field(f) => BasicCostCalculator::score_field(f, schema),
             Selection::FragmentSpread(s) => BasicCostCalculator::score_fragment_spread(s),
             Selection::InlineFragment(i) => BasicCostCalculator::score_inline_fragment(i, schema),
         }
+    }
+
+    fn score_selection_set(
+        selection_set: &SelectionSet,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, BoxError> {
+        let mut cost = 0.0;
+        for selection in selection_set.selections.iter() {
+            cost += BasicCostCalculator::score_selection(selection, schema)?;
+        }
+        Ok(cost)
     }
 
     fn skipped_by_directives(field: &Field) -> bool {
@@ -90,7 +123,7 @@ impl BasicCostCalculator {
 }
 
 impl CostCalculator for BasicCostCalculator {
-    fn estimated(query: &ExecutableDocument, schema: &Schema) -> Result<f64, BoxError> {
+    fn estimated(query: &ExecutableDocument, schema: &Valid<Schema>) -> Result<f64, BoxError> {
         let mut cost = 0.0;
         if let Some(op) = &query.anonymous_operation {
             cost += BasicCostCalculator::score_operation(op, schema)?;
@@ -107,8 +140,8 @@ mod tests {
     use super::*;
 
     fn cost(schema_str: &str, query_str: &str) -> f64 {
-        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
-        let query = ExecutableDocument::parse_and_validate(&schema, query_str, "").unwrap();
+        let schema = Valid::assume_valid(Schema::parse(schema_str, "").unwrap());
+        let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         BasicCostCalculator::estimated(&query, &schema).unwrap()
     }
 
@@ -252,6 +285,22 @@ mod tests {
     }
 
     #[test]
+    fn scalar_list_cost() {
+        let schema = "
+            type Query {
+                numbers: [Int]
+            }
+        ";
+        let query = "
+            {
+                numbers
+            }
+        ";
+
+        assert_eq!(cost(schema, query), 0.0)
+    }
+
+    #[test]
     fn nested_object_lists() {
         let schema = "
             type Query {
@@ -350,5 +399,62 @@ mod tests {
         ";
 
         assert_eq!(cost(schema, query), 100.0)
+    }
+
+    #[test]
+    fn requires_adds_required_field_cost() {
+        let schema = r#"
+            extend schema
+                @link(url: "https://spec.apollo.dev/federation/2.7", import: ["external", "requires"])
+
+            type Query {
+                products: [Product!] @external
+                productCount: Int! @requires(fields: "products")
+            }
+
+            type Product {
+                name: String!
+            }
+        "#;
+        let query = "
+            {
+                productCount
+            }
+        ";
+
+        assert_eq!(cost(schema, query), 100.0);
+    }
+
+    #[test]
+    fn nested_requires_adds_required_field_costs() {
+        let schema = r#"
+            extend schema
+                @link(url: "https://spec.apollo.dev/federation/2.7", import: ["external", "requires"])
+
+            type Query {
+                foos: [Foo!] @external
+                bar: Bar
+                thingWithRequires: Int! @requires(fields: "foos bar { bazzes }")
+            }
+
+            type Foo {
+                name: String!
+            }
+
+            type Bar {
+                bazzes: [Baz!] @external
+            }
+
+            type Baz {
+                name: String!
+            }
+        "#;
+        let query = "
+            {
+                thingWithRequires
+            }
+        ";
+
+        assert_eq!(cost(schema, query), 201.0);
     }
 }

@@ -3,6 +3,7 @@ mod basic_cost_calculator;
 mod directives;
 
 use apollo_compiler::executable::ExecutableDocument;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -47,7 +48,7 @@ pub(crate) struct DemandControlConfig {
 }
 
 trait CostCalculator {
-    fn estimated(query: &ExecutableDocument, schema: &Schema) -> Result<f64, BoxError>;
+    fn estimated(query: &ExecutableDocument, schema: &Valid<Schema>) -> Result<f64, BoxError>;
 }
 
 #[derive(Clone, Debug)]
