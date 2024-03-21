@@ -559,7 +559,9 @@ impl BridgeQueryPlanner {
                             );
                         }
 
-                        if usage_reporting.referenced_fields_by_type != generated_usage_reporting.referenced_fields_by_type {
+                        // todo do this comparison in a better way
+
+                        if !compare_ref_fields_by_type(&usage_reporting.referenced_fields_by_type, &generated_usage_reporting.referenced_fields_by_type) {
                             println!(
                                 "referenced_fields_by_type's are different:\n{:?}\n{:?}",  
                                 generated_usage_reporting.referenced_fields_by_type,
@@ -639,7 +641,7 @@ impl BridgeQueryPlanner {
         // This is based on apollo-utils packages/printWithReducedWhitespace/src/index.ts
         // Note that we don't need to do the StringValue -> hex -> StringValue processing because all StringValues
         // are replaced with an empty string before we get here.
-        // todo can we combine these or make it more efficient somehow? or just do it in the string generation?
+        // todo can we just update the generation code so we don't need to strip any whitespace? Try this after fuzzing.
         let stripped_body = regex::Regex::new(r"\s+").unwrap()
             .replace_all(&body, " ").to_string();
         let stripped_body = regex::Regex::new(r"([^_a-zA-Z0-9]) ").unwrap()
@@ -696,7 +698,7 @@ impl BridgeQueryPlanner {
 
     fn generate_apollo_reporting_refs(doc: &ParsedDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
         match doc.executable.get_operation(operation_name.as_deref()).ok() {
-            None => HashMap::new(),
+            None => HashMap::new(), // todo the existing implementation seems to return the ref fields from the whole document
             Some(operation) => {
                 let mut fields_by_type: HashMap<String, HashSet<String>> = HashMap::new();
                 let mut fields_by_interface: HashMap<String, bool> = HashMap::new();
@@ -740,9 +742,6 @@ impl BridgeQueryPlanner {
                                         fields_by_interface, 
                                         seen_fragments
                                     );
-                                } else {
-                                    // todo not sure what to do for fragments without a type - ignore? use parent_type?
-                                    let _tmp = 1;
                                 }
                             },
                             apollo_compiler::executable::Selection::FragmentSpread(fragment) => {
@@ -922,6 +921,7 @@ enum ApolloReportingSignatureFormatter<'a> {
     UnsortedDirectiveList(&'a apollo_compiler::executable::DirectiveList),
     SortedDirectiveList(&'a apollo_compiler::executable::DirectiveList),
     Value(&'a apollo_compiler::ast::Value),
+    Argument(&'a Node<apollo_compiler::ast::Argument>),
 }
 
 impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
@@ -936,7 +936,7 @@ impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
             ApolloReportingSignatureFormatter::UnsortedDirectiveList(directives) => format_directives(directives, false, f),
             ApolloReportingSignatureFormatter::SortedDirectiveList(directives) => format_directives(directives, true, f),
             ApolloReportingSignatureFormatter::Value(value) => format_value(value, f),
-            
+            ApolloReportingSignatureFormatter::Argument(value) => format_argument(value, f),
         }
     }
 }
@@ -996,8 +996,7 @@ fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::Selecti
     if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
         fields.sort_by(|&a, &b| a.name.cmp(&b.name));
         named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
-        // todo sort? I don't think inline fragments are sorted
-        // inline_fragments.sort_by(|&a, &b| a.type_condition.cmp(&b.type_condition));
+        // Note that inline fragments are not sorted in the JS implementation
 
         f.write_str("{ ")?;
 
@@ -1019,6 +1018,10 @@ fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::Selecti
     Ok(())
 }
 
+fn format_argument<'a>(arg: &Node<apollo_compiler::ast::Argument>, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "{}:{}", arg.name.to_string(), &ApolloReportingSignatureFormatter::Value(&arg.value).to_string())
+}
+
 fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fmt::Formatter) -> fmt::Result {
     f.write_str(&field.name)?;
     
@@ -1028,18 +1031,24 @@ fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fm
 
         f.write_str("( ")?;
 
-        // todo not sure about this
-        let use_comma = sorted_args.iter().any(|a| matches!(*a.value, apollo_compiler::ast::Value::Variable(_)));
+        // The graphql-js implementation will use newlines and indentation instead of commas if the length of the "arg line" is 
+        // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never 
+        // the case for now), followed by all argument names and values separated by ": ", surrounded with brackets. Our usage
+        // reporting plugin replaces all newlines + indentation with a single space, so we can just replace commas with spaces if
+        // the line length is too long.
+        // When we update this to allow aliases to remain, we can choose to just always use commas, since we won't have to preserve
+        // the same operation ID as it will already be changing with the included alias.
+        let arg_strings: Vec<String> = sorted_args.iter()
+            .map(|a| ApolloReportingSignatureFormatter::Argument(a).to_string())
+            .collect();
+        let original_line_length = 2 + arg_strings.iter().map(|s| s.len()).sum::<usize>() + (arg_strings.len() * 2);
+        let separator = if original_line_length > 80 { " " } else { "," };
 
-        for (index, arg) in sorted_args.iter().enumerate() {
+        for (index, arg_string) in arg_strings.iter().enumerate() {
             if index != 0 {
-                if use_comma {
-                    f.write_str(",")?;
-                } else {
-                    f.write_str(" ")?;
-                }
+                f.write_str(separator)?;
             }
-            write!(f, "{}:{}", &(arg.name), &ApolloReportingSignatureFormatter::Value(&arg.value).to_string())?;
+            f.write_str(arg_string)?;
         }
         f.write_str(") ")?;
     }
@@ -1078,9 +1087,29 @@ fn format_directives<'a>(directives: &apollo_compiler::executable::DirectiveList
         sorted_directives.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
-    // todo strip strings?
+    for directive in sorted_directives.iter() {
+        write!(f, "@ {}", directive.name.to_string())?;
 
-    f.write_str(&sorted_directives.to_string())
+        let mut sorted_args = directive.arguments.clone();
+        if !sorted_args.is_empty() {
+            sorted_args.sort_by(|a, b| a.name.cmp(&b.name));
+    
+            f.write_str("(")?;
+
+            for (index, argument) in sorted_args.iter().enumerate() {
+                if index != 0 {
+                    f.write_str(",")?;
+                }
+                f.write_str(&ApolloReportingSignatureFormatter::Argument(argument).to_string())?;
+            }
+
+            f.write_str(")")?;
+        }
+
+        f.write_str(" ")?;
+    }
+
+    Ok(())
 }
 
 fn format_value<'a>(value: &apollo_compiler::ast::Value, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1104,6 +1133,21 @@ fn format_value<'a>(value: &apollo_compiler::ast::Value, f: &mut fmt::Formatter)
     }
 }
 
+// The JS implementation builds up a set of field names and converts it to an array using the spread operator, so we can't
+// rely on any specific ordering. Before comparing the referenced fields we re-order the type vectors.
+fn order_ref_fields_by_type(original: &HashMap<String, ReferencedFieldsForType>) -> HashMap<String, ReferencedFieldsForType> {
+    original.iter()
+        .map(|(parent_type, ref_fields)| {
+            let mut ref_fields_sorted = ref_fields.clone();
+            ref_fields_sorted.field_names.sort();
+            (parent_type.clone(), ref_fields_sorted)
+        })
+        .collect()
+}
+
+fn compare_ref_fields_by_type(left: &HashMap<String, ReferencedFieldsForType>, right: &HashMap<String, ReferencedFieldsForType>) -> bool {
+    return order_ref_fields_by_type(left) == order_ref_fields_by_type(right);
+}
 
 // end todo move
 
@@ -1963,20 +2007,6 @@ mod tests {
 
     // todo more/better tests
 
-    // The JS implementation builds up a set of field names and converts it to an array using the spread operator, so we can't
-    // rely on any specific ordering. Before comparing the referenced fields we re-order the type vectors.
-    fn order_ref_fields_by_type(map: &mut HashMap<String, ReferencedFieldsForType>) {
-        for (_, ref_fields) in map {
-            ref_fields.field_names.sort();
-        }
-    }
-
-    fn compare_ref_fields_by_type(left: &mut HashMap<String, ReferencedFieldsForType>, right: &mut HashMap<String, ReferencedFieldsForType>) {
-        order_ref_fields_by_type(left);
-        order_ref_fields_by_type(right);
-        assert_eq!(left, right);
-    }
-
     #[test(tokio::test)]
     async fn test_sig_and_ref_generation_1() {
         let configuration = Arc::new(Default::default());
@@ -2165,8 +2195,8 @@ mod tests {
         let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
         assert_eq!(expected_sig, generated_sig);
 
-        let mut generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("TransformedQuery".into()), &schema.api_schema().definitions);
-        let mut expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("TransformedQuery".into()), &schema.api_schema().definitions);
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("Query".into(), ReferencedFieldsForType {
                 field_names: vec!["scalarInputQuery".into()],
                 is_interface: false,
@@ -2201,7 +2231,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        compare_ref_fields_by_type(&mut expected_refs, &mut generated_refs);
+        assert!(compare_ref_fields_by_type(&expected_refs, &generated_refs));
     }
 
     #[test(tokio::test)]
@@ -2389,8 +2419,8 @@ mod tests {
         let expected_sig = "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}";
         assert_eq!(expected_sig, generated_sig);
 
-        let mut generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("Query".into()), &schema.api_schema().definitions);
-        let mut expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("Query".into()), &schema.api_schema().definitions);
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("Query".into(), ReferencedFieldsForType {
                 field_names: vec!["scalarResponseQuery".into(), "noInputQuery".into(), "basicInputTypeQuery".into()],
                 is_interface: false,
@@ -2434,7 +2464,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        compare_ref_fields_by_type(&mut expected_refs, &mut generated_refs);
+        assert!(compare_ref_fields_by_type(&expected_refs, &generated_refs));
     }
 
     #[test(tokio::test)]
@@ -2465,7 +2495,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_sig_anonymous_operation() {
+    async fn test_sig_anonymous_query() {
         let configuration = Arc::new(Default::default());
 
         let schema_str = r#"type BasicResponse {
@@ -2488,6 +2518,60 @@ mod tests {
 
         let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, None);
         let expected_sig = "# -\n{noInputQuery{id}}";
+        assert_eq!(expected_sig, generated_sig);
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_anonymous_mutation() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Mutation {
+            noInputMutation: BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"mutation {
+            noInputMutation {
+              id
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, None);
+        let expected_sig = "# -\nmutation{noInputMutation{id}}";
+        assert_eq!(expected_sig, generated_sig);
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_anonymous_subscription() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"type BasicResponse {
+            id: Int!
+            nullableId: Int
+          }
+          
+          type Subscription {
+            noInputSubscription: BasicResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query: &str = r#"subscription {
+            noInputSubscription {
+              id
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, None);
+        let expected_sig = "# -\nsubscription{noInputSubscription{id}}";
         assert_eq!(expected_sig, generated_sig);
     }
 
@@ -2604,11 +2688,11 @@ mod tests {
                 }
               }
               unionResponse {
-                ... on UnionType1 {
-                  unionType1Field
-                }
                 ... on UnionType2 {
                   unionType2Field
+                }
+                ... on UnionType1 {
+                  unionType1Field
                 }
               }
               ...zzzFragment
@@ -2652,11 +2736,11 @@ mod tests {
         let doc = Query::parse_document(query, &schema, &configuration);
 
         let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("FragmentQuery".into()));
-        let expected_sig = "# FragmentQuery\nfragment ZZZFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaInterfaceFragment on InterfaceImplementation1{sharedField}fragment bbbInterfaceFragment on InterfaceImplementation2{implementation2Field sharedField}fragment zzzFragment on EverythingResponse{listOfInterfaces{sharedField}}query FragmentQuery{noInputQuery{interfaceResponse{sharedField...aaaInterfaceFragment...bbbInterfaceFragment...on InterfaceImplementation2{implementation2Field}...{...on InterfaceImplementation1{implementation1Field}}...on InterfaceImplementation1{implementation1Field}}listOfBools unionResponse{...on UnionType1{unionType1Field}...on UnionType2{unionType2Field}}...ZZZFragment...aaaFragment...zzzFragment}}";
+        let expected_sig = "# FragmentQuery\nfragment ZZZFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaInterfaceFragment on InterfaceImplementation1{sharedField}fragment bbbInterfaceFragment on InterfaceImplementation2{implementation2Field sharedField}fragment zzzFragment on EverythingResponse{listOfInterfaces{sharedField}}query FragmentQuery{noInputQuery{interfaceResponse{sharedField...aaaInterfaceFragment...bbbInterfaceFragment...on InterfaceImplementation2{implementation2Field}...{...on InterfaceImplementation1{implementation1Field}}...on InterfaceImplementation1{implementation1Field}}listOfBools unionResponse{...on UnionType2{unionType2Field}...on UnionType1{unionType1Field}}...ZZZFragment...aaaFragment...zzzFragment}}";
         assert_eq!(expected_sig, generated_sig);
 
-        let mut generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("FragmentQuery".into()), &schema.api_schema().definitions);
-        let mut expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("FragmentQuery".into()), &schema.api_schema().definitions);
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("UnionType1".into(), ReferencedFieldsForType {
                 field_names: vec!["unionType1Field".into()],
                 is_interface: false,
@@ -2690,13 +2774,241 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        compare_ref_fields_by_type(&mut expected_refs, &mut generated_refs);
-        // todo change this to pass by mutable value? see:
-        /*
-        let left = standardize_schema(left).to_string();
-        let right = standardize_schema(right).to_string();
-        */
+        assert!(compare_ref_fields_by_type(&expected_refs, &generated_refs));
     }
 
-    // todo test directives and value stripping
+    #[test(tokio::test)]
+    async fn test_sig_and_ref_with_directives() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"directive @withArgs(
+            arg1: String = "Default"
+            arg2: String
+            arg3: Boolean
+            arg4: Int
+            arg5: [ID]
+          ) on QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
+          directive @noArgs on QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
+          
+          enum SomeEnum {
+            SOME_VALUE_1
+            SOME_VALUE_2
+            SOME_VALUE_3
+          }
+
+          interface AnInterface {
+            sharedField: String!
+          }
+          
+          type InterfaceImplementation1 implements AnInterface {
+            sharedField: String!
+            implementation1Field: Int!
+          }
+          
+          type InterfaceImplementation2 implements AnInterface {
+            sharedField: String!
+            implementation2Field: Float!
+          }
+          
+          type UnionType1 {
+            unionType1Field: String!
+            nullableString: String
+          }
+          
+          type UnionType2 {
+            unionType2Field: String!
+            nullableString: String
+          }
+          
+          union UnionType = UnionType1 | UnionType2
+        
+          type EverythingResponse {
+            enumResponse: SomeEnum
+            interfaceResponse: AnInterface
+            unionResponse: UnionType
+          }
+          
+          type Query {
+            noInputQuery: EverythingResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"fragment Fragment1 on InterfaceImplementation1 {
+            sharedField
+            implementation1Field
+          }
+          
+          fragment Fragment2 on InterfaceImplementation2 @withArgs(arg2: "" arg1: "test" arg3: true arg5: [1,2] arg4: 2) @noArgs {
+            sharedField
+            implementation2Field
+          }
+          
+          query DirectiveQuery @withArgs(arg2: "" arg1: "test") @noArgs {
+            noInputQuery {
+              enumResponse @withArgs(arg3: false arg5: [1,2] arg4: 2) @noArgs
+              unionResponse {
+                ... on UnionType1 @withArgs(arg2: "" arg1: "test") @noArgs {
+                  unionType1Field
+                }
+              }
+              interfaceResponse {
+                ... Fragment1 @withArgs(arg2: "" arg1: "test") @noArgs
+                ... Fragment2
+              }
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("DirectiveQuery".into()));
+        let expected_sig = "# DirectiveQuery\nfragment Fragment1 on InterfaceImplementation1{implementation1Field sharedField}fragment Fragment2 on InterfaceImplementation2@noArgs@withArgs(arg1:\"\",arg2:\"\",arg3:true,arg4:0,arg5:[]){implementation2Field sharedField}query DirectiveQuery@withArgs(arg1:\"\",arg2:\"\")@noArgs{noInputQuery{enumResponse@withArgs(arg3:false,arg4:0,arg5:[])@noArgs interfaceResponse{...Fragment1@noArgs@withArgs(arg1:\"\",arg2:\"\")...Fragment2}unionResponse{...on UnionType1@noArgs@withArgs(arg1:\"\",arg2:\"\"){unionType1Field}}}}";
+        assert_eq!(expected_sig, generated_sig);
+
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("DirectiveQuery".into()), &schema.api_schema().definitions);
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            ("UnionType1".into(), ReferencedFieldsForType {
+                field_names: vec!["unionType1Field".into()],
+                is_interface: false,
+            }),
+            ("Query".into(), ReferencedFieldsForType {
+                field_names: vec!["noInputQuery".into()],
+                is_interface: false,
+            }),
+            ("EverythingResponse".into(), ReferencedFieldsForType {
+                field_names: vec!["enumResponse".into(), "interfaceResponse".into(), "unionResponse".into()],
+                is_interface: false,
+            }),
+            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
+                field_names: vec!["sharedField".into(), "implementation1Field".into()],
+                is_interface: false,
+            }),
+            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
+                field_names: vec!["implementation1Field".into(), "sharedField".into()],
+                is_interface: false,
+            }),
+            ("InterfaceImplementation2".into(), ReferencedFieldsForType {
+                field_names: vec!["sharedField".into(), "implementation2Field".into()],
+                is_interface: false,
+            }),
+        ]);
+        assert!(compare_ref_fields_by_type(&expected_refs, &generated_refs));
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_and_ref_with_aliases() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"enum SomeEnum {
+            SOME_VALUE_1
+            SOME_VALUE_2
+            SOME_VALUE_3
+          }
+        
+          type EverythingResponse {
+            enumResponse: SomeEnum
+          }
+          
+          type Query {
+            enumInputQuery(enumInput: SomeEnum): EverythingResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query AliasQuery {
+            xxAlias: enumInputQuery(enumInput: SOME_VALUE_1) {
+              aliased: enumResponse
+            }
+            aaAlias: enumInputQuery(enumInput: SOME_VALUE_2) {
+              aliasedAgain: enumResponse
+            }
+            ZZAlias: enumInputQuery(enumInput: SOME_VALUE_3) {
+              enumResponse
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("AliasQuery".into()));
+        let expected_sig = "# AliasQuery\nquery AliasQuery{enumInputQuery(enumInput:SOME_VALUE_1){enumResponse}enumInputQuery(enumInput:SOME_VALUE_2){enumResponse}enumInputQuery(enumInput:SOME_VALUE_3){enumResponse}}";
+        assert_eq!(expected_sig, generated_sig);
+
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("AliasQuery".into()), &schema.api_schema().definitions);
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            ("EverythingResponse".into(), ReferencedFieldsForType {
+                field_names: vec!["enumResponse".into()],
+                is_interface: false,
+            }),
+            ("Query".into(), ReferencedFieldsForType {
+                field_names: vec!["enumInputQuery".into()],
+                is_interface: false,
+            }),
+        ]);
+        assert!(compare_ref_fields_by_type(&expected_refs, &generated_refs));
+    }
+
+    #[test(tokio::test)]
+    async fn test_sig_and_ref_with_inline_values() {
+        let configuration = Arc::new(Default::default());
+
+        let schema_str = r#"enum SomeEnum {
+            SOME_VALUE_1
+            SOME_VALUE_2
+            SOME_VALUE_3
+          }
+          
+          input InputType {
+            inputString: String!
+            inputInt: Int!
+            inputBoolean: Boolean
+            nestedType: NestedInputType!
+            enumInput: SomeEnum
+            listInput: [Int!]!
+            nestedTypeList: [NestedInputType]
+          }
+          
+          input NestedEnumInputType {
+            someEnum: SomeEnum
+          }
+        
+          type EverythingResponse {
+            enumResponse: SomeEnum
+          }
+          
+          type Query {
+            inputTypeQuery(input: InputType!): EverythingResponse!
+          }"#;
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+
+        let query = r#"query InlineInputTypeQuery {
+            inputTypeQuery(input: { 
+                inputString: "foo", 
+                inputInt: 42, 
+                inputBoolean: null, 
+                nestedType: { someFloat: 4.2 }, 
+                enumInput: SOME_VALUE_1, 
+                nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ], 
+                listInput: [1, 2, 3] 
+            }) {
+              enumResponse
+            }
+          }"#;
+
+        let doc = Query::parse_document(query, &schema, &configuration);
+
+        let generated_sig = BridgeQueryPlanner::generate_apollo_reporting_signature(&doc, Some("InlineInputTypeQuery".into()));
+        let expected_sig = "# InlineInputTypeQuery\nquery InlineInputTypeQuery{inputTypeQuery(input:{}){enumResponse}}";
+        assert_eq!(expected_sig, generated_sig);
+
+        let generated_refs = BridgeQueryPlanner::generate_apollo_reporting_refs(&doc, Some("InlineInputTypeQuery".into()), &schema.api_schema().definitions);
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            ("EverythingResponse".into(), ReferencedFieldsForType {
+                field_names: vec!["enumResponse".into()],
+                is_interface: false,
+            }),
+            ("Query".into(), ReferencedFieldsForType {
+                field_names: vec!["inputTypeQuery".into()],
+                is_interface: false,
+            }),
+        ]);
+        assert!(compare_ref_fields_by_type(&expected_refs, &generated_refs));
+    }
 }
