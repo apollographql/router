@@ -49,9 +49,6 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
-use crate::query_planner::apollo_reporting::generate_apollo_reporting_signature;
-use crate::query_planner::apollo_reporting::generate_apollo_reporting_refs;
-use crate::query_planner::apollo_reporting::compare_ref_fields_by_type;
 
 // For reporting validation results with `experimental_graphql_validation_mode: both`.
 const VALIDATION_SOURCE_SCHEMA: &str = "schema";
@@ -529,8 +526,8 @@ impl BridgeQueryPlanner {
                     };
                     
                     let generated_usage_reporting = UsageReporting {
-                        stats_report_key: generate_apollo_reporting_signature(&signature_doc.executable, operation.clone()),
-                        referenced_fields_by_type: generate_apollo_reporting_refs(&doc.executable, operation, &self.schema.definitions),
+                        stats_report_key: apollo_router_studio_interop::generate_apollo_reporting_signature(&signature_doc.executable, operation.clone()),
+                        referenced_fields_by_type: apollo_router_studio_interop::generate_apollo_reporting_refs(&doc.executable, operation, &self.schema.definitions),
                     };
 
                     if matches!(
@@ -563,7 +560,7 @@ impl BridgeQueryPlanner {
 
                         // todo do this comparison in a better way
 
-                        if !compare_ref_fields_by_type(&usage_reporting.referenced_fields_by_type, &generated_usage_reporting.referenced_fields_by_type) {
+                        if !apollo_router_studio_interop::compare_ref_fields_by_type(&usage_reporting.referenced_fields_by_type, &generated_usage_reporting.referenced_fields_by_type) {
                             println!(
                                 "referenced_fields_by_type's are different:\n{:?}\n{:?}",  
                                 generated_usage_reporting.referenced_fields_by_type,

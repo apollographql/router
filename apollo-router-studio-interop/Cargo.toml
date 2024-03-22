@@ -1,0 +1,21 @@
+[package]
+name = "apollo-router-studio-interop"
+version = "1.41.1"
+edition = "2021"
+authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
+description = "Utilities to assist in interoperating with Apollo Studio"
+license = "Elastic-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+apollo-compiler = "=1.0.0-beta.13"
+regex = "1.10.3"
+# note: this dependency should _always_ be pinned, prefix the version with an `=`
+router-bridge = "=0.5.16+v2.7.1"
+tokio = { version = "1.36.0", features = ["full"] }
+
+[dev-dependencies]
+test-log = { version = "0.2.14", default-features = false, features = [
+    "trace",
+] }

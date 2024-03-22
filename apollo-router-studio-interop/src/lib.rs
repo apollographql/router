@@ -1,5 +1,3 @@
-//! Calls out to nodejs query planner
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -10,8 +8,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use router_bridge::planner::ReferencedFieldsForType;
-
-// todo move somewhere where it's possible to do fuzzing?
 
 fn format_operation_for_report(operation: &Node<apollo_compiler::executable::Operation>, fragments: &HashMap<String, Node<apollo_compiler::executable::Fragment>>) -> String {
     // Sorted list of fragments goes first
@@ -45,7 +41,7 @@ fn format_operation_for_report(operation: &Node<apollo_compiler::executable::Ope
     format!("# {}\n{}", op_name, stripped_body)
 }
 
-pub(crate) fn generate_apollo_reporting_signature(doc: &ExecutableDocument, operation_name: Option<String>) -> String {
+pub fn generate_apollo_reporting_signature(doc: &ExecutableDocument, operation_name: Option<String>) -> String {
     match doc.get_operation(operation_name.as_deref()).ok() {
         None => {
             // todo Print the whole document after transforming (that's what the JS impl does).
@@ -85,7 +81,7 @@ pub(crate) fn generate_apollo_reporting_signature(doc: &ExecutableDocument, oper
     
 }
 
-pub(crate) fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
+pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
     match doc.get_operation(operation_name.as_deref()).ok() {
         None => HashMap::new(), // todo the existing implementation seems to return the ref fields from the whole document
         Some(operation) => {
@@ -414,7 +410,7 @@ fn order_ref_fields_by_type(original: &HashMap<String, ReferencedFieldsForType>)
         .collect()
 }
 
-pub(crate) fn compare_ref_fields_by_type(left: &HashMap<String, ReferencedFieldsForType>, right: &HashMap<String, ReferencedFieldsForType>) -> bool {
+pub fn compare_ref_fields_by_type(left: &HashMap<String, ReferencedFieldsForType>, right: &HashMap<String, ReferencedFieldsForType>) -> bool {
     return order_ref_fields_by_type(left) == order_ref_fields_by_type(right);
 }
 
