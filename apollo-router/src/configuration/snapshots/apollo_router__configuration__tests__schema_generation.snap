@@ -98,6 +98,11 @@ expression: "&schema"
                       "default": false,
                       "type": "boolean"
                     },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -1968,8 +1973,7 @@ expression: "&schema"
           "description": "Subgraph URL mappings",
           "type": "object",
           "additionalProperties": {
-            "type": "string",
-            "format": "uri"
+            "type": "string"
           }
         }
       ]
@@ -2157,6 +2161,11 @@ expression: "&schema"
             "required_to_start": {
               "description": "Prevents the router from starting if it cannot connect to Redis",
               "default": false,
+              "type": "boolean"
+            },
+            "reset_ttl": {
+              "description": "When a TTL is set on a key, reset it when reading the data from that key",
+              "default": true,
               "type": "boolean"
             },
             "timeout": {
@@ -2395,15 +2404,24 @@ expression: "&schema"
               "properties": {
                 "heartbeat_interval": {
                   "description": "Heartbeat interval for callback mode (default: 5secs)",
-                  "default": "5s",
+                  "default": "enabled",
                   "anyOf": [
                     {
+                      "description": "disable heartbeat",
                       "type": "string",
                       "enum": [
                         "disabled"
                       ]
                     },
                     {
+                      "description": "enable with default interval of 5s",
+                      "type": "string",
+                      "enum": [
+                        "enabled"
+                      ]
+                    },
+                    {
+                      "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
                       "type": "string"
                     }
                   ]
@@ -2455,6 +2473,30 @@ expression: "&schema"
                   "default": null,
                   "type": "object",
                   "properties": {
+                    "heartbeat_interval": {
+                      "description": "Heartbeat interval for graphql-ws protocol (default: disabled)",
+                      "default": "disabled",
+                      "anyOf": [
+                        {
+                          "description": "disable heartbeat",
+                          "type": "string",
+                          "enum": [
+                            "disabled"
+                          ]
+                        },
+                        {
+                          "description": "enable with default interval of 5s",
+                          "type": "string",
+                          "enum": [
+                            "enabled"
+                          ]
+                        },
+                        {
+                          "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "path": {
                       "description": "Path on which WebSockets are listening",
                       "default": null,
@@ -2482,6 +2524,30 @@ expression: "&schema"
                     "description": "WebSocket configuration for a specific subgraph",
                     "type": "object",
                     "properties": {
+                      "heartbeat_interval": {
+                        "description": "Heartbeat interval for graphql-ws protocol (default: disabled)",
+                        "default": "disabled",
+                        "anyOf": [
+                          {
+                            "description": "disable heartbeat",
+                            "type": "string",
+                            "enum": [
+                              "disabled"
+                            ]
+                          },
+                          {
+                            "description": "enable with default interval of 5s",
+                            "type": "string",
+                            "enum": [
+                              "enabled"
+                            ]
+                          },
+                          {
+                            "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
+                            "type": "string"
+                          }
+                        ]
+                      },
                       "path": {
                         "description": "Path on which WebSockets are listening",
                         "default": null,
@@ -2641,6 +2707,11 @@ expression: "&schema"
                     "required_to_start": {
                       "description": "Prevents the router from starting if it cannot connect to Redis",
                       "default": false,
+                      "type": "boolean"
+                    },
+                    "reset_ttl": {
+                      "description": "When a TTL is set on a key, reset it when reading the data from that key",
+                      "default": true,
                       "type": "boolean"
                     },
                     "timeout": {
