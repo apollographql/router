@@ -112,7 +112,7 @@ impl SubscriptionModeConfig {
             if callback_cfg.subgraphs.contains(service_name) || callback_cfg.subgraphs.is_empty() {
                 let callback_cfg = CallbackMode {
                     public_url: callback_cfg.public_url.clone(),
-                    heartbeat_interval: callback_cfg.heartbeat_interval.clone(),
+                    heartbeat_interval: callback_cfg.heartbeat_interval,
                     listen: callback_cfg.listen.clone(),
                     path: callback_cfg.path.clone(),
                     subgraphs: HashSet::new(), // We don't need it
@@ -151,7 +151,7 @@ pub(crate) struct CallbackMode {
     pub(crate) public_url: url::Url,
 
     /// Heartbeat interval for callback mode (default: 5secs)
-    #[serde(default = "HeartbeatInterval::default")]
+    #[serde(default = "HeartbeatInterval::new_enabled")]
     pub(crate) heartbeat_interval: HeartbeatInterval,
     // `skip_serializing` We don't need it in the context
     /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
@@ -168,25 +168,45 @@ pub(crate) struct CallbackMode {
     pub(crate) subgraphs: HashSet<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub(crate) enum HeartbeatInterval {
+    /// disable heartbeat
     Disabled(Disabled),
+    /// enable with default interval of 5s
+    Enabled(Enabled),
+    /// enable with custom interval, e.g. '100ms', '10s' or '1m'
     #[serde(with = "humantime_serde")]
     #[schemars(with = "String")]
     Duration(Duration),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+impl HeartbeatInterval {
+    pub(crate) fn new_enabled() -> Self {
+        Self::Enabled(Enabled::Enabled)
+    }
+    pub(crate) fn new_disabled() -> Self {
+        Self::Disabled(Disabled::Disabled)
+    }
+    pub(crate) fn into_option(self) -> Option<Duration> {
+        match self {
+            Self::Disabled(_) => None,
+            Self::Enabled(_) => Some(Duration::from_secs(5)),
+            Self::Duration(duration) => Some(duration),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Disabled {
     Disabled,
 }
 
-impl Default for HeartbeatInterval {
-    fn default() -> Self {
-        Self::Duration(Duration::from_secs(5))
-    }
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Enabled {
+    Enabled,
 }
 
 /// Using websocket to directly connect to subgraph
@@ -197,14 +217,19 @@ pub(crate) struct PassthroughMode {
     subgraph: SubgraphPassthroughMode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 /// WebSocket configuration for a specific subgraph
 pub(crate) struct WebSocketConfiguration {
     /// Path on which WebSockets are listening
+    #[serde(default)]
     pub(crate) path: Option<String>,
     /// Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)
+    #[serde(default)]
     pub(crate) protocol: WebSocketProtocol,
+    /// Heartbeat interval for graphql-ws protocol (default: disabled)
+    #[serde(default = "HeartbeatInterval::new_disabled")]
+    pub(crate) heartbeat_interval: HeartbeatInterval,
 }
 
 fn default_path() -> String {
@@ -228,21 +253,17 @@ impl Plugin for Subscription {
                     .clone(),
             );
             #[cfg(not(test))]
-            match init
-                .config
-                .mode
-                .callback
-                .as_ref()
-                .expect("we checked in the condition the callback conf")
-                .heartbeat_interval
-            {
-                HeartbeatInterval::Duration(duration) => {
-                    init.notify.set_ttl(Some(duration)).await?;
-                }
-                HeartbeatInterval::Disabled(_) => {
-                    init.notify.set_ttl(None).await?;
-                }
-            }
+            init.notify
+                .set_ttl(
+                    init.config
+                        .mode
+                        .callback
+                        .as_ref()
+                        .expect("we checked in the condition the callback conf")
+                        .heartbeat_interval
+                        .into_option(),
+                )
+                .await?;
         }
 
         Ok(Subscription {
