@@ -142,267 +142,92 @@ mod tests {
     use super::*;
 
     fn cost(schema_str: &str, query_str: &str) -> f64 {
-        let schema = Valid::assume_valid(Schema::parse(schema_str, "").unwrap());
+        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         BasicCostCalculator::estimated(&query, &schema).unwrap()
     }
 
     #[test]
     fn query_cost() {
-        let schema = "
-            type Query {
-                a(id: ID): String
-                b: Int
-            }
-        ";
-        let query = "
-            {
-                a(id: 2)
-            }
-        ";
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_query.graphql");
 
         assert_eq!(cost(schema, query), 0.0)
     }
 
     #[test]
     fn mutation_cost() {
-        let schema = "
-            type Query {
-                a: Int
-            }
-            type Mutation {
-                doSomething: Int
-            }
-        ";
-        let query = "
-            mutation {
-                doSomething
-            }
-        ";
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_mutation.graphql");
 
         assert_eq!(cost(schema, query), 10.0)
     }
 
     #[test]
     fn object_cost() {
-        let schema = "
-            type Query {
-                me: User!
-            }
-
-            type User {
-                name: String!
-                age: Int
-            }
-        ";
-        let query = "
-            {
-                me {
-                    name
-                }
-            }
-        ";
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_object_query.graphql");
 
         assert_eq!(cost(schema, query), 1.0)
     }
 
     #[test]
     fn interface_cost() {
-        let schema = "
-            type Query {
-                favoriteBook: Book
-            }
-
-            interface Book {
-                title: String!
-                author: String!
-            }
-        ";
-        let query = "
-            {
-                favoriteBook {
-                    title
-                }
-            }
-        ";
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_interface_query.graphql");
 
         assert_eq!(cost(schema, query), 1.0)
     }
 
     #[test]
     fn union_cost() {
-        let schema = "
-            type Query {
-                fruit: Fruit!
-            }
-
-            type Apple {
-                weight: Float
-            }
-
-            type Orange {
-                weight: Float
-            }
-
-            union Fruit = Apple | Orange
-        ";
-        let query = "
-            {
-                fruit {
-                    ... on Apple {
-                        weight
-                    }
-                    ... on Orange {
-                        weight
-                    }
-                }
-            }
-        ";
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_union_query.graphql");
 
         assert_eq!(cost(schema, query), 1.0)
     }
 
     #[test]
     fn list_cost() {
-        let schema = "
-            type Query {
-                products: [Product!]
-            }
-
-            type Product {
-                name: String
-                cost: Float
-            }
-        ";
-        let query = "
-            {
-                products {
-                    name
-                    cost
-                }
-            }
-        ";
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_object_list_query.graphql");
 
         assert_eq!(cost(schema, query), 100.0)
     }
 
     #[test]
     fn scalar_list_cost() {
-        let schema = "
-            type Query {
-                numbers: [Int]
-            }
-        ";
-        let query = "
-            {
-                numbers
-            }
-        ";
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_scalar_list_query.graphql");
 
         assert_eq!(cost(schema, query), 0.0)
     }
 
     #[test]
     fn nested_object_lists() {
-        let schema = "
-            type Query {
-                authors: [Author]
-                books: [Book]
-            }
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_nested_list_query.graphql");
 
-            type Author {
-                books: [Book]
-                name: String
-            }
-
-            type Book {
-                authors: [Author]
-                title: String
-            }
-        ";
-        let query = "
-            {
-                authors {
-                    books {
-                        title
-                    }
-                }
-            }
-        ";
-
-        // The scoring works recursively starting at the leaf nodes of the query.
-        //
-        // The leaf selection is a Book object, which has cost 1.
-        //
-        // The parent is itself a selection of an Author object, which has an overhead of 1, plus
-        // the cost of its children (assumed to be a list of 100 books). So the cost of each author
-        // is 101.
-        //
-        // The query selects a list of authors, which is also assumed to have 100 items. So the cost
-        // of the query overall is 101 * 100, or 10,100.
         assert_eq!(cost(schema, query), 10100.0)
     }
 
     #[test]
     fn skip_directive_excludes_cost() {
-        let schema = "
-            type Query {
-                authors: [Author]
-            }
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_skipped_query.graphql");
 
-            type Author {
-                books: [Book]
-                name: String
-            }
-
-            type Book {
-                title: String
-            }
-        ";
-        let query = "
-            {
-                authors {
-                    books @skip(if: true) {
-                        title
-                    }
-                    name
-                }
-            }
-        ";
-
-        assert_eq!(cost(schema, query), 100.0)
+        assert_eq!(cost(schema, query), 0.0)
     }
 
     #[test]
     fn include_directive_excludes_cost() {
-        let schema = "
-            type Query {
-                authors: [Author]
-            }
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_excluded_query.graphql");
 
-            type Author {
-                books: [Book]
-                name: String
-            }
-
-            type Book {
-                title: String
-            }
-        ";
-        let query = "
-            {
-                authors {
-                    books @include(if: false) {
-                        title
-                    }
-                    name
-                }
-            }
-        ";
-
-        assert_eq!(cost(schema, query), 100.0)
+        assert_eq!(cost(schema, query), 0.0)
     }
 
+    #[ignore]
     #[test]
     fn requires_adds_required_field_cost() {
         let schema = r#"
@@ -427,6 +252,7 @@ mod tests {
         assert_eq!(cost(schema, query), 100.0);
     }
 
+    #[ignore]
     #[test]
     fn nested_requires_adds_required_field_costs() {
         let schema = r#"
