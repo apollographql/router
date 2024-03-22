@@ -45,7 +45,7 @@ While the option is also available for APQ, it's disabled for entity caching bec
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4604
 
-### Helm: Support configuring `j` on Horizontal Pod Autoscaler (HPA) targets ([PR #4776](https://github.com/apollographql/router/pull/4776))
+### Helm: Support configuring `ContainerResource` on Horizontal Pod Autoscaler (HPA) targets ([PR #4776](https://github.com/apollographql/router/pull/4776))
 
 The router supports configuration of the [`ContainerResource` type metric](https://kubernetes.io/blog/2023/05/02/hpa-container-resource-metric/) on Horizontal Pod Autoscaler (HPA) targets in the Helm chart with Kubernetes v1.27 or later.
 
