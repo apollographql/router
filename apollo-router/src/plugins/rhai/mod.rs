@@ -38,9 +38,9 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::batching::BatchQuery;
 use self::engine::RhaiService;
 use self::engine::SharedMut;
+use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -341,8 +341,11 @@ macro_rules! gen_map_request {
 
                         // FIXME: Catch this error higher up the chain
                         let context = request_opt.unwrap().context;
-                        if let Some(mut batch_query) = context.extensions().lock().remove::<BatchQuery>() {
-                            let send_fut = batch_query.signal_cancelled("cancelled by rhai".to_string());
+                        if let Some(mut batch_query) =
+                            context.extensions().lock().remove::<BatchQuery>()
+                        {
+                            let send_fut =
+                                batch_query.signal_cancelled("cancelled by rhai".to_string());
                             futures::executor::block_on(send_fut);
                         }
 

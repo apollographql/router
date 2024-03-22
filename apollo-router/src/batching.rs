@@ -154,6 +154,20 @@ enum BatchHandlerMessage {
     },
 }
 
+/// Collection of info needed to resolve a batch query
+pub(crate) struct BatchQueryInfo {
+    /// The owning subgraph request
+    request: SubgraphRequest,
+
+    /// The GraphQL request tied to this subgraph request
+    gql_request: graphql::Request,
+
+    /// Notifier for the subgraph service handler
+    ///
+    /// Note: This must be used or else the subgraph request will time out
+    sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+}
+
 // #[derive(Debug)]
 pub(crate) struct Batch {
     /// A sender channel to communicate with the batching handler
@@ -206,13 +220,8 @@ impl Batch {
             let mut batch_state: HashMap<usize, BatchQueryState> = HashMap::with_capacity(size);
 
             // We also need to keep track of all requests we need to make and their send handles
-            let mut requests: Vec<
-                Vec<(
-                    SubgraphRequest,
-                    graphql::Request,
-                    oneshot::Sender<Result<SubgraphResponse, BoxError>>,
-                )>,
-            > = Vec::from_iter((0..size).map(|_| Vec::new()));
+            let mut requests: Vec<Vec<BatchQueryInfo>> =
+                Vec::from_iter((0..size).map(|_| Vec::new()));
 
             let mut master_client_factory = None;
             tracing::debug!("Batch about to await messages...");
@@ -229,7 +238,10 @@ impl Batch {
                         if let Some(state) = batch_state.get_mut(&index) {
                             // Short-circuit any requests that are waiting for this cancelled request to complete.
                             let cancelled_requests = std::mem::take(&mut requests[index]);
-                            for (request, _, sender) in cancelled_requests {
+                            for BatchQueryInfo {
+                                request, sender, ..
+                            } in cancelled_requests
+                            {
                                 sender
                                     .send(Err(Box::new(FetchError::SubrequestBatchingError {
                                         service: request.subgraph_name.unwrap(),
@@ -281,7 +293,11 @@ impl Batch {
                         if master_client_factory.is_none() {
                             master_client_factory = Some(client_factory);
                         }
-                        requests[index].push((request, gql_request, response_sender))
+                        requests[index].push(BatchQueryInfo {
+                            request,
+                            gql_request,
+                            sender: response_sender,
+                        })
                     }
                 }
             }
@@ -303,20 +319,23 @@ impl Batch {
             // tracing::debug!("all_in_one: {all_in_one:?}");
 
             // Now build up a Service oriented view to use in constructing our batches
-            let mut svc_map: HashMap<
-                String,
-                Vec<(
-                    SubgraphRequest,
-                    graphql::Request,
-                    oneshot::Sender<Result<SubgraphResponse, BoxError>>,
-                )>,
-            > = HashMap::new();
-            for (sg_request, gql_request, tx) in all_in_one {
+            let mut svc_map: HashMap<String, Vec<BatchQueryInfo>> = HashMap::new();
+            for BatchQueryInfo {
+                request: sg_request,
+                gql_request,
+                sender: tx,
+            } in all_in_one
+            {
                 let value = svc_map
                     .entry(sg_request.subgraph_name.clone().unwrap())
                     .or_default();
-                value.push((sg_request, gql_request, tx))
+                value.push(BatchQueryInfo {
+                    request: sg_request,
+                    gql_request,
+                    sender: tx,
+                });
             }
+
             // tracing::debug!("svc_map: {svc_map:?}");
             process_batches(master_client_factory.unwrap(), svc_map)
                 .await
@@ -352,11 +371,7 @@ impl Drop for Batch {
 // Assemble a single batch request to a subgraph
 pub(crate) async fn assemble_batch(
     // context: Context,
-    requests: Vec<(
-        SubgraphRequest,
-        graphql::Request,
-        oneshot::Sender<Result<SubgraphResponse, BoxError>>,
-    )>,
+    requests: Vec<BatchQueryInfo>,
 ) -> (
     String,
     Context,
@@ -364,9 +379,9 @@ pub(crate) async fn assemble_batch(
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 ) {
     // Extract the collection of parts from the requests
-    let (mut txs, request_pairs): (Vec<_>, Vec<_>) = requests
+    let (txs, request_pairs): (Vec<_>, Vec<_>) = requests
         .into_iter()
-        .map(|(request, gql_request, sender)| (sender, (request, gql_request)))
+        .map(|r| (r.sender, (r.request, r.gql_request)))
         .unzip();
     let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
 
@@ -379,8 +394,7 @@ pub(crate) async fn assemble_batch(
 
     // Grab the common info from the first request
     let context = requests
-        .iter()
-        .next()
+        .first()
         .expect("batch to assemble had no requests")
         .context
         .clone();
@@ -395,9 +409,6 @@ pub(crate) async fn assemble_batch(
         .clone()
         .unwrap_or_default();
     let (parts, _) = first_request.into_parts();
-
-    // The senders will be in reverse since they were pushed on in reverse order
-    txs.reverse();
 
     // Generate the final request and pass it up
     // TODO: The previous implementation reversed the txs here. Is that necessary?
@@ -424,12 +435,12 @@ mod tests {
     use hyper::body::to_bytes;
     use tokio::sync::oneshot;
 
+    use super::assemble_batch;
+    use super::BatchQueryInfo;
     use crate::graphql;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::Context;
-
-    use super::assemble_batch;
 
     // Possible example test
     // #[tokio::test(flavor = "multi_thread")]
@@ -474,25 +485,23 @@ mod tests {
         let (receivers, requests): (Vec<_>, Vec<_>) = (0..2)
             .map(|index| {
                 let (tx, rx) = oneshot::channel();
-                let graphql_request = graphql::Request::fake_builder()
+                let gql_request = graphql::Request::fake_builder()
                     .operation_name(format!("batch_test_{index}"))
                     .query(format!("query batch_test {{ slot{index} }}"))
                     .build();
 
                 (
                     rx,
-                    (
-                        SubgraphRequest::fake_builder()
+                    BatchQueryInfo {
+                        request: SubgraphRequest::fake_builder()
                             .subgraph_request(
-                                http::Request::builder()
-                                    .body(graphql_request.clone())
-                                    .unwrap(),
+                                http::Request::builder().body(gql_request.clone()).unwrap(),
                             )
                             .subgraph_name(format!("slot{index}"))
                             .build(),
-                        graphql_request,
-                        tx,
-                    ),
+                        gql_request,
+                        sender: tx,
+                    },
                 )
             })
             .unzip();

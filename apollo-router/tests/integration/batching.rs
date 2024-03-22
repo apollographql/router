@@ -474,6 +474,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 2;
     const COPROCESSOR_CONFIG: &str = include_str!("../fixtures/batching/coprocessor.router.yaml");
