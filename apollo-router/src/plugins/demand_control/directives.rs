@@ -1,8 +1,9 @@
 use anyhow::anyhow;
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Parser;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
@@ -30,37 +31,31 @@ pub(super) struct RequiresDirective {
 impl RequiresDirective {
     pub(super) fn from_field(
         field: &Field,
+        parent_type_name: Option<&NamedType>,
         schema: &Valid<Schema>,
     ) -> Result<Option<Self>, BoxError> {
-        // TODO(tninesling): This assumes the happy path of consumers using federation directives as-is.
-        // However, unlike the built-ins, end users can rename these directives when they import the
-        // federation spec via `@link`. We'll need to follow-up with some solution that accounts for this
-        // potential renaming.
-        let required_selection = field
+        // When a user marks a subgraph schema field with `@requires`, the composition process
+        // replaces `@requires(field: "<selection>")` with `@join__field(requires: "<selection>")`.
+        let requires_arg = field
             .definition
             .directives
-            .get("requires")
-            .and_then(|requires| requires.argument_by_name("fields"))
-            .and_then(|arg| arg.as_str())
-            .map(|selection_without_braces| format!("{{ {} }}", selection_without_braces))
-            .map(|selection_str| {
-                RequiresDirective::parse_top_level_selection_set(selection_str, schema)
-            });
+            .get("join__field")
+            .and_then(|requires| requires.argument_by_name("requires"))
+            .and_then(|arg| arg.as_str());
 
-        match required_selection {
-            Some(Ok(Some(selection))) => Ok(Some(RequiresDirective { fields: selection })),
-            Some(Err(e)) => Err(e),
-            None | Some(Ok(None)) => Ok(None),
+        match (requires_arg, parent_type_name) {
+            (Some(arg), Some(type_name)) => {
+                let field_set = Parser::new()
+                    .parse_field_set(&schema, type_name.clone(), arg, "")
+                    .map_err(|e| anyhow!(e))?;
+
+                Ok(Some(RequiresDirective {
+                    fields: field_set.selection_set.clone(),
+                }))
+            }
+            (Some(_), None) => Err(anyhow!("Parent type name is required to parse fields argument of @requires but none was provided. This is likely because @requires was placed on an anonymous query.").into()),
+            (None, _) => Ok(None)
         }
-    }
-
-    fn parse_top_level_selection_set(
-        str: String,
-        schema: &Valid<Schema>,
-    ) -> Result<Option<SelectionSet>, BoxError> {
-        let doc = ExecutableDocument::parse(schema, str, "").map_err(|e| anyhow!(e))?;
-
-        Ok(doc.anonymous_operation.map(|op| op.selection_set.clone()))
     }
 }
 
