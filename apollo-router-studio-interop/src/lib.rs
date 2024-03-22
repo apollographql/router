@@ -178,14 +178,7 @@ pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: 
 
 enum ApolloReportingSignatureFormatter<'a> {
     Operation(&'a Node<apollo_compiler::executable::Operation>),
-    SelectionSet(&'a apollo_compiler::executable::SelectionSet),
-    Field(&'a Node<apollo_compiler::executable::Field>),
-    FragmentSpread(&'a Node<apollo_compiler::executable::FragmentSpread>),
-    InlineFragment(&'a Node<apollo_compiler::executable::InlineFragment>),
     Fragment(&'a Node<apollo_compiler::executable::Fragment>),
-    UnsortedDirectiveList(&'a apollo_compiler::executable::DirectiveList),
-    SortedDirectiveList(&'a apollo_compiler::executable::DirectiveList),
-    Value(&'a apollo_compiler::ast::Value),
     Argument(&'a Node<apollo_compiler::ast::Argument>),
 }
 
@@ -193,15 +186,8 @@ impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ApolloReportingSignatureFormatter::Operation(operation) => format_operation(operation, f),
-            ApolloReportingSignatureFormatter::SelectionSet(selection_set) => format_selection_set(selection_set, f),
-            ApolloReportingSignatureFormatter::Field(field) => format_field(field, f),
-            ApolloReportingSignatureFormatter::FragmentSpread(fragment_spread) => format_fragment_spread(fragment_spread, f),
-            ApolloReportingSignatureFormatter::InlineFragment(inline_fragment) => format_inline_fragment(inline_fragment, f),
             ApolloReportingSignatureFormatter::Fragment(fragment) => format_fragment(fragment, f),
-            ApolloReportingSignatureFormatter::UnsortedDirectiveList(directives) => format_directives(directives, false, f),
-            ApolloReportingSignatureFormatter::SortedDirectiveList(directives) => format_directives(directives, true, f),
-            ApolloReportingSignatureFormatter::Value(value) => format_value(value, f),
-            ApolloReportingSignatureFormatter::Argument(value) => format_argument(value, f),
+            ApolloReportingSignatureFormatter::Argument(argument) => format_argument(argument, f),
         }
     }
 }
@@ -233,10 +219,10 @@ fn format_operation<'a>(operation: &Node<apollo_compiler::executable::Operation>
         }
 
         // In the JS implementation, only the fragment directives are sorted
-        f.write_str(&ApolloReportingSignatureFormatter::UnsortedDirectiveList(&operation.directives).to_string())?;
+        format_directives(&operation.directives, false, f)?;
     }
 
-    f.write_str(&ApolloReportingSignatureFormatter::SelectionSet(&operation.selection_set).to_string())
+    format_selection_set(&operation.selection_set, f)
 }
 
 fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::SelectionSet, f: &mut fmt::Formatter) -> fmt::Result {
@@ -266,15 +252,18 @@ fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::Selecti
         f.write_str("{ ")?;
 
         for &field in fields.iter() {
-            write!(f, " {}", &ApolloReportingSignatureFormatter::Field(&field).to_string())?;
+            f.write_str(" ")?;
+            format_field(&field, f)?;
         }
 
         for &frag in named_fragments.iter() {
-            write!(f, " {}", &ApolloReportingSignatureFormatter::FragmentSpread(&frag).to_string())?;
+            f.write_str(" ")?;
+            format_fragment_spread(&frag, f)?;
         }
 
         for &frag in inline_fragments.iter() {
-            write!(f, " {}", &ApolloReportingSignatureFormatter::InlineFragment(&frag).to_string())?;
+            f.write_str(" ")?;
+            format_inline_fragment(&frag, f)?;
         }
 
         f.write_str(" } ")?;
@@ -284,7 +273,8 @@ fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::Selecti
 }
 
 fn format_argument<'a>(arg: &Node<apollo_compiler::ast::Argument>, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "{}:{}", arg.name.to_string(), &ApolloReportingSignatureFormatter::Value(&arg.value).to_string())
+    write!(f, "{}:", arg.name.to_string())?;
+    format_value(&arg.value, f)
 }
 
 fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fmt::Formatter) -> fmt::Result {
@@ -300,7 +290,7 @@ fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fm
         // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never 
         // the case for now), followed by all argument names and values separated by ": ", surrounded with brackets. Our usage
         // reporting plugin replaces all newlines + indentation with a single space, so we have to replace commas with spaces if 
-        // the line length is too long.
+        // the line length is too long.m
         // When we update this to allow aliases to remain, we can choose to just always use commas, since we won't have to preserve
         // the same operation ID as it will already be changing with the included alias.
         let arg_strings: Vec<String> = sorted_args.iter()
@@ -319,13 +309,13 @@ fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fm
     }
     
     // In the JS implementation, only the fragment directives are sorted
-    f.write_str(&ApolloReportingSignatureFormatter::UnsortedDirectiveList(&field.directives).to_string())?;
-    f.write_str(&ApolloReportingSignatureFormatter::SelectionSet(&field.selection_set).to_string())
+    format_directives(&field.directives, false, f)?;
+    format_selection_set(&field.selection_set, f)
 }
 
 fn format_fragment_spread<'a>(fragment_spread: &Node<apollo_compiler::executable::FragmentSpread>, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "...{}", fragment_spread.fragment_name.to_string())?;
-    f.write_str(&ApolloReportingSignatureFormatter::SortedDirectiveList(&fragment_spread.directives).to_string())
+    format_directives(&fragment_spread.directives, true, f)
 }
 
 fn format_inline_fragment<'a>(inline_fragment: &Node<apollo_compiler::executable::InlineFragment>, f: &mut fmt::Formatter) -> fmt::Result {
@@ -335,15 +325,15 @@ fn format_inline_fragment<'a>(inline_fragment: &Node<apollo_compiler::executable
         f.write_str("... ")?;
     }
 
-    f.write_str(&ApolloReportingSignatureFormatter::SortedDirectiveList(&inline_fragment.directives).to_string())?;
-    f.write_str(&ApolloReportingSignatureFormatter::SelectionSet(&inline_fragment.selection_set).to_string())
+    format_directives(&inline_fragment.directives, true, f)?;
+    format_selection_set(&inline_fragment.selection_set, f)
 
 }
 
 fn format_fragment<'a>(fragment: &Node<apollo_compiler::executable::Fragment>, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "fragment {} on {}", &fragment.name.to_string(), &fragment.selection_set.ty.to_string())?;
-    f.write_str(&ApolloReportingSignatureFormatter::SortedDirectiveList(&fragment.directives).to_string())?;
-    f.write_str(&ApolloReportingSignatureFormatter::SelectionSet(&fragment.selection_set).to_string())
+    format_directives(&fragment.directives, true, f)?;
+    format_selection_set(&fragment.selection_set, f)
 }
 
 fn format_directives<'a>(directives: &apollo_compiler::executable::DirectiveList, sorted: bool, f: &mut fmt::Formatter) -> fmt::Result {
