@@ -5695,13 +5695,17 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
+ "apollo-compiler",
  "apollo-parser",
+ "apollo-router-studio-interop",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
  "log",
  "reqwest",
+ "router-bridge",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

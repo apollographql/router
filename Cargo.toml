@@ -5,6 +5,7 @@ members = [
     "apollo-router",
     "apollo-router-benchmarks",
     "apollo-router-scaffold",
+    "apollo-router-studio-interop",
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
     "examples/cache-control/rhai",
@@ -24,7 +25,7 @@ members = [
     "examples/surrogate-cache-key/rhai",
     "examples/coprocessor-subgraph/rust",
     "examples/throw-error/rhai",
-    "fuzz", "apollo-router-studio-interop",
+    "fuzz", 
     # Note that xtask is not in the workspace member because it relies on dependencies that are incompatible with the router. Notably hyperx but there are others.
 ]
 
