@@ -524,11 +524,8 @@ impl BridgeQueryPlanner {
                     } else {
                         doc.clone()
                     };
-                    
-                    let generated_usage_reporting = UsageReporting {
-                        stats_report_key: apollo_router_studio_interop::generate_apollo_reporting_signature(&signature_doc.executable, operation.clone()),
-                        referenced_fields_by_type: apollo_router_studio_interop::generate_apollo_reporting_refs(&doc.executable, operation, &self.schema.definitions),
-                    };
+
+                    let generated_usage_reporting = apollo_router_studio_interop::generate_usage_reporting(&signature_doc.executable, &doc.executable, operation, &self.schema.definitions);
 
                     if matches!(
                         self.configuration.experimental_apollo_metrics_generation_mode,
@@ -558,9 +555,7 @@ impl BridgeQueryPlanner {
                             );
                         }
 
-                        // todo do this comparison in a better way
-
-                        if !apollo_router_studio_interop::compare_ref_fields_by_type(&usage_reporting.referenced_fields_by_type, &generated_usage_reporting.referenced_fields_by_type) {
+                        if !apollo_router_studio_interop::ref_fields_by_type_match(&usage_reporting.referenced_fields_by_type, &generated_usage_reporting.referenced_fields_by_type) {
                             println!(
                                 "referenced_fields_by_type's are different:\n{:?}\n{:?}",  
                                 generated_usage_reporting.referenced_fields_by_type,
