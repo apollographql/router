@@ -1,15 +1,27 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::FragmentSpread;
+use apollo_compiler::executable::InlineFragment;
+use apollo_compiler::Schema;
+use regex::Regex;
 
-use apollo_compiler::ast::Name;
-use apollo_compiler::ast::OperationType;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Name;
+use apollo_compiler::ast::OperationType;
+use apollo_compiler::ast::Value;
+use apollo_compiler::executable::Fragment;
+use apollo_compiler::executable::Operation;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::Valid;
 use router_bridge::planner::ReferencedFieldsForType;
 
-fn format_operation_for_report(operation: &Node<apollo_compiler::executable::Operation>, fragments: &HashMap<String, Node<apollo_compiler::executable::Fragment>>) -> String {
+fn format_operation_for_report(operation: &Node<Operation>, fragments: &HashMap<String, Node<Fragment>>) -> String {
     // Sorted list of fragments goes first
     let mut sorted_fragments: Vec<_> = fragments.into_iter().collect();
     sorted_fragments.sort_by_key(|&(k, _)| k);
@@ -27,11 +39,11 @@ fn format_operation_for_report(operation: &Node<apollo_compiler::executable::Ope
     // Note that we don't need to do the StringValue -> hex -> StringValue processing because all StringValues
     // are replaced with an empty string before we get here.
     // todo can we just update the generation code so we don't need to strip any whitespace? Try this after fuzzing.
-    let stripped_body = regex::Regex::new(r"\s+").unwrap()
+    let stripped_body = Regex::new(r"\s+").unwrap()
         .replace_all(&body, " ").to_string();
-    let stripped_body = regex::Regex::new(r"([^_a-zA-Z0-9]) ").unwrap()
+    let stripped_body = Regex::new(r"([^_a-zA-Z0-9]) ").unwrap()
         .replace_all(&stripped_body, "$1").to_string();
-    let stripped_body = regex::Regex::new(r" ([^_a-zA-Z0-9])").unwrap()
+    let stripped_body = Regex::new(r" ([^_a-zA-Z0-9])").unwrap()
         .replace_all(&stripped_body, "$1").to_string();
 
     let op_name = match &operation.name {
@@ -52,18 +64,18 @@ pub fn generate_apollo_reporting_signature(doc: &ExecutableDocument, operation_n
         Some(operation) => {
             // todo figure out used fragments - do this in a "op and ref fields processor" class while generating refs to minimise 
             // the number of times we loop through the whole operation
-            let mut seen_fragments: HashMap<String, Node<apollo_compiler::executable::Fragment>> = HashMap::new();
+            let mut seen_fragments: HashMap<String, Node<Fragment>> = HashMap::new();
 
-            fn extract_frags(selection_set: &apollo_compiler::executable::SelectionSet, doc: &ExecutableDocument, seen_fragments: &mut HashMap<String, Node<apollo_compiler::executable::Fragment>>) {
+            fn extract_frags(selection_set: &SelectionSet, doc: &ExecutableDocument, seen_fragments: &mut HashMap<String, Node<Fragment>>) {
                 for selection in &selection_set.selections {
                     match selection {
-                        apollo_compiler::executable::Selection::Field(field) => {
+                        Selection::Field(field) => {
                             extract_frags(&field.selection_set, doc, seen_fragments);
                         },
-                        apollo_compiler::executable::Selection::InlineFragment(fragment) => {
+                        Selection::InlineFragment(fragment) => {
                             extract_frags(&fragment.selection_set, doc, seen_fragments);
                         },
-                        apollo_compiler::executable::Selection::FragmentSpread(fragment_node) => {
+                        Selection::FragmentSpread(fragment_node) => {
                             if !seen_fragments.contains_key(&fragment_node.fragment_name.to_string()) {
                                 if let Some(fragment) = doc.fragments.get(&fragment_node.fragment_name) {
                                     seen_fragments.insert(fragment_node.fragment_name.to_string(), fragment.clone());
@@ -81,7 +93,7 @@ pub fn generate_apollo_reporting_signature(doc: &ExecutableDocument, operation_n
     
 }
 
-pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: Option<String>, schema: &Valid<apollo_compiler::Schema>) -> HashMap<String, ReferencedFieldsForType> {
+pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: Option<String>, schema: &Valid<Schema>) -> HashMap<String, ReferencedFieldsForType> {
     match doc.get_operation(operation_name.as_deref()).ok() {
         None => HashMap::new(), // todo the existing implementation seems to return the ref fields from the whole document
         Some(operation) => {
@@ -89,7 +101,7 @@ pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: 
             let mut fields_by_interface: HashMap<String, bool> = HashMap::new();
             let mut seen_fragments: HashSet<Name> = HashSet::new();
 
-            fn extract_fields(parent_type: &String, selection_set: &apollo_compiler::executable::SelectionSet, doc: &ExecutableDocument, schema: &Valid<apollo_compiler::Schema>, fields_by_type: &mut HashMap<String, HashSet<String>>, fields_by_interface: &mut HashMap<String, bool>, seen_fragments: &mut HashSet<Name>) {
+            fn extract_fields(parent_type: &String, selection_set: &SelectionSet, doc: &ExecutableDocument, schema: &Valid<Schema>, fields_by_type: &mut HashMap<String, HashSet<String>>, fields_by_interface: &mut HashMap<String, bool>, seen_fragments: &mut HashSet<Name>) {
                 if !fields_by_interface.contains_key(parent_type) {
                     let field_schema_type = schema.types.get(parent_type.as_str());
                     let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
@@ -98,7 +110,7 @@ pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: 
 
                 for selection in &selection_set.selections {
                     match selection {
-                        apollo_compiler::executable::Selection::Field(field) => {
+                        Selection::Field(field) => {
                             fields_by_type
                                 .entry(parent_type.clone())
                                 .or_insert(HashSet::new())
@@ -115,7 +127,7 @@ pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: 
                                 seen_fragments
                             );
                         },
-                        apollo_compiler::executable::Selection::InlineFragment(fragment) => {
+                        Selection::InlineFragment(fragment) => {
                             if let Some(fragment_type) = &fragment.type_condition {
                                 let frag_type_name = fragment_type.to_string();
                                 extract_fields(
@@ -129,7 +141,7 @@ pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: 
                                 );
                             }
                         },
-                        apollo_compiler::executable::Selection::FragmentSpread(fragment) => {
+                        Selection::FragmentSpread(fragment) => {
                             if !seen_fragments.contains(&fragment.fragment_name) {
                                 seen_fragments.insert(fragment.fragment_name.clone());
 
@@ -177,9 +189,9 @@ pub fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: 
 }
 
 enum ApolloReportingSignatureFormatter<'a> {
-    Operation(&'a Node<apollo_compiler::executable::Operation>),
-    Fragment(&'a Node<apollo_compiler::executable::Fragment>),
-    Argument(&'a Node<apollo_compiler::ast::Argument>),
+    Operation(&'a Node<Operation>),
+    Fragment(&'a Node<Fragment>),
+    Argument(&'a Node<Argument>),
 }
 
 impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
@@ -192,7 +204,7 @@ impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
     }
 }
 
-fn format_operation<'a>(operation: &Node<apollo_compiler::executable::Operation>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_operation<'a>(operation: &Node<Operation>, f: &mut fmt::Formatter) -> fmt::Result {
     let shorthand = operation.operation_type == OperationType::Query
         && operation.name.is_none()
         && operation.variables.is_empty()
@@ -225,20 +237,20 @@ fn format_operation<'a>(operation: &Node<apollo_compiler::executable::Operation>
     format_selection_set(&operation.selection_set, f)
 }
 
-fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::SelectionSet, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_selection_set<'a>(selection_set: &SelectionSet, f: &mut fmt::Formatter) -> fmt::Result {
     // print selection set sorted by name with fields followed by named fragments followed by inline fragments
-    let mut fields: Vec<&Node<apollo_compiler::executable::Field>> = Vec::new();
-    let mut named_fragments: Vec<&Node<apollo_compiler::executable::FragmentSpread>> = Vec::new();
-    let mut inline_fragments: Vec<&Node<apollo_compiler::executable::InlineFragment>> = Vec::new();
+    let mut fields: Vec<&Node<Field>> = Vec::new();
+    let mut named_fragments: Vec<&Node<FragmentSpread>> = Vec::new();
+    let mut inline_fragments: Vec<&Node<InlineFragment>> = Vec::new();
     for selection in selection_set.selections.iter() {       
         match selection {
-            apollo_compiler::executable::Selection::Field(field) => {
+            Selection::Field(field) => {
                 fields.push(field);
             }
-            apollo_compiler::executable::Selection::FragmentSpread(fragment_spread) => {
+            Selection::FragmentSpread(fragment_spread) => {
                 named_fragments.push(fragment_spread);
             }
-            apollo_compiler::executable::Selection::InlineFragment(inline_fragment) => {
+            Selection::InlineFragment(inline_fragment) => {
                 inline_fragments.push(inline_fragment);
             }
         }
@@ -272,12 +284,12 @@ fn format_selection_set<'a>(selection_set: &apollo_compiler::executable::Selecti
     Ok(())
 }
 
-fn format_argument<'a>(arg: &Node<apollo_compiler::ast::Argument>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_argument<'a>(arg: &Node<Argument>, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "{}:", arg.name.to_string())?;
     format_value(&arg.value, f)
 }
 
-fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_field<'a>(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
     f.write_str(&field.name)?;
     
     let mut sorted_args = field.arguments.clone();
@@ -313,12 +325,12 @@ fn format_field<'a>(field: &Node<apollo_compiler::executable::Field>, f: &mut fm
     format_selection_set(&field.selection_set, f)
 }
 
-fn format_fragment_spread<'a>(fragment_spread: &Node<apollo_compiler::executable::FragmentSpread>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_fragment_spread<'a>(fragment_spread: &Node<FragmentSpread>, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "...{}", fragment_spread.fragment_name.to_string())?;
     format_directives(&fragment_spread.directives, true, f)
 }
 
-fn format_inline_fragment<'a>(inline_fragment: &Node<apollo_compiler::executable::InlineFragment>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_inline_fragment<'a>(inline_fragment: &Node<InlineFragment>, f: &mut fmt::Formatter) -> fmt::Result {
     if let Some(type_name) = &inline_fragment.type_condition {
         write!(f, "... on {} ", type_name.to_string())?;
     } else {
@@ -330,13 +342,13 @@ fn format_inline_fragment<'a>(inline_fragment: &Node<apollo_compiler::executable
 
 }
 
-fn format_fragment<'a>(fragment: &Node<apollo_compiler::executable::Fragment>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_fragment<'a>(fragment: &Node<Fragment>, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "fragment {} on {}", &fragment.name.to_string(), &fragment.selection_set.ty.to_string())?;
     format_directives(&fragment.directives, true, f)?;
     format_selection_set(&fragment.selection_set, f)
 }
 
-fn format_directives<'a>(directives: &apollo_compiler::executable::DirectiveList, sorted: bool, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_directives<'a>(directives: &DirectiveList, sorted: bool, f: &mut fmt::Formatter) -> fmt::Result {
     let mut sorted_directives = directives.clone();
     if sorted {
         sorted_directives.sort_by(|a, b| a.name.cmp(&b.name));
@@ -367,8 +379,7 @@ fn format_directives<'a>(directives: &apollo_compiler::executable::DirectiveList
     Ok(())
 }
 
-fn format_value<'a>(value: &apollo_compiler::ast::Value, f: &mut fmt::Formatter) -> fmt::Result {
-    use apollo_compiler::ast::Value; // todo do this more often
+fn format_value<'a>(value: &Value, f: &mut fmt::Formatter) -> fmt::Result {
     match value {
         Value::String(_) => {
             f.write_str("\"\"")
