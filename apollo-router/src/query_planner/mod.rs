@@ -17,6 +17,7 @@ mod selection;
 pub(crate) mod subscription;
 pub use plan::*;
 mod labeler;
+mod apollo_reporting;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
 pub(crate) const SUBSCRIBE_SPAN_NAME: &str = "subscribe";
