@@ -73,6 +73,53 @@ async fn test_type_conditions_enabled() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_type_conditions_enabled_generate_query_fragments() {
+    let harness = setup_from_mocks(
+        json! {{
+            "experimental_type_conditioned_fetching": true,
+            "experimental_generate_query_fragments": true,
+            // will make debugging easier
+            "plugins": {
+                "experimental.expose_query_plan": true
+            },
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }},
+        &[
+            (
+                "searchSubgraph",
+                include_str!("fixtures/type_conditions/search_query_fragments_enabled.json"),
+            ),
+            (
+                "artworkSubgraph",
+                include_str!("fixtures/type_conditions/artwork_query_fragments_enabled .json"),
+            ),
+        ],
+    );
+    let supergraph_service = harness.build_supergraph().await.unwrap();
+    let mut variables = JsonMap::new();
+    variables.insert("movieResultParam", "movieResultEnabled".into());
+    variables.insert("articleResultParam", "articleResultEnabled".into());
+    let request = supergraph::Request::fake_builder()
+        .query(QUERY.to_string())
+        .header("Apollo-Expose-Query-Plan", "true")
+        .variables(variables)
+        .build()
+        .expect("expecting valid request");
+
+    let response = supergraph_service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled_list_of_list() {
     let harness = setup_from_mocks(
         json! {{

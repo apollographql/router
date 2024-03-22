@@ -199,7 +199,6 @@ pub struct Configuration {
 
     /// Enable generation of query fragments
     pub(crate) experimental_generate_query_fragments: Option<bool>,
-    
 }
 
 impl PartialEq for Configuration {
@@ -370,7 +369,7 @@ impl Configuration {
             notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
                 .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching.unwrap_or_default(),
-            experimental_generate_query_fragments: experimental_generate_query_fragments
+            experimental_generate_query_fragments
         };
 
         conf.validate()
@@ -407,6 +406,7 @@ impl Configuration {
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
+        experimental_generate_query_fragments: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -434,6 +434,7 @@ impl Configuration {
             experimental_batching: experimental_batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            experimental_generate_query_fragments,
         };
 
         configuration.validate()
@@ -674,7 +675,6 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
-        generate_query_fragments: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -683,7 +683,6 @@ impl Supergraph {
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
             reuse_query_fragments,
-            generate_query_fragments,
         }
     }
 }

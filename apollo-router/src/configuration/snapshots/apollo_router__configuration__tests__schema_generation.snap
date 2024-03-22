@@ -1390,6 +1390,11 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_generate_query_fragments": {
+      "description": "Enable generation of query fragments",
+      "type": "boolean",
+      "nullable": true
+    },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
       "default": "both",
@@ -2531,7 +2536,6 @@ expression: "&schema"
         "path": "/",
         "introspection": false,
         "experimental_reuse_query_fragments": null,
-        "experimental_generate_query_fragments": null,
         "defer_support": true,
         "query_planning": {
           "cache": {
@@ -2551,12 +2555,6 @@ expression: "&schema"
           "description": "Set to false to disable defer support",
           "default": true,
           "type": "boolean"
-        },
-        "experimental_generate_query_fragments": {
-          "description": "Enable generation of query fragments",
-          "default": null,
-          "type": "boolean",
-          "nullable": true
         },
         "experimental_reuse_query_fragments": {
           "description": "Enable reuse of query fragments Default: depends on the federation version",

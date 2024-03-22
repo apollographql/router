@@ -2,7 +2,7 @@
     "mocks": [
         {
             "request": {
-                "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
+                "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){..._generated_onEntityCollectionSection2_0 ...on GallerySection{artwork(params:$movieResultParam)}}}fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection{title artwork(params:$movieResultParam)}",
                 "operationName":"Search__artworkSubgraph__1",
                 "variables":{
                     "movieResultParam":"movieResultEnabled",
@@ -50,7 +50,7 @@
         },
         {
             "request": {
-                "query": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}...on EntityCollectionSection{artwork(params:$articleResultParam)title}}}",
+                "query": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}..._generated_onEntityCollectionSection2_0}}fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection{artwork(params:$articleResultParam)title}",
                 "operationName": "Search__artworkSubgraph__2",
                 "variables":{
                     "articleResultParam":"articleResultEnabled",
