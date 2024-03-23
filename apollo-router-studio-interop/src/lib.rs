@@ -22,182 +22,216 @@ use apollo_compiler::validation::Valid;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 
-// The JS implementation builds up a set of field names and converts it to an array using the spread operator, so we can't
-// rely on any specific ordering. Before comparing the referenced fields we re-order the type vectors.
-fn order_ref_fields_by_type(original: &HashMap<String, ReferencedFieldsForType>) -> HashMap<String, ReferencedFieldsForType> {
-    original.iter()
-        .map(|(parent_type, ref_fields)| {
-            let mut ref_fields_sorted = ref_fields.clone();
-            ref_fields_sorted.field_names.sort();
-            (parent_type.clone(), ref_fields_sorted)
-        })
-        .collect()
+pub struct UsageReportingResult {
+    pub result: UsageReporting,
 }
 
-// todo do this comparison in a better way
-pub fn ref_fields_by_type_match(left: &HashMap<String, ReferencedFieldsForType>, right: &HashMap<String, ReferencedFieldsForType>) -> bool {
-    return order_ref_fields_by_type(left) == order_ref_fields_by_type(right);
-}
+impl UsageReportingResult {
+    pub fn compare_stats_report_key(&self, other: &str) -> bool {
+        return &self.result.stats_report_key == other;
+    }
 
-pub fn generate_usage_reporting(signature_doc: &ExecutableDocument, doc: &ExecutableDocument, operation_name: Option<String>, schema: &Valid<Schema>) -> UsageReporting {
-    UsageReporting {
-        stats_report_key: generate_apollo_reporting_signature(&signature_doc, operation_name.clone()),
-        referenced_fields_by_type: generate_apollo_reporting_refs(&doc, operation_name, schema),
+    // todo test
+    pub fn compare_referenced_fields(&self, other: &HashMap<String, ReferencedFieldsForType>) -> bool {
+        let ref_fields = &self.result.referenced_fields_by_type;
+        if ref_fields.len() != other.len() {
+            return false;
+        }
+    
+        for (name, self_refs) in ref_fields.iter() {
+            let maybe_other_refs = other.get(name);
+            if let Some(other_refs) = maybe_other_refs {
+                if self_refs.is_interface != other_refs.is_interface {
+                    return false;
+                }
+    
+                let mut sorted_self_field_names = self_refs.field_names.clone();
+                sorted_self_field_names.sort();
+                let mut sorted_other_field_names = other_refs.field_names.clone();
+                sorted_other_field_names.sort();
+    
+                if sorted_self_field_names != sorted_other_field_names {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    
+        true
     }
 }
 
-fn generate_apollo_reporting_signature(doc: &ExecutableDocument, operation_name: Option<String>) -> String {
-    match doc.get_operation(operation_name.as_deref()).ok() {
-        None => {
-            // todo Print the whole document after transforming (that's what the JS impl does).
-            // See apollo-utils packages/dropUnusedDefinitions/src/index.ts
-            // Or return an error - if the operation can't be found, would we have thrown an error before getting here?
-            "".to_string()
-        },
-        Some(operation) => {
-            let mut seen_fragments: HashMap<String, Node<Fragment>> = HashMap::new();
+struct UsageReportingGenerator<'a> {
+    signature_doc: &'a ExecutableDocument,
+    references_doc: &'a ExecutableDocument, 
+    operation_name: &'a Option<String>, 
+    schema: &'a Valid<Schema>,
+    fragments_map: HashMap<String, Node<Fragment>>,
+    fields_by_type: HashMap<String, HashSet<String>>,
+    fields_by_interface: HashMap<String, bool>,
+    fragment_spread_set: HashSet<Name>,
+}
 
-            fn extract_frags(selection_set: &SelectionSet, doc: &ExecutableDocument, seen_fragments: &mut HashMap<String, Node<Fragment>>) {
-                for selection in &selection_set.selections {
-                    match selection {
-                        Selection::Field(field) => {
-                            extract_frags(&field.selection_set, doc, seen_fragments);
-                        },
-                        Selection::InlineFragment(fragment) => {
-                            extract_frags(&fragment.selection_set, doc, seen_fragments);
-                        },
-                        Selection::FragmentSpread(fragment_node) => {
-                            if !seen_fragments.contains_key(&fragment_node.fragment_name.to_string()) {
-                                if let Some(fragment) = doc.fragments.get(&fragment_node.fragment_name) {
-                                    seen_fragments.insert(fragment_node.fragment_name.to_string(), fragment.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-            }    
-            extract_frags(&operation.selection_set, doc, &mut seen_fragments);
+pub fn generate_usage_reporting(
+    signature_doc: &ExecutableDocument, 
+    references_doc: &ExecutableDocument, 
+    operation_name: &Option<String>, 
+    schema: &Valid<Schema>
+) -> UsageReportingResult {
+    let mut generator = UsageReportingGenerator {
+        signature_doc, 
+        references_doc,
+        operation_name,
+        schema,
+        fragments_map: HashMap::new(),
+        fields_by_type: HashMap::new(),
+        fields_by_interface: HashMap::new(),
+        fragment_spread_set: HashSet::new(),
+    };
 
-            format_operation_for_report(&operation, &seen_fragments)
+    generator.generate()
+}
+
+impl UsageReportingGenerator<'_> {
+    pub fn generate(&mut self) -> UsageReportingResult {
+        UsageReportingResult {
+            result: UsageReporting {
+                stats_report_key: self.generate_stats_report_key(),
+                referenced_fields_by_type: self.generate_apollo_reporting_refs(),
+            },
         }
     }
-    
-}
 
-fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: Option<String>, schema: &Valid<Schema>) -> HashMap<String, ReferencedFieldsForType> {
-    match doc.get_operation(operation_name.as_deref()).ok() {
-        None => HashMap::new(), // todo the existing implementation seems to return the ref fields from the whole document
-        Some(operation) => {
-            let mut fields_by_type: HashMap<String, HashSet<String>> = HashMap::new();
-            let mut fields_by_interface: HashMap<String, bool> = HashMap::new();
-            let mut seen_fragments: HashSet<Name> = HashSet::new();
+    fn generate_stats_report_key(&mut self) -> String {
+        match self.signature_doc.get_operation(self.operation_name.as_deref()).ok() {
+            None => {
+                // todo Print the whole document after transforming (that's what the JS impl does).
+                // See apollo-utils packages/dropUnusedDefinitions/src/index.ts
+                // Or return an error - if the operation can't be found, would we have thrown an error before getting here?
+                "".to_string()
+            },
+            Some(operation) => {
+                self.fragments_map.clear();
 
-            fn extract_fields(parent_type: &String, selection_set: &SelectionSet, doc: &ExecutableDocument, schema: &Valid<Schema>, fields_by_type: &mut HashMap<String, HashSet<String>>, fields_by_interface: &mut HashMap<String, bool>, seen_fragments: &mut HashSet<Name>) {
-                if !fields_by_interface.contains_key(parent_type) {
-                    let field_schema_type = schema.types.get(parent_type.as_str());
-                    let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
-                    fields_by_interface.insert(parent_type.clone(), is_interface);
-                }
+                self.extract_signature_fragments(&operation.selection_set);
+                self.format_operation_for_report(&operation)
+            }
+        }
+    }
 
-                for selection in &selection_set.selections {
-                    match selection {
-                        Selection::Field(field) => {
-                            fields_by_type
-                                .entry(parent_type.clone())
-                                .or_insert(HashSet::new())
-                                .insert(field.name.to_string());
-
-                            let field_type = field.selection_set.ty.to_string();
-                            extract_fields(
-                                &field_type, 
-                                &field.selection_set, 
-                                doc, 
-                                schema, 
-                                fields_by_type, 
-                                fields_by_interface, 
-                                seen_fragments
-                            );
-                        },
-                        Selection::InlineFragment(fragment) => {
-                            if let Some(fragment_type) = &fragment.type_condition {
-                                let frag_type_name = fragment_type.to_string();
-                                extract_fields(
-                                    &frag_type_name, 
-                                    &fragment.selection_set, 
-                                    doc, 
-                                    schema, 
-                                    fields_by_type, 
-                                    fields_by_interface, 
-                                    seen_fragments
-                                );
-                            }
-                        },
-                        Selection::FragmentSpread(fragment) => {
-                            if !seen_fragments.contains(&fragment.fragment_name) {
-                                seen_fragments.insert(fragment.fragment_name.clone());
-
-                                if let Some(fragment) = doc.fragments.get(&fragment.fragment_name) {
-                                    let fragment_type = fragment.selection_set.ty.to_string();
-                                    extract_fields(
-                                        &fragment_type, 
-                                        &fragment.selection_set, 
-                                        doc, 
-                                        schema, 
-                                        fields_by_type, 
-                                        fields_by_interface, 
-                                        seen_fragments
-                                    );
-                                }
-                            }
+    fn extract_signature_fragments(&mut self, selection_set: &SelectionSet) {
+        for selection in &selection_set.selections {
+            match selection {
+                Selection::Field(field) => {
+                    self.extract_signature_fragments(&field.selection_set);
+                },
+                Selection::InlineFragment(fragment) => {
+                    self.extract_signature_fragments(&fragment.selection_set);
+                },
+                Selection::FragmentSpread(fragment_node) => {
+                    let fragment_name = fragment_node.fragment_name.to_string();
+                    if !self.fragments_map.contains_key(&fragment_name) {
+                        if let Some(fragment) = self.signature_doc.fragments.get(&fragment_node.fragment_name) {
+                            self.fragments_map.insert(fragment_name, fragment.clone());
                         }
                     }
                 }
             }
-
-            let operation_type = match operation.operation_type {
-                OperationType::Query => "Query",
-                OperationType::Mutation => "Mutation",
-                OperationType::Subscription => "Subscription",
-            };
-            extract_fields(&operation_type.into(), &operation.selection_set, doc, schema, &mut fields_by_type, &mut fields_by_interface, &mut seen_fragments);
-
-            fields_by_type.iter()
-                .filter_map(|(type_name, field_names)| {
-                    if field_names.is_empty() {
-                        None
-                    } else {
-                        let refs = ReferencedFieldsForType {
-                            field_names: field_names.iter().cloned().collect(),
-                            is_interface: *fields_by_interface.get(type_name).unwrap_or(&false),
-                        };
-
-                        Some((type_name.clone(), refs))
-                    }
-                })
-                .collect()
         }
     }
-}
 
-fn format_operation_for_report(operation: &Node<Operation>, fragments: &HashMap<String, Node<Fragment>>) -> String {
-    // The result in the name of the operation
-    let op_name = match &operation.name {
-        None => "-".into(),
-        Some(node) => node.to_string(),
-    };
-    let mut result = format!("# {}\n", op_name);
+    fn format_operation_for_report(&self, operation: &Node<Operation>) -> String {
+        // The result in the name of the operation
+        let op_name = match &operation.name {
+            None => "-".into(),
+            Some(node) => node.to_string(),
+        };
+        let mut result = format!("# {}\n", op_name);
 
-    // Followed by a sorted list of fragments
-    let mut sorted_fragments: Vec<_> = fragments.into_iter().collect();
-    sorted_fragments.sort_by_key(|&(k, _)| k);
+        // Followed by a sorted list of fragments
+        let mut sorted_fragments: Vec<_> = self.fragments_map.iter().collect();
+        sorted_fragments.sort_by_key(|&(k, _)| k);
 
-    sorted_fragments.into_iter()
-        .for_each(|(_, fragment)| result.push_str(&ApolloReportingSignatureFormatter::Fragment(fragment).to_string()));
+        sorted_fragments.into_iter()
+            .for_each(|(_, f)| result.push_str(&ApolloReportingSignatureFormatter::Fragment(&f).to_string()));
 
-    // Followed by the operation
-    result.push_str(&ApolloReportingSignatureFormatter::Operation(operation).to_string());
+        // Followed by the operation
+        result.push_str(&ApolloReportingSignatureFormatter::Operation(operation).to_string());
 
-    result
+        result
+    }
+
+    fn generate_apollo_reporting_refs(&mut self) -> HashMap<String, ReferencedFieldsForType> {
+        match self.references_doc.get_operation(self.operation_name.as_deref()).ok() {
+            None => HashMap::new(), // todo the existing implementation seems to return the ref fields from the whole document
+            Some(operation) => {
+                self.fragments_map.clear();
+                self.fields_by_type.clear();
+                self.fields_by_interface.clear();
+
+                let operation_type = match operation.operation_type {
+                    OperationType::Query => "Query",
+                    OperationType::Mutation => "Mutation",
+                    OperationType::Subscription => "Subscription",
+                };
+                self.extract_fields(&operation_type.into(), &operation.selection_set);
+
+                self.fields_by_type.iter()
+                    .filter_map(|(type_name, field_names)| {
+                        if field_names.is_empty() {
+                            None
+                        } else {
+                            let refs = ReferencedFieldsForType {
+                                field_names: field_names.iter().cloned().collect(),
+                                is_interface: *self.fields_by_interface.get(type_name).unwrap_or(&false),
+                            };
+
+                            Some((type_name.clone(), refs))
+                        }
+                    })
+                    .collect()
+            }
+        }
+    }
+    
+    fn extract_fields(&mut self, parent_type: &String, selection_set: &SelectionSet) {
+        if !self.fields_by_interface.contains_key(parent_type) {
+            let field_schema_type = self.schema.types.get(parent_type.as_str());
+            let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
+            self.fields_by_interface.insert(parent_type.clone(), is_interface);
+        }
+
+        for selection in &selection_set.selections {
+            match selection {
+                Selection::Field(field) => {
+                    self.fields_by_type
+                        .entry(parent_type.clone())
+                        .or_insert(HashSet::new())
+                        .insert(field.name.to_string());
+
+                    let field_type = field.selection_set.ty.to_string();
+                    self.extract_fields(&field_type, &field.selection_set);
+                },
+                Selection::InlineFragment(fragment) => {
+                    if let Some(fragment_type) = &fragment.type_condition {
+                        let frag_type_name = fragment_type.to_string();
+                        self.extract_fields(&frag_type_name, &fragment.selection_set);
+                    }
+                },
+                Selection::FragmentSpread(fragment) => {
+                    if !self.fragment_spread_set.contains(&fragment.fragment_name) {
+                        self.fragment_spread_set.insert(fragment.fragment_name.clone());
+
+                        if let Some(fragment) = self.references_doc.fragments.get(&fragment.fragment_name) {
+                            let fragment_type = fragment.selection_set.ty.to_string();
+                            self.extract_fields(&fragment_type,  &fragment.selection_set);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 enum ApolloReportingSignatureFormatter<'a> {
@@ -617,10 +651,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("TransformedQuery".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("TransformedQuery".into()), &schema);
 
         let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("Query".into(), ReferencedFieldsForType {
@@ -657,7 +691,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        assert!(ref_fields_by_type_match(&expected_refs, &generated.referenced_fields_by_type));
+        assert!(generated.compare_referenced_fields(&expected_refs));
     }
 
     #[test(tokio::test)]
@@ -839,10 +873,10 @@ mod tests {
         let schema: Valid<Schema> = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("Query".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("Query".into()), &schema);
 
         let expected_sig = "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("Query".into(), ReferencedFieldsForType {
@@ -888,7 +922,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        assert!(ref_fields_by_type_match(&expected_refs, &generated.referenced_fields_by_type));
+        assert!(generated.compare_referenced_fields(&expected_refs));
     }
 
     #[test(tokio::test)]
@@ -911,10 +945,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("MyQuery".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("MyQuery".into()), &schema);
 
         let expected_sig = "# MyQuery\nquery MyQuery{noInputQuery{id}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
     }
 
     #[test(tokio::test)]
@@ -938,10 +972,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, None, &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
         let expected_sig = "# -\n{noInputQuery{id}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
     }
 
     #[test(tokio::test)]
@@ -967,10 +1001,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, None, &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
         let expected_sig = "# -\nmutation{noInputMutation{id}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
     }
 
     #[test(tokio::test)]
@@ -995,10 +1029,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, None, &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
         let expected_sig = "# -\nsubscription{noInputSubscription{id}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
     }
 
     #[test(tokio::test)]
@@ -1044,10 +1078,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("VariableScalarInputQuery".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("VariableScalarInputQuery".into()), &schema);
 
         let expected_sig = "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){scalarInputQuery(boolInput:$boolInput floatInput:$floatInput idInput:$idInput intInput:$intInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){CCC aaa id nullableId zzz}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
     }
 
 
@@ -1158,10 +1192,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("FragmentQuery".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("FragmentQuery".into()), &schema);
         
         let expected_sig = "# FragmentQuery\nfragment ZZZFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaInterfaceFragment on InterfaceImplementation1{sharedField}fragment bbbInterfaceFragment on InterfaceImplementation2{implementation2Field sharedField}fragment zzzFragment on EverythingResponse{listOfInterfaces{sharedField}}query FragmentQuery{noInputQuery{interfaceResponse{sharedField...aaaInterfaceFragment...bbbInterfaceFragment...on InterfaceImplementation2{implementation2Field}...{...on InterfaceImplementation1{implementation1Field}}...on InterfaceImplementation1{implementation1Field}}listOfBools unionResponse{...on UnionType2{unionType2Field}...on UnionType1{unionType1Field}}...ZZZFragment...aaaFragment...zzzFragment}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("UnionType1".into(), ReferencedFieldsForType {
@@ -1197,7 +1231,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        assert!(ref_fields_by_type_match(&expected_refs, &generated.referenced_fields_by_type));
+        assert!(generated.compare_referenced_fields(&expected_refs));
     }
 
     #[test(tokio::test)]
@@ -1281,10 +1315,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("DirectiveQuery".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("DirectiveQuery".into()), &schema);
 
         let expected_sig = "# DirectiveQuery\nfragment Fragment1 on InterfaceImplementation1{implementation1Field sharedField}fragment Fragment2 on InterfaceImplementation2@noArgs@withArgs(arg1:\"\",arg2:\"\",arg3:true,arg4:0,arg5:[]){implementation2Field sharedField}query DirectiveQuery@withArgs(arg1:\"\",arg2:\"\")@noArgs{noInputQuery{enumResponse@withArgs(arg3:false,arg4:0,arg5:[])@noArgs interfaceResponse{...Fragment1@noArgs@withArgs(arg1:\"\",arg2:\"\")...Fragment2}unionResponse{...on UnionType1@noArgs@withArgs(arg1:\"\",arg2:\"\"){unionType1Field}}}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("UnionType1".into(), ReferencedFieldsForType {
@@ -1312,7 +1346,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        assert!(ref_fields_by_type_match(&expected_refs, &generated.referenced_fields_by_type));
+        assert!(generated.compare_referenced_fields(&expected_refs));
     }
 
     #[test(tokio::test)]
@@ -1346,10 +1380,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("AliasQuery".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("AliasQuery".into()), &schema);
 
         let expected_sig = "# AliasQuery\nquery AliasQuery{enumInputQuery(enumInput:SOME_VALUE_1){enumResponse}enumInputQuery(enumInput:SOME_VALUE_2){enumResponse}enumInputQuery(enumInput:SOME_VALUE_3){enumResponse}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("EverythingResponse".into(), ReferencedFieldsForType {
@@ -1361,7 +1395,7 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        assert!(ref_fields_by_type_match(&expected_refs, &generated.referenced_fields_by_type));
+        assert!(generated.compare_referenced_fields(&expected_refs));
     }
 
     #[test(tokio::test)]
@@ -1411,10 +1445,10 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, Some("InlineInputTypeQuery".into()), &schema);
+        let generated = generate_usage_reporting(&doc, &doc, &Some("InlineInputTypeQuery".into()), &schema);
 
         let expected_sig = "# InlineInputTypeQuery\nquery InlineInputTypeQuery{inputTypeQuery(input:{}){enumResponse}}";
-        assert_eq!(expected_sig, generated.stats_report_key);
+        assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             ("EverythingResponse".into(), ReferencedFieldsForType {
@@ -1426,6 +1460,6 @@ mod tests {
                 is_interface: false,
             }),
         ]);
-        assert!(ref_fields_by_type_match(&expected_refs, &generated.referenced_fields_by_type));
+        assert!(generated.compare_referenced_fields(&expected_refs));
     }
 }

@@ -525,16 +525,21 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let generated_usage_reporting = apollo_router_studio_interop::generate_usage_reporting(&signature_doc.executable, &doc.executable, operation, &self.schema.definitions);
+                    let generated_usage_reporting = apollo_router_studio_interop::generate_usage_reporting(
+                        &signature_doc.executable, 
+                        &doc.executable, 
+                        &operation, 
+                        &self.schema.definitions
+                    );
 
                     if matches!(
                         self.configuration.experimental_apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::Both
                     ) {
-                        if usage_reporting.stats_report_key != generated_usage_reporting.stats_report_key {
+                        if !generated_usage_reporting.compare_stats_report_key(&usage_reporting.stats_report_key) {
                             println!(
                                 "stats_report_key's are different:\n{}\n{}",  
-                                generated_usage_reporting.stats_report_key,
+                                generated_usage_reporting.result.stats_report_key,
                                 usage_reporting.stats_report_key,
                             ); // todo remove
                             tracing::warn!(
@@ -544,7 +549,7 @@ impl BridgeQueryPlanner {
                             );
                             tracing::debug!(
                                 "Different signatures generated between router and router-bridge:\n{}\n{}",
-                                generated_usage_reporting.stats_report_key,
+                                generated_usage_reporting.result.stats_report_key,
                                 usage_reporting.stats_report_key,
                             );
                         } else {
@@ -555,10 +560,10 @@ impl BridgeQueryPlanner {
                             );
                         }
 
-                        if !apollo_router_studio_interop::ref_fields_by_type_match(&usage_reporting.referenced_fields_by_type, &generated_usage_reporting.referenced_fields_by_type) {
+                        if !generated_usage_reporting.compare_referenced_fields(&usage_reporting.referenced_fields_by_type) {
                             println!(
                                 "referenced_fields_by_type's are different:\n{:?}\n{:?}",  
-                                generated_usage_reporting.referenced_fields_by_type,
+                                generated_usage_reporting.result.referenced_fields_by_type,
                                 usage_reporting.referenced_fields_by_type,
                             ); // todo remove
                             tracing::warn!(
@@ -568,7 +573,7 @@ impl BridgeQueryPlanner {
                             );
                             tracing::debug!(
                                 "Different referenced fields generated between router and router-bridge:\n{:?}\n{:?}",
-                                generated_usage_reporting.referenced_fields_by_type,
+                                generated_usage_reporting.result.referenced_fields_by_type,
                                 usage_reporting.referenced_fields_by_type,
                             );
                         } else {
@@ -582,8 +587,8 @@ impl BridgeQueryPlanner {
                         self.configuration.experimental_apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::New
                     ) {
-                        usage_reporting.stats_report_key = generated_usage_reporting.stats_report_key;
-                        usage_reporting.referenced_fields_by_type = generated_usage_reporting.referenced_fields_by_type;
+                        usage_reporting.stats_report_key = generated_usage_reporting.result.stats_report_key;
+                        usage_reporting.referenced_fields_by_type = generated_usage_reporting.result.referenced_fields_by_type;
                     }
                 }
 
