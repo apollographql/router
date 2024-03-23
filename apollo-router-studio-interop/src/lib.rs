@@ -1,24 +1,25 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
-use apollo_compiler::ast::VariableDefinition;
-use apollo_compiler::executable::Field;
-use apollo_compiler::executable::FragmentSpread;
-use apollo_compiler::executable::InlineFragment;
-use apollo_compiler::Schema;
-
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
 use apollo_compiler::ast::Name;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
+use apollo_compiler::ast::VariableDefinition;
+use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Fragment;
+use apollo_compiler::executable::FragmentSpread;
+use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 
@@ -28,28 +29,31 @@ pub struct UsageReportingResult {
 
 impl UsageReportingResult {
     pub fn compare_stats_report_key(&self, other: &str) -> bool {
-        return &self.result.stats_report_key == other;
+        self.result.stats_report_key == other
     }
 
     // todo test
-    pub fn compare_referenced_fields(&self, other: &HashMap<String, ReferencedFieldsForType>) -> bool {
+    pub fn compare_referenced_fields(
+        &self,
+        other: &HashMap<String, ReferencedFieldsForType>,
+    ) -> bool {
         let ref_fields = &self.result.referenced_fields_by_type;
         if ref_fields.len() != other.len() {
             return false;
         }
-    
+
         for (name, self_refs) in ref_fields.iter() {
             let maybe_other_refs = other.get(name);
             if let Some(other_refs) = maybe_other_refs {
                 if self_refs.is_interface != other_refs.is_interface {
                     return false;
                 }
-    
+
                 let mut sorted_self_field_names = self_refs.field_names.clone();
                 sorted_self_field_names.sort();
                 let mut sorted_other_field_names = other_refs.field_names.clone();
                 sorted_other_field_names.sort();
-    
+
                 if sorted_self_field_names != sorted_other_field_names {
                     return false;
                 }
@@ -57,15 +61,15 @@ impl UsageReportingResult {
                 return false;
             }
         }
-    
+
         true
     }
 }
 
 struct UsageReportingGenerator<'a> {
     signature_doc: &'a ExecutableDocument,
-    references_doc: &'a ExecutableDocument, 
-    operation_name: &'a Option<String>, 
+    references_doc: &'a ExecutableDocument,
+    operation_name: &'a Option<String>,
     schema: &'a Valid<Schema>,
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
@@ -74,13 +78,13 @@ struct UsageReportingGenerator<'a> {
 }
 
 pub fn generate_usage_reporting(
-    signature_doc: &ExecutableDocument, 
-    references_doc: &ExecutableDocument, 
-    operation_name: &Option<String>, 
-    schema: &Valid<Schema>
+    signature_doc: &ExecutableDocument,
+    references_doc: &ExecutableDocument,
+    operation_name: &Option<String>,
+    schema: &Valid<Schema>,
 ) -> UsageReportingResult {
     let mut generator = UsageReportingGenerator {
-        signature_doc, 
+        signature_doc,
         references_doc,
         operation_name,
         schema,
@@ -104,18 +108,22 @@ impl UsageReportingGenerator<'_> {
     }
 
     fn generate_stats_report_key(&mut self) -> String {
-        match self.signature_doc.get_operation(self.operation_name.as_deref()).ok() {
+        match self
+            .signature_doc
+            .get_operation(self.operation_name.as_deref())
+            .ok()
+        {
             None => {
                 // todo Print the whole document after transforming (that's what the JS impl does).
                 // See apollo-utils packages/dropUnusedDefinitions/src/index.ts
                 // Or return an error - if the operation can't be found, would we have thrown an error before getting here?
                 "".to_string()
-            },
+            }
             Some(operation) => {
                 self.fragments_map.clear();
 
                 self.extract_signature_fragments(&operation.selection_set);
-                self.format_operation_for_report(&operation)
+                self.format_operation_for_report(operation)
             }
         }
     }
@@ -125,15 +133,19 @@ impl UsageReportingGenerator<'_> {
             match selection {
                 Selection::Field(field) => {
                     self.extract_signature_fragments(&field.selection_set);
-                },
+                }
                 Selection::InlineFragment(fragment) => {
                     self.extract_signature_fragments(&fragment.selection_set);
-                },
+                }
                 Selection::FragmentSpread(fragment_node) => {
                     let fragment_name = fragment_node.fragment_name.to_string();
-                    if !self.fragments_map.contains_key(&fragment_name) {
-                        if let Some(fragment) = self.signature_doc.fragments.get(&fragment_node.fragment_name) {
-                            self.fragments_map.insert(fragment_name, fragment.clone());
+                    if let Entry::Vacant(e) = self.fragments_map.entry(fragment_name) {
+                        if let Some(fragment) = self
+                            .signature_doc
+                            .fragments
+                            .get(&fragment_node.fragment_name)
+                        {
+                            e.insert(fragment.clone());
                         }
                     }
                 }
@@ -153,8 +165,9 @@ impl UsageReportingGenerator<'_> {
         let mut sorted_fragments: Vec<_> = self.fragments_map.iter().collect();
         sorted_fragments.sort_by_key(|&(k, _)| k);
 
-        sorted_fragments.into_iter()
-            .for_each(|(_, f)| result.push_str(&ApolloReportingSignatureFormatter::Fragment(&f).to_string()));
+        sorted_fragments.into_iter().for_each(|(_, f)| {
+            result.push_str(&ApolloReportingSignatureFormatter::Fragment(f).to_string())
+        });
 
         // Followed by the operation
         result.push_str(&ApolloReportingSignatureFormatter::Operation(operation).to_string());
@@ -163,7 +176,11 @@ impl UsageReportingGenerator<'_> {
     }
 
     fn generate_apollo_reporting_refs(&mut self) -> HashMap<String, ReferencedFieldsForType> {
-        match self.references_doc.get_operation(self.operation_name.as_deref()).ok() {
+        match self
+            .references_doc
+            .get_operation(self.operation_name.as_deref())
+            .ok()
+        {
             None => HashMap::new(), // todo the existing implementation seems to return the ref fields from the whole document
             Some(operation) => {
                 self.fragments_map.clear();
@@ -177,14 +194,18 @@ impl UsageReportingGenerator<'_> {
                 };
                 self.extract_fields(&operation_type.into(), &operation.selection_set);
 
-                self.fields_by_type.iter()
+                self.fields_by_type
+                    .iter()
                     .filter_map(|(type_name, field_names)| {
                         if field_names.is_empty() {
                             None
                         } else {
                             let refs = ReferencedFieldsForType {
                                 field_names: field_names.iter().cloned().collect(),
-                                is_interface: *self.fields_by_interface.get(type_name).unwrap_or(&false),
+                                is_interface: *self
+                                    .fields_by_interface
+                                    .get(type_name)
+                                    .unwrap_or(&false),
                             };
 
                             Some((type_name.clone(), refs))
@@ -194,12 +215,13 @@ impl UsageReportingGenerator<'_> {
             }
         }
     }
-    
+
     fn extract_fields(&mut self, parent_type: &String, selection_set: &SelectionSet) {
         if !self.fields_by_interface.contains_key(parent_type) {
             let field_schema_type = self.schema.types.get(parent_type.as_str());
             let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
-            self.fields_by_interface.insert(parent_type.clone(), is_interface);
+            self.fields_by_interface
+                .insert(parent_type.clone(), is_interface);
         }
 
         for selection in &selection_set.selections {
@@ -207,25 +229,28 @@ impl UsageReportingGenerator<'_> {
                 Selection::Field(field) => {
                     self.fields_by_type
                         .entry(parent_type.clone())
-                        .or_insert(HashSet::new())
+                        .or_default()
                         .insert(field.name.to_string());
 
                     let field_type = field.selection_set.ty.to_string();
                     self.extract_fields(&field_type, &field.selection_set);
-                },
+                }
                 Selection::InlineFragment(fragment) => {
                     if let Some(fragment_type) = &fragment.type_condition {
                         let frag_type_name = fragment_type.to_string();
                         self.extract_fields(&frag_type_name, &fragment.selection_set);
                     }
-                },
+                }
                 Selection::FragmentSpread(fragment) => {
                     if !self.fragment_spread_set.contains(&fragment.fragment_name) {
-                        self.fragment_spread_set.insert(fragment.fragment_name.clone());
+                        self.fragment_spread_set
+                            .insert(fragment.fragment_name.clone());
 
-                        if let Some(fragment) = self.references_doc.fragments.get(&fragment.fragment_name) {
+                        if let Some(fragment) =
+                            self.references_doc.fragments.get(&fragment.fragment_name)
+                        {
                             let fragment_type = fragment.selection_set.ty.to_string();
-                            self.extract_fields(&fragment_type,  &fragment.selection_set);
+                            self.extract_fields(&fragment_type, &fragment.selection_set);
                         }
                     }
                 }
@@ -243,14 +268,16 @@ enum ApolloReportingSignatureFormatter<'a> {
 impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ApolloReportingSignatureFormatter::Operation(operation) => format_operation(operation, f),
+            ApolloReportingSignatureFormatter::Operation(operation) => {
+                format_operation(operation, f)
+            }
             ApolloReportingSignatureFormatter::Fragment(fragment) => format_fragment(fragment, f),
             ApolloReportingSignatureFormatter::Argument(argument) => format_argument(argument, f),
         }
     }
 }
 
-fn format_operation<'a>(operation: &Node<Operation>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_operation(operation: &Node<Operation>, f: &mut fmt::Formatter) -> fmt::Result {
     let shorthand = operation.operation_type == OperationType::Query
         && operation.name.is_none()
         && operation.variables.is_empty()
@@ -273,7 +300,6 @@ fn format_operation<'a>(operation: &Node<Operation>, f: &mut fmt::Formatter) -> 
                     f.write_str(",")?;
                 }
                 format_variable(variable, f)?;
-
             }
             f.write_str(")")?;
         }
@@ -285,12 +311,12 @@ fn format_operation<'a>(operation: &Node<Operation>, f: &mut fmt::Formatter) -> 
     format_selection_set(&operation.selection_set, f)
 }
 
-fn format_selection_set<'a>(selection_set: &SelectionSet, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_selection_set(selection_set: &SelectionSet, f: &mut fmt::Formatter) -> fmt::Result {
     // print selection set sorted by name with fields followed by named fragments followed by inline fragments
     let mut fields: Vec<&Node<Field>> = Vec::new();
     let mut named_fragments: Vec<&Node<FragmentSpread>> = Vec::new();
     let mut inline_fragments: Vec<&Node<InlineFragment>> = Vec::new();
-    for selection in selection_set.selections.iter() {       
+    for selection in selection_set.selections.iter() {
         match selection {
             Selection::Field(field) => {
                 fields.push(field);
@@ -312,19 +338,22 @@ fn format_selection_set<'a>(selection_set: &SelectionSet, f: &mut fmt::Formatter
         f.write_str("{")?;
 
         for (i, &field) in fields.iter().enumerate() {
-            format_field(&field, f)?;
+            format_field(field, f)?;
 
-            if i < fields.len() - 1 && field.arguments.len() == 0 && field.selection_set.selections.len() == 0 {
+            if i < fields.len() - 1
+                && field.arguments.is_empty()
+                && field.selection_set.selections.is_empty()
+            {
                 f.write_str(" ")?;
             }
         }
 
         for &frag in named_fragments.iter() {
-            format_fragment_spread(&frag, f)?;
+            format_fragment_spread(frag, f)?;
         }
 
         for &frag in inline_fragments.iter() {
-            format_inline_fragment(&frag, f)?;
+            format_inline_fragment(frag, f)?;
         }
 
         f.write_str("}")?;
@@ -333,8 +362,8 @@ fn format_selection_set<'a>(selection_set: &SelectionSet, f: &mut fmt::Formatter
     Ok(())
 }
 
-fn format_variable<'a>(arg: &Node<VariableDefinition>, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "${}:{}", arg.name.to_string(), arg.ty.to_string())?;
+fn format_variable(arg: &Node<VariableDefinition>, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "${}:{}", arg.name, arg.ty)?;
     if let Some(value) = &arg.default_value {
         f.write_str("=")?;
         format_value(value, f)?;
@@ -343,86 +372,107 @@ fn format_variable<'a>(arg: &Node<VariableDefinition>, f: &mut fmt::Formatter) -
     format_directives(&arg.directives, false, f)
 }
 
-fn format_argument<'a>(arg: &Node<Argument>, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "{}:", arg.name.to_string())?;
+fn format_argument(arg: &Node<Argument>, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "{}:", arg.name)?;
     format_value(&arg.value, f)
 }
 
-fn format_field<'a>(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_field(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
     f.write_str(&field.name)?;
-    
+
     let mut sorted_args = field.arguments.clone();
     if !sorted_args.is_empty() {
         sorted_args.sort_by(|a, b| a.name.cmp(&b.name));
 
         f.write_str("(")?;
 
-        // The graphql-js implementation will use newlines and indentation instead of commas if the length of the "arg line" is 
-        // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never 
+        // The graphql-js implementation will use newlines and indentation instead of commas if the length of the "arg line" is
+        // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never
         // the case for now), followed by all argument names and values separated by ": ", surrounded with brackets. Our usage
-        // reporting plugin replaces all newlines + indentation with a single space, so we have to replace commas with spaces if 
+        // reporting plugin replaces all newlines + indentation with a single space, so we have to replace commas with spaces if
         // the line length is too long.
-        let arg_strings: Vec<String> = sorted_args.iter()
+        let arg_strings: Vec<String> = sorted_args
+            .iter()
             .map(|a| ApolloReportingSignatureFormatter::Argument(a).to_string())
             .collect();
         // Adjust for incorrect spacing generated by the argument formatter - 2 extra characters for the surrounding brackets, plus
         // 2 extra characters per argument for the separating space and the space between the argument name and type.
         // todo test this
-        let original_line_length = 2 + arg_strings.iter().map(|s| s.len()).sum::<usize>() + (arg_strings.len() * 2);
+        let original_line_length =
+            2 + arg_strings.iter().map(|s| s.len()).sum::<usize>() + (arg_strings.len() * 2);
         let separator = if original_line_length > 80 { " " } else { "," };
 
         for (index, arg_string) in arg_strings.iter().enumerate() {
             f.write_str(arg_string)?;
 
             // We only need to insert a separating space it's not the last arg and if the string ends in an alphanumeric character
-            if index < arg_strings.len() - 1 && arg_string.chars().last().map_or(true, |c| c.is_alphanumeric()) {
+            if index < arg_strings.len() - 1
+                && arg_string
+                    .chars()
+                    .last()
+                    .map_or(true, |c| c.is_alphanumeric())
+            {
                 f.write_str(separator)?;
             }
         }
         f.write_str(")")?;
     }
-    
+
     // In the JS implementation, only the fragment directives are sorted
     format_directives(&field.directives, false, f)?;
     format_selection_set(&field.selection_set, f)
 }
 
-fn format_fragment_spread<'a>(fragment_spread: &Node<FragmentSpread>, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "...{}", fragment_spread.fragment_name.to_string())?;
+fn format_fragment_spread(
+    fragment_spread: &Node<FragmentSpread>,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
+    write!(f, "...{}", fragment_spread.fragment_name)?;
     format_directives(&fragment_spread.directives, true, f)
 }
 
-fn format_inline_fragment<'a>(inline_fragment: &Node<InlineFragment>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_inline_fragment(
+    inline_fragment: &Node<InlineFragment>,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     if let Some(type_name) = &inline_fragment.type_condition {
-        write!(f, "...on {}", type_name.to_string())?;
+        write!(f, "...on {}", type_name)?;
     } else {
         f.write_str("...")?;
     }
 
     format_directives(&inline_fragment.directives, true, f)?;
     format_selection_set(&inline_fragment.selection_set, f)
-
 }
 
-fn format_fragment<'a>(fragment: &Node<Fragment>, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "fragment {} on {}", &fragment.name.to_string(), &fragment.selection_set.ty.to_string())?;
+fn format_fragment(fragment: &Node<Fragment>, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(
+        f,
+        "fragment {} on {}",
+        &fragment.name.to_string(),
+        &fragment.selection_set.ty.to_string()
+    )?;
     format_directives(&fragment.directives, true, f)?;
     format_selection_set(&fragment.selection_set, f)
 }
 
-fn format_directives<'a>(directives: &DirectiveList, sorted: bool, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_directives(
+    directives: &DirectiveList,
+    sorted: bool,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     let mut sorted_directives = directives.clone();
     if sorted {
         sorted_directives.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
     for directive in sorted_directives.iter() {
-        write!(f, "@{}", directive.name.to_string())?;
+        write!(f, "@{}", directive.name)?;
 
         let mut sorted_args = directive.arguments.clone();
         if !sorted_args.is_empty() {
             sorted_args.sort_by(|a, b| a.name.cmp(&b.name));
-    
+
             f.write_str("(")?;
 
             for (index, argument) in sorted_args.iter().enumerate() {
@@ -440,23 +490,13 @@ fn format_directives<'a>(directives: &DirectiveList, sorted: bool, f: &mut fmt::
     Ok(())
 }
 
-fn format_value<'a>(value: &Value, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_value(value: &Value, f: &mut fmt::Formatter) -> fmt::Result {
     match value {
-        Value::String(_) => {
-            f.write_str("\"\"")
-        }
-        Value::Float(_) | Value::Int(_) => {
-            f.write_str("0")
-        }
-        Value::Object(_) => {
-            f.write_str("{}")
-        }
-        Value::List(_) => {
-            f.write_str("[]")
-        }
-        rest => {
-            f.write_str(&rest.to_string())
-        }
+        Value::String(_) => f.write_str("\"\""),
+        Value::Float(_) | Value::Int(_) => f.write_str("0"),
+        Value::Object(_) => f.write_str("{}"),
+        Value::List(_) => f.write_str("[]"),
+        rest => f.write_str(&rest.to_string()),
     }
 }
 
@@ -651,45 +691,67 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, &Some("TransformedQuery".into()), &schema);
+        let generated =
+            generate_usage_reporting(&doc, &doc, &Some("TransformedQuery".into()), &schema);
 
         let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
         assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
-            ("Query".into(), ReferencedFieldsForType {
-                field_names: vec!["scalarInputQuery".into()],
-                is_interface: false,
-            }),
-            ("BasicTypesResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["nullableFloat".into(), "nonNullFloat".into()],
-                is_interface: false,
-            }),
-            ("EverythingResponse".into(), ReferencedFieldsForType {
-                field_names: vec![
-                    "basicTypes".into(), 
-                    "objectTypeWithInputField".into(),
-                    "enumResponse".into(),
-                    "interfaceResponse".into(),
-                ],
-                is_interface: false,
-            }),
-            ("AnInterface".into(), ReferencedFieldsForType {
-                field_names: vec!["sharedField".into()],
-                is_interface: true,
-            }),
-            ("ObjectTypeResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["stringField".into(), "__typename".into(), "intField".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
-                field_names: vec!["implementation1Field".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation2".into(), ReferencedFieldsForType {
-                field_names: vec!["implementation2Field".into()],
-                is_interface: false,
-            }),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["scalarInputQuery".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "BasicTypesResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["nullableFloat".into(), "nonNullFloat".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec![
+                        "basicTypes".into(),
+                        "objectTypeWithInputField".into(),
+                        "enumResponse".into(),
+                        "interfaceResponse".into(),
+                    ],
+                    is_interface: false,
+                },
+            ),
+            (
+                "AnInterface".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sharedField".into()],
+                    is_interface: true,
+                },
+            ),
+            (
+                "ObjectTypeResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["stringField".into(), "__typename".into(), "intField".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["implementation1Field".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation2".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["implementation2Field".into()],
+                    is_interface: false,
+                },
+            ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
     }
@@ -870,7 +932,8 @@ mod tests {
             }
           }"#;
 
-        let schema: Valid<Schema> = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+        let schema: Valid<Schema> =
+            Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
         let generated = generate_usage_reporting(&doc, &doc, &Some("Query".into()), &schema);
@@ -879,48 +942,76 @@ mod tests {
         assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
-            ("Query".into(), ReferencedFieldsForType {
-                field_names: vec!["scalarResponseQuery".into(), "noInputQuery".into(), "basicInputTypeQuery".into()],
-                is_interface: false,
-            }),
-            ("BasicTypesResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["nonNullId".into(), "nonNullInt".into()],
-                is_interface: false,
-            }),
-            ("ObjectTypeResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["intField".into(), "stringField".into()],
-                is_interface: false,
-            }),
-            ("UnionType2".into(), ReferencedFieldsForType {
-                field_names: vec!["unionType2Field".into()],
-                is_interface: false,
-            }),
-            ("EverythingResponse".into(), ReferencedFieldsForType {
-                field_names: vec![
-                    "basicTypes".into(),
-                    "enumResponse".into(),
-                    "interfaceImplementationResponse".into(),
-                    "interfaceResponse".into(),
-                    "listOfUnions".into(),
-                    "objectTypeWithInputField".into(),
-                    "unionResponse".into(),
-                    "unionType2Response".into(),
-                    "listOfObjects".into(),
-                ],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
-                field_names: vec!["implementation1Field".into(), "sharedField".into()],
-                is_interface: false,
-            }),
-            ("UnionType1".into(), ReferencedFieldsForType {
-                field_names: vec!["nullableString".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation2".into(), ReferencedFieldsForType {
-                field_names: vec!["sharedField".into(), "implementation2Field".into()],
-                is_interface: false,
-            }),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec![
+                        "scalarResponseQuery".into(),
+                        "noInputQuery".into(),
+                        "basicInputTypeQuery".into(),
+                    ],
+                    is_interface: false,
+                },
+            ),
+            (
+                "BasicTypesResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["nonNullId".into(), "nonNullInt".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "ObjectTypeResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["intField".into(), "stringField".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "UnionType2".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["unionType2Field".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec![
+                        "basicTypes".into(),
+                        "enumResponse".into(),
+                        "interfaceImplementationResponse".into(),
+                        "interfaceResponse".into(),
+                        "listOfUnions".into(),
+                        "objectTypeWithInputField".into(),
+                        "unionResponse".into(),
+                        "unionType2Response".into(),
+                        "listOfObjects".into(),
+                    ],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["implementation1Field".into(), "sharedField".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "UnionType1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["nullableString".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation2".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sharedField".into(), "implementation2Field".into()],
+                    is_interface: false,
+                },
+            ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
     }
@@ -968,7 +1059,6 @@ mod tests {
             }
           }"#;
 
-
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
@@ -996,7 +1086,6 @@ mod tests {
               id
             }
           }"#;
-
 
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1078,12 +1167,16 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, &Some("VariableScalarInputQuery".into()), &schema);
+        let generated = generate_usage_reporting(
+            &doc,
+            &doc,
+            &Some("VariableScalarInputQuery".into()),
+            &schema,
+        );
 
         let expected_sig = "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){scalarInputQuery(boolInput:$boolInput floatInput:$floatInput idInput:$idInput intInput:$intInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){CCC aaa id nullableId zzz}}";
         assert!(generated.compare_stats_report_key(expected_sig));
     }
-
 
     #[test(tokio::test)]
     async fn test_sig_and_ref_with_fragments() {
@@ -1192,44 +1285,74 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, &Some("FragmentQuery".into()), &schema);
-        
+        let generated =
+            generate_usage_reporting(&doc, &doc, &Some("FragmentQuery".into()), &schema);
+
         let expected_sig = "# FragmentQuery\nfragment ZZZFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaInterfaceFragment on InterfaceImplementation1{sharedField}fragment bbbInterfaceFragment on InterfaceImplementation2{implementation2Field sharedField}fragment zzzFragment on EverythingResponse{listOfInterfaces{sharedField}}query FragmentQuery{noInputQuery{interfaceResponse{sharedField...aaaInterfaceFragment...bbbInterfaceFragment...on InterfaceImplementation2{implementation2Field}...{...on InterfaceImplementation1{implementation1Field}}...on InterfaceImplementation1{implementation1Field}}listOfBools unionResponse{...on UnionType2{unionType2Field}...on UnionType1{unionType1Field}}...ZZZFragment...aaaFragment...zzzFragment}}";
         assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
-            ("UnionType1".into(), ReferencedFieldsForType {
-                field_names: vec!["unionType1Field".into()],
-                is_interface: false,
-            }),
-            ("UnionType2".into(), ReferencedFieldsForType {
-                field_names: vec!["unionType2Field".into()],
-                is_interface: false,
-            }),
-            ("Query".into(), ReferencedFieldsForType {
-                field_names: vec!["noInputQuery".into()],
-                is_interface: false,
-            }),
-            ("EverythingResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["listOfInterfaces".into(), "listOfBools".into(), "interfaceResponse".into(), "unionResponse".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
-                field_names: vec!["sharedField".into(), "implementation1Field".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
-                field_names: vec!["implementation1Field".into(), "sharedField".into()],
-                is_interface: false,
-            }),
-            ("AnInterface".into(), ReferencedFieldsForType {
-                field_names: vec!["sharedField".into()],
-                is_interface: true,
-            }),
-            ("InterfaceImplementation2".into(), ReferencedFieldsForType {
-                field_names: vec!["sharedField".into(), "implementation2Field".into()],
-                is_interface: false,
-            }),
+            (
+                "UnionType1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["unionType1Field".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "UnionType2".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["unionType2Field".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["noInputQuery".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec![
+                        "listOfInterfaces".into(),
+                        "listOfBools".into(),
+                        "interfaceResponse".into(),
+                        "unionResponse".into(),
+                    ],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sharedField".into(), "implementation1Field".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["implementation1Field".into(), "sharedField".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "AnInterface".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sharedField".into()],
+                    is_interface: true,
+                },
+            ),
+            (
+                "InterfaceImplementation2".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sharedField".into(), "implementation2Field".into()],
+                    is_interface: false,
+                },
+            ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
     }
@@ -1315,36 +1438,59 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, &Some("DirectiveQuery".into()), &schema);
+        let generated =
+            generate_usage_reporting(&doc, &doc, &Some("DirectiveQuery".into()), &schema);
 
         let expected_sig = "# DirectiveQuery\nfragment Fragment1 on InterfaceImplementation1{implementation1Field sharedField}fragment Fragment2 on InterfaceImplementation2@noArgs@withArgs(arg1:\"\",arg2:\"\",arg3:true,arg4:0,arg5:[]){implementation2Field sharedField}query DirectiveQuery@withArgs(arg1:\"\",arg2:\"\")@noArgs{noInputQuery{enumResponse@withArgs(arg3:false,arg4:0,arg5:[])@noArgs interfaceResponse{...Fragment1@noArgs@withArgs(arg1:\"\",arg2:\"\")...Fragment2}unionResponse{...on UnionType1@noArgs@withArgs(arg1:\"\",arg2:\"\"){unionType1Field}}}}";
         assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
-            ("UnionType1".into(), ReferencedFieldsForType {
-                field_names: vec!["unionType1Field".into()],
-                is_interface: false,
-            }),
-            ("Query".into(), ReferencedFieldsForType {
-                field_names: vec!["noInputQuery".into()],
-                is_interface: false,
-            }),
-            ("EverythingResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["enumResponse".into(), "interfaceResponse".into(), "unionResponse".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
-                field_names: vec!["sharedField".into(), "implementation1Field".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation1".into(), ReferencedFieldsForType {
-                field_names: vec!["implementation1Field".into(), "sharedField".into()],
-                is_interface: false,
-            }),
-            ("InterfaceImplementation2".into(), ReferencedFieldsForType {
-                field_names: vec!["sharedField".into(), "implementation2Field".into()],
-                is_interface: false,
-            }),
+            (
+                "UnionType1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["unionType1Field".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["noInputQuery".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec![
+                        "enumResponse".into(),
+                        "interfaceResponse".into(),
+                        "unionResponse".into(),
+                    ],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sharedField".into(), "implementation1Field".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation1".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["implementation1Field".into(), "sharedField".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "InterfaceImplementation2".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sharedField".into(), "implementation2Field".into()],
+                    is_interface: false,
+                },
+            ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
     }
@@ -1386,14 +1532,20 @@ mod tests {
         assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
-            ("EverythingResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["enumResponse".into()],
-                is_interface: false,
-            }),
-            ("Query".into(), ReferencedFieldsForType {
-                field_names: vec!["enumInputQuery".into()],
-                is_interface: false,
-            }),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["enumResponse".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["enumInputQuery".into()],
+                    is_interface: false,
+                },
+            ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
     }
@@ -1445,20 +1597,27 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        let generated = generate_usage_reporting(&doc, &doc, &Some("InlineInputTypeQuery".into()), &schema);
+        let generated =
+            generate_usage_reporting(&doc, &doc, &Some("InlineInputTypeQuery".into()), &schema);
 
         let expected_sig = "# InlineInputTypeQuery\nquery InlineInputTypeQuery{inputTypeQuery(input:{}){enumResponse}}";
         assert!(generated.compare_stats_report_key(expected_sig));
 
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
-            ("EverythingResponse".into(), ReferencedFieldsForType {
-                field_names: vec!["enumResponse".into()],
-                is_interface: false,
-            }),
-            ("Query".into(), ReferencedFieldsForType {
-                field_names: vec!["inputTypeQuery".into()],
-                is_interface: false,
-            }),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["enumResponse".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["inputTypeQuery".into()],
+                    is_interface: false,
+                },
+            ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
     }

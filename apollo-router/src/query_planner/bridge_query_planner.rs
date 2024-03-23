@@ -386,6 +386,7 @@ impl BridgeQueryPlanner {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn plan(
         &self,
         original_query: String,
@@ -486,9 +487,11 @@ impl BridgeQueryPlanner {
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         // todo disable if running in ApolloMetricsGenerationMode::New mode
         let operation_signature = if matches!(
-            self.configuration.experimental_apollo_metrics_generation_mode,
+            self.configuration
+                .experimental_apollo_metrics_generation_mode,
             ApolloMetricsGenerationMode::Legacy | ApolloMetricsGenerationMode::Both
-        ) && original_query != filtered_query {
+        ) && original_query != filtered_query
+        {
             Some(
                 self.planner
                     .operation_signature(original_query.clone(), operation.clone())
@@ -513,7 +516,8 @@ impl BridgeQueryPlanner {
                 }
 
                 if matches!(
-                    self.configuration.experimental_apollo_metrics_generation_mode,
+                    self.configuration
+                        .experimental_apollo_metrics_generation_mode,
                     ApolloMetricsGenerationMode::New | ApolloMetricsGenerationMode::Both
                 ) {
                     // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -525,20 +529,24 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let generated_usage_reporting = apollo_router_studio_interop::generate_usage_reporting(
-                        &signature_doc.executable, 
-                        &doc.executable, 
-                        &operation, 
-                        &self.schema.definitions
-                    );
+                    let generated_usage_reporting =
+                        apollo_router_studio_interop::generate_usage_reporting(
+                            &signature_doc.executable,
+                            &doc.executable,
+                            &operation,
+                            &self.schema.definitions,
+                        );
 
                     if matches!(
-                        self.configuration.experimental_apollo_metrics_generation_mode,
+                        self.configuration
+                            .experimental_apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::Both
                     ) {
-                        if !generated_usage_reporting.compare_stats_report_key(&usage_reporting.stats_report_key) {
+                        if !generated_usage_reporting
+                            .compare_stats_report_key(&usage_reporting.stats_report_key)
+                        {
                             println!(
-                                "stats_report_key's are different:\n{}\n{}",  
+                                "stats_report_key's are different:\n{}\n{}",
                                 generated_usage_reporting.result.stats_report_key,
                                 usage_reporting.stats_report_key,
                             ); // todo remove
@@ -555,14 +563,22 @@ impl BridgeQueryPlanner {
                         } else {
                             println!("stats_report_key's are identical"); // todo remove
                             tracing::info!(
-                                monotonic_counter.apollo.router.operations.telemetry.studio.signature = 1u64,
+                                monotonic_counter
+                                    .apollo
+                                    .router
+                                    .operations
+                                    .telemetry
+                                    .studio
+                                    .signature = 1u64,
                                 generation.is_matched = true,
                             );
                         }
 
-                        if !generated_usage_reporting.compare_referenced_fields(&usage_reporting.referenced_fields_by_type) {
+                        if !generated_usage_reporting
+                            .compare_referenced_fields(&usage_reporting.referenced_fields_by_type)
+                        {
                             println!(
-                                "referenced_fields_by_type's are different:\n{:?}\n{:?}",  
+                                "referenced_fields_by_type's are different:\n{:?}\n{:?}",
                                 generated_usage_reporting.result.referenced_fields_by_type,
                                 usage_reporting.referenced_fields_by_type,
                             ); // todo remove
@@ -579,16 +595,25 @@ impl BridgeQueryPlanner {
                         } else {
                             println!("referenced_fields_by_type's are identical"); // todo remove
                             tracing::info!(
-                                monotonic_counter.apollo.router.operations.telemetry.studio.references = 1u64,
+                                monotonic_counter
+                                    .apollo
+                                    .router
+                                    .operations
+                                    .telemetry
+                                    .studio
+                                    .references = 1u64,
                                 generation.is_matched = true,
                             );
                         }
                     } else if matches!(
-                        self.configuration.experimental_apollo_metrics_generation_mode,
+                        self.configuration
+                            .experimental_apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::New
                     ) {
-                        usage_reporting.stats_report_key = generated_usage_reporting.result.stats_report_key;
-                        usage_reporting.referenced_fields_by_type = generated_usage_reporting.result.referenced_fields_by_type;
+                        usage_reporting.stats_report_key =
+                            generated_usage_reporting.result.stats_report_key;
+                        usage_reporting.referenced_fields_by_type =
+                            generated_usage_reporting.result.referenced_fields_by_type;
                     }
                 }
 

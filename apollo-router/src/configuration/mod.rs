@@ -294,7 +294,9 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
-            .experimental_apollo_metrics_generation_mode(ad_hoc.experimental_apollo_metrics_generation_mode)
+            .experimental_apollo_metrics_generation_mode(
+                ad_hoc.experimental_apollo_metrics_generation_mode,
+            )
             .experimental_batching(ad_hoc.experimental_batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -426,8 +428,8 @@ impl Configuration {
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
                 .unwrap_or_default(),
-            experimental_apollo_metrics_generation_mode: experimental_apollo_metrics_generation_mode
-                .unwrap_or_default(),
+            experimental_apollo_metrics_generation_mode:
+                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },

@@ -11,7 +11,10 @@ use libfuzzer_sys::arbitrary::Unstructured;
 use log::debug;
 
 /// This generate an arbitrary valid GraphQL operation
-pub fn generate_valid_operation(input: &[u8], schema_path: &'static str) -> Result<(String, String)> {
+pub fn generate_valid_operation(
+    input: &[u8],
+    schema_path: &'static str,
+) -> Result<(String, String)> {
     drop(env_logger::try_init());
 
     let contents = fs::read_to_string(schema_path).expect("cannot read file");
