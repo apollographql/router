@@ -443,7 +443,6 @@ name = "apollo-router-studio-interop"
 version = "1.41.1"
 dependencies = [
  "apollo-compiler",
- "regex",
  "router-bridge",
  "test-log",
  "tokio",

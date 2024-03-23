@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use std::fmt;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::ast::VariableDefinition;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FragmentSpread;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::Schema;
-use regex::Regex;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
@@ -180,37 +180,24 @@ fn generate_apollo_reporting_refs(doc: &ExecutableDocument, operation_name: Opti
 }
 
 fn format_operation_for_report(operation: &Node<Operation>, fragments: &HashMap<String, Node<Fragment>>) -> String {
-    // Sorted list of fragments goes first
-    let mut sorted_fragments: Vec<_> = fragments.into_iter().collect();
-    sorted_fragments.sort_by_key(|&(k, _)| k);
-
-    let mut body_sections = sorted_fragments.into_iter()
-        .map(|(_name, fragment)| ApolloReportingSignatureFormatter::Fragment(fragment).to_string())
-        .collect::<Vec<_>>();
-
-    // Then the operation
-    body_sections.push(ApolloReportingSignatureFormatter::Operation(operation).to_string());
-
-    let body = body_sections.join("");
-
-    // This is based on apollo-utils packages/printWithReducedWhitespace/src/index.ts
-    // Note that we don't need to do the StringValue -> hex -> StringValue processing because all StringValues
-    // are replaced with an empty string before we get here.
-    // todo can we just update the generation code so we don't need to strip any whitespace? Try this after fuzzing.
-    /*
-    let stripped_body = Regex::new(r"\s+").unwrap()
-        .replace_all(&body, " ").to_string();
-    let stripped_body = Regex::new(r"([^_a-zA-Z0-9]) ").unwrap()
-        .replace_all(&stripped_body, "$1").to_string();
-    let stripped_body = Regex::new(r" ([^_a-zA-Z0-9])").unwrap()
-        .replace_all(&stripped_body, "$1").to_string();
-    */
-
+    // The result in the name of the operation
     let op_name = match &operation.name {
         None => "-".into(),
         Some(node) => node.to_string(),
     };
-    format!("# {}\n{}", op_name, body)
+    let mut result = format!("# {}\n", op_name);
+
+    // Followed by a sorted list of fragments
+    let mut sorted_fragments: Vec<_> = fragments.into_iter().collect();
+    sorted_fragments.sort_by_key(|&(k, _)| k);
+
+    sorted_fragments.into_iter()
+        .for_each(|(_, fragment)| result.push_str(&ApolloReportingSignatureFormatter::Fragment(fragment).to_string()));
+
+    // Followed by the operation
+    result.push_str(&ApolloReportingSignatureFormatter::Operation(operation).to_string());
+
+    result
 }
 
 enum ApolloReportingSignatureFormatter<'a> {
@@ -247,10 +234,12 @@ fn format_operation<'a>(operation: &Node<Operation>, f: &mut fmt::Formatter) -> 
             let mut sorted_variables = operation.variables.clone();
             sorted_variables.sort_by(|a, b| a.name.cmp(&b.name));
             for (index, variable) in sorted_variables.iter().enumerate() {
+                // todo test behaviour when a comma is not necessary (if it was a space it would be left out)
                 if index != 0 {
                     f.write_str(",")?;
                 }
-                f.write_str(&(variable.to_string()))?;
+                format_variable(variable, f)?;
+
             }
             f.write_str(")")?;
         }
@@ -310,6 +299,16 @@ fn format_selection_set<'a>(selection_set: &SelectionSet, f: &mut fmt::Formatter
     Ok(())
 }
 
+fn format_variable<'a>(arg: &Node<VariableDefinition>, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "${}:{}", arg.name.to_string(), arg.ty.to_string())?;
+    if let Some(value) = &arg.default_value {
+        f.write_str("=")?;
+        format_value(value, f)?;
+    }
+    // todo test sorting
+    format_directives(&arg.directives, false, f)
+}
+
 fn format_argument<'a>(arg: &Node<Argument>, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "{}:", arg.name.to_string())?;
     format_value(&arg.value, f)
@@ -328,21 +327,23 @@ fn format_field<'a>(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result 
         // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never 
         // the case for now), followed by all argument names and values separated by ": ", surrounded with brackets. Our usage
         // reporting plugin replaces all newlines + indentation with a single space, so we have to replace commas with spaces if 
-        // the line length is too long.m
-        // When we update this to allow aliases to remain, we can choose to just always use commas, since we won't have to preserve
-        // the same operation ID as it will already be changing with the included alias.
+        // the line length is too long.
         let arg_strings: Vec<String> = sorted_args.iter()
             .map(|a| ApolloReportingSignatureFormatter::Argument(a).to_string())
             .collect();
-        // todo adjust for incorrect spacing
+        // Adjust for incorrect spacing generated by the argument formatter - 2 extra characters for the surrounding brackets, plus
+        // 2 extra characters per argument for the separating space and the space between the argument name and type.
+        // todo test this
         let original_line_length = 2 + arg_strings.iter().map(|s| s.len()).sum::<usize>() + (arg_strings.len() * 2);
         let separator = if original_line_length > 80 { " " } else { "," };
 
         for (index, arg_string) in arg_strings.iter().enumerate() {
-            if index != 0 {
+            f.write_str(arg_string)?;
+
+            // We only need to insert a separating space it's not the last arg and if the string ends in an alphanumeric character
+            if index < arg_strings.len() - 1 && arg_string.chars().last().map_or(true, |c| c.is_alphanumeric()) {
                 f.write_str(separator)?;
             }
-            f.write_str(arg_string)?;
         }
         f.write_str(")")?;
     }
@@ -394,6 +395,7 @@ fn format_directives<'a>(directives: &DirectiveList, sorted: bool, f: &mut fmt::
                 if index != 0 {
                     f.write_str(",")?;
                 }
+                // todo test behaviour when a comma is not necessary (if it was a space it would be left out)
                 f.write_str(&ApolloReportingSignatureFormatter::Argument(argument).to_string())?;
             }
 
