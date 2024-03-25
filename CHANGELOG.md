@@ -4,6 +4,183 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.43.0] - 2024-03-21
+
+## 🚀 Features
+
+### Support configurable heartbeat for subscriptions using the WebSocket protocol  ([Issue #4621](https://github.com/apollographql/router/issues/4621))
+
+To support GraphQL Subscription WebSocket implementations such as [DGS](https://netflix.github.io/dgs/) that drop idle connections by design, the router adds the ability to configure a heartbeat to keep active connections alive.
+
+An example router configuration:
+
+```yaml
+subscription:
+  mode:
+    passthrough:
+      all:
+        path: /graphql
+        heartbeat_interval: enable # Optional
+```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/4802
+
+### Unix socket support for subgraphs ([Issue #3504](https://github.com/apollographql/router/issues/3504))
+
+> ⚠️ This is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+>
+> If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
+
+The router now supports Unix sockets for subgraph connections by specifying URLs in the `unix:///path/to/router.sock` format in the schema, in addition to coming a valid URL option within [the existing `override_subgraph_url` configuration](https://www.apollographql.com/docs/router/configuration/overview/#subgraph-routing-urls). The router uses Unix stream-oriented sockets (not datagram-oriented). It supports compression but not TLS.
+
+Due to the lack of standardization of Unix socket URLs (and lack of support in the common URL types in Rust) a transformation is applied to to the socket path to parse it: the host is encoded in hexadecimal and stored in the `authority` part. This will have no consequence on the way the router functions, but [subgraph services](https://www.apollographql.com/docs/router/customizations/overview/#the-request-lifecycle) will receive URLs with the hex-encoded host.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4757
+
+### Add an option to refresh expiration on Redis GET ([Issue #4473](https://github.com/apollographql/router/issues/4473))
+
+This adds the option to refresh the time-to-live (TTL) on Redis entries when they are accessed. We want the query plan cache to act like an LRU cache (least-recently used), so if a TTL is set in its Redis configuration, it should reset every time it is accessed.
+
+While the option is also available for APQ, it's disabled for entity caching because that cache manages TTL directly.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4604
+
+### Helm: Support configuring `ContainerResource` on Horizontal Pod Autoscaler (HPA) targets ([PR #4776](https://github.com/apollographql/router/pull/4776))
+
+The router supports configuration of the [`ContainerResource` type metric](https://kubernetes.io/blog/2023/05/02/hpa-container-resource-metric/) on Horizontal Pod Autoscaler (HPA) targets in the Helm chart with Kubernetes v1.27 or later.
+
+By [@caugustus](https://github.com/caugustus) in https://github.com/apollographql/router/pull/4776
+
+## 🐛 Fixes
+
+### Fix chunk formatting in multipart protocol ([Issue #4634](https://github.com/apollographql/router/issues/4634))
+
+Previously, when sending a stream of chunks for HTTP multipart, the router finished each chunk by appending it with `\r\n`.
+Now, the router doesn't append `\r\n` to the current chunk but instead prepends it to the next chunk. This enables the router to close a stream with the correct final boundary by appending `--\r\n` directly to the last chunk.
+
+This PR changes the way we're sending chunks in the stream. Instead of finishing the chunk with `\r\n` we don't send this at the end of our current chunk but instead at the beginning of the next one. For the end users nothing changes but it let us to close the stream with the right final boundary by appending `--\r\n` directly to the last chunk.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4681
+
+### Zipkin service name not populated ([Issue #4807](https://github.com/apollographql/router/issues/4807))
+
+The Zipkin trace exporter now respects service name configuration from YAML or environment variables.
+
+For instance to set the service name to `my-app`, you can use the following configuration in your `router.yaml` file:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      common:
+        service_name: my-app
+      zipkin:
+        enabled: true
+        endpoint: default
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4816
+
+## 🛠 Maintenance
+
+### Preallocate response formatting output ([PR #4775](https://github.com/apollographql/router/pull/4775))
+
+To improve runtime performance, an internal change to the router's `format_response` now preallocates the output object.
+
+By [@xuorig](https://github.com/xuorig) in https://github.com/apollographql/router/pull/4775
+
+# [1.42.0] - 2024-03-12
+
+## 🚀 Features
+
+### Add headers to the JWKS download request ([Issue #4651](https://github.com/apollographql/router/issues/4651))
+
+The router supports the new `authentication.router.jwt.jwks.headers` option for setting static headers on HTTP requests to download a JWKS from an identity provider.
+
+For details, see the [JWKS configuration option](https://www.apollographql.com/docs/router/configuration/authn-jwt#jwks).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4688
+
+### Support loading JWT from other sources ([PR #4711](https://github.com/apollographql/router/pull/4711))
+
+The router supports the new `authentication.router.jwt.sources` option. It enables cookies as an alternative source for tokens and allows multiple alternative sources.
+
+For details, see the [sources configuration option](https://www.apollographql.com/docs/router/configuration/authn-jwt#sources).
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4711
+
+## 🐛 Fixes
+
+### Attach `dd.trace_id` to JSON formatted log messages ([PR #4764](https://github.com/apollographql/router/pull/4764))
+
+To enable correlation between DataDog tracing and logs, `dd.trace_id` must appear as a span attribute on the root of each JSON formatted log message.
+Once you configure the `dd.trace_id` attribute in router.yaml, it will automatically be extracted from the root span and attached to the logs:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          dd.trace_id: true
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4764
+
+# [1.41.1] - 2024-03-08
+
+> [!NOTE]
+>
+> v1.41.1 replaces a failed publish of v1.41.0.  The version number had to be moved from v1.41.0 to v1.41.1, but the release is otherwise the same.  Apologies for the confusion!
+
+## 🚀 Features
+
+### Entity caching: Add tracing spans around Redis interactions ([PR #4667](https://github.com/apollographql/router/pull/4667))
+
+This adds `cache_lookup` and `cache_store` spans to traces which show Redis calls related to our recently announced [entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching/) feature.  This also changes the behavior slightly so that storing in Redis does not stop the execution of the rest of the query.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4667
+
+### Use Gzip compression when downloading Persisted Query manifests ([PR #4622](https://github.com/apollographql/router/pull/4622))
+
+Router will now request Gzip compression when downloading Persisted Query manifests for improved network efficiency.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4622
+
+### Redis: add a fail open option ([Issue #4334](https://github.com/apollographql/router/issues/4334))
+
+This option configures the Router's behavior in case it cannot connect to Redis:
+- By default, the router will start and all requests will be handled in a degraded state.
+- Alternatively, this option can be configured to prevent the router from starting if it can't connect to Redis.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4534
+
+## 🐛 Fixes
+
+### Default header now correctly set when `experimental_response_trace_id` is enabled ([Issue #4699](https://github.com/apollographql/router/issues/4699))
+
+When configuring the `experimental_response_trace_id` without an explicit header it now correctly takes the default one `apollo-trace-id`.
+
+Example of configuration:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4702
+
+# [1.41.0] - 2024-03-08
+
+> [!NOTE]
+>
+> The release of v1.41.0 failed unexpectedly late in the deployment process due to a preventable publishing failure.  The release has been yanked from Crates.io on account of not being published successfully across all deployment targets.  This release is fully replaced by v1.41.1.  Apologies for the confusion!
+
 # [1.40.2] - 2024-03-06
 
 ## 🔒 Security
@@ -80,7 +257,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 The `subgraph_response_body` [selector](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors/) has been deprecated and replaced with selectors for a response body's constituent elements: `subgraph_response_data` and `subgraph_response_errors`.
 
-When configuring `subgraph_response_data` and `subgraph_response_errors`, both use a JSONPath expression to fetch data or errors from a subgraph response. 
+When configuring `subgraph_response_data` and `subgraph_response_errors`, both use a JSONPath expression to fetch data or errors from a subgraph response.
 
 An example configuration:
 
@@ -99,7 +276,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Add a `.remove` method for headers in Rhai
 
-The router supports a new `.remove` method that enables users to remove headers in a Rhai script. 
+The router supports a new `.remove` method that enables users to remove headers in a Rhai script.
 
 For example:
 
@@ -255,9 +432,9 @@ By [@nicholascioli](https://github.com/nicholascioli) in https://github.com/apol
 
 ### Add selector to get all baggage key values in span attributes ([Issue #4425](https://github.com/apollographql/router/issues/4425))
 
-Previously, baggage items were configured as standard attributes in `router.yaml`, and adding a new baggage item required a configuration update and router rerelease. 
+Previously, baggage items were configured as standard attributes in `router.yaml`, and adding a new baggage item required a configuration update and router rerelease.
 
-This release supports a new configuration that enables baggage items to be added automatically as span attributes. 
+This release supports a new configuration that enables baggage items to be added automatically as span attributes.
 
 If you have several baggage items and would like to add all of them directly as span attributes (for example, `baggage: my_item=test, my_second_item=bar`), setting `baggage: true` will add automatically add two span attributes, `my_item=test` and `my_second_item=bar`.
 

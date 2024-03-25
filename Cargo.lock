@@ -221,9 +221,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "0.0.6"
+version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8e029d74a3c5f5b5ceeb0450aa95df15b49bb71e962e7c22872afd6f5b5e631"
+checksum = "c810d52e0d9ac684ac2b0583df9479a4efbe3035b466b4c374eeaa388f4a1e93"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -232,7 +232,7 @@ dependencies = [
  "petgraph",
  "salsa",
  "serde_json",
- "strum",
+ "strum 0.26.1",
  "strum_macros 0.26.1",
  "thiserror",
  "url",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.40.2"
+version = "1.43.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -302,6 +302,7 @@ dependencies = [
  "humantime-serde",
  "hyper",
  "hyper-rustls",
+ "hyperlocal",
  "indexmap 2.2.3",
  "insta",
  "itertools 0.12.1",
@@ -409,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.40.2"
+version = "1.43.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -425,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.40.2"
+version = "1.43.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -2100,7 +2101,7 @@ dependencies = [
  "proc-macro2 1.0.76",
  "quote 1.0.35",
  "regex",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.3",
  "syn 1.0.109",
  "syn 2.0.48",
@@ -3448,6 +3449,19 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-io-timeout",
+]
+
+[[package]]
+name = "hyperlocal"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fafdf7b2b2de7c9784f76e02c0935e65a8117ec3b768644379983ab333ac98c"
+dependencies = [
+ "futures-util",
+ "hex",
+ "hyper",
+ "pin-project",
+ "tokio",
 ]
 
 [[package]]
@@ -6455,6 +6469,12 @@ checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
  "strum_macros 0.25.3",
 ]
+
+[[package]]
+name = "strum"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723b93e8addf9aa965ebe2d11da6d7540fa2283fcea14b3371ff055f7ba13f5f"
 
 [[package]]
 name = "strum_macros"

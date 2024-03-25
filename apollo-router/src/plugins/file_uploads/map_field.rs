@@ -36,7 +36,7 @@ impl MapField {
                     return Err(FileUploadError::InvalidPathInsideMapField(path));
                 }
                 let variable_path: Vec<String> = segments.map(str::to_owned).collect();
-                let variable_name = variable_path.get(0).ok_or_else(|| {
+                let variable_name = variable_path.first().ok_or_else(|| {
                     FileUploadError::MissingVariableNameInsideMapField(path.clone())
                 })?;
 
