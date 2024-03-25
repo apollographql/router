@@ -104,3 +104,10 @@ impl Supergraph {
         )
     }
 }
+
+const _: () = {
+    const fn assert_thread_safe<T: Sync + Send>() {}
+
+    assert_thread_safe::<Supergraph>();
+    assert_thread_safe::<query_plan::query_planner::QueryPlanner>();
+};
