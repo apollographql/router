@@ -12,6 +12,7 @@ use tower_service::Service;
 
 use super::externalize_header_map;
 use super::*;
+use crate::batching::BatchQuery;
 use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
@@ -289,6 +290,18 @@ where
 
             execution_response
         };
+
+        // Handle cancelled batch queries
+        // FIXME: This should be way higher up the call chain so that custom plugins / rhai / etc. can
+        // automatically work with batched queries and cancellations.
+        let batch_query_opt = res.context.extensions().lock().remove::<BatchQuery>();
+        if let Some(mut batch_query) = batch_query_opt {
+            // TODO: How do we reliably get the reason for the coprocessor cancellation here?
+            batch_query
+                .signal_cancelled("coprocessor cancelled request at execution layer".to_string())
+                .await;
+        }
+
         return Ok(ControlFlow::Break(res));
     }
 

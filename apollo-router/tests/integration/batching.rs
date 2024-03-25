@@ -474,7 +474,6 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 2;
     const COPROCESSOR_CONFIG: &str = include_str!("../fixtures/batching/coprocessor.router.yaml");
@@ -549,7 +548,23 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
     .await?;
 
     // TODO: Fill this in once we know how this response should look
-    assert_yaml_snapshot!(responses, @"");
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - errors:
+        - message: Subgraph A is not allowed
+          extensions:
+            code: ERR_NOT_ALLOWED
+    - data:
+        entryB:
+          index: 0
+    - errors:
+        - message: Subgraph A is not allowed
+          extensions:
+            code: ERR_NOT_ALLOWED
+    - data:
+        entryB:
+          index: 1
+    "###);
 
     Ok(())
 }
