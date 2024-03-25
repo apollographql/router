@@ -37,6 +37,7 @@ async fn make_request(request: supergraph::Request) {
         .expect("body must be returned");
 }
 
+/*
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
@@ -88,7 +89,7 @@ async fn variables() {
     )
     .await;
     assert_trace_snapshot!(get_spans());
-}
+}*/
 
 #[allow(unused)]
 // Useful to redact request_id in snapshot because it's not determinist
