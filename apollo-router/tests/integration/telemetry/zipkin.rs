@@ -1,8 +1,5 @@
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
-
 extern crate core;
-
-mod common;
 
 use std::time::Duration;
 
@@ -11,9 +8,9 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::common::IntegrationTest;
-use crate::common::Telemetry;
-use crate::common::ValueExt;
+use crate::integration::IntegrationTest;
+use crate::integration::Telemetry;
+use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
@@ -108,12 +105,17 @@ async fn find_valid_trace(
         .json()
         .await?;
     tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
+    validate_service_name(trace)?;
+
+    Ok(())
+}
+
+fn validate_service_name(trace: Value) -> Result<(), BoxError> {
     let service_name = trace.select_path("$..localEndpoint.serviceName")?;
 
     assert_eq!(
-        service_name.get(0),
+        service_name.first(),
         Some(&&Value::String("router".to_string()))
     );
-
     Ok(())
 }

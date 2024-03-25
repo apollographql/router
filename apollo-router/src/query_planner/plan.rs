@@ -12,6 +12,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::QueryHash;
 use crate::spec::Query;
 
 /// A planner key.
@@ -186,6 +187,61 @@ impl PlanNode {
                 }
 
                 false
+            }
+        }
+    }
+
+    /// Populate a Vec of QueryHashes representing Fetches in this plan.
+    ///
+    /// Do not include any operations which contain "requires" elements.
+    ///
+    /// TODO: Think about the impact of Defer/Subscription/Condition on this function. In
+    /// particular, Condition processing might be causing us to mis-report the number of fetches
+    /// and that would be a big problem. Perhaps we should Abort Batches which contain
+    /// Defer/Subscription/Condition....?
+    ///
+    pub(crate) fn query_hashes(&self, query_hashes: &mut Vec<Arc<QueryHash>>) {
+        match self {
+            PlanNode::Sequence { nodes } => {
+                nodes.iter().for_each(|n| n.query_hashes(query_hashes));
+            }
+            PlanNode::Parallel { nodes } => {
+                nodes.iter().for_each(|n| n.query_hashes(query_hashes));
+            }
+            PlanNode::Fetch(node) => {
+                // If requires.is_empty() we can batch it!
+                if node.requires.is_empty() {
+                    query_hashes.push(node.schema_aware_hash.clone());
+                }
+            }
+            PlanNode::Flatten(node) => node.node.query_hashes(query_hashes),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(n) = primary.node.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
+                deferred.iter().for_each(|n| {
+                    if let Some(n) = n.node.as_ref() {
+                        n.query_hashes(query_hashes);
+                    }
+                });
+            }
+            PlanNode::Subscription { rest, .. } => {
+                if let Some(n) = rest.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
+            }
+            // TODO: Think about impact of this processing
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                if let Some(n) = if_clause.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
+                if let Some(n) = else_clause.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
             }
         }
     }

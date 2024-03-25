@@ -26,7 +26,6 @@ use http_body::Body as _;
 use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
-use parking_lot::Mutex;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -36,7 +35,6 @@ use tracing::Instrument;
 
 use super::ClientRequestAccepts;
 use crate::batching::Batch;
-use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -613,27 +611,20 @@ impl RouterService {
         // Insert our batch configuration into Context extensions.
         // If the results len > 1, we always insert our batching configuration
         // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
-        let shared_batch_details: Option<Arc<Mutex<Batch>>> = if ok_results.len() > 1 {
-            context.extensions().lock().insert(self.batching.clone());
-            match &self.batching.subgraph {
-                Some(subgraph_batching_config) => {
-                    let enabled = match subgraph_batching_config {
-                        SubgraphBatchingConfig::All(all_config) => all_config.enabled,
-                        SubgraphBatchingConfig::Subgraphs(subgraphs) => {
-                            subgraphs.values().any(|v| v.enabled)
-                        }
-                    };
-                    if enabled {
-                        Some(Arc::new(Mutex::new(Batch::new(batch_size))))
-                    } else {
-                        None
-                    }
+        let shared_batch_details = (ok_results.len() > 1)
+            .then(|| {
+                context.extensions().lock().insert(self.batching.clone());
+
+                self.batching.subgraph.as_ref()
+            })
+            .flatten()
+            .map(|subgraph_batching_config| match subgraph_batching_config {
+                SubgraphBatchingConfig::All(all_config) => all_config.enabled,
+                SubgraphBatchingConfig::Subgraphs(subgraphs) => {
+                    subgraphs.values().any(|v| v.enabled)
                 }
-                None => None,
-            }
-        } else {
-            None
-        };
+            })
+            .and_then(|a| a.then_some(Arc::new(Batch::spawn_handler(batch_size))));
 
         let mut ok_results_it = ok_results.into_iter();
         let first = ok_results_it
@@ -655,6 +646,10 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of extensions and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
+        // Also: We rely on the fact that there aren't more elements in ok_results_it to avoid
+        // treating non-batch requests as batch requests. I think that is lazy, because really we
+        // should do this processing if shared_batch_details.is_some(). TODO: think about this some
+        // more before end of project.
         for (index, graphql_request) in ok_results_it.enumerate() {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
@@ -677,23 +672,29 @@ impl RouterService {
                 new_context_guard.insert(self.batching.clone());
                 // We are only going to insert a BatchQuery if Subgraph processing is enabled
                 if let Some(shared_batch_details) = &shared_batch_details {
-                    new_context_guard
-                        .insert(BatchQuery::new(index + 1, shared_batch_details.clone()));
+                    // We need to keep our shared details somewhere or they will drop, let's
+                    // insert them into our various contexts
+                    new_context_guard.insert(shared_batch_details.clone());
+                    new_context_guard.insert(shared_batch_details.query_for_index(index + 1));
                 }
             }
-
             results.push(SupergraphRequest {
                 supergraph_request: new,
-                // Build a new context. Cloning would cause issues.
                 context: new_context,
             });
         }
 
         if let Some(shared_batch_details) = shared_batch_details {
+            // We need to keep our shared details somewhere or they will drop, let's
+            // insert them into our various contexts
             context
                 .extensions()
                 .lock()
-                .insert(BatchQuery::new(0, shared_batch_details));
+                .insert(shared_batch_details.clone());
+            context
+                .extensions()
+                .lock()
+                .insert(shared_batch_details.query_for_index(0));
         }
 
         results.insert(
@@ -703,6 +704,7 @@ impl RouterService {
                 context,
             },
         );
+
         Ok(results)
     }
 }

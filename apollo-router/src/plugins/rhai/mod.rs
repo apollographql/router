@@ -40,6 +40,7 @@ use tower::ServiceExt;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
+use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -337,7 +338,18 @@ macro_rules! gen_map_request {
                         tracing::error!("map_request callback failed: {error_details:#?}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return $base::request_failure(request_opt.unwrap().context, error_details);
+
+                        // FIXME: Catch this error higher up the chain
+                        let context = request_opt.unwrap().context;
+                        if let Some(mut batch_query) =
+                            context.extensions().lock().remove::<BatchQuery>()
+                        {
+                            let send_fut =
+                                batch_query.signal_cancelled("cancelled by rhai".to_string());
+                            futures::executor::block_on(send_fut);
+                        }
+
+                        return $base::request_failure(context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();

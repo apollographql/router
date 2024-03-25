@@ -619,13 +619,22 @@ async fn plan_query(
         ))
         .await?;
 
-    if let Some(batching) = context.extensions().lock().get::<BatchQuery>() {
+    // We need to operate on the BatchQuery without holding on to the extension lock, but using the
+    // batched query requires awaiting it, which would hold the lock for too long.
+    //
+    // We remove the BatchQuery here and then reinsert it after we've done our call to fix that.
+    let batching = context.extensions().lock().remove::<BatchQuery>();
+    if let Some(mut batch_query) = batching {
         if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
-            let no_requires_fetches = plan.root.subgraph_fetches(false);
-            batching.set_subgraph_fetches(no_requires_fetches);
-            tracing::info!("subgraph fetches (no requires): {}", no_requires_fetches);
+            let mut query_hashes = vec![];
+            plan.root.query_hashes(&mut query_hashes);
+            batch_query.set_query_hashes(query_hashes).await;
+            tracing::info!("batch registered: {}", batch_query);
         }
+
+        context.extensions().lock().insert(batch_query);
     }
+
     Ok(qpr)
 }
 
