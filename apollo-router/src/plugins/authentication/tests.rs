@@ -47,13 +47,14 @@ fn create_an_url(filename: &str) -> String {
 }
 
 async fn build_a_default_test_harness() -> router::BoxCloneService {
-    build_a_test_harness(None, None, false).await
+    build_a_test_harness(None, None, false, false).await
 }
 
 async fn build_a_test_harness(
     header_name: Option<String>,
     header_value_prefix: Option<String>,
     multiple_jwks: bool,
+    ignore_other_prefixes: bool,
 ) -> router::BoxCloneService {
     // create a mock service we will use to test our plugin
     let mut mock_service = test::MockSupergraphService::new();
@@ -120,6 +121,9 @@ async fn build_a_test_harness(
         config["authentication"]["router"]["jwt"]["header_value_prefix"] =
             serde_json::Value::String(hp);
     }
+
+    config["authentication"]["router"]["jwt"]["ignore_other_prefixes"] =
+        serde_json::Value::Bool(ignore_other_prefixes);
 
     crate::TestHarness::builder()
         .configuration_json(config)
@@ -436,8 +440,43 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 }
 
 #[tokio::test]
+async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
+    let test_harness = build_a_test_harness(None, None, false, true).await;
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
+#[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-    let test_harness = build_a_test_harness(None, None, true).await;
+    let test_harness = build_a_test_harness(None, None, true, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -476,7 +515,8 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-    let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None, false).await;
+    let test_harness =
+        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -515,7 +555,8 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string()), false).await;
+    let test_harness =
+        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -554,7 +595,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("".to_string()), false).await;
+    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -594,13 +635,15 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-    let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false).await;
+    let _test_harness =
+        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
-    let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
+    let _test_harness =
+        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false).await;
 }
 
 #[tokio::test]

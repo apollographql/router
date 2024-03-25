@@ -133,7 +133,9 @@ struct JWTConf {
     /// Header value prefix
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
-
+    /// Whether to ignore any mismatched prefixes
+    #[serde(default)]
+    ignore_other_prefixes: bool,
     /// Alternative sources to extract the JWT
     #[serde(default)]
     sources: Vec<Source>,
@@ -571,7 +573,11 @@ fn authenticate(
 
     let mut jwt = None;
     for source in &config.sources {
-        match extract_jwt(source, request.router_request.headers()) {
+        match extract_jwt(
+            source,
+            config.ignore_other_prefixes,
+            request.router_request.headers(),
+        ) {
             None => continue,
             Some(Err(error)) => {
                 return failure_message(request.context, error, StatusCode::BAD_REQUEST)
@@ -676,6 +682,7 @@ fn authenticate(
 
 fn extract_jwt<'a, 'b: 'a>(
     source: &'a Source,
+    ignore_other_prefixes: bool,
     headers: &'b HeaderMap,
 ) -> Option<Result<&'b str, AuthenticationError<'a>>> {
     match source {
@@ -706,10 +713,14 @@ fn extract_jwt<'a, 'b: 'a>(
             if jwt_value.len() < prefix_len
                 || !&jwt_value[..prefix_len].eq_ignore_ascii_case(value_prefix)
             {
-                return Some(Err(AuthenticationError::InvalidPrefix(
-                    jwt_value_untrimmed,
-                    value_prefix,
-                )));
+                if ignore_other_prefixes {
+                    return None;
+                } else {
+                    return Some(Err(AuthenticationError::InvalidPrefix(
+                        jwt_value_untrimmed,
+                        value_prefix,
+                    )));
+                }
             }
             // If there's no header prefix, we need to avoid splitting the header
             let jwt = if value_prefix.is_empty() {
