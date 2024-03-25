@@ -576,7 +576,7 @@ fn authenticate(
         match extract_jwt(
             source,
             config.ignore_other_prefixes,
-            request.router_request.headers()
+            request.router_request.headers(),
         ) {
             None => continue,
             Some(Err(error)) => {
