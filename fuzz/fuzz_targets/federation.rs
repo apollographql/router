@@ -14,8 +14,8 @@ const GATEWAY_FED1_URL: &str = "http://localhost:4100/graphql";
 const GATEWAY_FED2_URL: &str = "http://localhost:4200/graphql";
 
 fuzz_target!(|data: &[u8]| {
-    let (generated_operation, _) = match generate_valid_operation(data, "fuzz/supergraph.graphql") {
-        Ok(d) => (d.0, d.1),
+    let generated_operation = match generate_valid_operation(data, "fuzz/supergraph.graphql") {
+        Ok((d, _)) => d,
         Err(_err) => {
             return;
         }

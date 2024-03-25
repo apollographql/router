@@ -13,9 +13,9 @@ const GATEWAY_URL: &str = "http://localhost:4100/graphql";
 const ROUTER_URL: &str = "http://localhost:4000";
 
 fuzz_target!(|data: &[u8]| {
-    let (generated_operation, _) =
+    let generated_operation =
         match generate_valid_operation(data, "fuzz/supergraph-fed2.graphql") {
-            Ok(d) => (d.0, d.1),
+            Ok((d, _)) => d,
             Err(_err) => {
                 return;
             }

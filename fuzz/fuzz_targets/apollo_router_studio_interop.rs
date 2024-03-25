@@ -6,7 +6,7 @@ use apollo_router_studio_interop::generate_usage_reporting;
 //use apollo_router_studio_interop::compare_ref_fields_by_type;
 use libfuzzer_sys::fuzz_target;
 // use log::debug;
-use router_bridge::planner::{PlanOptions, Planner, QueryPlannerConfig};
+use router_bridge::planner::{Planner, QueryPlannerConfig};
 use router_fuzz::generate_valid_operation;
 use tokio::runtime::Runtime;
 
@@ -40,17 +40,18 @@ fuzz_target!(|data: &[u8]| {
     println!("========================");
 
     let runtime = Runtime::new().unwrap();
-    let planner = runtime.block_on(planner(&schema_str));
-    let js_sig = runtime.block_on(generate(planner, &op_str));
+    let _planner = runtime.block_on(planner(&schema_str));
+    // let js_sig = runtime.block_on(generate(planner, &op_str));
 
-    println!("======= RUST SIGNATURE =======");
-    println!("{}", js_sig);
-    println!("========================");
+    // println!("======= JS SIGNATURE =======");
+    // println!("{}", js_sig);
+    // println!("========================");
 
     panic!();
 });
 
 async fn planner(ts: &str) -> Planner<serde_json::Value> {
+    println!("======= before Planner::new =======");
     let result =
         Planner::<serde_json::Value>::new(ts.to_string(), QueryPlannerConfig::default()).await;
     println!("======= got past Planner::new =======");
@@ -67,6 +68,7 @@ async fn planner(ts: &str) -> Planner<serde_json::Value> {
     }
 }
 
+/*
 async fn generate(planner: Planner<serde_json::Value>, op: &str) -> String {
     let maybe_plan = planner
         .plan(op.to_string(), None, PlanOptions::default())
@@ -83,3 +85,4 @@ async fn generate(planner: Planner<serde_json::Value>, op: &str) -> String {
         }
     }
 }
+*/
