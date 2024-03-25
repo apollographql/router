@@ -113,7 +113,7 @@ commands:
           platform: << parameters.platform >>
       - install_rust:
           platform: << parameters.platform >>
-      - install_extra_tools
+      #- install_extra_tools
       - fetch_dependencies
       - save_cache:
           key: "<< pipeline.parameters.toolchain_version >>"
