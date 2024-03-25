@@ -1,41 +1,40 @@
-use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
+// use apollo_router::services::supergraph;
+// use apollo_router::TestHarness;
 use insta::_macro_support::Content;
 use insta::_macro_support::Redaction;
-use serde_json::json;
-use test_span::prelude::test_span;
-use tower_service::Service;
+// use serde_json::json;
+// use tower_service::Service;
 
-macro_rules! assert_trace_snapshot {
-    ($spans:expr) => {
-        insta::assert_json_snapshot!($spans, {
-              ".**.children.*.record.entries[]" => redact_dynamic()
-        });
-    };
-}
+// macro_rules! assert_trace_snapshot {
+//     ($spans:expr) => {
+//         insta::assert_json_snapshot!($spans, {
+//               ".**.children.*.record.entries[]" => redact_dynamic()
+//         });
+//     };
+// }
 
-async fn make_request(request: supergraph::Request) {
-    let mut router = TestHarness::builder()
-        .with_subgraph_network_requests()
-        .configuration_json(json!({"telemetry": {
-            "apollo": {
-                "field_level_instrumentation_sampler": "always_off"
-            }
-        }
-        }))
-        .expect("configuration must be valid")
-        .build_router()
-        .await
-        .expect("router");
-    let response = router
-        .call(request.try_into().expect("valid router request"))
-        .await
-        .expect("request must succeed");
-    let body = response.response.into_body();
-    let _ = hyper::body::to_bytes(body)
-        .await
-        .expect("body must be returned");
-}
+// async fn make_request(request: supergraph::Request) {
+//     let mut router = TestHarness::builder()
+//         .with_subgraph_network_requests()
+//         .configuration_json(json!({"telemetry": {
+//             "apollo": {
+//                 "field_level_instrumentation_sampler": "always_off"
+//             }
+//         }
+//         }))
+//         .expect("configuration must be valid")
+//         .build_router()
+//         .await
+//         .expect("router");
+//     let response = router
+//         .call(request.try_into().expect("valid router request"))
+//         .await
+//         .expect("request must succeed");
+//     let body = response.response.into_body();
+//     let _ = hyper::body::to_bytes(body)
+//         .await
+//         .expect("body must be returned");
+// }
 
 /*
 #[test_span(tokio::test)]

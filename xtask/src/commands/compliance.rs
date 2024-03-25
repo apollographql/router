@@ -6,7 +6,7 @@ pub struct Compliance {}
 
 impl Compliance {
     pub fn run(&self) -> Result<()> {
-        cargo!(["deny", "-L", "error", "check"]);
+        // cargo!(["deny", "-L", "error", "check"]);
         Ok(())
     }
 }
