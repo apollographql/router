@@ -90,12 +90,11 @@ pub(crate) fn check(
     debug_assert_eq!(ids.len(), 1);
     let query_id = ids[0];
 
-    let Some(operation) = compiler.db.find_operation(query_id, operation_name.clone())
-    else {
+    let Some(operation) = compiler.db.find_operation(query_id, operation_name.clone()) else {
         // Undefined or ambiguous operation name.
         // The request is invalid and will be rejected by some other part of the router,
         // if it wasn’t already before we got to this code path.
-        return Ok(())
+        return Ok(());
     };
 
     let mut fragment_cache = HashMap::new();
