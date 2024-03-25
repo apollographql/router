@@ -76,7 +76,7 @@ pub struct QueryPlanIncrementalDeliveryConfig {
     /// (see `query_plan/mod.rs`).
     ///
     /// Defaults to false (meaning that the @defer are ignored).
-    enable_defer: bool,
+    pub enable_defer: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -84,7 +84,7 @@ pub struct QueryPlannerDebugConfig {
     /// If used and the supergraph is built from a single subgraph, then user queries do not go
     /// through the normal query planning and instead a fetch to the one subgraph is built directly
     /// from the input query.
-    bypass_planner_for_single_subgraph: bool,
+    pub bypass_planner_for_single_subgraph: bool,
 
     /// Query planning is an exploratory process. Depending on the specificities and feature used by
     /// subgraphs, there could exist may different theoretical valid (if not always efficient) plans
@@ -103,7 +103,7 @@ pub struct QueryPlannerDebugConfig {
     /// setting this value too low can negatively affect query runtime (due to the use of
     /// sub-optimal query plans).
     // TODO: should there additionally be a max_evaluated_cost?
-    pub(crate) max_evaluated_plans: u32,
+    pub max_evaluated_plans: u32,
 
     /// Before creating query plans, for each path of fields in the query we compute all the
     /// possible options to traverse that path via the subgraphs. Multiple options can arise because
@@ -117,7 +117,7 @@ pub struct QueryPlannerDebugConfig {
     /// path's options exceeds this limit, query planning will abort and the operation will fail.
     ///
     /// The default value is None, which specifies no limit.
-    pub(crate) paths_limit: Option<u32>,
+    pub paths_limit: Option<u32>,
 }
 
 impl Default for QueryPlannerDebugConfig {
