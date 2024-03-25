@@ -8,7 +8,6 @@ use std::task::Poll;
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::SinkExt;
 use futures::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
@@ -47,7 +46,6 @@ use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
-use crate::plugins::subscription::HeartbeatInterval;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
@@ -330,12 +328,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             subscription_id,
                             callback_url,
                             verifier,
-                            heartbeat_interval_ms: match heartbeat_interval {
-                                HeartbeatInterval::Disabled(_) => 0,
-                                HeartbeatInterval::Duration(duration) => {
-                                    duration.as_millis() as u64
-                                }
-                            },
+                            heartbeat_interval_ms: heartbeat_interval
+                                .into_option()
+                                .map(|duration| duration.as_millis() as u64)
+                                .unwrap_or(0),
                         };
                         body.extensions.insert(
                             "subscription",
@@ -574,7 +570,7 @@ async fn call_websocket(
         );
     }
 
-    let mut gql_stream = GraphqlWebSocket::new(
+    let gql_socket = GraphqlWebSocket::new(
         convert_websocket_stream(ws_stream, subscription_hash.clone()),
         subscription_hash,
         subgraph_cfg.protocol,
@@ -586,14 +582,14 @@ async fn call_websocket(
         reason: "cannot get the GraphQL websocket stream".to_string(),
     })?;
 
-    gql_stream
-        .send(body)
+    let gql_stream = gql_socket
+        .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
         .await
         .map_err(|err| FetchError::SubrequestWsError {
             service: service_name,
             reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
         })?;
-    let (mut gql_sink, gql_stream) = gql_stream.split();
+
     let (handle_sink, handle_stream) = handle.split();
 
     tokio::task::spawn(async move {
@@ -601,10 +597,6 @@ async fn call_websocket(
             .map(Ok::<_, graphql::Error>)
             .forward(handle_sink)
             .await;
-
-        if let Err(err) = gql_sink.close().await {
-            tracing::trace!("cannot close the websocket stream: {err:?}");
-        }
     });
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
@@ -1054,7 +1046,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
-    use crate::plugins::subscription::Disabled;
+    use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -1639,7 +1631,7 @@ mod tests {
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
-                    heartbeat_interval: HeartbeatInterval::Disabled(Disabled::Disabled),
+                    heartbeat_interval: HeartbeatInterval::new_disabled(),
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
@@ -1648,6 +1640,7 @@ mod tests {
                         WebSocketConfiguration {
                             path: Some(String::from("/ws")),
                             protocol: WebSocketProtocol::default(),
+                            heartbeat_interval: HeartbeatInterval::new_disabled(),
                         },
                     )]
                     .into(),
