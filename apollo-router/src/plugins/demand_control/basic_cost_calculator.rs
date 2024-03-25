@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
@@ -9,12 +8,12 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
-use tower::BoxError;
 
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::CostCalculator;
+use super::DemandControlError;
 
 pub(crate) struct BasicCostCalculator {}
 
@@ -41,14 +40,17 @@ impl BasicCostCalculator {
         field: &Field,
         parent_type_name: Option<&NamedType>,
         schema: &Valid<Schema>,
-    ) -> Result<f64, BoxError> {
+    ) -> Result<f64, DemandControlError> {
         if BasicCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
         }
 
         let ty = field
             .inner_type_def(schema)
-            .ok_or(anyhow!("Field {} was not found in schema", field))?;
+            .ok_or(DemandControlError::QueryParseFailure(format!(
+                "Field {} was found in query, but its type is missing from the schema.",
+                field.name
+            )))?;
 
         // Determine how many instances we're scoring. If there's no user-provided
         // information, assume lists have 100 items.
@@ -82,7 +84,7 @@ impl BasicCostCalculator {
         Ok(instance_count * type_cost + requirements_cost)
     }
 
-    fn score_fragment_spread(_fragment_spread: &FragmentSpread) -> Result<f64, BoxError> {
+    fn score_fragment_spread(_fragment_spread: &FragmentSpread) -> Result<f64, DemandControlError> {
         Ok(0.0)
     }
 
@@ -90,7 +92,7 @@ impl BasicCostCalculator {
         inline_fragment: &InlineFragment,
         parent_type: Option<&NamedType>,
         schema: &Valid<Schema>,
-    ) -> Result<f64, BoxError> {
+    ) -> Result<f64, DemandControlError> {
         BasicCostCalculator::score_selection_set(
             &inline_fragment.selection_set,
             parent_type,
@@ -98,7 +100,10 @@ impl BasicCostCalculator {
         )
     }
 
-    fn score_operation(operation: &Operation, schema: &Valid<Schema>) -> Result<f64, BoxError> {
+    fn score_operation(
+        operation: &Operation,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
         cost += BasicCostCalculator::score_selection_set(
             &operation.selection_set,
@@ -113,7 +118,7 @@ impl BasicCostCalculator {
         selection: &Selection,
         parent_type: Option<&NamedType>,
         schema: &Valid<Schema>,
-    ) -> Result<f64, BoxError> {
+    ) -> Result<f64, DemandControlError> {
         match selection {
             Selection::Field(f) => BasicCostCalculator::score_field(f, parent_type, schema),
             Selection::FragmentSpread(s) => BasicCostCalculator::score_fragment_spread(s),
@@ -127,7 +132,7 @@ impl BasicCostCalculator {
         selection_set: &SelectionSet,
         parent_type_name: Option<&NamedType>,
         schema: &Valid<Schema>,
-    ) -> Result<f64, BoxError> {
+    ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
             cost += BasicCostCalculator::score_selection(selection, parent_type_name, schema)?;
@@ -151,7 +156,10 @@ impl BasicCostCalculator {
 }
 
 impl CostCalculator for BasicCostCalculator {
-    fn estimated(query: &ExecutableDocument, schema: &Valid<Schema>) -> Result<f64, BoxError> {
+    fn estimated(
+        query: &ExecutableDocument,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         if let Some(op) = &query.anonymous_operation {
             cost += BasicCostCalculator::score_operation(op, schema)?;

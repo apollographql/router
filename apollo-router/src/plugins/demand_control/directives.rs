@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::SelectionSet;
@@ -6,6 +5,8 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Parser;
 use apollo_compiler::Schema;
 use tower::BoxError;
+
+use super::DemandControlError;
 
 pub(super) struct IncludeDirective {
     pub(super) is_included: bool,
@@ -33,7 +34,7 @@ impl RequiresDirective {
         field: &Field,
         parent_type_name: Option<&NamedType>,
         schema: &Valid<Schema>,
-    ) -> Result<Option<Self>, BoxError> {
+    ) -> Result<Option<Self>, DemandControlError> {
         // When a user marks a subgraph schema field with `@requires`, the composition process
         // replaces `@requires(field: "<selection>")` with `@join__field(requires: "<selection>")`.
         let requires_arg = field
@@ -46,14 +47,14 @@ impl RequiresDirective {
         match (requires_arg, parent_type_name) {
             (Some(arg), Some(type_name)) => {
                 let field_set = Parser::new()
-                    .parse_field_set(&schema, type_name.clone(), arg, "")
-                    .map_err(|e| anyhow!(e))?;
+                    .parse_field_set(schema, type_name.clone(), arg, "")
+                    .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
 
                 Ok(Some(RequiresDirective {
                     fields: field_set.selection_set.clone(),
                 }))
             }
-            (Some(_), None) => Err(anyhow!("Parent type name is required to parse fields argument of @requires but none was provided. This is likely because @requires was placed on an anonymous query.").into()),
+            (Some(_), None) => Err(DemandControlError::QueryParseFailure("Parent type name is required to parse fields argument of @requires but none was provided. This is likely because @requires was placed on an anonymous query.".to_string())),
             (None, _) => Ok(None)
         }
     }

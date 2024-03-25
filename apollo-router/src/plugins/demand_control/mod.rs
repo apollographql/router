@@ -5,8 +5,10 @@ mod directives;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use displaydoc::Display;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -36,6 +38,13 @@ pub(crate) enum CostCalculationAlgorithm {
     Basic,
 }
 
+trait CostCalculator {
+    fn estimated(
+        query: &ExecutableDocument,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError>;
+}
+
 /// Demand control configuration
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -47,8 +56,10 @@ pub(crate) struct DemandControlConfig {
     algorithm: CostCalculationAlgorithm,
 }
 
-trait CostCalculator {
-    fn estimated(query: &ExecutableDocument, schema: &Valid<Schema>) -> Result<f64, BoxError>;
+#[derive(Debug, Display, Error)]
+pub(crate) enum DemandControlError {
+    /// Query could not be parsed: {0}
+    QueryParseFailure(String),
 }
 
 #[derive(Clone, Debug)]
