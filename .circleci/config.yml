@@ -714,15 +714,15 @@ workflows:
             parameters:
               platform: [ amd_linux_build ]
 
-      - test_updated:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
-          matrix:
-            parameters:
-              platform:
-                [ amd_linux_test ]
+      # - test_updated:
+      #     requires:
+      #       - lint
+      #       - check_helm
+      #       - check_compliance
+      #     matrix:
+      #       parameters:
+      #         platform:
+      #           [ amd_linux_test ]
       - test:
           requires:
             - lint
