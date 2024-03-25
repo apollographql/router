@@ -142,7 +142,9 @@ where
         // notification
         let mut locked_wait_map = self.wait_map.lock().await;
         let _ = locked_wait_map.remove(key);
-        let _ = sender.send(value);
+        tokio::task::spawn(async move {
+            let _ = sender.send(value);
+        });
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
