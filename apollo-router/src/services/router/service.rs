@@ -626,13 +626,11 @@ impl RouterService {
             })
             .and_then(|a| a.then_some(Arc::new(Batch::spawn_handler(batch_size))));
 
-        // HACK: We clone here just so that we can test the rest of the stack. Revisit once we have time.
-        // let mut ok_results_it = ok_results.into_iter();
-        // let first = ok_results_it
-        //     .next()
-        //     .expect("we should have at least one request");
-        // let sg = http::Request::from_parts(parts, first);
-        let sg = http::Request::from_parts(parts, ok_results[0].clone());
+        let mut ok_results_it = ok_results.into_iter();
+        let first = ok_results_it
+            .next()
+            .expect("we should have at least one request");
+        let sg = http::Request::from_parts(parts, first);
 
         // Building up the batch of supergraph requests is tricky.
         // Firstly note that any http extensions are only propagated for the first request sent
@@ -648,7 +646,11 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of extensions and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        for (index, graphql_request) in ok_results.into_iter().enumerate() {
+        // Also: We rely on the fact that there aren't more elements in ok_results_it to avoid
+        // treating non-batch requests as batch requests. I think that is lazy, because really we
+        // should do this processing if shared_batch_details.is_some(). TODO: think about this some
+        // more before end of project.
+        for (index, graphql_request) in ok_results_it.enumerate() {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
@@ -673,16 +675,35 @@ impl RouterService {
                     // We need to keep our shared details somewhere or they will drop, let's
                     // insert them into our various contexts
                     new_context_guard.insert(shared_batch_details.clone());
-                    new_context_guard.insert(shared_batch_details.query_for_index(index));
+                    new_context_guard.insert(shared_batch_details.query_for_index(index + 1));
                 }
             }
-
             results.push(SupergraphRequest {
                 supergraph_request: new,
-                // Build a new context. Cloning would cause issues.
                 context: new_context,
             });
         }
+
+        if let Some(shared_batch_details) = shared_batch_details {
+            // We need to keep our shared details somewhere or they will drop, let's
+            // insert them into our various contexts
+            context
+                .extensions()
+                .lock()
+                .insert(shared_batch_details.clone());
+            context
+                .extensions()
+                .lock()
+                .insert(shared_batch_details.query_for_index(0));
+        }
+
+        results.insert(
+            0,
+            SupergraphRequest {
+                supergraph_request: sg,
+                context,
+            },
+        );
 
         Ok(results)
     }
