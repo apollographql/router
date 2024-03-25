@@ -357,7 +357,7 @@ impl RouterService {
                     Ok(RouterResponse { response, context })
                 } else {
                     tracing::info!(
-                        monotonic_counter.apollo_router_graphql_error = 1u64,
+                        monotonic_counter.apollo.router.graphql_error = 1u64,
                         code = "INVALID_ACCEPT_HEADER"
                     );
 
@@ -708,11 +708,11 @@ impl RouterService {
         for (code, count) in map {
             match code {
                 None => {
-                    tracing::info!(monotonic_counter.apollo_router_graphql_error = count,);
+                    tracing::info!(monotonic_counter.apollo.router.graphql_error = count,);
                 }
                 Some(code) => {
                     tracing::info!(
-                        monotonic_counter.apollo_router_graphql_error = count,
+                        monotonic_counter.apollo.router.graphql_error = count,
                         code = code
                     );
                 }
