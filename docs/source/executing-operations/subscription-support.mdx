@@ -101,9 +101,11 @@ subscription:
         reviews: # Overrides settings for the 'reviews' subgraph
           path: /ws # Absolute path that overrides '/subscriptions' defined above
           protocol: graphql_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
+          heartbeat_interval: 10s # Optional and 'disable' by default, also supports 'enable' (set 5s interval) and custom values for intervals, e.g. '100ms', '10s', '1m'.
 ```
 
 This example enables subscriptions in **passthrough mode**, which uses long-lived WebSocket connections.
+Note: If your subgraph implementation (e.g. [DGS](https://netflix.github.io/dgs/)) can close idle connection, set `heartbest_interval` to keep connection alive.
 
 The router supports the following WebSocket subprotocols, specified via the `protocol` option:
 
@@ -160,7 +162,7 @@ subscription:
         - accounts
 ```
 
-You can disable the heartbeat by setting `heartbeat_interval_ms: disabled`. This is useful for example if you're running in callback mode in an infrastructure based on lambda functions, where you prefer neither to send heartbeats nor to keep a lambda awake just to send heartbeats to subscriptions.
+You can disable the heartbeat by setting `heartbeat_interval: disabled`. This is useful for example if you're running in callback mode in an infrastructure based on lambda functions, where you prefer neither to send heartbeats nor to keep a lambda awake just to send heartbeats to subscriptions.
 
 <Caution>
 

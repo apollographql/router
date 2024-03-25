@@ -133,6 +133,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
 
     async fn create<'a>(
         &'a mut self,
+        is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
@@ -150,6 +151,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
     async fn create<'a>(
         &'a mut self,
+        _is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
@@ -455,8 +457,15 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
+    let is_telemetry_disabled = false;
     let service = YamlRouterFactory
-        .create(Arc::new(config), schema.to_string(), None, None)
+        .create(
+            is_telemetry_disabled,
+            Arc::new(config),
+            schema.to_string(),
+            None,
+            None,
+        )
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
@@ -617,6 +626,7 @@ pub(crate) async fn create_plugins(
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
+    add_optional_apollo_plugin!("experimental_demand_control");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
@@ -806,8 +816,15 @@ mod test {
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
 
+        let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(Arc::new(config), schema.to_string(), None, None)
+            .create(
+                is_telemetry_disabled,
+                Arc::new(config),
+                schema.to_string(),
+                None,
+                None,
+            )
             .await;
         service.map(|_| ())
     }
