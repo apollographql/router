@@ -147,7 +147,14 @@ where
             };
 
             let context = request.context.clone();
-            let entry = qp.cache.get(&caching_key).await;
+            let entry = qp
+                .cache
+                .get(&caching_key)
+                .instrument(tracing::info_span!(
+                    "cache_deduplication_entry_get",
+                    "otel.kind" = "INTERNAL"
+                ))
+                .await;
             if entry.is_first() {
                 // some clients might timeout and cancel the request before query planning is finished,
                 // so we execute it in a task that can continue even after the request was canceled and
@@ -197,6 +204,10 @@ where
             } else {
                 let res = entry
                     .get()
+                    .instrument(tracing::info_span!(
+                        "cache_deduplication_wait",
+                        "otel.kind" = "INTERNAL"
+                    ))
                     .await
                     .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
 

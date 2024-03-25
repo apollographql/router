@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 
 use self::storage::CacheStorage;
 use self::storage::KeyType;
@@ -61,7 +62,14 @@ where
         // If the data is present, it is sent directly to all the tasks that were waiting for it.
         // If it is not present, the first task that requested it can perform the work to create
         // the data, store it in the cache and send the value to all the other tasks.
-        let mut locked_wait_map = self.wait_map.lock().await;
+        let mut locked_wait_map = self
+            .wait_map
+            .lock()
+            .instrument(tracing::info_span!(
+                "cache_deduplication_wait_map_lock",
+                "otel.kind" = "INTERNAL"
+            ))
+            .await;
         match locked_wait_map.get(key) {
             Some(waiter) => {
                 // Register interest in key
@@ -92,8 +100,21 @@ where
                 // request other keys independently
                 drop(locked_wait_map);
 
-                if let Some(value) = self.storage.get(key).await {
-                    self.send(sender, key, value.clone()).await;
+                if let Some(value) = self
+                    .storage
+                    .get(key)
+                    .instrument(tracing::info_span!(
+                        "cache_deduplication_get",
+                        "otel.kind" = "INTERNAL"
+                    ))
+                    .await
+                {
+                    self.send(sender, key, value.clone())
+                        .instrument(tracing::info_span!(
+                            "cache_deduplication_send",
+                            "otel.kind" = "INTERNAL"
+                        ))
+                        .await;
 
                     return Entry {
                         inner: EntryInner::Value(value),

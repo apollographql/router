@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+use tracing::Instrument;
 
 use super::redis::*;
 
@@ -84,7 +85,14 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
-        let mut guard = self.inner.lock().await;
+        let mut guard = self
+            .inner
+            .lock()
+            .instrument(tracing::info_span!(
+                "cache_lock_wait",
+                "otel.kind" = "INTERNAL"
+            ))
+            .await;
         let instant_memory = Instant::now();
         match guard.get(key) {
             Some(v) => {

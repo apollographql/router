@@ -168,6 +168,7 @@ impl BridgeQueryPlanner {
         let planner_result = self
             .planner
             .plan(query, operation)
+            .instrument(tracing::info_span!("planning", "otel.kind" = "INTERNAL"))
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
@@ -287,7 +288,13 @@ impl BridgeQueryPlanner {
                     response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
-                return self.introspection(key.0).await;
+                return self
+                    .introspection(key.0)
+                    .instrument(tracing::info_span!(
+                        "introspection",
+                        "otel.kind" = "INTERNAL"
+                    ))
+                    .await;
             }
         }
 
