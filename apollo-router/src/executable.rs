@@ -519,6 +519,7 @@ impl Executable {
                 ));
             }
             (Some(config), None) => config,
+            #[allow(clippy::blocks_in_conditions)]
             _ => match opt.config_path.as_ref().map(|path| {
                 let path = if path.is_relative() {
                     current_directory.join(path)
@@ -680,6 +681,7 @@ impl Executable {
         }
 
         let router = RouterHttpServer::builder()
+            .is_telemetry_disabled(opt.is_telemetry_disabled())
             .configuration(configuration)
             .and_uplink(uplink_config)
             .schema(schema_source)
