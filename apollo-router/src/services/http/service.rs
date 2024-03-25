@@ -16,11 +16,14 @@ use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_rustls::HttpsConnector;
+#[cfg(unix)]
+use hyperlocal::UnixConnector;
 use opentelemetry::global;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
+use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -47,6 +50,12 @@ use crate::Context;
 
 type HTTPClient =
     Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
+#[cfg(unix)]
+type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, Body>>;
+#[cfg(unix)]
+type MixedClient = Either<HTTPClient, UnixHTTPClient>;
+#[cfg(not(unix))]
+type MixedClient = HTTPClient;
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -82,7 +91,9 @@ pub(crate) struct HttpClientService {
     // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
-    client: HTTPClient,
+    http_client: HTTPClient,
+    #[cfg(unix)]
+    unix_client: UnixHTTPClient,
     service: Arc<String>,
 }
 
@@ -148,9 +159,13 @@ impl HttpClientService {
             .http2_only(http2 == Http2Config::Http2Only)
             .build(connector);
         Ok(Self {
-            client: ServiceBuilder::new()
+            http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
+            #[cfg(unix)]
+            unix_client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(hyper::Client::builder().build(UnixConnector)),
             service: Arc::new(service.into()),
         })
     }
@@ -206,7 +221,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.client
+        self.http_client
             .poll_ready(cx)
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
@@ -230,6 +245,16 @@ impl tower::Service<HttpRequest> for HttpClientService {
             }
         });
 
+        #[cfg(unix)]
+        let client = match schema_uri.scheme().map(|s| s.as_str()) {
+            Some("unix") => Either::B(self.unix_client.clone()),
+            _ => Either::A(self.http_client.clone()),
+        };
+        #[cfg(not(unix))]
+        let client = self.http_client.clone();
+
+        let service_name = self.service.clone();
+
         let path = schema_uri.path();
 
         let http_req_span = tracing::info_span!("http_request",
@@ -249,33 +274,31 @@ impl tower::Service<HttpRequest> for HttpClientService {
             );
         });
 
-        let client = self.client.clone();
-        let service_name = self.service.clone();
+        let (parts, body) = http_request.into_parts();
+
+        let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+        let opt_compressor = content_encoding
+            .as_ref()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+
+        let body = match opt_compressor {
+            None => body,
+            Some(compressor) => Body::wrap_stream(compressor.process(body)),
+        };
+        let mut http_request = http::Request::from_parts(parts, body);
+
+        http_request
+            .headers_mut()
+            .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
+
+        let signing_params = context
+            .extensions()
+            .lock()
+            .get::<SigningParamsConfig>()
+            .cloned();
+
         Box::pin(async move {
-            let (parts, body) = http_request.into_parts();
-
-            let content_encoding = parts.headers.get(&CONTENT_ENCODING);
-            let opt_compressor = content_encoding
-                .as_ref()
-                .and_then(|value| value.to_str().ok())
-                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
-
-            let body = match opt_compressor {
-                None => body,
-                Some(compressor) => Body::wrap_stream(compressor.process(body)),
-            };
-            let mut http_request = http::Request::from_parts(parts, body);
-
-            http_request
-                .headers_mut()
-                .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
-
-            let signing_params = context
-                .extensions()
-                .lock()
-                .get::<SigningParamsConfig>()
-                .cloned();
-
             let http_request = if let Some(signing_params) = signing_params {
                 signing_params.sign(http_request, &service_name).await?
             } else {
@@ -311,7 +334,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 }
 
 async fn do_fetch(
-    mut client: HTTPClient,
+    mut client: MixedClient,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
@@ -339,6 +362,13 @@ pin_project! {
     pub(crate) struct BodyStream<B: hyper::body::HttpBody> {
         #[pin]
         inner: DecompressionBody<B>
+    }
+}
+
+impl<B: hyper::body::HttpBody> BodyStream<B> {
+    /// Create a new `BodyStream`.
+    pub(crate) fn new(body: DecompressionBody<B>) -> Self {
+        Self { inner: body }
     }
 }
 

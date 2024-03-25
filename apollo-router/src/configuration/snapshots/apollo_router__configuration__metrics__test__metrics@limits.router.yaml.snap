@@ -7,12 +7,11 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.operation.max_aliases.: true
-          opt.operation.max_depth.: true
-          opt.operation.max_height.: true
-          opt.operation.max_root_fields.: true
-          opt.operation.warn_only.: true
-          opt.parser.max_recursion.: true
-          opt.parser.max_tokens.: true
-          opt.request.max_size.: true
-
+          opt.operation.max_aliases: true
+          opt.operation.max_depth: true
+          opt.operation.max_height: true
+          opt.operation.max_root_fields: true
+          opt.operation.warn_only: true
+          opt.parser.max_recursion: true
+          opt.parser.max_tokens: true
+          opt.request.max_size: true

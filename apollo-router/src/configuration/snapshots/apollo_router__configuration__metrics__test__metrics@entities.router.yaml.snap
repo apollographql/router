@@ -7,7 +7,6 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.enabled.: true
-          opt.subgraph.enabled.: true
-          opt.subgraph.ttl.: true
-
+          opt.enabled: true
+          opt.subgraph.enabled: true
+          opt.subgraph.ttl: true

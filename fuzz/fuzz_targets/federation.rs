@@ -56,7 +56,6 @@ fuzz_target!(|data: &[u8]| {
         }
         let mut file = OpenOptions::new()
             .read(true)
-            .write(true)
             .create(true)
             .append(true)
             .open("federation.txt")
@@ -110,7 +109,6 @@ fuzz_target!(|data: &[u8]| {
         if gateway_fed1_response != gateway_fed2_response {
             let mut file = OpenOptions::new()
                 .read(true)
-                .write(true)
                 .create(true)
                 .append(true)
                 .open("federation.txt")

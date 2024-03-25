@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::common::IntegrationTest;
+use crate::integration::IntegrationTest;
 
-const PROMETHEUS_CONFIG: &str = include_str!("../fixtures/prometheus.router.yaml");
-const SUBGRAPH_AUTH_CONFIG: &str = include_str!("../fixtures/subgraph_auth.router.yaml");
+const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
+const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
@@ -135,10 +135,11 @@ async fn test_bad_queries() {
             None,
         )
         .await;
-    router.execute_bad_content_encoding().await;
+    router.execute_bad_content_type().await;
+
     router
             .assert_metrics_contains(
-                r#"apollo_router_http_requests_total{error="unknown content-encoding header value \"garbage\"",status="400",otel_scope_name="apollo/router"}"#,
+                r#"apollo_router_http_requests_total{error="'content-type' header must be one of: \"application/json\" or \"application/graphql-response+json\"",status="415",otel_scope_name="apollo/router"}"#,
                 None,
             )
             .await;

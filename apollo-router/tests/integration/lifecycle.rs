@@ -21,11 +21,9 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use wiremock::ResponseTemplate;
 
-use crate::common::IntegrationTest;
+use crate::integration::IntegrationTest;
 
-mod common;
-
-const HAPPY_CONFIG: &str = include_str!("fixtures/jaeger.router.yaml");
+const HAPPY_CONFIG: &str = include_str!("fixtures/happy.router.yaml");
 const BROKEN_PLUGIN_CONFIG: &str = include_str!("fixtures/broken_plugin.router.yaml");
 const INVALID_CONFIG: &str = "garbage: garbage";
 
@@ -179,7 +177,7 @@ async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    let _conn = std::net::TcpStream::connect("127.0.0.1:4000").unwrap();
+    let _conn = std::net::TcpStream::connect(router.bind_addr).unwrap();
     router.execute_default_query().await;
     tokio::time::timeout(Duration::from_secs(1), router.graceful_shutdown())
         .await

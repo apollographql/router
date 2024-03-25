@@ -148,7 +148,12 @@ const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
+
 pub(crate) const OTEL_STATUS_CODE: &str = "otel.status_code";
+#[allow(dead_code)]
+pub(crate) const OTEL_STATUS_DESCRIPTION: &str = "otel.status_description";
+pub(crate) const OTEL_STATUS_CODE_OK: &str = "OK";
+pub(crate) const OTEL_STATUS_CODE_ERROR: &str = "ERROR";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -407,12 +412,12 @@ impl Plugin for Telemetry {
                             }
 
                             if response.response.status() >= StatusCode::BAD_REQUEST {
-                                span.record(OTEL_STATUS_CODE, "Error");
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             } else {
-                                span.record(OTEL_STATUS_CODE, "Ok");
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                             }
                         } else if let Err(err) = &response {
-                            span.record(OTEL_STATUS_CODE, "Error");
+                            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             span.set_dyn_attributes(
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
@@ -443,7 +448,7 @@ impl Plugin for Telemetry {
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
                 if let Some(usage_reporting) =
-                    resp.context.extensions().lock().get::<UsageReporting>()
+                    resp.context.extensions().lock().get::<Arc<UsageReporting>>()
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -598,9 +603,9 @@ impl Plugin for Telemetry {
                         match &result {
                             Ok(resp) => {
                                 if resp.response.status() >= StatusCode::BAD_REQUEST {
-                                    span.record(OTEL_STATUS_CODE, "Error");
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                 } else {
-                                    span.record(OTEL_STATUS_CODE, "Ok");
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                                 }
                                 span.set_dyn_attributes(
                                     conf.instrumentation
@@ -611,7 +616,7 @@ impl Plugin for Telemetry {
                                 );
                             }
                             Err(err) => {
-                                span.record(OTEL_STATUS_CODE, "Error");
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
 
                                 span.set_dyn_attributes(
                                     conf.instrumentation.spans.subgraph.attributes.on_error(err),
@@ -1229,7 +1234,7 @@ impl Telemetry {
         operation_subtype: Option<OperationSubType>,
     ) {
         let metrics = if let Some(usage_reporting) =
-            context.extensions().lock().get::<UsageReporting>().cloned()
+            context.extensions().lock().get::<Arc<UsageReporting>>()
         {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
@@ -1303,6 +1308,7 @@ impl Telemetry {
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
+                                .clone()
                                 .into_iter()
                                 .map(|(k, v)| (k, convert(v)))
                                 .collect(),
