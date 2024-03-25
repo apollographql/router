@@ -50,8 +50,8 @@ pub(crate) fn validate_supergraph(
         return Err(SingleFederationError::InvalidFederationSupergraph {
             message: format!(
                 "Invalid supergraph: uses unsupported join spec version {} (supported versions: {})",
-                JOIN_VERSIONS.versions().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
                 join_link.url.version,
+                JOIN_VERSIONS.versions().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
             ),
         }.into());
     };
