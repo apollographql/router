@@ -1041,7 +1041,7 @@ pub(crate) async fn call_http(
 
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
-    tracing::info!("our JSON body: {body:?}");
+    tracing::debug!("our JSON body: {body:?}");
     let mut request = http::Request::from_parts(parts, Body::from(body));
 
     request
