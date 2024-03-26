@@ -12,6 +12,7 @@ license = "Elastic-2.0"
 apollo-compiler = "=1.0.0-beta.13"
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
 router-bridge = "=0.5.16+v2.7.1"
+serde_json = "1"
 tokio = { version = "1.36.0", features = ["full"] }
 
 [dev-dependencies]

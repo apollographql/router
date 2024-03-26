@@ -503,141 +503,41 @@ fn format_value(value: &Value, f: &mut fmt::Formatter) -> fmt::Result {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
+    use router_bridge::planner::PlanOptions;
+    use router_bridge::planner::Planner;
+    use router_bridge::planner::QueryPlannerConfig;
     use test_log::test;
 
     use super::*;
 
-    // todo more/better tests
+    // Generate the signature and referenced fields using router-bridge to confirm that the expected value we used is correct.
+    // We can remove this when we no longer use the bridge but should keep the rust implementation verifications.
+    async fn assert_js_implementation(
+        schema_str: &str,
+        query_str: &str,
+        expected_sig: &str,
+        expected_refs: &HashMap<String, ReferencedFieldsForType>,
+    ) {
+        let planner = Planner::<serde_json::Value>::new(
+            schema_str.to_string(),
+            QueryPlannerConfig::default(),
+        )
+        .await
+        .unwrap();
+        let plan = planner
+            .plan(query_str.to_string(), None, PlanOptions::default())
+            .await
+            .unwrap();
+        let js_result = UsageReportingResult {
+            result: plan.usage_reporting,
+        };
+        assert!(js_result.compare_stats_report_key(expected_sig));
+        assert!(js_result.compare_referenced_fields(expected_refs));
+    }
 
     #[test(tokio::test)]
-    async fn test_sig_and_ref_generation_1() {
-        let schema_str = r#"type BasicTypesResponse {
-            nullableId: ID
-            nonNullId: ID!
-            nullableInt: Int
-            nonNullInt: Int!
-            nullableString: String
-            nonNullString: String!
-            nullableFloat: Float
-            nonNullFloat: Float!
-            nullableBoolean: Boolean
-            nonNullBoolean: Boolean!
-          }
-          
-          enum SomeEnum {
-            SOME_VALUE_1
-            SOME_VALUE_2
-            SOME_VALUE_3
-          }
-          
-          interface AnInterface {
-            sharedField: String!
-          }
-          
-          type InterfaceImplementation1 implements AnInterface {
-            sharedField: String!
-            implementation1Field: Int!
-          }
-          
-          type InterfaceImplementation2 implements AnInterface {
-            sharedField: String!
-            implementation2Field: Float!
-          }
-          
-          type UnionType1 {
-            unionType1Field: String!
-            nullableString: String
-          }
-          
-          type UnionType2 {
-            unionType2Field: String!
-            nullableString: String
-          }
-          
-          union UnionType = UnionType1 | UnionType2
-          
-          type ObjectTypeResponse {
-            stringField: String!
-            intField: Int!
-            nullableField: String
-          }
-          
-          input NestedInputType {
-            someFloat: Float!
-            someNullableFloat: Float
-          }
-          
-          input InputType {
-            inputString: String!
-            inputInt: Int!
-            inputBoolean: Boolean
-            nestedType: NestedInputType!
-            enumInput: SomeEnum
-            listInput: [Int!]!
-            nestedTypeList: [NestedInputType]
-          }
-          
-          input NestedEnumInputType {
-            someEnum: SomeEnum
-          }
-          
-          input AnotherInputType {
-            anotherInput: ID!
-          }
-          
-          input InputTypeWithDefault {
-            nonNullId: ID!
-            nonNullIdWithDefault: ID! = "id"
-            nullableId: ID
-            nullableIdWithDefault: ID = "id"
-          }
-          
-          input EnumInputType {
-            enumInput: SomeEnum!
-            enumListInput: [SomeEnum!]!
-            nestedEnumType: [NestedEnumInputType]
-          }
-          
-          type EverythingResponse {
-            basicTypes: BasicTypesResponse
-            enumResponse: SomeEnum
-            interfaceResponse: AnInterface
-            interfaceImplementationResponse: InterfaceImplementation2
-            unionResponse: UnionType
-            unionType2Response: UnionType2
-            listOfBools: [Boolean!]!
-            listOfInterfaces: [AnInterface]
-            listOfUnions: [UnionType]
-            objectTypeWithInputField(boolInput: Boolean, secondInput: Boolean!): ObjectTypeResponse
-            listOfObjects: [ObjectTypeResponse]
-          }
-          
-          type BasicResponse {
-            id: Int!
-            nullableId: Int
-          }
-          
-          type Query {
-            inputTypeQuery(input: InputType!): EverythingResponse!
-            scalarInputQuery(
-              listInput: [String!]!, 
-              stringInput: String!, 
-              nullableStringInput: String, 
-              intInput: Int!, 
-              floatInput: Float!, 
-              boolInput: Boolean!, 
-              enumInput: SomeEnum,
-              idInput: ID!
-            ): EverythingResponse!
-            noInputQuery: EverythingResponse!
-            basicInputTypeQuery(input: NestedInputType!): EverythingResponse!
-            anotherInputTypeQuery(input: AnotherInputType): EverythingResponse!
-            enumInputQuery(enumInput: SomeEnum, inputType: EnumInputType): EverythingResponse!
-            basicResponseQuery: BasicResponse!
-            scalarResponseQuery: String
-            defaultArgQuery(stringInput: String! = "default", inputType: AnotherInputType = { anotherInput: "inputDefault" }): BasicResponse!
-            inputTypehDefaultQuery(input: InputTypeWithDefault): BasicResponse!
-          }"#;
+    async fn test_complex_query() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query UnusedQuery {
             noInputQuery {
@@ -754,137 +654,59 @@ mod tests {
             ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
+
+        // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
+        let sanitised_query_str = r#"fragment Fragment2 on EverythingResponse {
+            basicTypes {
+              nullableFloat
+            }
+          }
+          
+          query        TransformedQuery    {
+          
+          
+            scalarInputQuery(idInput: "a1", listInput: [], boolInput: true, intInput: 1, stringInput: "x", floatInput: 1.2)      @skip(if: false)   @include(if: true) {
+              ...Fragment2,
+          
+          
+              objectTypeWithInputField(boolInput: true, secondInput: false) {
+                stringField
+                __typename
+                intField
+              }
+          
+              enumResponse
+              interfaceResponse {
+                sharedField
+                ... on InterfaceImplementation2 {
+                  implementation2Field
+                }
+                ... on InterfaceImplementation1 {
+                  implementation1Field
+                }
+              }
+              ...Fragment1,
+            }
+          }
+          
+          fragment Fragment1 on EverythingResponse {
+            basicTypes {
+              nonNullFloat
+            }
+          }"#;
+
+        assert_js_implementation(
+            schema_str,
+            sanitised_query_str,
+            expected_sig,
+            &expected_refs,
+        )
+        .await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_and_ref_generation_2() {
-        let schema_str = r#"type BasicTypesResponse {
-            nullableId: ID
-            nonNullId: ID!
-            nullableInt: Int
-            nonNullInt: Int!
-            nullableString: String
-            nonNullString: String!
-            nullableFloat: Float
-            nonNullFloat: Float!
-            nullableBoolean: Boolean
-            nonNullBoolean: Boolean!
-          }
-          
-          enum SomeEnum {
-            SOME_VALUE_1
-            SOME_VALUE_2
-            SOME_VALUE_3
-          }
-          
-          interface AnInterface {
-            sharedField: String!
-          }
-          
-          type InterfaceImplementation1 implements AnInterface {
-            sharedField: String!
-            implementation1Field: Int!
-          }
-          
-          type InterfaceImplementation2 implements AnInterface {
-            sharedField: String!
-            implementation2Field: Float!
-          }
-          
-          type UnionType1 {
-            unionType1Field: String!
-            nullableString: String
-          }
-          
-          type UnionType2 {
-            unionType2Field: String!
-            nullableString: String
-          }
-          
-          union UnionType = UnionType1 | UnionType2
-          
-          type ObjectTypeResponse {
-            stringField: String!
-            intField: Int!
-            nullableField: String
-          }
-          
-          input NestedInputType {
-            someFloat: Float!
-            someNullableFloat: Float
-          }
-          
-          input InputType {
-            inputString: String!
-            inputInt: Int!
-            inputBoolean: Boolean
-            nestedType: NestedInputType!
-            enumInput: SomeEnum
-            listInput: [Int!]!
-            nestedTypeList: [NestedInputType]
-          }
-          
-          input NestedEnumInputType {
-            someEnum: SomeEnum
-          }
-          
-          input AnotherInputType {
-            anotherInput: ID!
-          }
-          
-          input InputTypeWithDefault {
-            nonNullId: ID!
-            nonNullIdWithDefault: ID! = "id"
-            nullableId: ID
-            nullableIdWithDefault: ID = "id"
-          }
-          
-          input EnumInputType {
-            enumInput: SomeEnum!
-            enumListInput: [SomeEnum!]!
-            nestedEnumType: [NestedEnumInputType]
-          }
-          
-          type EverythingResponse {
-            basicTypes: BasicTypesResponse
-            enumResponse: SomeEnum
-            interfaceResponse: AnInterface
-            interfaceImplementationResponse: InterfaceImplementation2
-            unionResponse: UnionType
-            unionType2Response: UnionType2
-            listOfBools: [Boolean!]!
-            listOfInterfaces: [AnInterface]
-            listOfUnions: [UnionType]
-            objectTypeWithInputField(boolInput: Boolean, secondInput: Boolean!): ObjectTypeResponse
-            listOfObjects: [ObjectTypeResponse]
-          }
-          
-          type BasicResponse {
-            id: Int!
-            nullableId: Int
-          }
-          
-          type Query {
-            inputTypeQuery(input: InputType!): EverythingResponse!
-            scalarInputQuery(
-              listInput: [String!]!, 
-              stringInput: String!, 
-              nullableStringInput: String, 
-              intInput: Int!, 
-              floatInput: Float!, 
-              boolInput: Boolean!, 
-              enumInput: SomeEnum,
-              idInput: ID!
-            ): EverythingResponse!
-            noInputQuery: EverythingResponse!
-            basicInputTypeQuery(input: NestedInputType!): EverythingResponse!
-            anotherInputTypeQuery(input: AnotherInputType): EverythingResponse!
-            enumInputQuery(enumInput: SomeEnum, inputType: EnumInputType): EverythingResponse!
-            basicResponseQuery: BasicResponse!
-            scalarResponseQuery: String
-            defaultArgQuery(stringInput: String! = "default", inputType: AnotherInputType = { anotherInput: "inputDefault" }): BasicResponse!
-            inputTypehDefaultQuery(input: InputTypeWithDefault): BasicResponse!
-          }"#;
+    async fn test_complex_references() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query Query($secondInput: Boolean!) {
             scalarResponseQuery
@@ -1014,18 +836,13 @@ mod tests {
             ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_basic_regex() {
-        let schema_str = r#"type BasicResponse {
-            id: Int!
-            nullableId: Int
-          }
-
-          type Query {
-            noInputQuery: BasicResponse!
-          }"#;
+    async fn test_basic_regex() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query MyQuery {
             noInputQuery {
@@ -1040,18 +857,31 @@ mod tests {
 
         let expected_sig = "# MyQuery\nquery MyQuery{noInputQuery{id}}";
         assert!(generated.compare_stats_report_key(expected_sig));
+
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["noInputQuery".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["id".into()],
+                    is_interface: false,
+                },
+            ),
+        ]);
+        assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_anonymous_query() {
-        let schema_str = r#"type BasicResponse {
-            id: Int!
-            nullableId: Int
-          }
-          
-          type Query {
-            noInputQuery: BasicResponse!
-          }"#;
+    async fn test_anonymous_query() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query {
             noInputQuery {
@@ -1066,20 +896,31 @@ mod tests {
 
         let expected_sig = "# -\n{noInputQuery{id}}";
         assert!(generated.compare_stats_report_key(expected_sig));
+
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["noInputQuery".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["id".into()],
+                    is_interface: false,
+                },
+            ),
+        ]);
+        assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_anonymous_mutation() {
-        let schema_str = r#"type BasicResponse {
-            id: Int!
-            nullableId: Int
-          }
-
-          type Query {}
-          
-          type Mutation {
-            noInputMutation: BasicResponse!
-          }"#;
+    async fn test_anonymous_mutation() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"mutation {
             noInputMutation {
@@ -1094,20 +935,31 @@ mod tests {
 
         let expected_sig = "# -\nmutation{noInputMutation{id}}";
         assert!(generated.compare_stats_report_key(expected_sig));
+
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            (
+                "Mutation".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["noInputMutation".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["id".into()],
+                    is_interface: false,
+                },
+            ),
+        ]);
+        assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_anonymous_subscription() {
-        let schema_str = r#"type BasicResponse {
-            id: Int!
-            nullableId: Int
-          }
-
-          type Query {}
-          
-          type Subscription {
-            noInputSubscription: BasicResponse!
-          }"#;
+    async fn test_anonymous_subscription() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str: &str = r#"subscription {
             noInputSubscription {
@@ -1122,36 +974,38 @@ mod tests {
 
         let expected_sig = "# -\nsubscription{noInputSubscription{id}}";
         assert!(generated.compare_stats_report_key(expected_sig));
+
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            (
+                "Subscription".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["noInputSubscription".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["id".into()],
+                    is_interface: false,
+                },
+            ),
+        ]);
+        assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_ordered_fields_and_variables() {
-        let schema_str = r#"type BasicResponse {
-            id: Int!
-            nullableId: Int
-            zzz: Int
-            aaa: Int
-            CCC: Int
-          }
-          
-          type Query {
-            scalarInputQuery(
-                listInput: [String!]!, 
-                stringInput: String!, 
-                nullableStringInput: String, 
-                intInput: Int!, 
-                floatInput: Float!, 
-                boolInput: Boolean!,
-                idInput: ID!
-              ): BasicResponse!
-          }"#;
+    async fn test_ordered_fields_and_variables() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query VariableScalarInputQuery($idInput: ID!, $boolInput: Boolean!, $floatInput: Float!, $intInput: Int!, $listInput: [String!]!, $stringInput: String!, $nullableStringInput: String) {
-            scalarInputQuery(
+            sortQuery(
               idInput: $idInput
               boolInput: $boolInput
               floatInput: $floatInput
-              intInput: $intInput
+              INTInput: $intInput
               listInput: $listInput
               stringInput: $stringInput
               nullableStringInput: $nullableStringInput
@@ -1174,48 +1028,39 @@ mod tests {
             &schema,
         );
 
-        let expected_sig = "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){scalarInputQuery(boolInput:$boolInput floatInput:$floatInput idInput:$idInput intInput:$intInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){CCC aaa id nullableId zzz}}";
+        let expected_sig = "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){sortQuery(INTInput:$intInput boolInput:$boolInput floatInput:$floatInput idInput:$idInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){CCC aaa id nullableId zzz}}";
         assert!(generated.compare_stats_report_key(expected_sig));
+
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["sortQuery".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "SortResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec![
+                        "aaa".into(),
+                        "CCC".into(),
+                        "id".into(),
+                        "nullableId".into(),
+                        "zzz".into(),
+                    ],
+                    is_interface: false,
+                },
+            ),
+        ]);
+        assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_and_ref_with_fragments() {
-        let schema_str = r#"interface AnInterface {
-            sharedField: String!
-          }
-          
-          type InterfaceImplementation1 implements AnInterface {
-            sharedField: String!
-            implementation1Field: Int!
-          }
-          
-          type InterfaceImplementation2 implements AnInterface {
-            sharedField: String!
-            implementation2Field: Float!
-          }
-          
-          type UnionType1 {
-            unionType1Field: String!
-            nullableString: String
-          }
-          
-          type UnionType2 {
-            unionType2Field: String!
-            nullableString: String
-          }
-          
-          union UnionType = UnionType1 | UnionType2
-        
-          type EverythingResponse {
-            interfaceResponse: AnInterface
-            listOfInterfaces: [AnInterface]
-            unionResponse: UnionType
-            listOfBools: [Boolean!]!
-          }
-          
-          type Query {
-            noInputQuery: EverythingResponse!
-          }"#;
+    async fn test_fragments() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query FragmentQuery {
             noInputQuery {
@@ -1355,60 +1200,79 @@ mod tests {
             ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
+
+        // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
+        let sanitised_query_str = r#"query FragmentQuery {
+            noInputQuery {
+              listOfBools
+              interfaceResponse {
+                sharedField
+                ... on InterfaceImplementation2 {
+                  implementation2Field
+                }
+                ...bbbInterfaceFragment
+                ...aaaInterfaceFragment
+                ... {
+                  ... on InterfaceImplementation1 {
+                    implementation1Field
+                  }
+                }
+                ... on InterfaceImplementation1 {
+                  implementation1Field
+                }
+              }
+              unionResponse {
+                ... on UnionType2 {
+                  unionType2Field
+                }
+                ... on UnionType1 {
+                  unionType1Field
+                }
+              }
+              ...zzzFragment
+              ...aaaFragment
+              ...ZZZFragment
+            }
+          }
+          
+          fragment zzzFragment on EverythingResponse {
+            listOfInterfaces {
+              sharedField
+            }
+          }
+          
+          fragment ZZZFragment on EverythingResponse {
+            listOfInterfaces {
+              sharedField
+            }
+          }
+          
+          fragment aaaFragment on EverythingResponse {
+            listOfInterfaces {
+              sharedField
+            }
+          }
+          
+          fragment bbbInterfaceFragment on InterfaceImplementation2 {
+            sharedField
+            implementation2Field
+          }
+          
+          fragment aaaInterfaceFragment on InterfaceImplementation1 {
+            sharedField
+          }"#;
+        assert_js_implementation(
+            schema_str,
+            sanitised_query_str,
+            expected_sig,
+            &expected_refs,
+        )
+        .await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_and_ref_with_directives() {
-        let schema_str = r#"directive @withArgs(
-            arg1: String = "Default"
-            arg2: String
-            arg3: Boolean
-            arg4: Int
-            arg5: [ID]
-          ) on QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
-          directive @noArgs on QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
-          
-          enum SomeEnum {
-            SOME_VALUE_1
-            SOME_VALUE_2
-            SOME_VALUE_3
-          }
-
-          interface AnInterface {
-            sharedField: String!
-          }
-          
-          type InterfaceImplementation1 implements AnInterface {
-            sharedField: String!
-            implementation1Field: Int!
-          }
-          
-          type InterfaceImplementation2 implements AnInterface {
-            sharedField: String!
-            implementation2Field: Float!
-          }
-          
-          type UnionType1 {
-            unionType1Field: String!
-            nullableString: String
-          }
-          
-          type UnionType2 {
-            unionType2Field: String!
-            nullableString: String
-          }
-          
-          union UnionType = UnionType1 | UnionType2
-        
-          type EverythingResponse {
-            enumResponse: SomeEnum
-            interfaceResponse: AnInterface
-            unionResponse: UnionType
-          }
-          
-          type Query {
-            noInputQuery: EverythingResponse!
-          }"#;
+    async fn test_directives() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"fragment Fragment1 on InterfaceImplementation1 {
             sharedField
@@ -1493,23 +1357,13 @@ mod tests {
             ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_and_ref_with_aliases() {
-        let schema_str = r#"enum SomeEnum {
-            SOME_VALUE_1
-            SOME_VALUE_2
-            SOME_VALUE_3
-          }
-        
-          type EverythingResponse {
-            enumResponse: SomeEnum
-          }
-          
-          type Query {
-            enumInputQuery(enumInput: SomeEnum): EverythingResponse!
-          }"#;
+    async fn test_aliases() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query AliasQuery {
             xxAlias: enumInputQuery(enumInput: SOME_VALUE_1) {
@@ -1548,38 +1402,13 @@ mod tests {
             ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
-    async fn test_sig_and_ref_with_inline_values() {
-        let schema_str = r#"enum SomeEnum {
-            SOME_VALUE_1
-            SOME_VALUE_2
-            SOME_VALUE_3
-          }
-          
-          input InputType {
-            inputString: String!
-            inputInt: Int!
-            inputBoolean: Boolean
-            nestedType: NestedInputType!
-            enumInput: SomeEnum
-            listInput: [Int!]!
-            nestedTypeList: [NestedInputType]
-          }
-          
-          input NestedInputType {
-            someFloat: Float!
-            someNullableFloat: Float
-          }
-        
-          type EverythingResponse {
-            enumResponse: SomeEnum
-          }
-          
-          type Query {
-            inputTypeQuery(input: InputType!): EverythingResponse!
-          }"#;
+    async fn test_inline_values() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
         let query_str = r#"query InlineInputTypeQuery {
             inputTypeQuery(input: { 
@@ -1620,5 +1449,7 @@ mod tests {
             ),
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 }

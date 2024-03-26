@@ -444,6 +444,7 @@ version = "1.41.1"
 dependencies = [
  "apollo-compiler",
  "router-bridge",
+ "serde_json",
  "test-log",
  "tokio",
 ]
