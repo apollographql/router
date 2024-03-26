@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
+use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -91,7 +92,7 @@ impl From<apollo_compiler::ast::OperationType> for OperationKind {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
-    pub(crate) service_name: String,
+    pub(crate) service_name: NodeStr,
 
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -99,19 +100,19 @@ pub(crate) struct FetchNode {
     pub(crate) requires: Vec<Selection>,
 
     /// The variables that are used for the subgraph fetch.
-    pub(crate) variable_usages: Vec<String>,
+    pub(crate) variable_usages: Vec<NodeStr>,
 
     /// The GraphQL subquery that is used for the fetch.
     pub(crate) operation: String,
 
     /// The GraphQL subquery operation name.
-    pub(crate) operation_name: Option<String>,
+    pub(crate) operation_name: Option<NodeStr>,
 
     /// The GraphQL operation kind that is used for the fetch.
     pub(crate) operation_kind: OperationKind,
 
     /// Optional id used by Deferred nodes
-    pub(crate) id: Option<String>,
+    pub(crate) id: Option<NodeStr>,
 
     // Optionally describes a number of "rewrites" that query plan executors should apply to the data that is sent as input of this fetch.
     pub(crate) input_rewrites: Option<Vec<rewrites::DataRewrite>>,
@@ -150,7 +151,7 @@ impl Variables {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         requires: &[Selection],
-        variable_usages: &[String],
+        variable_usages: &[NodeStr],
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
@@ -250,7 +251,7 @@ impl FetchNode {
             inverted_paths: paths,
         } = match Variables::new(
             &self.requires,
-            self.variable_usages.as_ref(),
+            &self.variable_usages,
             data,
             current_dir,
             // Needs the original request here
@@ -283,14 +284,14 @@ impl FetchNode {
                     .body(
                         Request::builder()
                             .query(operation)
-                            .and_operation_name(operation_name.clone())
+                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
                     )
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
-            .subgraph_name(self.service_name.clone())
+            .subgraph_name(self.service_name.to_string())
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
@@ -340,7 +341,7 @@ impl FetchNode {
             return (
                 Value::default(),
                 vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_owned(),
+                    service: service_name.to_string(),
                 }
                 .to_graphql_error(Some(current_dir.to_owned()))],
             );

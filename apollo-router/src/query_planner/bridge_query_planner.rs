@@ -229,7 +229,7 @@ impl PlannerMode {
                     usage_reporting: super::convert::usage_reporting(&plan),
                     data: QueryPlanResult {
                         formatted_query_plan: Some(super::convert::formatted(&plan)),
-                        query_plan: plan.into(),
+                        query_plan: (&plan).into(),
                     },
                 })
             }
@@ -251,7 +251,7 @@ impl PlannerMode {
                     .into_result()
                     .map_err(PlanErrors::from);
 
-                match (&js_result, rust_result) {
+                match (&js_result, &rust_result) {
                     (Err(js_error), Ok(_)) => {
                         tracing::warn!("JS query planner error: {}", js_error);
                         tracing::warn!(
@@ -1358,17 +1358,17 @@ mod tests {
         fn check_query_plan_coverage(
             node: &PlanNode,
             path: &Path,
-            parent_label: Option<String>,
+            parent_label: Option<&str>,
             subselections: &HashMap<SubSelectionKey, SubSelectionValue>,
         ) {
             match node {
                 PlanNode::Defer { primary, deferred } => {
                     if let Some(subselection) = primary.subselection.clone() {
-                        let path = path.join(primary.path.clone().unwrap_or_default());
                         assert!(
-                            subselections.keys().any(|k| k.defer_label == parent_label),
-                            "Missing key: '{}' '{:?}' '{}' in {:?}",
-                            path,
+                            subselections
+                                .keys()
+                                .any(|k| k.defer_label.as_deref() == parent_label),
+                            "Missing key: '{:?}' '{}' in {:?}",
                             parent_label,
                             subselection,
                             subselections.keys().collect::<Vec<_>>()
@@ -1380,7 +1380,7 @@ mod tests {
                             assert!(
                                 subselections
                                     .keys()
-                                    .any(|k| k.defer_label == deferred.label),
+                                    .any(|k| k.defer_label.as_deref() == deferred.label.as_deref()),
                                 "Missing key: '{}' '{:?}' '{}'",
                                 path,
                                 deferred.label,
@@ -1391,7 +1391,7 @@ mod tests {
                             check_query_plan_coverage(
                                 node,
                                 &deferred.query_path,
-                                deferred.label.clone(),
+                                deferred.label.as_ref().map(|l| l.as_str()),
                                 subselections,
                             )
                         }
@@ -1399,7 +1399,7 @@ mod tests {
                 }
                 PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                     for node in nodes {
-                        check_query_plan_coverage(node, path, parent_label.clone(), subselections)
+                        check_query_plan_coverage(node, path, parent_label, subselections)
                     }
                 }
                 PlanNode::Fetch(_) => {}
@@ -1412,7 +1412,7 @@ mod tests {
                     else_clause,
                 } => {
                     if let Some(node) = if_clause {
-                        check_query_plan_coverage(node, path, parent_label.clone(), subselections)
+                        check_query_plan_coverage(node, path, parent_label, subselections)
                     }
                     if let Some(node) = else_clause {
                         check_query_plan_coverage(node, path, parent_label, subselections)
