@@ -805,11 +805,15 @@ pub(crate) async fn process_batch(
     }
 
     tracing::debug!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
-    let value = serde_json::from_slice(&body.unwrap().unwrap()).map_err(|error| {
+    let value = serde_json::from_slice(&body.ok_or(BoxError::from(
         FetchError::SubrequestMalformedResponse {
             service: service.to_string(),
-            reason: error.to_string(),
-        }
+            reason: "no body in response".to_string(),
+        },
+    ))??)
+    .map_err(|error| FetchError::SubrequestMalformedResponse {
+        service: service.to_string(),
+        reason: error.to_string(),
     })?;
 
     tracing::debug!("json value from body is: {value:?}");
