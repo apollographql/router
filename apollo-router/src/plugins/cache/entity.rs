@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +12,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
+use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -32,6 +34,7 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
@@ -51,6 +54,7 @@ pub(crate) struct EntityCache {
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
     metrics: Metrics,
+    private_queries: Arc<RwLock<HashSet<String>>>,
 }
 
 /// Configuration for entity caching
@@ -137,6 +141,7 @@ impl Plugin for EntityCache {
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraphs),
             metrics: init.config.metrics,
+            private_queries: Arc::new(RwLock::new(HashSet::new())),
         })
     }
 
@@ -185,11 +190,13 @@ impl Plugin for EntityCache {
         }
 
         if subgraph_enabled {
+            let private_queries = self.private_queries.clone();
             tower::util::BoxService::new(CacheService(Some(InnerCacheService {
                 service,
                 name: name.to_string(),
                 storage,
                 subgraph_ttl,
+                private_queries,
             })))
         } else {
             service
@@ -211,6 +218,7 @@ impl EntityCache {
             enabled: Some(true),
             subgraphs: Arc::new(subgraphs),
             metrics: Metrics::default(),
+            private_queries: Default::default(),
         })
     }
 }
@@ -221,6 +229,7 @@ struct InnerCacheService {
     name: String,
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
+    private_queries: Arc<RwLock<HashSet<String>>>,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -251,6 +260,21 @@ impl InnerCacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
+        let query = request
+            .subgraph_request
+            .body()
+            .query
+            .clone()
+            .unwrap_or_default();
+
+        let is_known_private = { self.private_queries.read().await.contains(&query) };
+
+        let private_id = if is_known_private {
+            get_private_id(&request.context)
+        } else {
+            None
+        };
+
         if !request
             .subgraph_request
             .body()
@@ -258,9 +282,14 @@ impl InnerCacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
-                match cache_lookup_root(self.name, self.storage.clone(), request)
-                    .instrument(tracing::info_span!("cache_lookup"))
-                    .await?
+                match cache_lookup_root(
+                    self.name,
+                    self.storage.clone(),
+                    private_id.as_deref(),
+                    request,
+                )
+                .instrument(tracing::info_span!("cache_lookup"))
+                .await?
                 {
                     ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, root_cache_key)) => {
@@ -273,9 +302,13 @@ impl InnerCacheService {
                         cache_store_root_from_response(
                             self.storage,
                             self.subgraph_ttl,
+                            &self.private_queries,
+                            &query,
                             &response,
                             cache_control,
                             root_cache_key,
+                            is_known_private,
+                            private_id,
                         )
                         .await?;
 
@@ -286,9 +319,14 @@ impl InnerCacheService {
                 self.service.call(request).await
             }
         } else {
-            match cache_lookup_entities(self.name, self.storage.clone(), request)
-                .instrument(tracing::info_span!("cache_lookup"))
-                .await?
+            match cache_lookup_entities(
+                self.name,
+                self.storage.clone(),
+                private_id.as_deref(),
+                request,
+            )
+            .instrument(tracing::info_span!("cache_lookup"))
+            .await?
             {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, cache_result)) => {
@@ -316,6 +354,7 @@ impl InnerCacheService {
 async fn cache_lookup_root(
     name: String,
     cache: RedisCacheStorage,
+    private_id: Option<&str>,
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
     let body = request.subgraph_request.body_mut();
@@ -326,6 +365,7 @@ async fn cache_lookup_root(
         body,
         &request.context,
         &request.authorization,
+        private_id,
     );
 
     let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
@@ -351,6 +391,7 @@ struct EntityCacheResults(Vec<IntermediateResult>);
 async fn cache_lookup_entities(
     name: String,
     cache: RedisCacheStorage,
+    private_id: Option<&str>,
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
     let body = request.subgraph_request.body_mut();
@@ -361,6 +402,7 @@ async fn cache_lookup_entities(
         body,
         &request.context,
         &request.authorization,
+        private_id,
     )?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
@@ -427,15 +469,27 @@ struct CacheEntry {
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
+    private_queries: &Arc<RwLock<HashSet<String>>>,
+    query: &str,
     response: &subgraph::Response,
     cache_control: CacheControl,
-    cache_key: String,
+    mut cache_key: String,
+    is_known_private: bool,
+    private_id: Option<String>,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl: Option<Duration> = cache_control
             .ttl()
             .map(|secs| Duration::from_secs(secs as u64))
             .or(subgraph_ttl);
+
+        // we did not know in advance that this was a query with a private scope, so we update the cache key
+        if !is_known_private && cache_control.private() {
+            if let Some(s) = private_id {
+                cache_key = format!("{cache_key}:{s}");
+            }
+            private_queries.write().await.insert(query.to_string());
+        }
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let span = tracing::info_span!("cache_store");
@@ -572,6 +626,7 @@ fn extract_cache_key_root(
     body: &mut graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
+    private_id: Option<&str>,
 ) -> String {
     // hash the query and operation name
     let query_hash = hash_query(query_hash, body);
@@ -582,10 +637,18 @@ fn extract_cache_key_root(
     // - subgraph name: caching is done per subgraph
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
-    format!(
-        "subgraph:{}:Query:{}:{}",
-        subgraph_name, query_hash, additional_data_hash
-    )
+    match private_id {
+        None => format!(
+            "subgraph:{}:Query:{}:{}",
+            subgraph_name, query_hash, additional_data_hash
+        ),
+        Some(s) => {
+            format!(
+                "subgraph:{}:Query:{}:{}:{}",
+                subgraph_name, query_hash, additional_data_hash, s
+            )
+        }
+    }
 }
 
 // build a list of keys to get from the cache in one query
@@ -595,6 +658,7 @@ fn extract_cache_keys(
     body: &mut graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
+    private_id: Option<&str>,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
     let query_hash = hash_query(query_hash, body);
@@ -629,10 +693,23 @@ fn extract_cache_keys(
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
-        let key = format!(
-            "subgraph:{}:{}:{}:{}:{}",
-            subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
-        );
+        let key = match private_id {
+            None => format!(
+                "subgraph:{}:{}:{}:{}:{}",
+                subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
+            ),
+            Some(s) => {
+                format!(
+                    "subgraph:{}:{}:{}:{}:{}:{}",
+                    subgraph_name,
+                    &typename,
+                    hashed_entity_key,
+                    query_hash,
+                    additional_data_hash,
+                    s
+                )
+            }
+        };
 
         representation
             .as_object_mut()
@@ -833,6 +910,21 @@ async fn insert_entities_in_result(
     Ok((new_entities, new_errors))
 }
 
+fn get_private_id(context: &Context) -> Option<String> {
+    context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .and_then(|value| {
+            value.as_object().and_then(|object| {
+                object.get("sub").and_then(|v| {
+                    v.as_str().map(|s| {
+                        let mut digest = Sha256::new();
+                        digest.update(s);
+                        hex::encode(digest.finalize().as_slice())
+                    })
+                })
+            })
+        })
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Key {
     #[serde(rename = "type")]
