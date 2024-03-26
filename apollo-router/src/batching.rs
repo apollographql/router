@@ -133,6 +133,8 @@ impl BatchQuery {
             if self.remaining == 0 {
                 self.sender = None;
             }
+        } else {
+            tracing::warn!("attempted to cancel completed batch query");
         }
     }
 }

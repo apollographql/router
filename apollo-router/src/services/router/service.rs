@@ -37,6 +37,7 @@ use tracing::Instrument;
 use super::ClientRequestAccepts;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
+use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -426,12 +427,46 @@ impl RouterService {
             }
         };
 
+        // We need to handle cases where a failure is part of a batch and thus must be cancelled.
+        // Requests can be cancelled at any point of the router pipeline, but all failures bubble back
+        // up through here, so we can catch them without having to specially handle batch queries in
+        // other portions of the codebase.
         let futures = supergraph_requests
             .into_iter()
-            .map(|supergraph_request| self.process_supergraph_request(supergraph_request));
+            .map(|supergraph_request| async {
+                // TODO: Cloning here seems to keep around the batch queries that should have been removed by the subgraph
+                // handler for the happy path, but `process_supergraph_request` takes ownership of the original request (and
+                // thus context) so we can't grab it from there.
+                // This will cause warnings about trying to cancel already completed batch queries in the logs for all
+                // batch queries.
+                let context = supergraph_request.context.clone();
+                let result = self.process_supergraph_request(supergraph_request).await;
+
+                // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
+                // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
+                // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
+                let batch_query_opt = context.extensions().lock().remove::<BatchQuery>();
+                if let Some(mut batch_query) = batch_query_opt {
+                    // Grab the reason from the result, keeping in mind that even an `Ok` here could mean that
+                    // the query was cancelled.
+                    let reason = match &result {
+                        Ok(res) => "todo!".into(),
+                        Err(e) => e.to_string(),
+                    };
+
+                    tracing::info!(
+                        "cancelling dangling batch query in supergraph response with: {reason}"
+                    );
+                    batch_query.signal_cancelled(reason).await;
+                }
+
+                result
+            });
 
         // Use join_all to preserve ordering of concurrent operations
         // (Short circuit processing and propagate any errors in the batch)
+        // Note: We use `join_all` here since it awaits all futures before returning, thus allowing us to
+        // handle cancellation logic without fear of the other futures getting killed.
         let mut results: Vec<router::Response> = join_all(futures)
             .await
             .into_iter()
