@@ -40,7 +40,6 @@ use tower::ServiceExt;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
-use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
