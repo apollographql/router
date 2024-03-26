@@ -15,6 +15,7 @@ use tower::ServiceExt;
 
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::query_planner::QueryPlan;
 use crate::register_plugin;
 use crate::services::execution::BoxService;
 
@@ -43,6 +44,8 @@ trait CostCalculator {
         query: &ExecutableDocument,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError>;
+
+    fn planned(query_plan: &QueryPlan) -> Result<f64, DemandControlError>;
 }
 
 /// Demand control configuration
