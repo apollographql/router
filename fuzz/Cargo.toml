@@ -22,6 +22,19 @@ router-bridge = "=0.5.16+v2.7.1"
 serde_json = "1"
 tokio = { version = "1.36.0", features = ["full"] }
 
+[dev-dependencies]
+apollo-router = { path = "../apollo-router" }
+anyhow = "1"
+async-trait = "0.1"
+schemars = { version = "0.8", features = ["url"] }
+serde = "1"
+serde_json_bytes = "0.2"
+tower = { version = "0.4", features = ["full"] }
+http = "0.2"
+
+[[example]]
+name = "fuzz_target"
+
 [[bin]]
 name = "invariant_router"
 path = "fuzz_targets/invariant_router.rs"
