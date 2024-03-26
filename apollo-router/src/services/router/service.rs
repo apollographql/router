@@ -450,7 +450,7 @@ impl RouterService {
                     // Grab the reason from the result, keeping in mind that even an `Ok` here could mean that
                     // the query was cancelled.
                     let reason = match &result {
-                        Ok(res) => "todo!".into(),
+                        Ok(_res) => "todo!".into(),
                         Err(e) => e.to_string(),
                     };
 

@@ -601,7 +601,17 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
                 .unwrap()
                 .as_string()
                 .unwrap();
-            let query = info.as_object().unwrap().get("body").unwrap().as_object().unwrap().get("query").unwrap().as_string().unwrap();
+            let query = info
+                .as_object()
+                .unwrap()
+                .get("body")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .get("query")
+                .unwrap()
+                .as_string()
+                .unwrap();
 
             // Cancel the request if we're in subgraph A, index 2
             let response = if subgraph == "a" && query.contains("op2") {
