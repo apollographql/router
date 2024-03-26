@@ -13,6 +13,7 @@ coprocessor:
     all:
       request:
         service_name: true
+        body: true
 
 include_subgraph_errors:
   all: true

@@ -569,6 +569,149 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 4;
+    const COPROCESSOR_CONFIG: &str = include_str!("../fixtures/batching/coprocessor.router.yaml");
+
+    let requests_a = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests_b = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+
+    // Spin up a coprocessor for cancelling requests to A
+    let coprocessor = wiremock::MockServer::builder().start().await;
+    let subgraph_a_canceller = wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(|request: &wiremock::Request| {
+            let info: serde_json::Value = request.body_json().unwrap();
+            let subgraph = info
+                .as_object()
+                .unwrap()
+                .get("serviceName")
+                .unwrap()
+                .as_string()
+                .unwrap();
+            let query = info.as_object().unwrap().get("body").unwrap().as_object().unwrap().get("query").unwrap().as_string().unwrap();
+
+            // Cancel the request if we're in subgraph A, index 2
+            let response = if subgraph == "a" && query.contains("op2") {
+                // Patch it to stop execution
+                let mut res = info;
+                let block = res.as_object_mut().unwrap();
+                block.insert("control".to_string(), serde_json::json!({ "break": 403 }));
+                block.insert(
+                    "body".to_string(),
+                    serde_json::json!({
+                        "errors": [{
+                            "message": "Subgraph A index 2 is not allowed",
+                            "extensions": {
+                                "code": "ERR_NOT_ALLOWED",
+                            },
+                        }],
+                    }),
+                );
+
+                res
+            } else {
+                info
+            };
+            ResponseTemplate::new(200).set_body_json(response)
+        })
+        .named("coprocessor POST /");
+    coprocessor.register(subgraph_a_canceller).await;
+
+    // We aren't expecting the whole batch anymore, so we need a handler here for it
+    fn handle_a(request: &wiremock::Request) -> ResponseTemplate {
+        let requests: Vec<Request> = request.body_json().unwrap();
+
+        // We should have gotten all of the regular elements minus the third
+        assert_eq!(requests.len(), REQUEST_COUNT - 1);
+
+        // Each element should have be for the specified subgraph and should have a field selection
+        // of index. The index should be 0..n without 2.
+        // Note: The router appends info to the query, so we append it at this check
+        for (request, index) in requests.into_iter().zip((0..).filter(|&i| i != 2)) {
+            assert_eq!(
+                request.query,
+                Some(format!(
+                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                ))
+            );
+        }
+
+        ResponseTemplate::new(200).set_body_json(
+            (0..REQUEST_COUNT)
+                .filter(|&i| i != 2)
+                .map(|index| {
+                    serde_json::json!({
+                        "data": {
+                            "entryA": {
+                                "index": index
+                            }
+                        }
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    // Make sure to patch the config with the coprocessor's port
+    let config = COPROCESSOR_CONFIG.replace("REPLACEME", &coprocessor.address().port().to_string());
+
+    // Interleave requests so that we can verify that they get properly separated
+    // Have the A subgraph get all of its requests cancelled by a coprocessor
+    let requests: Vec<_> = requests_a.interleave(requests_b).collect();
+    let responses = helper::run_test(
+        config.as_str(),
+        &requests,
+        Some(handle_a),
+        Some(helper::expect_batch),
+    )
+    .await?;
+
+    // TODO: Fill this in once we know how this response should look
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - data:
+        entryB:
+          index: 0
+    - data:
+        entryA:
+          index: 1
+    - data:
+        entryB:
+          index: 1
+    - errors:
+        - message: Subgraph A index 2 is not allowed
+          extensions:
+            code: ERR_NOT_ALLOWED
+    - data:
+        entryB:
+          index: 2
+    - data:
+        entryA:
+          index: 3
+    - data:
+        entryB:
+          index: 3
+    "###);
+
+    Ok(())
+}
+
 /// Utility methods for these tests
 mod helper {
     use std::time::Duration;
