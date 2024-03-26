@@ -64,8 +64,8 @@ features = ["docs_rs"]
 askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.80"
-apollo-compiler = "=1.0.0-beta.13"
-apollo-federation = "=0.0.8"
+apollo-compiler = "=1.0.0-beta.14"
+apollo-federation = { path = "../../federation-next" }
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
@@ -272,7 +272,9 @@ uname = "0.1.1"
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
-hyperlocal = { version = "0.8.0", default-features = false, features = ["client"] }
+hyperlocal = { version = "0.8.0", default-features = false, features = [
+    "client",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemallocator = "0.5"
@@ -331,7 +333,10 @@ wiremock = "0.5.22"
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
 
 [target.'cfg(unix)'.dev-dependencies]
-hyperlocal = { version = "0.8.0", default-features = false, features = ["client", "server"] }
+hyperlocal = { version = "0.8.0", default-features = false, features = [
+    "client",
+    "server",
+] }
 
 [build-dependencies]
 tonic-build = "0.9.2"

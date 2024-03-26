@@ -126,7 +126,7 @@ fn validate_input_value(
         _ => {}
     }
     let type_def = schema
-        .definitions
+        .definitions()
         .types
         .get(type_name)
         .ok_or(InvalidValue)?;

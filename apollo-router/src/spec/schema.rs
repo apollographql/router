@@ -17,36 +17,28 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
 /// A GraphQL schema.
-#[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    pub(crate) definitions: Valid<apollo_compiler::Schema>,
+    pub(crate) federation_supergraph: apollo_federation::Supergraph,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
-    api_schema: Option<Box<Schema>>,
+    api_schema: Option<ApiSchema>,
     pub(crate) schema_id: Option<String>,
 }
+
+/// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
+#[derive(Debug)]
+pub(crate) struct ApiSchema(pub(crate) Valid<apollo_compiler::Schema>);
 
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let schema = Self::parse(s)?;
-        let api_schema = Self::parse(
-            &schema
-                .create_api_schema(configuration)
-                // Avoid adding an error branch that's only used in tests--stick the error
-                // string in an existing generic one
-                .map_err(|err| {
-                    SchemaError::Api(format!(
-                        "The supergraph schema failed to produce a valid API schema: {err}"
-                    ))
-                })?,
-        )?;
+        let api_schema = Self::parse_compiler_schema(&schema.create_api_schema(configuration)?)?;
         Ok(schema.with_api_schema(api_schema))
     }
 
@@ -65,17 +57,17 @@ impl Schema {
         })
     }
 
+    pub(crate) fn parse_compiler_schema(
+        sdl: &str,
+    ) -> Result<Valid<apollo_compiler::Schema>, SchemaError> {
+        Self::parse_ast(sdl)?
+            .to_schema_validate()
+            .map_err(|WithErrors { errors, .. }| SchemaError::Validate(errors.into()))
+    }
+
     pub(crate) fn parse(sdl: &str) -> Result<Self, SchemaError> {
         let start = Instant::now();
-        let ast = Self::parse_ast(sdl)?;
-        let definitions = match ast.to_schema_validate() {
-            Ok(schema) => schema,
-            Err(WithErrors { errors, .. }) => {
-                return Err(SchemaError::Validate(ValidationErrors {
-                    errors: errors.iter().map(|e| e.to_json()).collect(),
-                }));
-            }
-        };
+        let definitions = Self::parse_compiler_schema(sdl)?;
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
@@ -120,15 +112,20 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
+        let federation_supergraph = apollo_federation::Supergraph::from_schema(definitions)?;
 
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
-            definitions,
+            federation_supergraph,
             subgraphs,
             implementers_map,
             api_schema: None,
             schema_id,
         })
+    }
+
+    pub(crate) fn definitions(&self) -> &Valid<apollo_compiler::Schema> {
+        self.federation_supergraph.schema.schema()
     }
 
     pub(crate) fn schema_id(sdl: &str) -> String {
@@ -142,34 +139,30 @@ impl Schema {
         configuration: &Configuration,
     ) -> Result<String, apollo_federation::error::FederationError> {
         use apollo_federation::ApiSchemaOptions;
-        use apollo_federation::Supergraph;
 
-        let schema = Supergraph::from_schema(self.definitions.clone())?;
-        let api_schema = schema.to_api_schema(ApiSchemaOptions {
+        let api_schema = self.federation_supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: configuration.supergraph.defer_support,
             ..Default::default()
         })?;
         Ok(api_schema.schema().to_string())
     }
 
-    pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
-        self.api_schema = Some(Box::new(api_schema));
+    pub(crate) fn with_api_schema(mut self, api_schema: Valid<apollo_compiler::Schema>) -> Self {
+        self.api_schema = Some(ApiSchema(api_schema));
         self
     }
-}
 
-impl Schema {
     /// Extracts a string containing the entire [`Schema`].
     pub(crate) fn as_string(&self) -> &Arc<String> {
         &self.raw_sdl
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
-        self.definitions.is_subtype(abstract_type, maybe_subtype)
+        self.definitions().is_subtype(abstract_type, maybe_subtype)
     }
 
     pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
-        self.definitions
+        self.definitions()
             .get_interface(interface)
             .map(|interface| {
                 // FIXME: this looks backwards
@@ -179,11 +172,7 @@ impl Schema {
     }
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
-        self.definitions.get_interface(abstract_type).is_some()
-    }
-
-    pub(crate) fn is_union(&self, abstract_type: &str) -> bool {
-        self.definitions.get_union(abstract_type).is_some()
+        self.definitions().get_interface(abstract_type).is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
@@ -216,25 +205,25 @@ impl Schema {
         self.subgraphs.get(service_name)
     }
 
-    pub(crate) fn api_schema(&self) -> &Schema {
+    pub(crate) fn api_schema(&self) -> &ApiSchema {
         match &self.api_schema {
             Some(schema) => schema,
-            None => self,
+            None => panic!("missing API schema"),
         }
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        if let Some(name) = self.definitions.root_operation(kind.into()) {
+        if let Some(name) = self.definitions().root_operation(kind.into()) {
             name.as_str()
         } else {
-            kind.as_str()
+            kind.default_type_name()
         }
     }
 
     /// Return the federation major version based on the @link or @core directives in the schema,
     /// or None if there are no federation directives.
     pub(crate) fn federation_version(&self) -> Option<i64> {
-        for directive in &self.definitions.schema_definition.directives {
+        for directive in &self.definitions().schema_definition.directives {
             let join_url = if directive.name == "core" {
                 let Some(feature) = directive
                     .argument_by_name("feature")
@@ -267,7 +256,7 @@ impl Schema {
     }
 
     pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
-        self.definitions
+        self.definitions()
             .schema_definition
             .directives
             .iter()
@@ -343,8 +332,35 @@ impl Schema {
     }
 }
 
+impl std::fmt::Debug for Schema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            raw_sdl,
+            federation_supergraph: _, // skip
+            subgraphs,
+            implementers_map,
+            api_schema: _, // skip
+            schema_id,
+        } = self;
+        f.debug_struct("Schema")
+            .field("raw_sdl", raw_sdl)
+            .field("subgraphs", subgraphs)
+            .field("implementers_map", implementers_map)
+            .field("schema_id", schema_id)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct InvalidObject;
+
+impl std::ops::Deref for ApiSchema {
+    type Target = Valid<apollo_compiler::Schema>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -522,15 +538,14 @@ mod tests {
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        let has_in_stock_field = |schema: &Schema| {
+        let has_in_stock_field = |schema: &apollo_compiler::Schema| {
             schema
-                .definitions
                 .get_object("Product")
                 .unwrap()
                 .fields
                 .contains_key("inStock")
         };
-        assert!(has_in_stock_field(&schema));
+        assert!(has_in_stock_field(schema.definitions()));
         assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
     }
 
@@ -564,13 +579,6 @@ mod tests {
                 schema.schema_id,
                 Some(
                     "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
-                )
-            );
-
-            assert_eq!(
-                schema.api_schema().schema_id,
-                Some(
-                    "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
                 )
             );
         }

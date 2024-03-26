@@ -4,19 +4,21 @@
 
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
+pub use plan::QueryPlan;
+pub(crate) use plan::*;
 
 pub use self::fetch::OperationKind;
 
 mod bridge_query_planner;
 mod caching_query_planner;
+mod convert;
 mod execution;
 pub(crate) mod fetch;
+mod labeler;
 mod plan;
 pub(crate) mod rewrites;
 mod selection;
 pub(crate) mod subscription;
-pub use plan::*;
-mod labeler;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
 pub(crate) const SUBSCRIBE_SPAN_NAME: &str = "subscribe";
