@@ -616,6 +616,12 @@ pub(crate) struct Supergraph {
 
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
+
+    /// abort request handling when the client drops the connection.
+    /// Default: false.
+    /// When set to true, some parts of the request pipeline like telemetry will not work properly,
+    /// but request handling will stop immediately when the client connection is closed.
+    pub(crate) early_cancel: bool,
 }
 
 fn default_defer_support() -> bool {
@@ -632,6 +638,7 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        early_cancel: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -640,6 +647,7 @@ impl Supergraph {
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
             reuse_query_fragments,
+            early_cancel: early_cancel.unwrap_or_default(),
         }
     }
 }
@@ -655,6 +663,7 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        early_cancel: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -663,6 +672,7 @@ impl Supergraph {
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
             reuse_query_fragments,
+            early_cancel: early_cancel.unwrap_or_default(),
         }
     }
 }
