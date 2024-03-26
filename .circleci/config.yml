@@ -258,7 +258,8 @@ commands:
             - run:
                 name: Install CMake
                 command: |
-                  choco install cmake.install -y --installargs 'ADD_CMAKE_TO_PATH=User'
+                  choco install cmake.install -y
+                  echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
                   exit $LASTEXITCODE
       - when:
           condition:
