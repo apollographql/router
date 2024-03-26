@@ -1,0 +1,21 @@
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+      jaeger:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        agent:
+          endpoint: default
+    logging:
+      experimental_when_header:
+        - name: content-type
+          value: "application/json"
+          body: true
+      stdout:
+        format: json
