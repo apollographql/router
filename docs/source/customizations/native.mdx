@@ -100,8 +100,8 @@ impl Plugin for HelloWorld {
 
     fn supergraph_service(
         &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: supergraph::BoxService,
+    ) -> supergraph::BoxService {
         service
     }
 
