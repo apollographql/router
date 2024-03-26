@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 anyhow = "1.0.80"
 clap = { version = "4.5.1", features = ["derive"] }
-cargo-scaffold = { version = "0.11.0", default-features = false }
+cargo-scaffold = { version = "0.12.0", default-features = false }
 regex = "1"
 str_inflector = "0.12.0"
 toml = "0.8.10"
