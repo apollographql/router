@@ -210,8 +210,8 @@ impl BasicCostCalculator {
 
     fn estimated_cost_of_operation(
         &self,
-        subgraph: &String,
-        operation: &String,
+        subgraph: &str,
+        operation: &str,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
