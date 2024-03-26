@@ -4,6 +4,7 @@ mod directives;
 
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use apollo_compiler::Schema;
 use displaydoc::Display;
 use schemars::JsonSchema;
@@ -63,6 +64,12 @@ pub(crate) struct DemandControlConfig {
 pub(crate) enum DemandControlError {
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
+}
+
+impl<T> From<WithErrors<T>> for DemandControlError {
+    fn from(value: WithErrors<T>) -> Self {
+        DemandControlError::QueryParseFailure(format!("{}", value))
+    }
 }
 
 #[derive(Clone, Debug)]

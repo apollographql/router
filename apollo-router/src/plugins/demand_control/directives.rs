@@ -47,8 +47,7 @@ impl RequiresDirective {
         match (requires_arg, parent_type_name) {
             (Some(arg), Some(type_name)) => {
                 let field_set = Parser::new()
-                    .parse_field_set(schema, type_name.clone(), arg, "")
-                    .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
+                    .parse_field_set(schema, type_name.clone(), arg, "")?;
 
                 Ok(Some(RequiresDirective {
                     fields: field_set.selection_set.clone(),
