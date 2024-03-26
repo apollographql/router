@@ -134,11 +134,10 @@ fn validate_input_value(
         // Custom scalar: accept any JSON value
         (schema::ExtendedType::Scalar(_), _) => Ok(()),
 
-        // TODO: check enum value?
-        // (schema::ExtendedType::Enum(def), Value::String(s)) => {
-        //     from_bool(def.values.contains_key(s))
-        // },
-        (schema::ExtendedType::Enum(_), _) => Ok(()),
+        (schema::ExtendedType::Enum(def), Value::String(s)) => {
+            from_bool(def.values.contains_key(s.as_str()))
+        }
+        (schema::ExtendedType::Enum(_), _) => Err(InvalidValue),
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
             // TODO: check keys in `obj` but not in `def.fields`?

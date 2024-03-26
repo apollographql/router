@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+expression: response
+---
+{
+  "errors": [
+    {
+      "message": "value `C` does not exist on `InputEnum`",
+      "locations": [
+        {
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "extensions": {
+        "code": "GRAPHQL_VALIDATION_FAILED"
+      }
+    }
+  ]
+}
