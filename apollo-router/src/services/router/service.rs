@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -296,6 +297,10 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
+                    if !response.errors.is_empty() {
+                        Self::count_errors(&response.errors);
+                    }
+
                     parts
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
@@ -318,17 +323,31 @@ impl RouterService {
                             MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
                         );
                     }
+
+                    if !response.errors.is_empty() {
+                        Self::count_errors(&response.errors);
+                    }
+
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
                     let multipart_stream = match response.subscribed {
-                        Some(true) => {
-                            StreamBody::new(Multipart::new(body, ProtocolMode::Subscription))
-                        }
+                        Some(true) => StreamBody::new(Multipart::new(
+                            body.inspect(|response| {
+                                if !response.errors.is_empty() {
+                                    Self::count_errors(&response.errors);
+                                }
+                            }),
+                            ProtocolMode::Subscription,
+                        )),
                         _ => StreamBody::new(Multipart::new(
-                            once(ready(response)).chain(body),
+                            once(ready(response)).chain(body.inspect(|response| {
+                                if !response.errors.is_empty() {
+                                    Self::count_errors(&response.errors);
+                                }
+                            })),
                             ProtocolMode::Defer,
                         )),
                     };
@@ -350,6 +369,11 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
+                    tracing::info!(
+                        monotonic_counter.apollo.router.graphql_error = 1u64,
+                        code = "INVALID_ACCEPT_HEADER"
+                    );
+
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
                             .error(
@@ -717,6 +741,29 @@ impl RouterService {
         );
 
         Ok(results)
+    }
+
+    fn count_errors(errors: &[graphql::Error]) {
+        let mut map = HashMap::new();
+        for error in errors {
+            let code = error.extensions.get("code").and_then(|c| c.as_str());
+            let entry = map.entry(code).or_insert(0u64);
+            *entry += 1;
+        }
+
+        for (code, count) in map {
+            match code {
+                None => {
+                    tracing::info!(monotonic_counter.apollo.router.graphql_error = count,);
+                }
+                Some(code) => {
+                    tracing::info!(
+                        monotonic_counter.apollo.router.graphql_error = count,
+                        code = code
+                    );
+                }
+            }
+        }
     }
 }
 

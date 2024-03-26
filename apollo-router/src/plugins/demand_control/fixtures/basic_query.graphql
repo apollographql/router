@@ -1,0 +1,4 @@
+query BasicQuery {
+    getScalar(id: 2)
+    anotherScalar
+}
