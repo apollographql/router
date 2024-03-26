@@ -21,7 +21,7 @@ const ROUTER_CONFIG_PATH: &str = "fuzz/router.yaml";
 const ROUTER_URL: &str = "http://localhost:4100";
 static ROUTER_INIT: AtomicBool = AtomicBool::new(false);
 
-static ROUTER_PROCESS: OnceLock<ChildProcessGuard> = OnceLock::new();
+static mut ROUTER_PROCESS: OnceLock<ChildProcessGuard> = OnceLock::new();
 
 #[derive(Debug)]
 struct ChildProcessGuard(Child);
@@ -60,8 +60,7 @@ fuzz_target!(|data: &[u8]| {
         if let Ok(Some(exit_status)) = cmd.try_wait() {
             panic!("the router exited with exit code : {}", exit_status);
         }
-        ROUTER_PROCESS
-            .set(ChildProcessGuard(cmd))
+        unsafe { ROUTER_PROCESS.set(ChildProcessGuard(cmd)) }
             .expect("cannot set the router child process");
     }
 
@@ -102,6 +101,11 @@ fuzz_target!(|data: &[u8]| {
         .send();
     if let Err(err) = router_response {
         eprintln!("bad response from router: {op_str:?}");
+        unsafe { ROUTER_PROCESS.get_mut() }
+            .unwrap()
+            .0
+            .kill()
+            .unwrap();
         panic!("{}", err);
     }
 
@@ -119,14 +123,17 @@ fuzz_target!(|data: &[u8]| {
     )
     .unwrap();
 
-    assert_eq!(
-        generated.result.stats_report_key,
-        usage_reporting.stats_report_key
-    );
-    assert!(
-        generated.compare_referenced_fields(&usage_reporting.referenced_fields_by_type),
-        "generated\n{:?}\nand router's\n{:?}",
-        generated.result,
-        usage_reporting
-    );
+    if generated.result.stats_report_key != usage_reporting.stats_report_key
+        || !generated.compare_referenced_fields(&usage_reporting.referenced_fields_by_type)
+    {
+        unsafe { ROUTER_PROCESS.get_mut() }
+            .unwrap()
+            .0
+            .kill()
+            .unwrap();
+        panic!(
+            "generated\n{:?}\nand router's\n{:?}",
+            generated.result, usage_reporting
+        );
+    }
 });
