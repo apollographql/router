@@ -340,6 +340,19 @@ The `telemetry.logging.stdout.format.json.display_resource` option configures wh
 
 For example, given a `router.yaml` with `display_resource: true` and a configured `resource`, log messages will display the resource: 
 
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: 
+          json:
+            display_resource: true
+      common:
+        service_name: bryn-router
+        resource:
+          test.resource: test
+```
 
 ```text showLineNumbers=false disableCopy=true
 "resource":{"test.resource":"test","service.name":"bryn-router"}
