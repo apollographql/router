@@ -34,6 +34,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::ClientRequestAccepts;
+use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
@@ -266,6 +267,16 @@ impl RouterService {
 
         let (mut parts, mut body) = response.into_parts();
         process_vary_header(&mut parts.headers);
+
+        if context
+            .extensions()
+            .lock()
+            .get::<CanceledRequest>()
+            .is_some()
+        {
+            parts.status = StatusCode::from_u16(499)
+                .expect("499 is not a standard status code but common enough");
+        }
 
         match body.next().await {
             None => {

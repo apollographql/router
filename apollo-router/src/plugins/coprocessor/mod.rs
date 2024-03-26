@@ -30,6 +30,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
@@ -685,6 +686,17 @@ where
             }
         }
 
+        // Handle cancelled batch queries
+        // FIXME: This should be way higher up the call chain so that custom plugins / rhai / etc. can
+        // automatically work with batched queries and cancellations.
+        let batch_query_opt = res.context.extensions().lock().remove::<BatchQuery>();
+        if let Some(mut batch_query) = batch_query_opt {
+            // TODO: How do we reliably get the reason for the coprocessor cancellation here?
+            batch_query
+                .signal_cancelled("coprocessor cancelled request at router layer".to_string())
+                .await;
+        }
+
         return Ok(ControlFlow::Break(res));
     }
 
@@ -1014,6 +1026,18 @@ where
 
             subgraph_response
         };
+
+        // Handle cancelled batch queries
+        // FIXME: This should be way higher up the call chain so that custom plugins / rhai / etc. can
+        // automatically work with batched queries and cancellations.
+        let batch_query_opt = res.context.extensions().lock().remove::<BatchQuery>();
+        if let Some(mut batch_query) = batch_query_opt {
+            // TODO: How do we reliably get the reason for the coprocessor cancellation here?
+            batch_query
+                .signal_cancelled("coprocessor cancelled request at subgraph layer".to_string())
+                .await;
+        }
+
         return Ok(ControlFlow::Break(res));
     }
 
