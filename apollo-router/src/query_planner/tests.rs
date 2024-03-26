@@ -84,6 +84,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             referenced_fields_by_type: Default::default(),
         }
         .into(),
+        subgraph_schemas: Arc::new(HashMap::new()),
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
@@ -137,6 +138,7 @@ async fn fetch_includes_operation_name() {
         }
         .into(),
         query: Arc::new(Query::empty()),
+        subgraph_schemas: Arc::new(HashMap::new()),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -195,6 +197,7 @@ async fn fetch_makes_post_requests() {
         }
         .into(),
         query: Arc::new(Query::empty()),
+        subgraph_schemas: Arc::new(HashMap::new()),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -319,6 +322,7 @@ async fn defer() {
                 referenced_fields_by_type: Default::default(),
             }.into(),
             query: Arc::new(Query::empty()),
+            subgraph_schemas: Arc::new(HashMap::new()),
         };
 
     let mut mock_x_service = plugin::test::MockSubgraphService::new();
@@ -441,6 +445,7 @@ async fn defer_if_condition() {
             .unwrap(),
         ),
         formatted_query_plan: None,
+        subgraph_schemas: Arc::new(HashMap::new()),
     };
 
     let mocked_accounts = MockSubgraph::builder()
@@ -619,6 +624,7 @@ async fn dependent_mutations() {
         }
         .into(),
         query: Arc::new(Query::empty()),
+        subgraph_schemas: Arc::new(HashMap::new()),
     };
 
     let mut mock_a_service = plugin::test::MockSubgraphService::new();

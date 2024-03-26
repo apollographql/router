@@ -663,6 +663,7 @@ mod tests {
                     }
                     .into(),
                     query: Arc::new(Query::empty()),
+                    subgraph_schemas: Arc::new(HashMap::new()),
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use router_bridge::planner::PlanOptions;
@@ -34,6 +35,7 @@ pub struct QueryPlan {
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<String>,
     pub(crate) query: Arc<Query>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, String>>,
 }
 
 /// This default impl is useful for test users
@@ -55,6 +57,7 @@ impl QueryPlan {
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
+            subgraph_schemas: Arc::new(HashMap::new()),
         }
     }
 }

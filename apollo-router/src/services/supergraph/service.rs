@@ -370,6 +370,7 @@ async fn subscription_task(
                 root: *r,
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
+                subgraph_schemas: query_plan.subgraph_schemas.clone(),
             })
         }),
         _ => {

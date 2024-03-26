@@ -63,6 +63,7 @@ const VALIDATION_MATCH: &str = "match";
 pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlanResult>>,
     schema: Arc<Schema>,
+    subgraph_schemas: Arc<HashMap<String, String>>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
@@ -235,6 +236,9 @@ impl BridgeQueryPlanner {
         let api_schema = Schema::parse(&api_schema_string, &configuration)?;
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
+
+        let subgraph_schemas = Arc::new(planner.subgraphs().await?);
+
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
@@ -247,6 +251,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
+            subgraph_schemas,
             introspection,
             enable_authorization_directives,
             configuration,
@@ -293,6 +298,8 @@ impl BridgeQueryPlanner {
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
+        let subgraph_schemas = Arc::new(planner.subgraphs().await?);
+
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
@@ -305,6 +312,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
+            subgraph_schemas,
             introspection,
             enable_authorization_directives,
             configuration,
@@ -512,6 +520,7 @@ impl BridgeQueryPlanner {
                         root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
+                        subgraph_schemas: self.subgraph_schemas.clone(),
                     }),
                 })
             }
