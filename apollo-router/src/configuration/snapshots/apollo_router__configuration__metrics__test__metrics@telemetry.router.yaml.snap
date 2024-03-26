@@ -9,6 +9,10 @@ expression: "&metrics.non_zero()"
         attributes:
           opt.events: false
           opt.instruments: false
+          opt.instruments.default_attribute_requirement_level: false
+          opt.instruments.router: false
+          opt.instruments.subgraph: false
+          opt.instruments.supergraph: false
           opt.logging.experimental_when_header: true
           opt.metrics.otlp: true
           opt.metrics.prometheus: true
