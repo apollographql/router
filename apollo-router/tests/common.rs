@@ -26,6 +26,10 @@ use opentelemetry::trace::Span;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_otlp::HttpExporterBuilder;
+use opentelemetry_otlp::Protocol;
+use opentelemetry_otlp::SpanExporterBuilder;
+use opentelemetry_otlp::WithExportConfig;
 use serde_json::json;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
@@ -96,7 +100,7 @@ impl Respond for TracedResponder {
 #[allow(dead_code)]
 pub enum Telemetry {
     Jaeger,
-    Otlp,
+    Otlp { endpoint: String },
     Datadog,
     Zipkin,
 }
@@ -105,7 +109,7 @@ pub enum Telemetry {
 impl IntegrationTest {
     #[builder]
     pub async fn new(
-        config: &'static str,
+        config: String,
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
@@ -139,7 +143,7 @@ impl IntegrationTest {
         };
 
         // Insert the overrides into the config
-        let config_str = merge_overrides(config, &subgraph_overrides, &addr);
+        let config_str = merge_overrides(&config, &subgraph_overrides, &addr);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -257,7 +261,7 @@ impl IntegrationTest {
             Some(Telemetry::Jaeger) => {
                 let tracer = opentelemetry_jaeger::new_agent_pipeline()
                     .with_service_name("my_app")
-                    .install_simple()
+                    .install_batch(opentelemetry::runtime::Tokio)
                     .expect("jaeger pipeline failed");
                 let telemetry = tracing_opentelemetry::layer()
                     .with_tracer(tracer)
@@ -274,7 +278,7 @@ impl IntegrationTest {
             Some(Telemetry::Datadog) => {
                 let tracer = opentelemetry_datadog::new_pipeline()
                     .with_service_name("my_app")
-                    .install_simple()
+                    .install_batch(opentelemetry::runtime::Tokio)
                     .expect("datadog pipeline failed");
                 let telemetry = tracing_opentelemetry::layer()
                     .with_tracer(tracer)
@@ -288,10 +292,15 @@ impl IntegrationTest {
                 global::set_text_map_propagator(opentelemetry_datadog::DatadogPropagator::new());
                 Some(Dispatch::new(subscriber))
             }
-            Some(Telemetry::Otlp) => {
+            Some(Telemetry::Otlp { endpoint }) => {
                 let tracer = opentelemetry_otlp::new_pipeline()
                     .tracing()
-                    .install_simple()
+                    .with_exporter(SpanExporterBuilder::Http(
+                        HttpExporterBuilder::default()
+                            .with_endpoint(endpoint)
+                            .with_protocol(Protocol::HttpBinary),
+                    ))
+                    .install_batch(opentelemetry::runtime::Tokio)
                     .expect("otlp pipeline failed");
                 let telemetry = tracing_opentelemetry::layer()
                     .with_tracer(tracer)
@@ -310,7 +319,7 @@ impl IntegrationTest {
             Some(Telemetry::Zipkin) => {
                 let tracer = opentelemetry_zipkin::new_pipeline()
                     .with_service_name("my_app")
-                    .install_simple()
+                    .install_batch(opentelemetry::runtime::Tokio)
                     .expect("zipkin pipeline failed");
                 let telemetry = tracing_opentelemetry::layer()
                     .with_tracer(tracer)
