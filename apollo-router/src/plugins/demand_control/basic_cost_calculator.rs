@@ -15,7 +15,9 @@ use super::directives::SkipDirective;
 use super::CostCalculator;
 use super::DemandControlError;
 
+use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
+use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 
 pub(crate) struct BasicCostCalculator {}
@@ -178,54 +180,39 @@ impl BasicCostCalculator {
                 else_clause,
             } => Self::max_score_of_nodes(if_clause, else_clause, plan),
             PlanNode::Defer { primary, deferred } => {
-                let mut score = 0.0;
-                if let Some(node) = &primary.node {
-                    score += Self::score_plan_node(node, plan)?;
-                }
-                for d in deferred {
-                    if let Some(node) = &d.node {
-                        score += Self::score_plan_node(node, plan)?;
-                    }
-                }
-                Ok(score)
+                Self::summed_score_of_deferred_nodes(primary, deferred, plan)
             }
-            PlanNode::Fetch(fetch_node) => {
-                tracing::debug!("Scoring fetch node: {:?}", fetch_node);
-
-                let schema_str = plan.subgraph_schemas.get(&fetch_node.service_name).ok_or(
-                    DemandControlError::QueryParseFailure(format!(
-                        "Query planner did not provide a schema for service {}",
-                        fetch_node.service_name
-                    )),
-                )?;
-                let schema = Schema::parse_and_validate(schema_str, "")
-                    .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
-                let query =
-                    ExecutableDocument::parse(&schema, fetch_node.operation.to_string(), "")
-                        .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
-
-                Self::estimated(&query, &schema)
-            }
-            PlanNode::Subscription { primary, rest } => {
-                let schema_str = plan.subgraph_schemas.get(&primary.service_name).ok_or(
-                    DemandControlError::QueryParseFailure(format!(
-                        "Query planner did not provide a schema for service {}",
-                        primary.service_name
-                    )),
-                )?;
-                let schema = Schema::parse_and_validate(schema_str, "")
-                    .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
-                let query = ExecutableDocument::parse(&schema, primary.operation.to_string(), "")
-                    .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
-
-                let mut score = Self::estimated(&query, &schema)?;
-                if let Some(node) = rest {
-                    score += Self::score_plan_node(&node, plan)?;
-                }
-
-                Ok(score)
+            PlanNode::Fetch(fetch_node) => Self::estimated_cost_of_operation(
+                &fetch_node.service_name,
+                &fetch_node.operation,
+                plan,
+            ),
+            PlanNode::Subscription { primary, rest: _ } => {
+                Self::estimated_cost_of_operation(&primary.service_name, &primary.operation, plan)
             }
         }
+    }
+
+    fn estimated_cost_of_operation(
+        subgraph: &String,
+        operation: &String,
+        plan: &QueryPlan,
+    ) -> Result<f64, DemandControlError> {
+        tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
+
+        let schema_str =
+            plan.subgraph_schemas
+                .get(subgraph)
+                .ok_or(DemandControlError::QueryParseFailure(format!(
+                    "Query planner did not provide a schema for service {}",
+                    subgraph
+                )))?;
+        let schema = Schema::parse_and_validate(schema_str, "")
+            .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
+        let query = ExecutableDocument::parse(&schema, operation, "")
+            .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
+
+        Self::estimated(&query, &schema)
     }
 
     fn max_score_of_nodes(
@@ -243,6 +230,23 @@ impl BasicCostCalculator {
                 Ok(left_score.max(right_score))
             }
         }
+    }
+
+    fn summed_score_of_deferred_nodes(
+        primary: &Primary,
+        deferred: &Vec<DeferredNode>,
+        plan: &QueryPlan,
+    ) -> Result<f64, DemandControlError> {
+        let mut score = 0.0;
+        if let Some(node) = &primary.node {
+            score += Self::score_plan_node(node, plan)?;
+        }
+        for d in deferred {
+            if let Some(node) = &d.node {
+                score += Self::score_plan_node(node, plan)?;
+            }
+        }
+        Ok(score)
     }
 
     fn summed_score_of_nodes(
