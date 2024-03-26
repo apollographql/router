@@ -279,7 +279,7 @@ telemetry:
 
 Example output with span information:
 
-```yaml
+```json
 {
   "timestamp": "2023-10-30T14:09:34.771388Z",
   "level": "INFO",
@@ -315,7 +315,7 @@ telemetry:
 
 Example output with a list of spans:
 
-```yaml
+```json
 {
   "timestamp": "2023-10-30T14:09:34.771388Z",
   "level": "INFO",
@@ -346,13 +346,11 @@ telemetry:
     logging:
       stdout:
         format: json
-          display_resource: true #highlight-line
+          display_resource: true
       common:
         service_name: bryn-router
-        #highlight-start
         resource:
           test.resource: test
-        #highlight-end
 ```
 
 ```text showLineNumbers=false disableCopy=true
