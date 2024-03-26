@@ -14,7 +14,6 @@ use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::CostCalculator;
 use super::DemandControlError;
-
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
@@ -286,6 +285,7 @@ mod tests {
     use test_log::test;
     use tower::Service;
 
+    use super::*;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::QueryPlannerContent;
@@ -294,8 +294,6 @@ mod tests {
     use crate::spec::Query;
     use crate::Configuration;
     use crate::Context;
-
-    use super::*;
 
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
