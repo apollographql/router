@@ -207,10 +207,8 @@ impl BasicCostCalculator {
                     "Query planner did not provide a schema for service {}",
                     subgraph
                 )))?;
-        let schema = Schema::parse_and_validate(schema_str, "")
-            .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
-        let query = ExecutableDocument::parse(&schema, operation, "")
-            .map_err(|e| DemandControlError::QueryParseFailure(format!("{}", e)))?;
+        let schema = Schema::parse_and_validate(schema_str, "")?;
+        let query = ExecutableDocument::parse(&schema, operation, "")?;
 
         Self::estimated(&query, &schema)
     }
