@@ -16,6 +16,7 @@ use crate::error::SingleFederationError;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
+use crate::link::spec_definition::SpecDefinitions;
 use crate::merge::merge_subgraphs;
 use crate::merge::MergeFailure;
 pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSubgraph;
@@ -29,9 +30,25 @@ use schema::FederationSchema;
 
 pub(crate) type SupergraphSpecs = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
 
+pub(crate) fn validate_supergraph_for_query_planning(
+    supergraph_schema: &FederationSchema,
+) -> Result<SupergraphSpecs, FederationError> {
+    validate_supergraph(supergraph_schema, &JOIN_VERSIONS)
+}
+
+pub(crate) fn validate_supergraph_for_non_query_planning(
+    supergraph_schema: &FederationSchema,
+) -> Result<SupergraphSpecs, FederationError> {
+    validate_supergraph(
+        supergraph_schema,
+        &link::join_spec_definition::NON_QUERY_PLANNING_JOIN_VERSIONS,
+    )
+}
+
 /// Checks that required supergraph directives are in the schema, and returns which ones were used.
 pub(crate) fn validate_supergraph(
     supergraph_schema: &FederationSchema,
+    join_versions: &'static SpecDefinitions<JoinSpecDefinition>,
 ) -> Result<SupergraphSpecs, FederationError> {
     let Some(metadata) = supergraph_schema.metadata() else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
@@ -46,12 +63,12 @@ pub(crate) fn validate_supergraph(
         }
         .into());
     };
-    let Some(join_spec_definition) = JOIN_VERSIONS.find(&join_link.url.version) else {
+    let Some(join_spec_definition) = join_versions.find(&join_link.url.version) else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
             message: format!(
                 "Invalid supergraph: uses unsupported join spec version {} (supported versions: {})",
                 join_link.url.version,
-                JOIN_VERSIONS.versions().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
+                join_versions.versions().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
             ),
         }.into());
     };
@@ -72,7 +89,7 @@ impl Supergraph {
         let schema = schema.into_inner();
         let schema = FederationSchema::new(schema)?;
 
-        let _ = validate_supergraph(&schema)?;
+        let _ = validate_supergraph_for_non_query_planning(&schema)?;
 
         Ok(Self {
             // We know it's valid because the input was.

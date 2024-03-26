@@ -142,6 +142,7 @@ pub(crate) trait SpecDefinition {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct SpecDefinitions<T: SpecDefinition> {
     identity: Identity,
     definitions: BTreeMap<Version, T>,
