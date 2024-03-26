@@ -1039,7 +1039,6 @@ where
             .map(|s| s.on_response(response).into_iter().collect())
             .unwrap_or_default();
         attrs.append(&mut inner.attributes);
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -1101,5 +1100,163 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::StatusCode;
+    use serde_json::json;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+    use crate::services::RouterRequest;
+    use crate::services::RouterResponse;
+
+    #[tokio::test]
+    async fn test_router_instruments() {
+        async {
+            let config: InstrumentsConfig = serde_json::from_str(
+                json!({
+                    "router": {
+                        "http.server.request.body.size": true,
+                        "http.server.response.body.size": {
+                            "attributes": {
+                                "http.response.status_code": false,
+                                "acme.my_attribute": {
+                                    "response_header": "x-my-header",
+                                    "default": "unknown"
+                                }
+                            }
+                        },
+                        "acme.request.on_error": {
+                            "value": "unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "not": {
+                                    "eq": [
+                                        200,
+                                        {
+                                            "response_status": "code"
+                                        }
+                                    ]
+                                }
+                            },
+                            "attributes": {
+                                "http.response.status_code": true
+                            }
+                        },
+                        "acme.request.header_value": {
+                            "value": {
+                                "request_header": "x-my-header-count"
+                            },
+                            "type": "counter",
+                            "description": "my description",
+                            "unit": "nb"
+                        }
+                    }
+                })
+                .to_string()
+                .as_str(),
+            )
+            .unwrap();
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("conditional-custom", "X")
+                .header("x-my-header-count", "55")
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            let router_response = RouterResponse::fake_builder()
+                .context(router_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("x-my-header", "TEST")
+                .header("content-length", "35")
+                .data(json!({"errors": [{"message": "nope"}]}))
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            assert_counter!("acme.request.header_value", 55.0);
+            assert_counter!(
+                "acme.request.on_error",
+                1.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!("http.server.request.body.size", 35.0);
+            assert_histogram_sum!(
+                "http.server.response.body.size",
+                35.0,
+                "acme.my_attribute" = "TEST"
+            );
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("content-length", "35")
+                .header("x-my-header-count", "5")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            let router_response = RouterResponse::fake_builder()
+                .context(router_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .data(json!({"errors": [{"message": "nope"}]}))
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            assert_counter!("acme.request.header_value", 60.0);
+            assert_counter!(
+                "acme.request.on_error",
+                2.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!("http.server.request.body.size", 70.0);
+            assert_histogram_sum!(
+                "http.server.response.body.size",
+                35.0,
+                "acme.my_attribute" = "TEST"
+            );
+            assert_histogram_sum!(
+                "http.server.response.body.size",
+                35.0,
+                "acme.my_attribute" = "unknown"
+            );
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            let router_response = RouterResponse::fake_builder()
+                .context(router_req.context.clone())
+                .status_code(StatusCode::OK)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .data(json!({"errors": [{"message": "nope"}]}))
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            assert_counter!("acme.request.header_value", 60.0);
+            assert_counter!(
+                "acme.request.on_error",
+                2.0,
+                "http.response.status_code" = 400
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
