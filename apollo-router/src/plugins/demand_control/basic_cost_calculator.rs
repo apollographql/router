@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
@@ -19,7 +22,9 @@ use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 
-pub(crate) struct BasicCostCalculator {}
+pub(crate) struct BasicCostCalculator {
+    subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
+}
 
 impl BasicCostCalculator {
     /// Scores a field within a GraphQL operation, handling some expected cases where
@@ -168,91 +173,98 @@ impl BasicCostCalculator {
         false
     }
 
-    fn score_plan_node(plan_node: &PlanNode, plan: &QueryPlan) -> Result<f64, DemandControlError> {
+    fn score_plan_node(
+        &self,
+        plan_node: &PlanNode,
+        plan: &QueryPlan,
+    ) -> Result<f64, DemandControlError> {
         match plan_node {
-            PlanNode::Sequence { nodes } => Self::summed_score_of_nodes(nodes, plan),
-            PlanNode::Parallel { nodes } => Self::summed_score_of_nodes(nodes, plan),
-            PlanNode::Flatten(flatten_node) => Self::score_plan_node(&flatten_node.node, plan),
+            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, plan),
+            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, plan),
+            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node, plan),
             PlanNode::Condition {
                 condition: _,
                 if_clause,
                 else_clause,
-            } => Self::max_score_of_nodes(if_clause, else_clause, plan),
+            } => self.max_score_of_nodes(if_clause, else_clause, plan),
             PlanNode::Defer { primary, deferred } => {
-                Self::summed_score_of_deferred_nodes(primary, deferred, plan)
+                self.summed_score_of_deferred_nodes(primary, deferred, plan)
             }
-            PlanNode::Fetch(fetch_node) => Self::estimated_cost_of_operation(
+            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
                 &fetch_node.service_name,
                 &fetch_node.operation,
                 plan,
             ),
             PlanNode::Subscription { primary, rest: _ } => {
-                Self::estimated_cost_of_operation(&primary.service_name, &primary.operation, plan)
+                self.estimated_cost_of_operation(&primary.service_name, &primary.operation, plan)
             }
         }
     }
 
     fn estimated_cost_of_operation(
+        &self,
         subgraph: &String,
         operation: &String,
         plan: &QueryPlan,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
-        let schema_str =
-            plan.subgraph_schemas
+        let schema =
+            self.subgraph_schemas
                 .get(subgraph)
                 .ok_or(DemandControlError::QueryParseFailure(format!(
                     "Query planner did not provide a schema for service {}",
                     subgraph
                 )))?;
-        let schema = Schema::parse_and_validate(schema_str, "")?;
         let query = ExecutableDocument::parse(&schema, operation, "")?;
 
         Self::estimated(&query, &schema)
     }
 
     fn max_score_of_nodes(
+        &self,
         left: &Option<Box<PlanNode>>,
         right: &Option<Box<PlanNode>>,
         plan: &QueryPlan,
     ) -> Result<f64, DemandControlError> {
         match (left, right) {
             (None, None) => Ok(0.0),
-            (None, Some(right)) => Self::score_plan_node(right, plan),
-            (Some(left), None) => Self::score_plan_node(left, plan),
+            (None, Some(right)) => self.score_plan_node(right, plan),
+            (Some(left), None) => self.score_plan_node(left, plan),
             (Some(left), Some(right)) => {
-                let left_score = Self::score_plan_node(left, plan)?;
-                let right_score = Self::score_plan_node(right, plan)?;
+                let left_score = self.score_plan_node(left, plan)?;
+                let right_score = self.score_plan_node(right, plan)?;
                 Ok(left_score.max(right_score))
             }
         }
     }
 
     fn summed_score_of_deferred_nodes(
+        &self,
         primary: &Primary,
         deferred: &Vec<DeferredNode>,
         plan: &QueryPlan,
     ) -> Result<f64, DemandControlError> {
         let mut score = 0.0;
         if let Some(node) = &primary.node {
-            score += Self::score_plan_node(node, plan)?;
+            score += self.score_plan_node(node, plan)?;
         }
         for d in deferred {
             if let Some(node) = &d.node {
-                score += Self::score_plan_node(node, plan)?;
+                score += self.score_plan_node(node, plan)?;
             }
         }
         Ok(score)
     }
 
     fn summed_score_of_nodes(
+        &self,
         nodes: &Vec<PlanNode>,
         plan: &QueryPlan,
     ) -> Result<f64, DemandControlError> {
         let mut sum = 0.0;
         for node in nodes {
-            sum += Self::score_plan_node(node, plan)?;
+            sum += self.score_plan_node(node, plan)?;
         }
         Ok(sum)
     }
@@ -273,8 +285,8 @@ impl CostCalculator for BasicCostCalculator {
         Ok(cost)
     }
 
-    fn planned(query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
-        Self::score_plan_node(&query_plan.root, query_plan)
+    fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
+        self.score_plan_node(&query_plan.root, query_plan)
     }
 }
 
@@ -322,7 +334,11 @@ mod tests {
             _ => panic!("Query planner returned unexpected non-plan content"),
         };
 
-        BasicCostCalculator::planned(&query_plan).unwrap()
+        let calculator = BasicCostCalculator {
+            subgraph_schemas: planner.subgraph_schemas(),
+        };
+
+        calculator.planned(&query_plan).unwrap()
     }
 
     #[test]
