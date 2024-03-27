@@ -5,7 +5,6 @@ use apollo_compiler::name;
 use std::fmt;
 use std::str;
 use thiserror::Error;
-use url;
 
 pub const APOLLO_SPEC_DOMAIN: &str = "https://specs.apollo.dev";
 
