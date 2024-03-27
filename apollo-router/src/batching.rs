@@ -10,11 +10,16 @@ use std::fmt;
 use std::sync::Arc;
 
 use hyper::Body;
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::Context as otelContext;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower::BoxError;
+use tracing::Instrument;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::error::FetchError;
 use crate::graphql;
@@ -96,6 +101,7 @@ impl BatchQuery {
                     request,
                     gql_request,
                     response_sender: tx,
+                    span_context: Span::current().context(),
                 })
                 .await
                 .unwrap();
@@ -144,6 +150,7 @@ enum BatchHandlerMessage {
         request: SubgraphRequest,
         gql_request: graphql::Request,
         response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+        span_context: otelContext,
     },
 
     /// A query has passed query planning and now knows how many fetches are needed
@@ -281,6 +288,7 @@ impl Batch {
                         request,
                         gql_request,
                         response_sender,
+                        span_context,
                     } => {
                         // Progress the index
 
@@ -293,6 +301,7 @@ impl Batch {
                         if master_client_factory.is_none() {
                             master_client_factory = Some(client_factory);
                         }
+                        Span::current().add_link(span_context.span().span_context().clone());
                         requests[index].push(BatchQueryInfo {
                             request,
                             gql_request,
@@ -340,7 +349,8 @@ impl Batch {
             process_batches(master_client_factory.unwrap(), svc_map)
                 .await
                 .expect("XXX NEEDS TO WORK FOR NOW");
-        });
+        }
+        .instrument(tracing::info_span!("batch_request", size)));
 
         Self {
             senders: Mutex::new(senders),

@@ -33,6 +33,7 @@ use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tracing::instrument;
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -727,6 +728,7 @@ fn http_response_to_graphql_response(
 }
 
 /// Process a single subgraph batch request
+#[instrument(skip(client_factory, context, request))]
 pub(crate) async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
@@ -929,6 +931,7 @@ pub(crate) async fn notify_batch_query(
 }
 
 /// Collect all batch requests and process them concurrently
+#[instrument(skip_all)]
 pub(crate) async fn process_batches(
     client_factory: HttpClientServiceFactory,
     svc_map: HashMap<String, Vec<BatchQueryInfo>>,
