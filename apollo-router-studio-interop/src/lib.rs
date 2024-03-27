@@ -512,7 +512,7 @@ mod tests {
 
     // Generate the signature and referenced fields using router-bridge to confirm that the expected value we used is correct.
     // We can remove this when we no longer use the bridge but should keep the rust implementation verifications.
-    async fn assert_js_implementation(
+    async fn assert_bridge_results(
         schema_str: &str,
         query_str: &str,
         expected_sig: &str,
@@ -528,11 +528,11 @@ mod tests {
             .plan(query_str.to_string(), None, PlanOptions::default())
             .await
             .unwrap();
-        let js_result = UsageReportingResult {
+        let bridge_result = UsageReportingResult {
             result: plan.usage_reporting,
         };
-        assert!(js_result.compare_stats_report_key(expected_sig));
-        assert!(js_result.compare_referenced_fields(expected_refs));
+        assert!(bridge_result.compare_stats_report_key(expected_sig));
+        assert!(bridge_result.compare_referenced_fields(expected_refs));
     }
 
     #[test(tokio::test)]
@@ -695,7 +695,7 @@ mod tests {
             }
           }"#;
 
-        assert_js_implementation(
+        assert_bridge_results(
             schema_str,
             sanitised_query_str,
             expected_sig,
@@ -837,7 +837,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -876,7 +876,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -915,7 +915,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -954,7 +954,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -993,7 +993,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -1055,7 +1055,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -1261,7 +1261,7 @@ mod tests {
           fragment aaaInterfaceFragment on InterfaceImplementation1 {
             sharedField
           }"#;
-        assert_js_implementation(
+        assert_bridge_results(
             schema_str,
             sanitised_query_str,
             expected_sig,
@@ -1358,7 +1358,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -1403,7 +1403,7 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
     #[test(tokio::test)]
@@ -1450,6 +1450,102 @@ mod tests {
         ]);
         assert!(generated.compare_referenced_fields(&expected_refs));
 
-        assert_js_implementation(schema_str, query_str, expected_sig, &expected_refs).await;
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+    }
+
+    // todo remove
+    #[test(tokio::test)]
+    async fn test_random_queries() {
+        const GENERATED_QUERIES_COUNT: usize = 1000;
+
+        // apollo_smith doesn't support random generation of input objects, union types, etc
+        let schema_str = include_str!("testdata/schema_cutdown.graphql");
+
+        let doc_schema: apollo_smith::Document = apollo_parser::Parser::new(schema_str)
+            .parse()
+            .document()
+            .try_into()
+            .unwrap();
+
+        let mut state: u32 = 0;
+        let mut prng = || {
+            state = state.wrapping_mul(134775813).wrapping_add(1);
+            (state >> 24) as u8
+        };
+        let mut bytes = vec![0; 128];
+
+        let mut queries = Vec::<String>::new();
+        queries.resize_with(GENERATED_QUERIES_COUNT, || {
+            bytes.fill_with(&mut prng);
+            let mut input = arbitrary::Unstructured::new(&bytes);
+            apollo_smith::DocumentBuilder::with_document(&mut input, doc_schema.clone())
+                .unwrap()
+                .operation_definition()
+                .unwrap()
+                .unwrap()
+                .into()
+        });
+
+        let planner = Planner::<serde_json::Value>::new(
+            schema_str.to_string(),
+            QueryPlannerConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        let compiler_schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+
+        let mut failed_tests = 0;
+        for query_str in queries.iter() {
+            let plan = planner
+                .plan(query_str.to_string(), None, PlanOptions::default())
+                .await
+                .unwrap();
+
+            // only check the results if the plan was successfully generated
+            if plan.data.is_some() {
+                let executable_doc =
+                    ExecutableDocument::parse(&compiler_schema, query_str, "query.graphql")
+                        .unwrap();
+                let executable_op = executable_doc.all_operations().next();
+                let op_name = executable_op
+                    .and_then(|o| o.name.clone())
+                    .map(|n| n.to_string());
+
+                let rust_result = generate_usage_reporting(
+                    &executable_doc,
+                    &executable_doc,
+                    &op_name,
+                    &compiler_schema,
+                );
+
+                let mut test_ok = true;
+                if !rust_result.compare_stats_report_key(&plan.usage_reporting.stats_report_key) {
+                    println!(
+                        "Mismatched signatures: \n{}\n{}",
+                        plan.usage_reporting.stats_report_key, rust_result.result.stats_report_key
+                    );
+                    test_ok = false;
+                }
+                if !rust_result
+                    .compare_referenced_fields(&plan.usage_reporting.referenced_fields_by_type)
+                {
+                    println!(
+                        "Mismatched referenced fields: \n{:?}\n{:?}",
+                        plan.usage_reporting.referenced_fields_by_type,
+                        rust_result.result.referenced_fields_by_type
+                    );
+                    test_ok = false;
+                }
+                if !test_ok {
+                    println!("Failed on query_str: {query_str}");
+                    failed_tests = failed_tests + 1;
+                }
+            }
+        }
+
+        if failed_tests > 0 {
+            panic!("Rust and bridge implementations differ in {failed_tests} operations");
+        }
     }
 }

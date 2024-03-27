@@ -74,7 +74,7 @@ register_plugin!(
 
 // make sure you rebuild before you fuzz!
 // in the /fuzz directory (you need to be there because fuzz is not in the workspace)
-// $ cargo build --example fuzz_target
+// $ cargo build --example usage_reporting_router
 fn main() -> Result<()> {
     apollo_router::main()
 }

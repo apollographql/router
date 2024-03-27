@@ -33,7 +33,7 @@ tower = { version = "0.4", features = ["full"] }
 http = "0.2"
 
 [[example]]
-name = "fuzz_target"
+name = "usage_reporting_router"
 
 [[bin]]
 name = "invariant_router"
