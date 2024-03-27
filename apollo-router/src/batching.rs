@@ -17,7 +17,6 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower::BoxError;
-use tracing::Instrument;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
