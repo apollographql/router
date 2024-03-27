@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_router_studio_interop::UsageReportingComparisonResult;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -542,14 +543,20 @@ impl BridgeQueryPlanner {
                             .experimental_apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::Both
                     ) {
-                        if !generated_usage_reporting
-                            .compare_stats_report_key(&usage_reporting.stats_report_key)
-                        {
+                        let comparison_result =
+                            generated_usage_reporting.compare_usage_reporting(&usage_reporting);
+
+                        if matches!(
+                            comparison_result,
+                            UsageReportingComparisonResult::StatsReportKeyNotEqual
+                                | UsageReportingComparisonResult::BothNotEqual
+                        ) {
                             println!(
                                 "stats_report_key's are different:\n{}\n{}",
                                 generated_usage_reporting.result.stats_report_key,
                                 usage_reporting.stats_report_key,
                             ); // todo remove
+
                             tracing::warn!(
                                 monotonic_counter.apollo.router.operations.telemetry.studio.signature = 1u64,
                                 generation.is_matched = false,
@@ -574,9 +581,11 @@ impl BridgeQueryPlanner {
                             );
                         }
 
-                        if !generated_usage_reporting
-                            .compare_referenced_fields(&usage_reporting.referenced_fields_by_type)
-                        {
+                        if matches!(
+                            comparison_result,
+                            UsageReportingComparisonResult::ReferencedFieldsNotEqual
+                                | UsageReportingComparisonResult::BothNotEqual
+                        ) {
                             println!(
                                 "referenced_fields_by_type's are different:\n{:?}\n{:?}",
                                 generated_usage_reporting.result.referenced_fields_by_type,

@@ -3,6 +3,7 @@
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_router_studio_interop::generate_usage_reporting;
+use apollo_router_studio_interop::UsageReportingComparisonResult;
 use libfuzzer_sys::fuzz_target;
 use router_bridge::planner::UsageReporting;
 use router_fuzz::generate_valid_operation;
@@ -101,7 +102,7 @@ fuzz_target!(|data: &[u8]| {
         }
     };
 
-    let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+    let rust_generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
     let http_client = reqwest::blocking::Client::new();
     let router_response = http_client
@@ -122,7 +123,7 @@ fuzz_target!(|data: &[u8]| {
 
     let response: serde_json::Value = router_response.unwrap().json().unwrap();
 
-    let usage_reporting: UsageReporting = serde_json::from_value(
+    let bridge_generated: UsageReporting = serde_json::from_value(
         response
             .get("extensions")
             .unwrap()
@@ -134,8 +135,7 @@ fuzz_target!(|data: &[u8]| {
     )
     .unwrap();
 
-    if generated.result.stats_report_key != usage_reporting.stats_report_key
-        || !generated.compare_referenced_fields(&usage_reporting.referenced_fields_by_type)
+    if !matches!(rust_generated.compare_usage_reporting(&bridge_generated), UsageReportingComparisonResult::Equal)
     {
         unsafe { ROUTER_PROCESS.get_mut() }
             .unwrap()
@@ -144,7 +144,7 @@ fuzz_target!(|data: &[u8]| {
             .unwrap();
         panic!(
             "New rust implementation:\n{:?}\nExisting router-bridge implementation:\n{:?}",
-            generated.result, usage_reporting
+            rust_generated.result, bridge_generated
         );
     }
 });

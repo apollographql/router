@@ -27,23 +27,44 @@ pub struct UsageReportingResult {
     pub result: UsageReporting,
 }
 
+pub enum UsageReportingComparisonResult {
+    Equal,
+    StatsReportKeyNotEqual,
+    ReferencedFieldsNotEqual,
+    BothNotEqual,
+}
+
 impl UsageReportingResult {
-    pub fn compare_stats_report_key(&self, other: &str) -> bool {
-        self.result.stats_report_key == other
+    // todo test (especially ref fields comparison)
+    pub fn compare(&self, other: &Self) -> UsageReportingComparisonResult {
+        self.compare_usage_reporting(&other.result)
     }
 
-    // todo test
-    pub fn compare_referenced_fields(
+    pub fn compare_usage_reporting(
         &self,
-        other: &HashMap<String, ReferencedFieldsForType>,
+        other: &UsageReporting,
+    ) -> UsageReportingComparisonResult {
+        let sig_equal = self.result.stats_report_key == other.stats_report_key;
+        let refs_equal = self.compare_referenced_fields(&other.referenced_fields_by_type);
+        match (sig_equal, refs_equal) {
+            (true, true) => UsageReportingComparisonResult::Equal,
+            (false, true) => UsageReportingComparisonResult::StatsReportKeyNotEqual,
+            (true, false) => UsageReportingComparisonResult::ReferencedFieldsNotEqual,
+            (false, false) => UsageReportingComparisonResult::BothNotEqual,
+        }
+    }
+
+    fn compare_referenced_fields(
+        &self,
+        other_ref_fields: &HashMap<String, ReferencedFieldsForType>,
     ) -> bool {
-        let ref_fields = &self.result.referenced_fields_by_type;
-        if ref_fields.len() != other.len() {
+        let self_ref_fields = &self.result.referenced_fields_by_type;
+        if self_ref_fields.len() != other_ref_fields.len() {
             return false;
         }
 
-        for (name, self_refs) in ref_fields.iter() {
-            let maybe_other_refs = other.get(name);
+        for (name, self_refs) in self_ref_fields.iter() {
+            let maybe_other_refs = other_ref_fields.get(name);
             if let Some(other_refs) = maybe_other_refs {
                 if self_refs.is_interface != other_refs.is_interface {
                     return false;
@@ -531,8 +552,32 @@ mod tests {
         let bridge_result = UsageReportingResult {
             result: plan.usage_reporting,
         };
-        assert!(bridge_result.compare_stats_report_key(expected_sig));
-        assert!(bridge_result.compare_referenced_fields(expected_refs));
+        let expected_result = UsageReportingResult {
+            result: UsageReporting {
+                stats_report_key: expected_sig.to_string(),
+                referenced_fields_by_type: expected_refs.clone(),
+            },
+        };
+        assert!(matches!(
+            bridge_result.compare(&expected_result),
+            UsageReportingComparisonResult::Equal
+        ));
+    }
+    async fn assert_expected_results(
+        actual: &UsageReportingResult,
+        expected_sig: &str,
+        expected_refs: &HashMap<String, ReferencedFieldsForType>,
+    ) {
+        let expected_result = UsageReportingResult {
+            result: UsageReporting {
+                stats_report_key: expected_sig.to_string(),
+                referenced_fields_by_type: expected_refs.clone(),
+            },
+        };
+        assert!(matches!(
+            actual.compare(&expected_result),
+            UsageReportingComparisonResult::Equal
+        ));
     }
 
     #[test(tokio::test)]
@@ -595,8 +640,6 @@ mod tests {
             generate_usage_reporting(&doc, &doc, &Some("TransformedQuery".into()), &schema);
 
         let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "Query".into(),
@@ -653,7 +696,7 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
 
         // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
         let sanitised_query_str = r#"fragment Fragment2 on EverythingResponse {
@@ -761,8 +804,6 @@ mod tests {
         let generated = generate_usage_reporting(&doc, &doc, &Some("Query".into()), &schema);
 
         let expected_sig = "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "Query".into(),
@@ -835,7 +876,7 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
 
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
@@ -856,8 +897,6 @@ mod tests {
         let generated = generate_usage_reporting(&doc, &doc, &Some("MyQuery".into()), &schema);
 
         let expected_sig = "# MyQuery\nquery MyQuery{noInputQuery{id}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "Query".into(),
@@ -874,8 +913,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -895,8 +934,6 @@ mod tests {
         let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
         let expected_sig = "# -\n{noInputQuery{id}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "Query".into(),
@@ -913,8 +950,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -934,8 +971,6 @@ mod tests {
         let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
         let expected_sig = "# -\nmutation{noInputMutation{id}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "Mutation".into(),
@@ -952,8 +987,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -973,8 +1008,6 @@ mod tests {
         let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
         let expected_sig = "# -\nsubscription{noInputSubscription{id}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "Subscription".into(),
@@ -991,8 +1024,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1029,8 +1062,6 @@ mod tests {
         );
 
         let expected_sig = "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){sortQuery(INTInput:$intInput boolInput:$boolInput floatInput:$floatInput idInput:$idInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){CCC aaa id nullableId zzz}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "Query".into(),
@@ -1053,8 +1084,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1134,8 +1165,6 @@ mod tests {
             generate_usage_reporting(&doc, &doc, &Some("FragmentQuery".into()), &schema);
 
         let expected_sig = "# FragmentQuery\nfragment ZZZFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaInterfaceFragment on InterfaceImplementation1{sharedField}fragment bbbInterfaceFragment on InterfaceImplementation2{implementation2Field sharedField}fragment zzzFragment on EverythingResponse{listOfInterfaces{sharedField}}query FragmentQuery{noInputQuery{interfaceResponse{sharedField...aaaInterfaceFragment...bbbInterfaceFragment...on InterfaceImplementation2{implementation2Field}...{...on InterfaceImplementation1{implementation1Field}}...on InterfaceImplementation1{implementation1Field}}listOfBools unionResponse{...on UnionType2{unionType2Field}...on UnionType1{unionType1Field}}...ZZZFragment...aaaFragment...zzzFragment}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "UnionType1".into(),
@@ -1199,7 +1228,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
+
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
 
         // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
         let sanitised_query_str = r#"query FragmentQuery {
@@ -1306,8 +1336,6 @@ mod tests {
             generate_usage_reporting(&doc, &doc, &Some("DirectiveQuery".into()), &schema);
 
         let expected_sig = "# DirectiveQuery\nfragment Fragment1 on InterfaceImplementation1{implementation1Field sharedField}fragment Fragment2 on InterfaceImplementation2@noArgs@withArgs(arg1:\"\",arg2:\"\",arg3:true,arg4:0,arg5:[]){implementation2Field sharedField}query DirectiveQuery@withArgs(arg1:\"\",arg2:\"\")@noArgs{noInputQuery{enumResponse@withArgs(arg3:false,arg4:0,arg5:[])@noArgs interfaceResponse{...Fragment1@noArgs@withArgs(arg1:\"\",arg2:\"\")...Fragment2}unionResponse{...on UnionType1@noArgs@withArgs(arg1:\"\",arg2:\"\"){unionType1Field}}}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "UnionType1".into(),
@@ -1356,8 +1384,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1383,8 +1411,6 @@ mod tests {
         let generated = generate_usage_reporting(&doc, &doc, &Some("AliasQuery".into()), &schema);
 
         let expected_sig = "# AliasQuery\nquery AliasQuery{enumInputQuery(enumInput:SOME_VALUE_1){enumResponse}enumInputQuery(enumInput:SOME_VALUE_2){enumResponse}enumInputQuery(enumInput:SOME_VALUE_3){enumResponse}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "EverythingResponse".into(),
@@ -1401,8 +1427,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1430,8 +1456,6 @@ mod tests {
             generate_usage_reporting(&doc, &doc, &Some("InlineInputTypeQuery".into()), &schema);
 
         let expected_sig = "# InlineInputTypeQuery\nquery InlineInputTypeQuery{inputTypeQuery(input:{}){enumResponse}}";
-        assert!(generated.compare_stats_report_key(expected_sig));
-
         let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
             (
                 "EverythingResponse".into(),
@@ -1448,8 +1472,8 @@ mod tests {
                 },
             ),
         ]);
-        assert!(generated.compare_referenced_fields(&expected_refs));
 
+        assert_expected_results(&generated, &expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1519,25 +1543,30 @@ mod tests {
                     &compiler_schema,
                 );
 
-                let mut test_ok = true;
-                if !rust_result.compare_stats_report_key(&plan.usage_reporting.stats_report_key) {
+                let result = rust_result.compare_usage_reporting(&plan.usage_reporting);
+                if matches!(
+                    result,
+                    UsageReportingComparisonResult::StatsReportKeyNotEqual
+                        | UsageReportingComparisonResult::BothNotEqual
+                ) {
                     println!(
                         "Mismatched signatures: \n{}\n{}",
                         plan.usage_reporting.stats_report_key, rust_result.result.stats_report_key
                     );
-                    test_ok = false;
                 }
-                if !rust_result
-                    .compare_referenced_fields(&plan.usage_reporting.referenced_fields_by_type)
-                {
+                if matches!(
+                    result,
+                    UsageReportingComparisonResult::ReferencedFieldsNotEqual
+                        | UsageReportingComparisonResult::BothNotEqual
+                ) {
                     println!(
                         "Mismatched referenced fields: \n{:?}\n{:?}",
                         plan.usage_reporting.referenced_fields_by_type,
                         rust_result.result.referenced_fields_by_type
                     );
-                    test_ok = false;
                 }
-                if !test_ok {
+
+                if !matches!(result, UsageReportingComparisonResult::Equal) {
                     println!("Failed on query_str: {query_str}");
                     failed_tests = failed_tests + 1;
                 }
