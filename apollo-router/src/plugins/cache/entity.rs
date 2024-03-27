@@ -339,9 +339,13 @@ impl InnerCacheService {
                     cache_store_entities_from_response(
                         self.storage,
                         self.subgraph_ttl,
+                        &self.private_queries,
+                        &query,
                         &mut response,
                         cache_control,
                         cache_result.0,
+                        is_known_private,
+                        private_id,
                     )
                     .await?;
                     Ok(response)
@@ -516,11 +520,18 @@ async fn cache_store_root_from_response(
 async fn cache_store_entities_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
+    private_queries: &Arc<RwLock<HashSet<String>>>,
+    query: &str,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
     mut result_from_cache: Vec<IntermediateResult>,
+    is_known_private: bool,
+    private_id: Option<String>,
 ) -> Result<(), BoxError> {
     update_cache_control(&response.context, &cache_control);
+    if !is_known_private && cache_control.private() {
+        private_queries.write().await.insert(query.to_string());
+    }
 
     let mut data = response.response.body_mut().data.take();
 
@@ -540,6 +551,8 @@ async fn cache_store_entities_from_response(
             subgraph_ttl,
             cache_control,
             &mut result_from_cache,
+            is_known_private,
+            private_id,
         )
         .await?;
 
@@ -638,15 +651,9 @@ fn extract_cache_key_root(
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
     match private_id {
-        None => format!(
-            "subgraph:{}:Query:{}:{}",
-            subgraph_name, query_hash, additional_data_hash
-        ),
-        Some(s) => {
-            format!(
-                "subgraph:{}:Query:{}:{}:{}",
-                subgraph_name, query_hash, additional_data_hash, s
-            )
+        None => format!("subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"),
+        Some(id) => {
+            format!("subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}:{id}",)
         }
     }
 }
@@ -695,18 +702,11 @@ fn extract_cache_keys(
         // - additional data: separate cache entries depending on info like authorization status
         let key = match private_id {
             None => format!(
-                "subgraph:{}:{}:{}:{}:{}",
-                subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
+                "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}"
             ),
-            Some(s) => {
+            Some(id) => {
                 format!(
-                    "subgraph:{}:{}:{}:{}:{}:{}",
-                    subgraph_name,
-                    &typename,
-                    hashed_entity_key,
-                    query_hash,
-                    additional_data_hash,
-                    s
+                    "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}:{id}"
                 )
             }
         };
@@ -815,6 +815,8 @@ async fn insert_entities_in_result(
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
+    is_known_private: bool,
+    private_id: Option<String>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
@@ -828,12 +830,14 @@ async fn insert_entities_in_result(
     let mut to_insert: Vec<_> = Vec::new();
     let mut entities_it = entities.drain(..).enumerate();
 
+    let should_be_private = !is_known_private && cache_control.private();
+
     // insert requested entities and cached entities in the same order as
     // they were requested
     for (
         new_entity_idx,
         IntermediateResult {
-            key,
+            mut key,
             typename,
             cache_entry,
         },
@@ -853,6 +857,12 @@ async fn insert_entities_in_result(
 
                 if cache_control.should_store() {
                     *inserted_types.entry(typename).or_default() += 1;
+
+                    if should_be_private {
+                        if let Some(ref id) = private_id {
+                            key = format!("{key}:{id}");
+                        }
+                    }
 
                     let mut has_errors = false;
                     for error in errors.iter().filter(|e| {
