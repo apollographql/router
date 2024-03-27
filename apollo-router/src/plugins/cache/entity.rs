@@ -290,23 +290,27 @@ impl InnerCacheService {
                 .await?
                 {
                     ControlFlow::Break(response) => Ok(response),
-                    ControlFlow::Continue((request, root_cache_key)) => {
+                    ControlFlow::Continue((request, mut root_cache_key)) => {
                         let response = self.service.call(request).await?;
 
                         let cache_control =
                             CacheControl::new(response.response.headers(), self.storage.ttl)?;
                         update_cache_control(&response.context, &cache_control);
 
+                        // we did not know in advance that this was a query with a private scope, so we update the cache key
+                        if !is_known_private && cache_control.private() {
+                            if let Some(s) = private_id.as_ref() {
+                                root_cache_key = format!("{root_cache_key}:{s}");
+                            }
+                            self.private_queries.write().await.insert(query.to_string());
+                        }
+
                         cache_store_root_from_response(
                             self.storage,
                             self.subgraph_ttl,
-                            &self.private_queries,
-                            &query,
                             &response,
                             cache_control,
                             root_cache_key,
-                            is_known_private,
-                            private_id,
                         )
                         .await?;
 
@@ -335,11 +339,13 @@ impl InnerCacheService {
                         CacheControl::new(response.response.headers(), self.storage.ttl)?;
                     update_cache_control(&response.context, &cache_control);
 
+                    if !is_known_private && cache_control.private() {
+                        self.private_queries.write().await.insert(query.to_string());
+                    }
+
                     cache_store_entities_from_response(
                         self.storage,
                         self.subgraph_ttl,
-                        &self.private_queries,
-                        &query,
                         &mut response,
                         cache_control,
                         cache_result.0,
@@ -476,27 +482,15 @@ struct CacheEntry {
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
-    private_queries: &Arc<RwLock<HashSet<String>>>,
-    query: &str,
     response: &subgraph::Response,
     cache_control: CacheControl,
-    mut cache_key: String,
-    is_known_private: bool,
-    private_id: Option<String>,
+    cache_key: String,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl: Option<Duration> = cache_control
             .ttl()
             .map(|secs| Duration::from_secs(secs as u64))
             .or(subgraph_ttl);
-
-        // we did not know in advance that this was a query with a private scope, so we update the cache key
-        if !is_known_private && cache_control.private() {
-            if let Some(s) = private_id {
-                cache_key = format!("{cache_key}:{s}");
-            }
-            private_queries.write().await.insert(query.to_string());
-        }
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let span = tracing::info_span!("cache_store");
@@ -523,8 +517,6 @@ async fn cache_store_root_from_response(
 async fn cache_store_entities_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
-    private_queries: &Arc<RwLock<HashSet<String>>>,
-    query: &str,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
     mut result_from_cache: Vec<IntermediateResult>,
@@ -532,9 +524,6 @@ async fn cache_store_entities_from_response(
     private_id: Option<String>,
 ) -> Result<(), BoxError> {
     update_cache_control(&response.context, &cache_control);
-    if !is_known_private && cache_control.private() {
-        private_queries.write().await.insert(query.to_string());
-    }
 
     let mut data = response.response.body_mut().data.take();
 
@@ -543,6 +532,12 @@ async fn cache_store_entities_from_response(
         .and_then(|v| v.as_object_mut())
         .and_then(|o| o.remove(ENTITIES))
     {
+        let update_key_private = if !is_known_private && cache_control.private() {
+            private_id
+        } else {
+            None
+        };
+
         let (new_entities, new_errors) = insert_entities_in_result(
             entities
                 .as_array_mut()
@@ -554,8 +549,7 @@ async fn cache_store_entities_from_response(
             subgraph_ttl,
             cache_control,
             &mut result_from_cache,
-            is_known_private,
-            private_id,
+            update_key_private,
         )
         .await?;
 
@@ -823,8 +817,7 @@ async fn insert_entities_in_result(
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
-    is_known_private: bool,
-    private_id: Option<String>,
+    update_key_private: Option<String>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
@@ -837,8 +830,6 @@ async fn insert_entities_in_result(
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
     let mut entities_it = entities.drain(..).enumerate();
-
-    let should_be_private = !is_known_private && cache_control.private();
 
     // insert requested entities and cached entities in the same order as
     // they were requested
@@ -866,10 +857,8 @@ async fn insert_entities_in_result(
                 if cache_control.should_store() {
                     *inserted_types.entry(typename).or_default() += 1;
 
-                    if should_be_private {
-                        if let Some(ref id) = private_id {
-                            key = format!("{key}:{id}");
-                        }
+                    if let Some(ref id) = update_key_private {
+                        key = format!("{key}:{id}");
                     }
 
                     let mut has_errors = false;

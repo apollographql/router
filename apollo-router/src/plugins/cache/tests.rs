@@ -249,14 +249,10 @@ impl Mocks for MockStore {
             }
             "MSET" => {
                 let mut args_it = command.args.iter();
-                loop {
-                    if let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
-                        (args_it.next(), args_it.next())
-                    {
-                        self.map.lock().insert(key.clone(), value.clone());
-                    } else {
-                        break;
-                    }
+                while let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
+                    (args_it.next(), args_it.next())
+                {
+                    self.map.lock().insert(key.clone(), value.clone());
                 }
                 return Ok(RedisValue::Null);
             }
