@@ -7,12 +7,16 @@ use fred::mocks::MockCommand;
 use fred::mocks::Mocks;
 use fred::prelude::RedisError;
 use fred::prelude::RedisValue;
+use http::header::CACHE_CONTROL;
+use http::HeaderValue;
 use parking_lot::Mutex;
 use tower::ServiceExt;
 
 use super::entity::EntityCache;
 use crate::cache::redis::RedisCacheStorage;
+use crate::json_ext::Object;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;
@@ -201,6 +205,170 @@ async fn insert() {
         .build()
         .unwrap();
     let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[derive(Debug)]
+pub(crate) struct Mock2 {
+    //map: HashMap<Bytes, Bytes>,
+}
+
+impl Mock2 {
+    fn new() -> Mock2 {
+        Mock2 {}
+    }
+}
+impl Mocks for Mock2 {
+    fn process_command(&self, command: MockCommand) -> Result<RedisValue, RedisError> {
+        println!("mock2 received redis command: {command:?}");
+
+        match &*command.cmd {
+            "GET" => {
+                if let Some(RedisValue::Bytes(b)) = command.args.first() {
+                    if b == &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"[..]{
+                        return Ok(RedisValue::Bytes(Bytes::from(r#"{"control":{"created":1711538853,"private":true},"data":{"currentUser":{"activeOrganization":{"__typename":"Organization","id":"1"}}}}"#)));
+                    }
+                    if b == &b"subgraph:orga:Organization:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:655f22a6af21d7ffe671d3ce4b33464a76ddfea0bf179740b15e804b11983c04:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"[..] {
+                        return Ok(RedisValue::Bytes(Bytes::from(r#"{"control":{"created":1711539336,"private":true},"data":{"creatorUser":{"__typename":"User","id":2}}}"#)));
+                    }
+                }
+            }
+            "SET" => {
+                if let Some(RedisValue::Bytes(b)) = command.args.first() {
+                    if b == &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"[..]{
+                            return Ok(RedisValue::Null)
+                    }
+                }
+            }
+            _ => {}
+        }
+        Err(RedisError::new(RedisErrorKind::NotFound, "mock not found"))
+    }
+}
+
+#[tokio::test]
+async fn private() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {
+                    "__typename": "Organization",
+                    "id": "1"
+                } }}}}
+            ).with_header(CACHE_CONTROL, HeaderValue::from_static("private"))
+            .build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{creatorUser{__typename id}}}}",
+            "variables": {
+                "representations": [
+                    {
+                        "id": "1",
+                        "__typename": "Organization",
+                    }
+                ]
+            }}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }]
+            }}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("private")).build())
+    ].into_iter().collect());
+
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(Mock2::new()))
+        .await
+        .unwrap();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
+        .await
+        .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache.clone())
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let mut claims = Object::new();
+    claims.insert("sub", "1234".into());
+    let context = Context::new();
+    context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, claims.into());
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    println!("\nNOW WITHOUT SUBGRAPHS\n");
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let mut claims = Object::new();
+    claims.insert("sub", "1234".into());
+    let context = Context::new();
+    context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, claims.into());
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .build()
+        .unwrap();
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    println!("\nNOW WITH DIFFERENT SUB\n");
+
+    let mut claims = Object::new();
+    claims.insert("sub", "5678".into());
+    let context = Context::new();
+    context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, claims.into());
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .build()
+        .unwrap();
+    let response = service
+        .clone()
         .oneshot(request)
         .await
         .unwrap()

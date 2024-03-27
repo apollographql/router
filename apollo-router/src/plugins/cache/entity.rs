@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,6 +50,7 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
+#[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
     subgraphs: Arc<HashMap<String, Subgraph>>,
@@ -268,12 +270,13 @@ impl InnerCacheService {
             .unwrap_or_default();
 
         let is_known_private = { self.private_queries.read().await.contains(&query) };
+        println!("is known private={is_known_private} for '{query}'");
 
-        let private_id = if is_known_private {
-            get_private_id(&request.context)
-        } else {
-            None
-        };
+        let private_id = get_private_id(&request.context); /* if is_known_private {
+                                                               get_private_id(&request.context)
+                                                           } else {
+                                                               None
+                                                           };*/
 
         if !request
             .subgraph_request
@@ -285,6 +288,7 @@ impl InnerCacheService {
                 match cache_lookup_root(
                     self.name,
                     self.storage.clone(),
+                    is_known_private,
                     private_id.as_deref(),
                     request,
                 )
@@ -322,6 +326,7 @@ impl InnerCacheService {
             match cache_lookup_entities(
                 self.name,
                 self.storage.clone(),
+                is_known_private,
                 private_id.as_deref(),
                 request,
             )
@@ -358,6 +363,7 @@ impl InnerCacheService {
 async fn cache_lookup_root(
     name: String,
     cache: RedisCacheStorage,
+    is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
@@ -369,6 +375,7 @@ async fn cache_lookup_root(
         body,
         &request.context,
         &request.authorization,
+        is_known_private,
         private_id,
     );
 
@@ -395,6 +402,7 @@ struct EntityCacheResults(Vec<IntermediateResult>);
 async fn cache_lookup_entities(
     name: String,
     cache: RedisCacheStorage,
+    is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
@@ -406,6 +414,7 @@ async fn cache_lookup_entities(
         body,
         &request.context,
         &request.authorization,
+        is_known_private,
         private_id,
     )?;
 
@@ -639,6 +648,7 @@ fn extract_cache_key_root(
     body: &mut graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
+    is_known_private: bool,
     private_id: Option<&str>,
 ) -> String {
     // hash the query and operation name
@@ -650,12 +660,18 @@ fn extract_cache_key_root(
     // - subgraph name: caching is done per subgraph
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
-    match private_id {
-        None => format!("subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"),
-        Some(id) => {
-            format!("subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}:{id}",)
+    let mut key = String::new();
+    write!(
+        &mut key,
+        "subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"
+    );
+
+    if is_known_private {
+        if let Some(id) = private_id {
+            write!(&mut key, ":{id}");
         }
     }
+    key
 }
 
 // build a list of keys to get from the cache in one query
@@ -665,6 +681,7 @@ fn extract_cache_keys(
     body: &mut graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
+    is_known_private: bool,
     private_id: Option<&str>,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
@@ -700,16 +717,13 @@ fn extract_cache_keys(
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
-        let key = match private_id {
-            None => format!(
-                "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}"
-            ),
-            Some(id) => {
-                format!(
-                    "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}:{id}"
-                )
+        let mut key = String::new();
+        write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
+        if is_known_private {
+            if let Some(id) = private_id {
+                write!(&mut key, ":{id}");
             }
-        };
+        }
 
         representation
             .as_object_mut()
