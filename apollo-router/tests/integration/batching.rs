@@ -722,6 +722,90 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 5;
+
+    let mut requests: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                ))
+                .build()
+        })
+        .collect();
+
+    // Mess up the 4th one
+    requests[3].query = Some("query op3".into());
+
+    // We aren't expecting the whole batch anymore, so we need a handler here for it
+    fn handle_a(request: &wiremock::Request) -> ResponseTemplate {
+        let requests: Vec<Request> = request.body_json().unwrap();
+
+        // We should have gotten all of the regular elements minus the third
+        assert_eq!(requests.len(), REQUEST_COUNT - 1);
+
+        // Each element should have be for the specified subgraph and should have a field selection
+        // of index. The index should be 0..n without 3.
+        // Note: The router appends info to the query, so we append it at this check
+        for (request, index) in requests.into_iter().zip((0..).filter(|&i| i != 3)) {
+            assert_eq!(
+                request.query,
+                Some(format!(
+                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                ))
+            );
+        }
+
+        ResponseTemplate::new(200).set_body_json(
+            (0..REQUEST_COUNT)
+                .filter(|&i| i != 3)
+                .map(|index| {
+                    serde_json::json!({
+                        "data": {
+                            "entryA": {
+                                "index": index
+                            }
+                        }
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    let responses = helper::run_test(
+        CONFIG,
+        &requests[..],
+        Some(handle_a),
+        None::<helper::Handler>,
+    )
+    .await?;
+
+    // Make sure that we got back what we wanted
+    assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        entryA:
+          index: 0
+    - data:
+        entryA:
+          index: 1
+    - data:
+        entryA:
+          index: 2
+    - errors:
+        - message: "parsing error: Error: syntax error: expected a Selection Set\n   ╭─[query.graphql:1:10]\n   │\n 1 │ query op3\n   │          │ \n   │          ╰─ expected a Selection Set\n───╯\n"
+          extensions:
+            code: PARSING_ERROR
+    - data:
+        entryA:
+          index: 4
+    "###);
+
+    Ok(())
+}
+
 /// Utility methods for these tests
 mod helper {
     use std::time::Duration;
