@@ -1,5 +1,12 @@
 #![no_main]
 
+use std::env;
+use std::process::Child;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::atomic::AtomicBool;
+use std::sync::OnceLock;
+
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_router_studio_interop::generate_usage_reporting;
@@ -8,20 +15,14 @@ use libfuzzer_sys::fuzz_target;
 use router_bridge::planner::UsageReporting;
 use router_fuzz::generate_valid_operation;
 use serde_json::json;
-use std::env;
-use std::process::Child;
-use std::process::Command;
-use std::process::Stdio;
-use std::sync::atomic::AtomicBool;
-use std::sync::OnceLock;
 
 const ROUTER_CMD: &str = "./target/debug/examples/usage_reporting_router";
 // const SCHEMA_PATH: &str = "fuzz/supergraph.graphql";
-const SCHEMA_PATH: &str = "fuzz/supergraph-fed2.graphql";
+// const SCHEMA_PATH: &str = "fuzz/supergraph-fed2.graphql";
 // This schema contains more types and fields and directive so we can test as much of signature and referenced field
 // generation as possible. apollo_smith doesn't support random generation of input objects, union types, etc so it's
 // still not comprehensive.
-// const SCHEMA_PATH: &str = "fuzz/supergraph-moretypes.graphql";
+const SCHEMA_PATH: &str = "fuzz/supergraph-moretypes.graphql";
 const ROUTER_CONFIG_PATH: &str = "fuzz/router.yaml";
 const ROUTER_URL: &str = "http://localhost:4100";
 static ROUTER_INIT: AtomicBool = AtomicBool::new(false);
@@ -142,8 +143,10 @@ fuzz_target!(|data: &[u8]| {
     )
     .unwrap();
 
-    if !matches!(rust_generated.compare_usage_reporting(&bridge_generated), UsageReportingComparisonResult::Equal)
-    {
+    if !matches!(
+        rust_generated.compare_usage_reporting(&bridge_generated),
+        UsageReportingComparisonResult::Equal
+    ) {
         unsafe { ROUTER_PROCESS.get_mut() }
             .unwrap()
             .0
