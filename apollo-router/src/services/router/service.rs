@@ -434,11 +434,8 @@ impl RouterService {
         let futures = supergraph_requests
             .into_iter()
             .map(|supergraph_request| async {
-                // TODO: Cloning here seems to keep around the batch queries that should have been removed by the subgraph
-                // handler for the happy path, but `process_supergraph_request` takes ownership of the original request (and
-                // thus context) so we can't grab it from there.
-                // This will cause warnings about trying to cancel already completed batch queries in the logs for all
-                // batch queries.
+                // TODO: We clone the context here, because if the request results in an Err, the
+                // response context will no longer exist.
                 let context = supergraph_request.context.clone();
                 let result = self.process_supergraph_request(supergraph_request).await;
 
@@ -447,17 +444,13 @@ impl RouterService {
                 // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
                 let batch_query_opt = context.extensions().lock().remove::<BatchQuery>();
                 if let Some(mut batch_query) = batch_query_opt {
-                    // Grab the reason from the result, keeping in mind that even an `Ok` here could mean that
-                    // the query was cancelled.
-                    let reason = match &result {
-                        Ok(_res) => "todo!".into(),
-                        Err(e) => e.to_string(),
-                    };
-
-                    tracing::info!(
-                        "cancelling dangling batch query in supergraph response with: {reason}"
-                    );
-                    batch_query.signal_cancelled(reason).await;
+                    // Only proceed with signalling cancelled if the batch_query is not finished
+                    if !batch_query.finished() {
+                        tracing::info!("cancelling batch query in supergraph response");
+                        batch_query
+                            .signal_cancelled("request terminated by user".to_string())
+                            .await;
+                    }
                 }
 
                 result
