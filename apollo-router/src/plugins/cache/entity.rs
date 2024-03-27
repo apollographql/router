@@ -270,8 +270,6 @@ impl InnerCacheService {
             .unwrap_or_default();
 
         let is_known_private = { self.private_queries.read().await.contains(&query) };
-        println!("is known private={is_known_private} for '{query}'");
-
         let private_id = get_private_id(&request.context);
 
         if !request
