@@ -18,6 +18,7 @@ use tokio::time::Instant;
 use tower::BoxError;
 
 use super::attributes::HttpServerAttributes;
+use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
@@ -56,6 +57,17 @@ pub(crate) struct InstrumentsConfig {
 }
 
 impl InstrumentsConfig {
+    /// Update the defaults for spans configuration regarding the `default_attribute_requirement_level`
+    pub(crate) fn update_defaults(&mut self) {
+        self.router
+            .attributes
+            .defaults_for_levels(self.default_attribute_requirement_level);
+        self.supergraph
+            .defaults_for_levels(self.default_attribute_requirement_level);
+        self.subgraph
+            .defaults_for_levels(self.default_attribute_requirement_level);
+    }
+
     pub(crate) fn new_router_instruments(&self) -> RouterInstruments {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let http_server_request_duration = self
@@ -286,6 +298,25 @@ pub(crate) struct RouterInstrumentsConfig {
         DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
 }
 
+impl DefaultForLevel for RouterInstrumentsConfig {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                if !self.http_server_request_duration.is_enabled() {
+                    self.http_server_request_duration = DefaultedStandardInstrument::Bool(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::Recommended => {
+                // Recommended
+                if !self.http_server_request_duration.is_enabled() {
+                    self.http_server_request_duration = DefaultedStandardInstrument::Bool(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ActiveRequestsAttributes {
@@ -352,6 +383,10 @@ where
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphInstruments {}
 
+impl DefaultForLevel for SupergraphInstruments {
+    fn defaults_for_level(&mut self, _requirement_level: DefaultAttributeRequirementLevel) {}
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -370,6 +405,22 @@ pub(crate) struct SubgraphInstrumentsConfig {
     #[serde(rename = "http.client.response.body.size")]
     http_client_response_body_size:
         DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
+}
+
+impl DefaultForLevel for SubgraphInstrumentsConfig {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                if !self.http_client_request_duration.is_enabled() {
+                    self.http_client_request_duration = DefaultedStandardInstrument::Bool(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::Recommended => {
+                // Recommended
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
 }
 
 #[allow(dead_code)]

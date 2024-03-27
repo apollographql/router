@@ -7012,7 +7012,7 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "A header from the response",
+                                    "description": "A status from the response",
                                     "type": "object",
                                     "required": [
                                       "response_status"
@@ -7563,7 +7563,7 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "A header from the response",
+                                    "description": "A status from the response",
                                     "type": "object",
                                     "required": [
                                       "response_status"
@@ -8114,7 +8114,7 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "A header from the response",
+                                    "description": "A status from the response",
                                     "type": "object",
                                     "required": [
                                       "response_status"
@@ -8663,7 +8663,7 @@ expression: "&schema"
                               "additionalProperties": false
                             },
                             {
-                              "description": "A header from the response",
+                              "description": "A status from the response",
                               "type": "object",
                               "required": [
                                 "response_status"
@@ -9127,7 +9127,7 @@ expression: "&schema"
                                           "additionalProperties": false
                                         },
                                         {
-                                          "description": "A header from the response",
+                                          "description": "A status from the response",
                                           "type": "object",
                                           "required": [
                                             "response_status"
@@ -9366,10 +9366,10 @@ expression: "&schema"
                             "description": "A condition to check a selection against a selector.",
                             "type": "object",
                             "required": [
-                              "exist"
+                              "exists"
                             ],
                             "properties": {
-                              "exist": {
+                              "exists": {
                                 "anyOf": [
                                   {
                                     "description": "A header from the request",
@@ -9532,7 +9532,7 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "A header from the response",
+                                    "description": "A status from the response",
                                     "type": "object",
                                     "required": [
                                       "response_status"
@@ -10023,7 +10023,7 @@ expression: "&schema"
                                 "additionalProperties": false
                               },
                               {
-                                "description": "A header from the response",
+                                "description": "A status from the response",
                                 "type": "object",
                                 "required": [
                                   "response_status"
@@ -14742,10 +14742,10 @@ expression: "&schema"
                             "description": "A condition to check a selection against a selector.",
                             "type": "object",
                             "required": [
-                              "exist"
+                              "exists"
                             ],
                             "properties": {
-                              "exist": {
+                              "exists": {
                                 "anyOf": [
                                   {
                                     "type": "object",
@@ -16765,6 +16765,35 @@ expression: "&schema"
                               "additionalProperties": false
                             },
                             {
+                              "description": "A status from the response",
+                              "type": "object",
+                              "required": [
+                                "response_status"
+                              ],
+                              "properties": {
+                                "response_status": {
+                                  "description": "The http response status code.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The http status code.",
+                                      "type": "string",
+                                      "enum": [
+                                        "code"
+                                      ]
+                                    },
+                                    {
+                                      "description": "The http status reason.",
+                                      "type": "string",
+                                      "enum": [
+                                        "reason"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
                               "type": "object",
                               "required": [
                                 "request_context"
@@ -17268,6 +17297,35 @@ expression: "&schema"
                                           "additionalProperties": false
                                         },
                                         {
+                                          "description": "A status from the response",
+                                          "type": "object",
+                                          "required": [
+                                            "response_status"
+                                          ],
+                                          "properties": {
+                                            "response_status": {
+                                              "description": "The http response status code.",
+                                              "oneOf": [
+                                                {
+                                                  "description": "The http status code.",
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "code"
+                                                  ]
+                                                },
+                                                {
+                                                  "description": "The http status reason.",
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "reason"
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        {
                                           "type": "object",
                                           "required": [
                                             "request_context"
@@ -17518,10 +17576,10 @@ expression: "&schema"
                             "description": "A condition to check a selection against a selector.",
                             "type": "object",
                             "required": [
-                              "exist"
+                              "exists"
                             ],
                             "properties": {
-                              "exist": {
+                              "exists": {
                                 "anyOf": [
                                   {
                                     "type": "object",
@@ -17707,6 +17765,35 @@ expression: "&schema"
                                       "response_header": {
                                         "description": "The name of the response header.",
                                         "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "description": "A status from the response",
+                                    "type": "object",
+                                    "required": [
+                                      "response_status"
+                                    ],
+                                    "properties": {
+                                      "response_status": {
+                                        "description": "The http response status code.",
+                                        "oneOf": [
+                                          {
+                                            "description": "The http status code.",
+                                            "type": "string",
+                                            "enum": [
+                                              "code"
+                                            ]
+                                          },
+                                          {
+                                            "description": "The http status reason.",
+                                            "type": "string",
+                                            "enum": [
+                                              "reason"
+                                            ]
+                                          }
+                                        ]
                                       }
                                     },
                                     "additionalProperties": false
@@ -18237,6 +18324,35 @@ expression: "&schema"
                                   "response_header": {
                                     "description": "The name of the response header.",
                                     "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "description": "A status from the response",
+                                "type": "object",
+                                "required": [
+                                  "response_status"
+                                ],
+                                "properties": {
+                                  "response_status": {
+                                    "description": "The http response status code.",
+                                    "oneOf": [
+                                      {
+                                        "description": "The http status code.",
+                                        "type": "string",
+                                        "enum": [
+                                          "code"
+                                        ]
+                                      },
+                                      {
+                                        "description": "The http status reason.",
+                                        "type": "string",
+                                        "enum": [
+                                          "reason"
+                                        ]
+                                      }
+                                    ]
                                   }
                                 },
                                 "additionalProperties": false
@@ -18847,7 +18963,7 @@ expression: "&schema"
                             "additionalProperties": false
                           },
                           {
-                            "description": "A header from the response",
+                            "description": "A status from the response",
                             "type": "object",
                             "required": [
                               "response_status"
@@ -20185,6 +20301,35 @@ expression: "&schema"
                             "additionalProperties": false
                           },
                           {
+                            "description": "A status from the response",
+                            "type": "object",
+                            "required": [
+                              "response_status"
+                            ],
+                            "properties": {
+                              "response_status": {
+                                "description": "The http response status code.",
+                                "oneOf": [
+                                  {
+                                    "description": "The http status code.",
+                                    "type": "string",
+                                    "enum": [
+                                      "code"
+                                    ]
+                                  },
+                                  {
+                                    "description": "The http status reason.",
+                                    "type": "string",
+                                    "enum": [
+                                      "reason"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
                             "type": "object",
                             "required": [
                               "request_context"
@@ -21128,7 +21273,7 @@ expression: "&schema"
                         "additionalProperties": false
                       },
                       {
-                        "description": "A header from the response",
+                        "description": "A status from the response",
                         "type": "object",
                         "required": [
                           "response_status"
@@ -21367,10 +21512,10 @@ expression: "&schema"
           "description": "A condition to check a selection against a selector.",
           "type": "object",
           "required": [
-            "exist"
+            "exists"
           ],
           "properties": {
-            "exist": {
+            "exists": {
               "anyOf": [
                 {
                   "description": "A header from the request",
@@ -21533,7 +21678,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 {
-                  "description": "A header from the response",
+                  "description": "A status from the response",
                   "type": "object",
                   "required": [
                     "response_status"
@@ -22752,10 +22897,10 @@ expression: "&schema"
           "description": "A condition to check a selection against a selector.",
           "type": "object",
           "required": [
-            "exist"
+            "exists"
           ],
           "properties": {
-            "exist": {
+            "exists": {
               "anyOf": [
                 {
                   "type": "object",
@@ -23926,6 +24071,35 @@ expression: "&schema"
                         "additionalProperties": false
                       },
                       {
+                        "description": "A status from the response",
+                        "type": "object",
+                        "required": [
+                          "response_status"
+                        ],
+                        "properties": {
+                          "response_status": {
+                            "description": "The http response status code.",
+                            "oneOf": [
+                              {
+                                "description": "The http status code.",
+                                "type": "string",
+                                "enum": [
+                                  "code"
+                                ]
+                              },
+                              {
+                                "description": "The http status reason.",
+                                "type": "string",
+                                "enum": [
+                                  "reason"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
                         "type": "object",
                         "required": [
                           "request_context"
@@ -24176,10 +24350,10 @@ expression: "&schema"
           "description": "A condition to check a selection against a selector.",
           "type": "object",
           "required": [
-            "exist"
+            "exists"
           ],
           "properties": {
-            "exist": {
+            "exists": {
               "anyOf": [
                 {
                   "type": "object",
@@ -24365,6 +24539,35 @@ expression: "&schema"
                     "response_header": {
                       "description": "The name of the response header.",
                       "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "description": "A status from the response",
+                  "type": "object",
+                  "required": [
+                    "response_status"
+                  ],
+                  "properties": {
+                    "response_status": {
+                      "description": "The http response status code.",
+                      "oneOf": [
+                        {
+                          "description": "The http status code.",
+                          "type": "string",
+                          "enum": [
+                            "code"
+                          ]
+                        },
+                        {
+                          "description": "The http status reason.",
+                          "type": "string",
+                          "enum": [
+                            "reason"
+                          ]
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false

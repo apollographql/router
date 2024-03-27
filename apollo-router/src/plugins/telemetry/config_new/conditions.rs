@@ -12,7 +12,7 @@ pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
     Eq([SelectorOrValue<T>; 2]),
     /// A condition to check a selection against a selector.
-    Exist(T),
+    Exists(T),
     /// All sub-conditions must be true.
     All(Vec<Condition<T>>),
     /// At least one sub-conditions must be true.
@@ -73,7 +73,7 @@ where
                     }
                 }
             },
-            Condition::Exist(exist) => {
+            Condition::Exists(exist) => {
                 if exist.on_request(request).is_some() {
                     *self = Condition::True;
                     Some(true)
@@ -132,7 +132,7 @@ where
                 let right = eq[1].on_response(response);
                 left == right
             }
-            Condition::Exist(exist) => exist.on_response(response).is_some(),
+            Condition::Exists(exist) => exist.on_response(response).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_response(response)),
             Condition::Any(any) => any.iter().any(|c| c.evaluate_response(response)),
             Condition::Not(not) => !not.evaluate_response(response),
@@ -214,19 +214,20 @@ mod test {
     fn test_condition_exist() {
         assert_eq!(
             None,
-            Condition::<TestSelectorReqRes>::Exist(TestSelectorReqRes::Req).evaluate_request(&None)
+            Condition::<TestSelectorReqRes>::Exists(TestSelectorReqRes::Req)
+                .evaluate_request(&None)
         );
         assert!(
-            !Condition::<TestSelectorReqRes>::Exist(TestSelectorReqRes::Req)
+            !Condition::<TestSelectorReqRes>::Exists(TestSelectorReqRes::Req)
                 .evaluate_response(&Some(3i64))
         );
         assert_eq!(
             Some(true),
-            Condition::<TestSelectorReqRes>::Exist(TestSelectorReqRes::Req)
+            Condition::<TestSelectorReqRes>::Exists(TestSelectorReqRes::Req)
                 .evaluate_request(&Some(2i64))
         );
         assert!(
-            Condition::<TestSelectorReqRes>::Exist(TestSelectorReqRes::Resp)
+            Condition::<TestSelectorReqRes>::Exists(TestSelectorReqRes::Resp)
                 .evaluate_response(&Some(3i64))
         );
     }

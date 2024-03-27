@@ -23,7 +23,7 @@ telemetry:
           unit: request
           description: "supergraph requests"
           condition:
-            exist:
+            exists:
               request_header: "conditional-custom"
         acme.request.size: # The name of your custom instrument/metric
           value:
@@ -59,7 +59,7 @@ telemetry:
             "acme.my_attribute":
               response_header: "content-type"
           condition:
-            exist:
+            exists:
               request_header: "x-custom"
       subgraph:
         acme.subgraph.error_reqs:
@@ -72,5 +72,5 @@ telemetry:
             graphql_error:
               subgraph_response_errors: "$[*].message"
           condition:
-            exist:
+            exists:
               subgraph_response_errors: "$[*].message"

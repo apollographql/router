@@ -246,6 +246,7 @@ impl Plugin for Telemetry {
 
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
+        config.instrumentation.instruments.update_defaults();
         config.exporters.logging.validate()?;
 
         let field_level_instrumentation_ratio =
@@ -2117,6 +2118,7 @@ mod tests {
                 "http.response.status_code" = 400,
                 "acme.my_attribute" = "application/json"
             );
+            assert_histogram_exists!("http.server.request.duration", f64);
             assert_histogram_sum!("acme.request.length", 55.0);
 
             let router_req = RouterRequest::fake_builder()
@@ -2345,6 +2347,7 @@ mod tests {
                 ])),
                 subgraph.name = "test"
             );
+            assert_histogram_exists!("http.client.request.duration", f64);
         }
         .with_metrics()
         .await;
