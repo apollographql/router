@@ -173,30 +173,24 @@ impl BasicCostCalculator {
         false
     }
 
-    fn score_plan_node(
-        &self,
-        plan_node: &PlanNode,
-        plan: &QueryPlan,
-    ) -> Result<f64, DemandControlError> {
+    fn score_plan_node(&self, plan_node: &PlanNode) -> Result<f64, DemandControlError> {
         match plan_node {
-            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, plan),
-            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, plan),
-            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node, plan),
+            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes),
+            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes),
+            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node),
             PlanNode::Condition {
                 condition: _,
                 if_clause,
                 else_clause,
-            } => self.max_score_of_nodes(if_clause, else_clause, plan),
+            } => self.max_score_of_nodes(if_clause, else_clause),
             PlanNode::Defer { primary, deferred } => {
-                self.summed_score_of_deferred_nodes(primary, deferred, plan)
+                self.summed_score_of_deferred_nodes(primary, deferred)
             }
-            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
-                &fetch_node.service_name,
-                &fetch_node.operation,
-                plan,
-            ),
+            PlanNode::Fetch(fetch_node) => {
+                self.estimated_cost_of_operation(&fetch_node.service_name, &fetch_node.operation)
+            }
             PlanNode::Subscription { primary, rest: _ } => {
-                self.estimated_cost_of_operation(&primary.service_name, &primary.operation, plan)
+                self.estimated_cost_of_operation(&primary.service_name, &primary.operation)
             }
         }
     }
@@ -205,7 +199,6 @@ impl BasicCostCalculator {
         &self,
         subgraph: &String,
         operation: &String,
-        plan: &QueryPlan,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
@@ -216,24 +209,23 @@ impl BasicCostCalculator {
                     "Query planner did not provide a schema for service {}",
                     subgraph
                 )))?;
-        let query = ExecutableDocument::parse(&schema, operation, "")?;
+        let query = ExecutableDocument::parse(schema, operation, "")?;
 
-        Self::estimated(&query, &schema)
+        Self::estimated(&query, schema)
     }
 
     fn max_score_of_nodes(
         &self,
         left: &Option<Box<PlanNode>>,
         right: &Option<Box<PlanNode>>,
-        plan: &QueryPlan,
     ) -> Result<f64, DemandControlError> {
         match (left, right) {
             (None, None) => Ok(0.0),
-            (None, Some(right)) => self.score_plan_node(right, plan),
-            (Some(left), None) => self.score_plan_node(left, plan),
+            (None, Some(right)) => self.score_plan_node(right),
+            (Some(left), None) => self.score_plan_node(left),
             (Some(left), Some(right)) => {
-                let left_score = self.score_plan_node(left, plan)?;
-                let right_score = self.score_plan_node(right, plan)?;
+                let left_score = self.score_plan_node(left)?;
+                let right_score = self.score_plan_node(right)?;
                 Ok(left_score.max(right_score))
             }
         }
@@ -243,28 +235,23 @@ impl BasicCostCalculator {
         &self,
         primary: &Primary,
         deferred: &Vec<DeferredNode>,
-        plan: &QueryPlan,
     ) -> Result<f64, DemandControlError> {
         let mut score = 0.0;
         if let Some(node) = &primary.node {
-            score += self.score_plan_node(node, plan)?;
+            score += self.score_plan_node(node)?;
         }
         for d in deferred {
             if let Some(node) = &d.node {
-                score += self.score_plan_node(node, plan)?;
+                score += self.score_plan_node(node)?;
             }
         }
         Ok(score)
     }
 
-    fn summed_score_of_nodes(
-        &self,
-        nodes: &Vec<PlanNode>,
-        plan: &QueryPlan,
-    ) -> Result<f64, DemandControlError> {
+    fn summed_score_of_nodes(&self, nodes: &Vec<PlanNode>) -> Result<f64, DemandControlError> {
         let mut sum = 0.0;
         for node in nodes {
-            sum += self.score_plan_node(node, plan)?;
+            sum += self.score_plan_node(node)?;
         }
         Ok(sum)
     }
@@ -286,7 +273,7 @@ impl CostCalculator for BasicCostCalculator {
     }
 
     fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
-        self.score_plan_node(&query_plan.root, query_plan)
+        self.score_plan_node(&query_plan.root)
     }
 }
 
