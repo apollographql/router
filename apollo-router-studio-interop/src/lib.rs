@@ -129,20 +129,15 @@ impl UsageReportingGenerator<'_> {
     }
 
     fn generate_stats_report_key(&mut self) -> String {
+        self.fragments_map.clear();
+
         match self
             .signature_doc
             .get_operation(self.operation_name.as_deref())
             .ok()
         {
-            None => {
-                // todo Print the whole document after transforming (that's what the JS impl does).
-                // See apollo-utils packages/dropUnusedDefinitions/src/index.ts
-                // Or return an error - if the operation can't be found, would we have thrown an error before getting here?
-                "".to_string()
-            }
+            None => "".to_string(), // todo ensure we can't get into this situation (https://github.com/apollographql/router/issues/4837)
             Some(operation) => {
-                self.fragments_map.clear();
-
                 self.extract_signature_fragments(&operation.selection_set);
                 self.format_operation_for_report(operation)
             }
@@ -197,17 +192,17 @@ impl UsageReportingGenerator<'_> {
     }
 
     fn generate_apollo_reporting_refs(&mut self) -> HashMap<String, ReferencedFieldsForType> {
+        self.fragments_map.clear();
+        self.fields_by_type.clear();
+        self.fields_by_interface.clear();
+
         match self
             .references_doc
             .get_operation(self.operation_name.as_deref())
             .ok()
         {
-            None => HashMap::new(), // todo the existing implementation seems to return the ref fields from the whole document
+            None => HashMap::new(), // todo ensure we can't get into this situation (https://github.com/apollographql/router/issues/4837)
             Some(operation) => {
-                self.fragments_map.clear();
-                self.fields_by_type.clear();
-                self.fields_by_interface.clear();
-
                 let operation_type = match operation.operation_type {
                     OperationType::Query => "Query",
                     OperationType::Mutation => "Mutation",
@@ -257,10 +252,11 @@ impl UsageReportingGenerator<'_> {
                     self.extract_fields(&field_type, &field.selection_set);
                 }
                 Selection::InlineFragment(fragment) => {
-                    if let Some(fragment_type) = &fragment.type_condition {
-                        let frag_type_name = fragment_type.to_string();
-                        self.extract_fields(&frag_type_name, &fragment.selection_set);
-                    }
+                    let frag_type_name = match fragment.type_condition.clone() {
+                        Some(fragment_type) => fragment_type.to_string(),
+                        None => parent_type.clone(),
+                    };
+                    self.extract_fields(&frag_type_name, &fragment.selection_set);
                 }
                 Selection::FragmentSpread(fragment) => {
                     if !self.fragment_spread_set.contains(&fragment.fragment_name) {
@@ -284,6 +280,7 @@ enum ApolloReportingSignatureFormatter<'a> {
     Operation(&'a Node<Operation>),
     Fragment(&'a Node<Fragment>),
     Argument(&'a Node<Argument>),
+    Field(&'a Node<Field>),
 }
 
 impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
@@ -294,6 +291,7 @@ impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
             }
             ApolloReportingSignatureFormatter::Fragment(fragment) => format_fragment(fragment, f),
             ApolloReportingSignatureFormatter::Argument(argument) => format_argument(argument, f),
+            ApolloReportingSignatureFormatter::Field(field) => format_field(field, f),
         }
     }
 }
@@ -359,11 +357,15 @@ fn format_selection_set(selection_set: &SelectionSet, f: &mut fmt::Formatter) ->
         f.write_str("{")?;
 
         for (i, &field) in fields.iter().enumerate() {
-            format_field(field, f)?;
+            let field_str = ApolloReportingSignatureFormatter::Field(field).to_string();
+            f.write_str(&field_str)?;
 
+            // We need to insert a space if this is not the last field and it ends in an alphanumeric character
             if i < fields.len() - 1
-                && field.arguments.is_empty()
-                && field.selection_set.selections.is_empty()
+                && field_str
+                    .chars()
+                    .last()
+                    .map_or(false, |c| c.is_alphanumeric())
             {
                 f.write_str(" ")?;
             }
@@ -563,7 +565,8 @@ mod tests {
             UsageReportingComparisonResult::Equal
         ));
     }
-    async fn assert_expected_results(
+
+    fn assert_expected_results(
         actual: &UsageReportingResult,
         expected_sig: &str,
         expected_refs: &HashMap<String, ReferencedFieldsForType>,
@@ -696,7 +699,7 @@ mod tests {
                 },
             ),
         ]);
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
 
         // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
         let sanitised_query_str = r#"fragment Fragment2 on EverythingResponse {
@@ -876,7 +879,7 @@ mod tests {
                 },
             ),
         ]);
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
 
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
@@ -914,7 +917,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -951,7 +954,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -988,7 +991,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1025,7 +1028,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1085,7 +1088,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1229,7 +1232,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
 
         // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
         let sanitised_query_str = r#"query FragmentQuery {
@@ -1385,7 +1388,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1428,7 +1431,7 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
@@ -1473,108 +1476,94 @@ mod tests {
             ),
         ]);
 
-        assert_expected_results(&generated, &expected_sig, &expected_refs);
+        assert_expected_results(&generated, expected_sig, &expected_refs);
         assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 
-    // todo remove
     #[test(tokio::test)]
-    async fn test_random_queries() {
-        const GENERATED_QUERIES_COUNT: usize = 1000;
+    async fn test_root_type_fragment() {
+        let schema_str = include_str!("testdata/schema.graphql");
 
-        // apollo_smith doesn't support random generation of input objects, union types, etc
-        let schema_str = include_str!("testdata/schema_cutdown.graphql");
-
-        let doc_schema: apollo_smith::Document = apollo_parser::Parser::new(schema_str)
-            .parse()
-            .document()
-            .try_into()
-            .unwrap();
-
-        let mut state: u32 = 0;
-        let mut prng = || {
-            state = state.wrapping_mul(134775813).wrapping_add(1);
-            (state >> 24) as u8
-        };
-        let mut bytes = vec![0; 128];
-
-        let mut queries = Vec::<String>::new();
-        queries.resize_with(GENERATED_QUERIES_COUNT, || {
-            bytes.fill_with(&mut prng);
-            let mut input = arbitrary::Unstructured::new(&bytes);
-            apollo_smith::DocumentBuilder::with_document(&mut input, doc_schema.clone())
-                .unwrap()
-                .operation_definition()
-                .unwrap()
-                .unwrap()
-                .into()
-        });
-
-        let planner = Planner::<serde_json::Value>::new(
-            schema_str.to_string(),
-            QueryPlannerConfig::default(),
-        )
-        .await
-        .unwrap();
-
-        let compiler_schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
-
-        let mut failed_tests = 0;
-        for query_str in queries.iter() {
-            let plan = planner
-                .plan(query_str.to_string(), None, PlanOptions::default())
-                .await
-                .unwrap();
-
-            // only check the results if the plan was successfully generated
-            if plan.data.is_some() {
-                let executable_doc =
-                    ExecutableDocument::parse(&compiler_schema, query_str, "query.graphql")
-                        .unwrap();
-                let executable_op = executable_doc.all_operations().next();
-                let op_name = executable_op
-                    .and_then(|o| o.name.clone())
-                    .map(|n| n.to_string());
-
-                let rust_result = generate_usage_reporting(
-                    &executable_doc,
-                    &executable_doc,
-                    &op_name,
-                    &compiler_schema,
-                );
-
-                let result = rust_result.compare_usage_reporting(&plan.usage_reporting);
-                if matches!(
-                    result,
-                    UsageReportingComparisonResult::StatsReportKeyNotEqual
-                        | UsageReportingComparisonResult::BothNotEqual
-                ) {
-                    println!(
-                        "Mismatched signatures: \n{}\n{}",
-                        plan.usage_reporting.stats_report_key, rust_result.result.stats_report_key
-                    );
+        let query_str = r#"query SomeQuery {
+            ... on Query {
+              ... {
+                basicResponseQuery {
+                  id
                 }
-                if matches!(
-                    result,
-                    UsageReportingComparisonResult::ReferencedFieldsNotEqual
-                        | UsageReportingComparisonResult::BothNotEqual
-                ) {
-                    println!(
-                        "Mismatched referenced fields: \n{:?}\n{:?}",
-                        plan.usage_reporting.referenced_fields_by_type,
-                        rust_result.result.referenced_fields_by_type
-                    );
-                }
-
-                if !matches!(result, UsageReportingComparisonResult::Equal) {
-                    println!("Failed on query_str: {query_str}");
-                    failed_tests = failed_tests + 1;
-                }
+              }
             }
-        }
+            noInputQuery {
+              enumResponse
+            }
+          }"#;
+        let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+        let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-        if failed_tests > 0 {
-            panic!("Rust and bridge implementations differ in {failed_tests} operations");
-        }
+        let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+
+        let expected_sig = "# SomeQuery\nquery SomeQuery{noInputQuery{enumResponse}...on Query{...{basicResponseQuery{id}}}}";
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            (
+                "BasicResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["id".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["basicResponseQuery".into(), "noInputQuery".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "EverythingResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["enumResponse".into()],
+                    is_interface: false,
+                },
+            ),
+        ]);
+
+        assert_expected_results(&generated, expected_sig, &expected_refs);
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_directive_arg_spacing() {
+        let schema_str = include_str!("testdata/schema.graphql");
+
+        let query_str = r#"query {
+            basicResponseQuery {
+              id @withArgs(arg1: "")
+              id
+            }
+          }"#;
+        let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+        let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+        let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+
+        let expected_sig = "# -\n{basicResponseQuery{id@withArgs(arg1:\"\")id}}";
+        let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+            (
+                "BasicResponse".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["id".into()],
+                    is_interface: false,
+                },
+            ),
+            (
+                "Query".into(),
+                ReferencedFieldsForType {
+                    field_names: vec!["basicResponseQuery".into()],
+                    is_interface: false,
+                },
+            ),
+        ]);
+
+        assert_expected_results(&generated, expected_sig, &expected_refs);
+        assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
     }
 }

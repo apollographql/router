@@ -16,11 +16,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::OnceLock;
 
 const ROUTER_CMD: &str = "./target/debug/examples/usage_reporting_router";
-// const ROUTER_SCHEMA_PATH: &str = "fuzz/supergraph-fed2.graphql";
+const SCHEMA_PATH: &str = "fuzz/supergraph.graphql";
+// const SCHEMA_PATH: &str = "fuzz/supergraph-fed2.graphql";
 // This schema contains more types and fields and directive so we can test as much of signature and referenced field
 // generation as possible. apollo_smith doesn't support random generation of input objects, union types, etc so it's
 // still not comprehensive.
-const SCHEMA_PATH: &str = "fuzz/supergraph-moretypes.graphql";
+//const SCHEMA_PATH: &str = "fuzz/supergraph-moretypes.graphql";
 const ROUTER_CONFIG_PATH: &str = "fuzz/router.yaml";
 const ROUTER_URL: &str = "http://localhost:4100";
 static ROUTER_INIT: AtomicBool = AtomicBool::new(false);
@@ -91,13 +92,19 @@ fuzz_target!(|data: &[u8]| {
         }
     };
 
-    // If the generated operation doesn't pass validation, the call to the router will fail, so
-    // we don't want to continue with the test.
-    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    // If the generated schema or operation doesn't pass validation, the call to the router will
+    // fail, so we don't want to continue with the test.
+    let schema = match Schema::parse_and_validate(schema_str, "schema.graphql") {
+        Ok(s) => s,
+        Err(_err) => {
+            // println!("Failed to parse and validate schema");
+            return;
+        }
+    };
     let doc = match ExecutableDocument::parse_and_validate(&schema, &op_str, "query.graphql") {
         Ok(d) => d,
         Err(_err) => {
-            println!("Generated operation failed validation");
+            // println!("Failed to parse and validate operation");
             return;
         }
     };
