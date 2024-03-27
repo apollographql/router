@@ -486,7 +486,6 @@ impl BridgeQueryPlanner {
         }
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
-        // todo disable if running in ApolloMetricsGenerationMode::New mode
         let operation_signature = if matches!(
             self.configuration
                 .experimental_apollo_metrics_generation_mode,
@@ -523,7 +522,6 @@ impl BridgeQueryPlanner {
                 ) {
                     // If the query is filtered, we want to generate the signature using the original query and generate the
                     // reference using the filtered query. To do this, we need to re-parse the original query here.
-                    // todo test this somehow
                     let signature_doc = if original_query != filtered_query {
                         Query::parse_document(&original_query, &self.schema, &self.configuration)
                     } else {
@@ -551,12 +549,6 @@ impl BridgeQueryPlanner {
                             UsageReportingComparisonResult::StatsReportKeyNotEqual
                                 | UsageReportingComparisonResult::BothNotEqual
                         ) {
-                            println!(
-                                "stats_report_key's are different:\n{}\n{}",
-                                generated_usage_reporting.result.stats_report_key,
-                                usage_reporting.stats_report_key,
-                            ); // todo remove
-
                             tracing::warn!(
                                 monotonic_counter.apollo.router.operations.telemetry.studio.signature = 1u64,
                                 generation.is_matched = false,
@@ -568,7 +560,6 @@ impl BridgeQueryPlanner {
                                 usage_reporting.stats_report_key,
                             );
                         } else {
-                            println!("stats_report_key's are identical"); // todo remove
                             tracing::info!(
                                 monotonic_counter
                                     .apollo
@@ -586,11 +577,6 @@ impl BridgeQueryPlanner {
                             UsageReportingComparisonResult::ReferencedFieldsNotEqual
                                 | UsageReportingComparisonResult::BothNotEqual
                         ) {
-                            println!(
-                                "referenced_fields_by_type's are different:\n{:?}\n{:?}",
-                                generated_usage_reporting.result.referenced_fields_by_type,
-                                usage_reporting.referenced_fields_by_type,
-                            ); // todo remove
                             tracing::warn!(
                                 monotonic_counter.apollo.router.operations.telemetry.studio.references = 1u64,
                                 generation.is_matched = false,
@@ -602,7 +588,6 @@ impl BridgeQueryPlanner {
                                 usage_reporting.referenced_fields_by_type,
                             );
                         } else {
-                            println!("referenced_fields_by_type's are identical"); // todo remove
                             tracing::info!(
                                 monotonic_counter
                                     .apollo

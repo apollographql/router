@@ -78,4 +78,3 @@ register_plugin!(
 fn main() -> Result<()> {
     apollo_router::main()
 }
-    
