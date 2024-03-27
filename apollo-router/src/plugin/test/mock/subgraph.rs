@@ -107,6 +107,7 @@ impl MockSubgraphBuilder {
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self

@@ -272,11 +272,7 @@ impl InnerCacheService {
         let is_known_private = { self.private_queries.read().await.contains(&query) };
         println!("is known private={is_known_private} for '{query}'");
 
-        let private_id = get_private_id(&request.context); /* if is_known_private {
-                                                               get_private_id(&request.context)
-                                                           } else {
-                                                               None
-                                                           };*/
+        let private_id = get_private_id(&request.context);
 
         if !request
             .subgraph_request
@@ -661,14 +657,14 @@ fn extract_cache_key_root(
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
     let mut key = String::new();
-    write!(
+    let _ = write!(
         &mut key,
         "subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"
     );
 
     if is_known_private {
         if let Some(id) = private_id {
-            write!(&mut key, ":{id}");
+            let _ = write!(&mut key, ":{id}");
         }
     }
     key
@@ -718,10 +714,10 @@ fn extract_cache_keys(
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = String::new();
-        write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
+        let _ = write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
         if is_known_private {
             if let Some(id) = private_id {
-                write!(&mut key, ":{id}");
+                let _ = write!(&mut key, ":{id}");
             }
         }
 

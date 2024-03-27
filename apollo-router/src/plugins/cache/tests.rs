@@ -216,37 +216,51 @@ async fn insert() {
 }
 
 #[derive(Debug)]
-pub(crate) struct Mock2 {
-    //map: HashMap<Bytes, Bytes>,
+pub(crate) struct MockStore {
+    map: Arc<Mutex<HashMap<Bytes, Bytes>>>,
 }
 
-impl Mock2 {
-    fn new() -> Mock2 {
-        Mock2 {}
+impl MockStore {
+    fn new() -> MockStore {
+        MockStore {
+            map: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
-impl Mocks for Mock2 {
+impl Mocks for MockStore {
     fn process_command(&self, command: MockCommand) -> Result<RedisValue, RedisError> {
         println!("mock2 received redis command: {command:?}");
 
         match &*command.cmd {
             "GET" => {
                 if let Some(RedisValue::Bytes(b)) = command.args.first() {
-                    if b == &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"[..]{
-                        return Ok(RedisValue::Bytes(Bytes::from(r#"{"control":{"created":1711538853,"private":true},"data":{"currentUser":{"activeOrganization":{"__typename":"Organization","id":"1"}}}}"#)));
-                    }
-                    if b == &b"subgraph:orga:Organization:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:655f22a6af21d7ffe671d3ce4b33464a76ddfea0bf179740b15e804b11983c04:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"[..] {
-                        return Ok(RedisValue::Bytes(Bytes::from(r#"{"control":{"created":1711539336,"private":true},"data":{"creatorUser":{"__typename":"User","id":2}}}"#)));
+                    if let Some(bytes) = self.map.lock().get(b) {
+                        return Ok(RedisValue::Bytes(bytes.clone()));
                     }
                 }
             }
             "SET" => {
-                if let Some(RedisValue::Bytes(b)) = command.args.first() {
-                    if b == &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"[..]{
-                            return Ok(RedisValue::Null)
-                    }
+                if let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
+                    (command.args.first(), command.args.get(1))
+                {
+                    self.map.lock().insert(key.clone(), value.clone());
+                    return Ok(RedisValue::Null);
                 }
             }
+            "MSET" => {
+                let mut args_it = command.args.iter();
+                loop {
+                    if let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
+                        (args_it.next(), args_it.next())
+                    {
+                        self.map.lock().insert(key.clone(), value.clone());
+                    } else {
+                        break;
+                    }
+                }
+                return Ok(RedisValue::Null);
+            }
+
             _ => {}
         }
         Err(RedisError::new(RedisErrorKind::NotFound, "mock not found"))
@@ -288,7 +302,7 @@ async fn private() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("private")).build())
     ].into_iter().collect());
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(Mock2::new()))
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
