@@ -46,7 +46,7 @@ trait CostCalculator {
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError>;
 
-    fn planned(query_plan: &QueryPlan) -> Result<f64, DemandControlError>;
+    fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError>;
 }
 
 /// Demand control configuration
