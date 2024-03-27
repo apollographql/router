@@ -408,19 +408,30 @@ mod tests {
         assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
-    #[test]
-    fn requires_adds_required_field_cost() {
+    #[test(tokio::test)]
+    async fn federated_query_with_requires() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 10200.0)
+        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(planned_cost(schema, query).await, 10400.0);
     }
 
     #[test(tokio::test)]
-    async fn query_plan_cost() {
+    async fn federated_query_with_fragments() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
-        let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+        let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
 
-        assert_eq!(planned_cost(schema, query).await, 10400.0)
+        assert_eq!(estimated_cost(schema, query), 300.0);
+        assert_eq!(planned_cost(schema, query).await, 400.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_defer() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+
+        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(planned_cost(schema, query).await, 10400.0);
     }
 }
