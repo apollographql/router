@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
@@ -181,6 +182,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                             Arc::new(apollo_compiler::validation::Valid::assume_valid(
                                 apollo_compiler::Schema::new(),
                             )),
+                            Arc::new(HashMap::new()),
                             configuration.notify.clone(),
                         )
                         .await
@@ -310,6 +312,7 @@ impl YamlRouterFactory {
             create_plugins(
                 &configuration,
                 &schema,
+                bridge_query_planner.subgraph_schemas(),
                 initial_telemetry_plugin,
                 extra_plugins,
             )
@@ -485,6 +488,7 @@ caused by
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
+    subgraph_schemas: Arc<HashMap<String, Valid<apollo_compiler::Schema>>>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
@@ -519,6 +523,7 @@ pub(crate) async fn create_plugins(
                     &$plugin_config,
                     schema.as_string().clone(),
                     supergraph_schema.clone(),
+                    subgraph_schemas.clone(),
                     configuration.notify.clone(),
                 )
                 .await

@@ -722,6 +722,7 @@ mod tests {
                 Arc::new(apollo_compiler::validation::Valid::assume_valid(
                     apollo_compiler::Schema::new(),
                 )),
+                Default::default(),
                 notify.clone(),
             )
             .await
@@ -863,6 +864,7 @@ mod tests {
                 Arc::new(apollo_compiler::validation::Valid::assume_valid(
                     apollo_compiler::Schema::new(),
                 )),
+                Default::default(),
                 notify.clone(),
             )
             .await
@@ -951,6 +953,7 @@ mod tests {
                 Arc::new(apollo_compiler::validation::Valid::assume_valid(
                     apollo_compiler::Schema::new(),
                 )),
+                Default::default(),
                 notify.clone(),
             )
             .await
