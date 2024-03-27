@@ -892,7 +892,7 @@ where
     T: Selector<Request = Request, Response = Response> + Debug,
 {
     fn drop(&mut self) {
-        // TODO add attribute error broken pipe ?
+        // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
             if let Some(counter) = inner.counter.take() {
@@ -1085,7 +1085,7 @@ where
     T: Selector<Request = Request, Response = Response>,
 {
     fn drop(&mut self) {
-        // TODO add attribute error broken pipe ?
+        // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
             if let Some(histogram) = inner.histogram.take() {
@@ -1109,6 +1109,8 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::context::OPERATION_KIND;
+    use crate::graphql;
     use crate::metrics::FutureMetricsExt;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -1255,6 +1257,139 @@ mod tests {
                 2.0,
                 "http.response.status_code" = 400
             );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_instruments() {
+        async {
+            let config: InstrumentsConfig = serde_json::from_str(
+                json!({
+                    "supergraph": {
+                        "acme.request.on_error": {
+                            "value": "unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "not": {
+                                    "eq": [
+                                        200,
+                                        {
+                                            "response_status": "code"
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        "acme.query": {
+                            "value": "unit",
+                            "type": "counter",
+                            "description": "nb of queries",
+                            "condition": {
+                                "eq": [
+                                    "query",
+                                    {
+                                        "operation_kind": "string"
+                                    }
+                                ]
+                            },
+                            "unit": "query",
+                            "attributes": {
+                                "query": {
+                                    "query": "string"
+                                }
+                            }
+                        }
+                    }
+                })
+                .to_string()
+                .as_str(),
+            )
+            .unwrap();
+
+            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
+            let context = crate::context::Context::new();
+            let _ = context.insert(OPERATION_KIND, "query".to_string());
+            let supergraph_req = supergraph::Request::fake_builder()
+                .header("conditional-custom", "X")
+                .header("x-my-header-count", "55")
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .query("{me{name}}")
+                .context(context.clone())
+                .build()
+                .unwrap();
+            custom_instruments.on_request(&supergraph_req);
+            let supergraph_response = supergraph::Response::fake_builder()
+                .context(supergraph_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("x-my-header", "TEST")
+                .header("content-length", "35")
+                .errors(vec![graphql::Error::builder()
+                    .message("nope")
+                    .extension_code("NOPE")
+                    .build()])
+                .build()
+                .unwrap();
+            custom_instruments.on_response(&supergraph_response);
+
+            assert_counter!("acme.query", 1.0, query = "{me{name}}");
+            assert_counter!("acme.request.on_error", 1.0);
+
+            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
+            let supergraph_req = supergraph::Request::fake_builder()
+                .header("content-length", "35")
+                .header("x-my-header-count", "5")
+                .header("content-type", "application/graphql")
+                .context(context.clone())
+                .query("Subscription {me{name}}")
+                .build()
+                .unwrap();
+            custom_instruments.on_request(&supergraph_req);
+            let supergraph_response = supergraph::Response::fake_builder()
+                .context(supergraph_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .errors(vec![graphql::Error::builder()
+                    .message("nope")
+                    .extension_code("NOPE")
+                    .build()])
+                .build()
+                .unwrap();
+            custom_instruments.on_response(&supergraph_response);
+
+            assert_counter!("acme.query", 1.0, query = "{me{name}}");
+            assert_counter!("acme.request.on_error", 2.0);
+
+            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
+            let supergraph_req = supergraph::Request::fake_builder()
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .context(context.clone())
+                .query("{me{name}}")
+                .build()
+                .unwrap();
+            custom_instruments.on_request(&supergraph_req);
+            let supergraph_response = supergraph::Response::fake_builder()
+                .context(supergraph_req.context.clone())
+                .status_code(StatusCode::OK)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .errors(vec![graphql::Error::builder()
+                    .message("nope")
+                    .extension_code("NOPE")
+                    .build()])
+                .build()
+                .unwrap();
+            custom_instruments.on_response(&supergraph_response);
+
+            assert_counter!("acme.query", 2.0, query = "{me{name}}");
+            assert_counter!("acme.request.on_error", 2.0);
         }
         .with_metrics()
         .await;

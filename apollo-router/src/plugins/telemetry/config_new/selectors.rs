@@ -98,7 +98,7 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
-    /// A header from the response
+    /// A status from the response
     ResponseStatus {
         /// The http response status code.
         response_status: ResponseStatus,
@@ -205,6 +205,11 @@ pub(crate) enum SupergraphSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
+    },
+    /// A status from the response
+    ResponseStatus {
+        /// The http response status code.
+        response_status: ResponseStatus,
     },
     RequestContext {
         /// The request context key.
@@ -626,6 +631,16 @@ impl Selector for SupergraphSelector {
                 .and_then(|h| Some(h.to_str().ok()?.to_string()))
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
+            SupergraphSelector::ResponseStatus { response_status } => match response_status {
+                ResponseStatus::Code => Some(opentelemetry::Value::I64(
+                    response.response.status().as_u16() as i64,
+                )),
+                ResponseStatus::Reason => response
+                    .response
+                    .status()
+                    .canonical_reason()
+                    .map(|reason| reason.to_string().into()),
+            },
             SupergraphSelector::ResponseContext {
                 response_context,
                 default,
