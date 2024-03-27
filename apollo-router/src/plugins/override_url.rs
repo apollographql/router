@@ -113,7 +113,7 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.override_subgraph_url")
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &Value::from_str(
                     r#"{
                 "test_one": "http://localhost:8001",
@@ -121,8 +121,6 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
-                Default::default(),
-                Default::default(),
             )
             .await
             .unwrap();

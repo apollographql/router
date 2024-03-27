@@ -1,0 +1,10 @@
+{
+    someUnion {
+        ... on FirstObjectType {
+            field1
+        }
+        ... on SecondObjectType {
+            field2
+        }
+    }
+}

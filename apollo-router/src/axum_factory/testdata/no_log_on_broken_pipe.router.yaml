@@ -1,0 +1,2 @@
+supergraph:
+  experimental_log_on_broken_pipe: false

@@ -13,9 +13,11 @@ use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
+use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -218,17 +220,31 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     let fetch_time_offset =
                         parameters.context.created_at.elapsed().as_nanos() as i64;
-                    let (v, e) = fetch_node
-                        .fetch_node(parameters, parent_value, current_dir)
-                        .instrument(tracing::info_span!(
-                            FETCH_SPAN_NAME,
-                            "otel.kind" = "INTERNAL",
-                            "apollo.subgraph.name" = fetch_node.service_name.as_str(),
-                            "apollo_private.sent_time_offset" = fetch_time_offset
-                        ))
-                        .await;
-                    value = v;
-                    errors = e;
+
+                    // The client closed the connection, we are still executing the request pipeline,
+                    // but we won't send unused trafic to subgraph
+                    if parameters
+                        .context
+                        .extensions()
+                        .lock()
+                        .get::<CanceledRequest>()
+                        .is_some()
+                    {
+                        value = Value::Object(Object::default());
+                        errors = Vec::new();
+                    } else {
+                        let (v, e) = fetch_node
+                            .fetch_node(parameters, parent_value, current_dir)
+                            .instrument(tracing::info_span!(
+                                FETCH_SPAN_NAME,
+                                "otel.kind" = "INTERNAL",
+                                "apollo.subgraph.name" = fetch_node.service_name.as_str(),
+                                "apollo_private.sent_time_offset" = fetch_time_offset
+                            ))
+                            .await;
+                        value = v;
+                        errors = e;
+                    }
                 }
                 PlanNode::Defer {
                     primary:

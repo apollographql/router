@@ -681,6 +681,7 @@ fn ensure_id_consistency(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use futures::StreamExt;
     use serde_json::Value;
@@ -718,6 +719,9 @@ mod tests {
                 )
                 .unwrap(),
                 Default::default(),
+                Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                    apollo_compiler::Schema::new(),
+                )),
                 notify.clone(),
             )
             .await
@@ -856,6 +860,9 @@ mod tests {
                 )
                 .unwrap(),
                 Default::default(),
+                Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                    apollo_compiler::Schema::new(),
+                )),
                 notify.clone(),
             )
             .await
@@ -941,6 +948,9 @@ mod tests {
                 )
                 .unwrap(),
                 Default::default(),
+                Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                    apollo_compiler::Schema::new(),
+                )),
                 notify.clone(),
             )
             .await
@@ -1076,15 +1086,13 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &Value::from_str(
                     r#"{
                     "enabled": false
                 }"#,
                 )
                 .unwrap(),
-                Default::default(),
-                Default::default(),
             )
             .await
             .unwrap();

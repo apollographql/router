@@ -382,6 +382,10 @@ impl LicenseEnforcementReport {
                 .path("$.preview_file_uploads")
                 .name("File uploads plugin")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.experimental_demand_control")
+                .name("Demand control plugin")
+                .build(),
         ]
     }
 

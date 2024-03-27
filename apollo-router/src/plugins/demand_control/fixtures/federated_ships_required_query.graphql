@@ -1,0 +1,6 @@
+{
+    ships {
+        name
+        registrationFee
+    }
+}

@@ -1,0 +1,7 @@
+{
+    someObjects {
+        innerList {
+            field2
+        }
+    }
+}

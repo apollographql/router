@@ -10,6 +10,7 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 // TODO Remove MetricExporterBuilder once upstream issue is fixed
 // This has to exist because Http is not currently supported for metrics export
@@ -42,7 +43,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
         mut builder: MetricsBuilder,
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
-        let exporter: MetricExporterBuilder = self.exporter()?;
+        let exporter: MetricExporterBuilder = self.exporter(TelemetryDataKind::Metrics)?;
         if !self.enabled {
             return Ok(builder);
         }

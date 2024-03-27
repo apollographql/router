@@ -25,6 +25,7 @@ pub(crate) mod authorization;
 pub(crate) mod cache;
 mod coprocessor;
 pub(crate) mod csrf;
+mod demand_control;
 mod expose_query_plan;
 pub(crate) mod file_uploads;
 mod forbid_mutations;

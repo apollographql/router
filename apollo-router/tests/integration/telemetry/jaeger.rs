@@ -1,8 +1,5 @@
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
-
 extern crate core;
-
-mod common;
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -12,9 +9,9 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::common::IntegrationTest;
-use crate::common::Telemetry;
-use crate::common::ValueExt;
+use crate::integration::IntegrationTest;
+use crate::integration::Telemetry;
+use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload() -> Result<(), BoxError> {

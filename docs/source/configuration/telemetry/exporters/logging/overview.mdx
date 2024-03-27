@@ -178,3 +178,17 @@ telemetry:
 | `resource`          |                          | The OpenTelemetry resource to attach to generated log events. |
 
 
+## Experimental logging of broken pipe errors
+
+You can emit a log message each time the client closes the connection early, which can help you debug issues with clients that close connections before the server can respond. 
+
+This feature is disabled by default but can be enabled by setting the `experimental_log_broken_pipe` option to `true`:
+
+```yaml title="router.yaml"
+supergraph:
+   experimental_log_on_broken_pipe: true
+```
+| Attribute                        | Default | Description                                         |
+|----------------------------------|---------|-----------------------------------------------------|
+| `experimental_log_on_broken_pipe`   | false   | Emit a log message if a broken pipe was detected.   |
+

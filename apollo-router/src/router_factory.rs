@@ -157,7 +157,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
-        // we have to create afirst telemetry plugin before creating everything else, to generate a trace
+        // we have to create a telemetry plugin before creating everything else, to generate a trace
         // of router and plugin creation
         let plugin_registry = &*crate::plugin::PLUGINS;
         let mut initial_telemetry_plugin = None;
@@ -178,6 +178,9 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         .create_instance(
                             plugin_config,
                             Arc::new(schema.clone()),
+                            Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                                apollo_compiler::Schema::new(),
+                            )),
                             configuration.notify.clone(),
                         )
                         .await
@@ -485,6 +488,7 @@ pub(crate) async fn create_plugins(
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
+    let supergraph_schema = Arc::new(schema.definitions.clone());
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -507,13 +511,14 @@ pub(crate) async fn create_plugins(
     let mut errors = Vec::new();
     let mut plugin_instances = Plugins::new();
 
-    // Use fonction-like macros to avoid borrow conflicts of captures
+    // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
         ($name: expr, $factory: expr, $plugin_config: expr) => {{
             match $factory
                 .create_instance(
                     &$plugin_config,
                     schema.as_string().clone(),
+                    supergraph_schema.clone(),
                     configuration.notify.clone(),
                 )
                 .await
@@ -626,6 +631,7 @@ pub(crate) async fn create_plugins(
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
+    add_optional_apollo_plugin!("experimental_demand_control");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end

@@ -416,13 +416,7 @@ where
                     tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 let mut heartbeat_stream = IntervalStream::new(interval)
-                    .map(|_| {
-                        Ok(ClientMessage::Ping {
-                            payload: Some(serde_json_bytes::Value::String(
-                                "APOLLO_ROUTER_HEARTBEAT".into(),
-                            )),
-                        })
-                    })
+                    .map(|_| Ok(ClientMessage::Ping { payload: None }))
                     .take_until(close_sentinel);
                 if let Err(err) = sink.send_all(&mut heartbeat_stream).await {
                     tracing::trace!("cannot send heartbeat: {err:?}");
@@ -755,7 +749,7 @@ mod tests {
                    tokio::time::sleep(duration).await;
                    let ping_message = socket.next().await.unwrap().unwrap();
                    assert_eq!(ping_message, AxumWsMessage::Text(
-                       serde_json::to_string(&ClientMessage::Ping { payload: Some(serde_json_bytes::Value::String("APOLLO_ROUTER_HEARTBEAT".into())) }).unwrap(),
+                       serde_json::to_string(&ClientMessage::Ping { payload: None }).unwrap(),
                    ));
 
                    assert!(

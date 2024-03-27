@@ -1,5 +1,5 @@
 ---
-source: apollo-router/tests/lifecycle_tests.rs
+source: apollo-router/tests/integration/lifecycle.rs
 expression: data
 ---
 {
