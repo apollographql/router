@@ -68,13 +68,13 @@ impl BatchQuery {
         // TODO: How should we handle the sender dying?
         self.sender
             .as_ref()
-            .unwrap()
+            .expect("set query hashes has a sender")
             .send(BatchHandlerMessage::Begin {
                 index: self.index,
                 query_hashes,
             })
             .await
-            .unwrap();
+            .expect("set query hashes could send");
     }
 
     /// Signal to the batch handler that this specific batch query has made some progress.
@@ -94,7 +94,7 @@ impl BatchQuery {
             // TODO: How should we handle the sender dying?
             self.sender
                 .as_ref()
-                .unwrap()
+                .expect("signal progress has a sender")
                 .send(BatchHandlerMessage::Progress {
                     index: self.index,
                     client_factory,
@@ -104,7 +104,7 @@ impl BatchQuery {
                     span_context: Span::current().context(),
                 })
                 .await
-                .unwrap();
+                .expect("signal progress could send");
 
             self.remaining -= 1;
             if self.remaining == 0 {
@@ -121,18 +121,20 @@ impl BatchQuery {
         if self.sender.is_some() {
             self.sender
                 .as_ref()
-                .unwrap()
+                .expect("signal cancelled has a sender")
                 .send(BatchHandlerMessage::Cancel {
                     index: self.index,
                     reason,
                 })
                 .await
-                .unwrap();
+                .expect("signal cancelled could send");
 
             self.remaining -= 1;
             if self.remaining == 0 {
                 self.sender = None;
             }
+        } else {
+            tracing::warn!("attempted to cancel completed batch query");
         }
     }
 }
@@ -251,10 +253,12 @@ impl Batch {
                             {
                                 sender
                                     .send(Err(Box::new(FetchError::SubrequestBatchingError {
-                                        service: request.subgraph_name.unwrap(),
+                                        service: request
+                                            .subgraph_name
+                                            .expect("request has a subgraph_name"),
                                         reason: format!("request cancelled: {reason}"),
                                     })))
-                                    .unwrap();
+                                    .expect("batcher could send request cancelled to waiter");
                             }
 
                             // Clear out everything that has committed, now that they are cancelled, and
@@ -336,7 +340,12 @@ impl Batch {
             } in all_in_one
             {
                 let value = svc_map
-                    .entry(sg_request.subgraph_name.clone().unwrap())
+                    .entry(
+                        sg_request
+                            .subgraph_name
+                            .clone()
+                            .expect("request has a subgraph_name"),
+                    )
                     .or_default();
                 value.push(BatchQueryInfo {
                     request: sg_request,
@@ -346,11 +355,13 @@ impl Batch {
             }
 
             // tracing::debug!("svc_map: {svc_map:?}");
-            process_batches(master_client_factory.unwrap(), svc_map)
-                .await
-                .expect("XXX NEEDS TO WORK FOR NOW");
-        }
-        .instrument(tracing::info_span!("batch_request", size)));
+            // If we don't have a master_client_factory, we can't do anything.
+            if let Some(client_factory) = master_client_factory {
+                process_batches(client_factory, svc_map)
+                    .await
+                    .expect("XXX NEEDS TO WORK FOR NOW");
+            }
+        }.instrument(tracing::info_span!("batch_request", size)));
 
         Self {
             senders: Mutex::new(senders),
