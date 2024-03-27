@@ -6,7 +6,7 @@ This feature is disabled by default but can be enabled by setting the `experimen
 
 ```yaml title="router.yaml"
 supergraph:
-  experimental_log_broken_pipe: true
+  experimental_log_on_broken_pipe: true
 ```
 
 Users that have internet facing routers will likely not want to opt in to this log message as they have no control over the clients.
