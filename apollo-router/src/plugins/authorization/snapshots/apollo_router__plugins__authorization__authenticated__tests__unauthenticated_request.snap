@@ -3,16 +3,6 @@ source: apollo-router/src/plugins/authorization/authenticated.rs
 expression: response
 ---
 {
-  "data": {
-    "orga": {
-      "id": 1,
-      "creatorUser": {
-        "id": 0,
-        "name": "Ada",
-        "phone": null
-      }
-    }
-  },
   "errors": [
     {
       "message": "Unauthorized field or type",
@@ -25,5 +15,15 @@ expression: response
         "code": "UNAUTHORIZED_FIELD_OR_TYPE"
       }
     }
-  ]
+  ],
+  "data": {
+    "orga": {
+      "id": 1,
+      "creatorUser": {
+        "id": 0,
+        "name": "Ada",
+        "phone": null
+      }
+    }
+  }
 }

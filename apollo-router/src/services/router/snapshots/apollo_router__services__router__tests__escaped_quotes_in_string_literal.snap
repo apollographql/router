@@ -5,6 +5,7 @@ expression: "(graphql_response, &subgraph_query_log)"
 (
     Response {
         label: None,
+        errors: [],
         data: Some(
             Object({
                 "topProducts": Array([
@@ -24,7 +25,6 @@ expression: "(graphql_response, &subgraph_query_log)"
             }),
         ),
         path: None,
-        errors: [],
         extensions: {},
         has_next: None,
         subscribed: None,

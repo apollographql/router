@@ -23,6 +23,10 @@ pub struct Response {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub label: Option<String>,
 
+    /// The optional graphql errors encountered.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub errors: Vec<Error>,
+
     /// The response data.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub data: Option<Value>,
@@ -30,10 +34,6 @@ pub struct Response {
     /// The path that the data should be merged at.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub path: Option<Path>,
-
-    /// The optional graphql errors encountered.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub errors: Vec<Error>,
 
     /// The optional graphql extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
@@ -465,5 +465,27 @@ mod tests {
                 reason: "graphql response without data must contain at least one error".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn test_errors_come_first() {
+        let response = Response::builder()
+            .error(
+                Error::builder()
+                    .message("some random error")
+                    .extension_code("RANDOM_ERROR")
+                    .build(),
+            )
+            .data(json!({
+                "random": "data"
+            }))
+            .build();
+
+        let json = serde_json::to_string(&response).unwrap();
+        let errors_location = json.find(r#""errors":"#).unwrap();
+        let data_location = json.find(r#""data":"#).unwrap();
+
+        // Make sure that errors are present before data
+        assert!(errors_location < data_location)
     }
 }
