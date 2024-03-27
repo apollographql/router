@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower::BoxError;
+use tracing::Instrument;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -360,7 +361,7 @@ impl Batch {
                     .await
                     .expect("XXX NEEDS TO WORK FOR NOW");
             }
-        });
+        }.instrument(tracing::info_span!("batch_request", size)));
 
         Self {
             senders: Mutex::new(senders),
