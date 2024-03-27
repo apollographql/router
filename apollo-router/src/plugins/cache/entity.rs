@@ -114,7 +114,10 @@ impl Plugin for EntityCache {
         Self: Sized,
     {
         let required_to_start = init.config.redis.required_to_start;
-        let storage = match RedisCacheStorage::new(init.config.redis).await {
+        // we need to explicitely disable TTL reset because it is managed directly by this plugin
+        let mut redis_config = init.config.redis.clone();
+        redis_config.reset_ttl = false;
+        let storage = match RedisCacheStorage::new(redis_config).await {
             Ok(storage) => Some(storage),
             Err(e) => {
                 tracing::error!(

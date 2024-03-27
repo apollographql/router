@@ -136,6 +136,7 @@ supergraph:
         namespace: "prefix"  # Optional
         #tls:
         required_to_start: false # Optional, defaults to false
+        reset_ttl: true # Optional, defaults to true
 ```
 
 #### Timeout
@@ -157,4 +158,8 @@ When using the same Redis instance for multiple puposes, the `namespace` option 
 
 ### Required to start
 
-When active, the `required_to_start` option will prevent the Router from starting if it cannot connect to Redis. By default, the Router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ and query planning, and entity caching sending the requestsz to subgraphs undisturbed.
+When active, the `required_to_start` option will prevent the Router from starting if it cannot connect to Redis. By default, the Router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ and query planning, and entity caching sending the requests to subgraphs undisturbed.
+
+### Reset TTL
+
+When this option is active, accessing a cache entry in Redis will reset its expiration.

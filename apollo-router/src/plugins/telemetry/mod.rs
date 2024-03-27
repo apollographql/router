@@ -448,7 +448,7 @@ impl Plugin for Telemetry {
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
                 if let Some(usage_reporting) =
-                    resp.context.extensions().lock().get::<UsageReporting>()
+                    resp.context.extensions().lock().get::<Arc<UsageReporting>>()
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -1234,7 +1234,7 @@ impl Telemetry {
         operation_subtype: Option<OperationSubType>,
     ) {
         let metrics = if let Some(usage_reporting) =
-            context.extensions().lock().get::<UsageReporting>().cloned()
+            context.extensions().lock().get::<Arc<UsageReporting>>()
         {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
@@ -1308,6 +1308,7 @@ impl Telemetry {
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
+                                .clone()
                                 .into_iter()
                                 .map(|(k, v)| (k, convert(v)))
                                 .collect(),
@@ -1859,7 +1860,7 @@ mod tests {
         let mut plugin = crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(telemetry_config, Default::default(), Default::default())
+            .create_instance_without_schema(telemetry_config)
             .await
             .unwrap();
 
@@ -1934,10 +1935,8 @@ mod tests {
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &serde_json::json!({"apollo": {"schema_id":"abc"}, "exporters": {"tracing": {}}}),
-                Default::default(),
-                Default::default(),
             )
             .await
             .unwrap();

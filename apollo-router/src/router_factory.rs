@@ -133,6 +133,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
 
     async fn create<'a>(
         &'a mut self,
+        is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
@@ -150,12 +151,13 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
     async fn create<'a>(
         &'a mut self,
+        _is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
-        // we have to create afirst telemetry plugin before creating everything else, to generate a trace
+        // we have to create a telemetry plugin before creating everything else, to generate a trace
         // of router and plugin creation
         let plugin_registry = &*crate::plugin::PLUGINS;
         let mut initial_telemetry_plugin = None;
@@ -176,6 +178,9 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         .create_instance(
                             plugin_config,
                             Arc::new(schema.clone()),
+                            Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                                apollo_compiler::Schema::new(),
+                            )),
                             configuration.notify.clone(),
                         )
                         .await
@@ -455,8 +460,15 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
+    let is_telemetry_disabled = false;
     let service = YamlRouterFactory
-        .create(Arc::new(config), schema.to_string(), None, None)
+        .create(
+            is_telemetry_disabled,
+            Arc::new(config),
+            schema.to_string(),
+            None,
+            None,
+        )
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
@@ -476,6 +488,7 @@ pub(crate) async fn create_plugins(
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
+    let supergraph_schema = Arc::new(schema.definitions.clone());
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -498,13 +511,14 @@ pub(crate) async fn create_plugins(
     let mut errors = Vec::new();
     let mut plugin_instances = Plugins::new();
 
-    // Use fonction-like macros to avoid borrow conflicts of captures
+    // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
         ($name: expr, $factory: expr, $plugin_config: expr) => {{
             match $factory
                 .create_instance(
                     &$plugin_config,
                     schema.as_string().clone(),
+                    supergraph_schema.clone(),
                     configuration.notify.clone(),
                 )
                 .await
@@ -617,6 +631,7 @@ pub(crate) async fn create_plugins(
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
+    add_optional_apollo_plugin!("experimental_demand_control");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
@@ -806,8 +821,15 @@ mod test {
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
 
+        let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(Arc::new(config), schema.to_string(), None, None)
+            .create(
+                is_telemetry_disabled,
+                Arc::new(config),
+                schema.to_string(),
+                None,
+                None,
+            )
             .await;
         service.map(|_| ())
     }
