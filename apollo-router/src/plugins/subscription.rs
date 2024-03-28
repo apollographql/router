@@ -704,8 +704,8 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(
-                &Value::from_str(
+            .create_instance(PluginInit {
+                config: &Value::from_str(
                     r#"{
                 "enabled": true,
                 "mode": {
@@ -718,12 +718,13 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
-                Default::default(),
-                Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                supergraph_sdl: Default::default(),
+                supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
                     apollo_compiler::Schema::new(),
                 )),
-                notify.clone(),
-            )
+                subgraph_schemas: Default::default(),
+                notify: notify.clone(),
+            })
             .await
             .unwrap();
 
@@ -845,8 +846,8 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(
-                &Value::from_str(
+            .create_instance(PluginInit {
+                config: &Value::from_str(
                     r#"{
                 "enabled": true,
                 "mode": {
@@ -859,12 +860,13 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
-                Default::default(),
-                Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                supergraph_sdl: Default::default(),
+                supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
                     apollo_compiler::Schema::new(),
                 )),
-                notify.clone(),
-            )
+                subgraph_schemas: Default::default(),
+                notify: notify.clone(),
+            })
             .await
             .unwrap();
 
@@ -933,8 +935,8 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(
-                &Value::from_str(
+            .create_instance(PluginInit {
+                config: &Value::from_str(
                     r#"{
                 "enabled": true,
                 "mode": {
@@ -947,12 +949,13 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
-                Default::default(),
-                Arc::new(apollo_compiler::validation::Valid::assume_valid(
+                supergraph_sdl: Default::default(),
+                supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
                     apollo_compiler::Schema::new(),
                 )),
-                notify.clone(),
-            )
+                subgraph_schemas: Default::default(),
+                notify: notify.clone(),
+            })
             .await
             .unwrap();
 

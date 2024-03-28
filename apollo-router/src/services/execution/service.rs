@@ -1,5 +1,6 @@
 //! Implements the Execution phase of the request lifecycle.
 
+use std::collections::HashMap;
 use std::future::ready;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::Stream;
@@ -593,6 +595,7 @@ async fn consume_responses(
 #[derive(Clone)]
 pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Valid<apollo_compiler::Schema>>>,
     pub(crate) plugins: Arc<Plugins>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
 }

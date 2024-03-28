@@ -194,12 +194,19 @@ mod test {
             .await
             .unwrap();
         let schema = planner.schema();
+        let subgraph_schemas = planner.subgraph_schemas();
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let mut plugins = create_plugins(&Configuration::default(), &schema, None, None)
-            .await
-            .unwrap();
+        let mut plugins = create_plugins(
+            &Configuration::default(),
+            &schema,
+            subgraph_schemas,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
