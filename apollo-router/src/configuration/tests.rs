@@ -1000,3 +1000,19 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
         })
         .next()
 }
+
+#[test]
+fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
+    let conf = Configuration::builder()
+        .supergraph(
+            Supergraph::builder()
+                .generate_query_fragments(true)
+                .reuse_query_fragments(true)
+                .build(),
+        )
+        .build()
+        .unwrap();
+
+    assert_eq!(conf.supergraph.generate_query_fragments, Some(true));
+    assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
+}

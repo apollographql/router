@@ -610,6 +610,11 @@ pub(crate) struct Supergraph {
     #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: Option<bool>,
 
+    /// Enable QP generation of fragments for subgraph requests
+    /// Default: false
+    #[serde(rename = "generate_query_fragments")]
+    pub(crate) generate_query_fragments: Option<bool>,
+
     /// Set to false to disable defer support
     pub(crate) defer_support: bool,
 
@@ -631,7 +636,21 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        generate_query_fragments: Option<bool>,
     ) -> Self {
+        // reuse and generate query fragments are mutually exclusive options. If both
+        // are set and true, generate will be used and a warning will be
+        // emitted.
+        let reuse_query_fragments = if generate_query_fragments.is_some_and(|v| v) {
+            if reuse_query_fragments.is_some_and(|v| v) {
+                // warn the user that both are enabled and it's overridden
+                tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
+            }
+            Some(false)
+        } else {
+            reuse_query_fragments
+        };
+
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
@@ -639,6 +658,7 @@ impl Supergraph {
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
             reuse_query_fragments,
+            generate_query_fragments,
         }
     }
 }
@@ -654,6 +674,7 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        generate_query_fragments: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -662,6 +683,7 @@ impl Supergraph {
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
             reuse_query_fragments,
+            generate_query_fragments,
         }
     }
 }
