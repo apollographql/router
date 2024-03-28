@@ -272,6 +272,11 @@ impl InnerCacheService {
         let is_known_private = { self.private_queries.read().await.contains(&query) };
         let private_id = get_private_id(&request.context);
 
+        // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
+        if is_known_private && private_id.is_none() {
+            return self.service.call(request).await;
+        }
+
         if !request
             .subgraph_request
             .body()
@@ -299,10 +304,14 @@ impl InnerCacheService {
 
                         // we did not know in advance that this was a query with a private scope, so we update the cache key
                         if !is_known_private && cache_control.private() {
+                            self.private_queries.write().await.insert(query.to_string());
+
                             if let Some(s) = private_id.as_ref() {
                                 root_cache_key = format!("{root_cache_key}:{s}");
+                            } else {
+                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                return Ok(response);
                             }
-                            self.private_queries.write().await.insert(query.to_string());
                         }
 
                         cache_store_root_from_response(
@@ -532,6 +541,9 @@ async fn cache_store_entities_from_response(
         .and_then(|v| v.as_object_mut())
         .and_then(|o| o.remove(ENTITIES))
     {
+        // if the scope is private but we do not have a way to differentiate users, do not store anything in the cache
+        let should_cache_private = !cache_control.private() || private_id.is_some();
+
         let update_key_private = if !is_known_private && cache_control.private() {
             private_id
         } else {
@@ -550,6 +562,7 @@ async fn cache_store_entities_from_response(
             cache_control,
             &mut result_from_cache,
             update_key_private,
+            should_cache_private,
         )
         .await?;
 
@@ -818,6 +831,7 @@ async fn insert_entities_in_result(
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
     update_key_private: Option<String>,
+    should_cache_private: bool,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
@@ -883,7 +897,7 @@ async fn insert_entities_in_result(
                         has_errors = true;
                     }
 
-                    if !has_errors {
+                    if !has_errors && should_cache_private {
                         to_insert.push((
                             RedisKey(key),
                             RedisValue(CacheEntry {
