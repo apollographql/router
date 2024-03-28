@@ -52,6 +52,7 @@ pub(crate) struct EntityCache {
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
     metrics: Metrics,
+    ttl: Option<Duration>,
 }
 
 /// Configuration for entity caching
@@ -62,6 +63,9 @@ pub(crate) struct Config {
     /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
     #[serde(default)]
     enabled: Option<bool>,
+    /// Global expiration configuration for all entries, unless overriden in subgraph specific configuration or by the `Cache-Control` header in subgraph responses
+    #[serde(default)]
+    ttl: Option<Ttl>,
     /// Per subgraph configuration
     #[serde(default)]
     subgraphs: HashMap<String, Subgraph>,
@@ -75,7 +79,8 @@ pub(crate) struct Config {
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Subgraph {
-    /// expiration for all keys
+    /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
+    #[serde(default)]
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
@@ -133,11 +138,18 @@ impl Plugin for EntityCache {
             }
         };
 
+        if init.config.ttl.is_none() && init.config.subgraphs.values().any(|s| s.ttl.is_none()) {
+            return Err("a TTL must be configured for all subgraphs or globally"
+                .to_string()
+                .into());
+        }
+
         Ok(Self {
             storage,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraphs),
             metrics: init.config.metrics,
+            ttl: init.config.ttl.map(|t| t.0),
         })
     }
 
@@ -168,7 +180,7 @@ impl Plugin for EntityCache {
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
             (
-                config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
+                config.ttl.clone().map(|t| t.0).or_else(|| self.ttl),
                 config.enabled.or(self.enabled).unwrap_or(false),
             )
         } else {
@@ -212,6 +224,7 @@ impl EntityCache {
             enabled: Some(true),
             subgraphs: Arc::new(subgraphs),
             metrics: Metrics::default(),
+            ttl: None,
         })
     }
 }
