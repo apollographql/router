@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,6 +11,7 @@ use fred::prelude::KeysInterface;
 use fred::prelude::RedisClient;
 use fred::prelude::RedisError;
 use fred::prelude::RedisErrorKind;
+use fred::types::ClusterRouting;
 use fred::types::Expiration;
 use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
@@ -17,6 +19,7 @@ use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
 use fred::types::TlsConfig;
 use fred::types::TlsHostMapping;
+use futures::FutureExt;
 use tower::BoxError;
 use url::Url;
 
@@ -49,6 +52,7 @@ pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
+    is_cluster: bool,
     reset_ttl: bool,
 }
 
@@ -139,6 +143,7 @@ impl RedisCacheStorage {
     pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
+        let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
 
         if let Some(username) = config.username {
             client_config.username = Some(username);
@@ -198,6 +203,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             namespace: config.namespace.map(Arc::new),
             ttl: config.ttl,
+            is_cluster,
             reset_ttl: config.reset_ttl,
         })
     }
@@ -247,6 +253,7 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             ttl: None,
             namespace: None,
+            is_cluster: false,
             reset_ttl: false,
         })
     }
@@ -441,6 +448,46 @@ impl RedisCacheStorage {
                 .ok();
 
             Some(vec![res])
+        } else if self.is_cluster {
+            // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
+            // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
+            // across multipe nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
+            let len = keys.len();
+            let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
+            for (index, key) in keys.into_iter().enumerate() {
+                let key = self.make_key(key);
+                let hash = ClusterRouting::hash_key(key.as_bytes());
+                let entry = h.entry(hash).or_default();
+                entry.0.push(index);
+                entry.1.push(key);
+            }
+
+            // then we query all the key groups at the same time
+            let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
+                self.inner
+                    .mget(keys)
+                    .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
+            }))
+            .await;
+
+            // then we have to assemble the results, by making sure that the values are in the same order as
+            // the keys argument's order
+            let mut res = Vec::with_capacity(len);
+            for (indexes, result) in results.into_iter() {
+                match result {
+                    Err(e) => {
+                        tracing::error!("mget error: {}", e);
+                        return None;
+                    }
+                    Ok(values) => {
+                        for (index, value) in indexes.into_iter().zip(values.into_iter()) {
+                            res.push((index, value));
+                        }
+                    }
+                }
+            }
+            res.sort_by(|(i, _), (j, _)| i.cmp(j));
+            Some(res.into_iter().map(|(_, v)| v).collect())
         } else {
             self.inner
                 .mget(
@@ -451,8 +498,9 @@ impl RedisCacheStorage {
                 .await
                 .map_err(|e| {
                     if !e.is_not_found() {
-                        tracing::error!("get error: {}", e);
+                        tracing::error!("mget error: {}", e);
                     }
+
                     e
                 })
                 .ok()

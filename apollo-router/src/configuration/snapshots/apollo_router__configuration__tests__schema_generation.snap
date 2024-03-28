@@ -1395,6 +1395,33 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_demand_control": {
+      "description": "Demand control configuration",
+      "type": "object",
+      "required": [
+        "algorithm",
+        "enabled"
+      ],
+      "properties": {
+        "algorithm": {
+          "description": "The algorithm used to calculate the cost of an incoming request",
+          "oneOf": [
+            {
+              "description": "A simple, statically-defined cost mapping for operations and types.\n\nOperation costs: - Mutation: 10 - Query: 0 - Subscription 0\n\nType costs: - Object: 1 - Interface: 1 - Union: 1 - Scalar: 0 - Enum: 0",
+              "type": "string",
+              "enum": [
+                "basic"
+              ]
+            }
+          ]
+        },
+        "enabled": {
+          "description": "Enable demand control",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
       "default": "both",
@@ -2603,13 +2630,25 @@ expression: "&schema"
           "warmed_up_queries": null,
           "experimental_plans_limit": null,
           "experimental_paths_limit": null
-        }
+        },
+        "early_cancel": false,
+        "experimental_log_on_broken_pipe": false
       },
       "type": "object",
       "properties": {
         "defer_support": {
           "description": "Set to false to disable defer support",
           "default": true,
+          "type": "boolean"
+        },
+        "early_cancel": {
+          "description": "abort request handling when the client drops the connection. Default: false. When set to true, some parts of the request pipeline like telemetry will not work properly, but request handling will stop immediately when the client connection is closed.",
+          "default": false,
+          "type": "boolean"
+        },
+        "experimental_log_on_broken_pipe": {
+          "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
+          "default": false,
           "type": "boolean"
         },
         "experimental_reuse_query_fragments": {
@@ -3284,6 +3323,11 @@ expression: "&schema"
                                   "default": true,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3306,6 +3350,11 @@ expression: "&schema"
                                 },
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
@@ -3372,6 +3421,11 @@ expression: "&schema"
                                   "default": false,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: false)",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3395,6 +3449,11 @@ expression: "&schema"
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: false)",
+                                  "default": false,
                                   "type": "boolean"
                                 }
                               },
@@ -3477,6 +3536,11 @@ expression: "&schema"
                                   "default": true,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3499,6 +3563,11 @@ expression: "&schema"
                                 },
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
@@ -3565,6 +3634,11 @@ expression: "&schema"
                                   "default": false,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: false)",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3588,6 +3662,11 @@ expression: "&schema"
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: false)",
+                                  "default": false,
                                   "type": "boolean"
                                 }
                               },

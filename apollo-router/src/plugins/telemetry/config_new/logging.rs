@@ -334,6 +334,10 @@ pub(crate) struct JsonFormat {
     pub(crate) display_span_list: bool,
     /// Include the resource with the log event. (default: true)
     pub(crate) display_resource: bool,
+    /// Include the trace id (if any) with the log event. (default: true)
+    pub(crate) display_trace_id: bool,
+    /// Include the span id (if any) with the log event. (default: true)
+    pub(crate) display_span_id: bool,
 }
 
 impl Default for JsonFormat {
@@ -349,6 +353,8 @@ impl Default for JsonFormat {
             display_current_span: false,
             display_span_list: true,
             display_resource: true,
+            display_trace_id: true,
+            display_span_id: true,
         }
     }
 }
@@ -382,6 +388,10 @@ pub(crate) struct TextFormat {
     pub(crate) display_current_span: bool,
     /// Include all of the containing span information with the log event. (default: true)
     pub(crate) display_span_list: bool,
+    /// Include the trace id (if any) with the log event. (default: false)
+    pub(crate) display_trace_id: bool,
+    /// Include the span id (if any) with the log event. (default: false)
+    pub(crate) display_span_id: bool,
 }
 
 impl Default for TextFormat {
@@ -400,6 +410,8 @@ impl Default for TextFormat {
             display_resource: false,
             display_current_span: true,
             display_span_list: true,
+            display_trace_id: false,
+            display_span_id: false,
         }
     }
 }
