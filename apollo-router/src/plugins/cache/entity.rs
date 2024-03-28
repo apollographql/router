@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::header;
+use http::header::CACHE_CONTROL;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -267,7 +268,14 @@ impl InnerCacheService {
                         let response = self.service.call(request).await?;
 
                         let cache_control =
-                            CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                            if response.response.headers().contains_key(CACHE_CONTROL) {
+                                CacheControl::new(response.response.headers(), self.storage.ttl)?
+                            } else {
+                                let mut c = CacheControl::default();
+                                c.no_store = true;
+                                c
+                            };
+
                         update_cache_control(&response.context, &cache_control);
 
                         cache_store_root_from_response(
@@ -294,8 +302,13 @@ impl InnerCacheService {
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
 
-                    let cache_control =
-                        CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                    let cache_control = if response.response.headers().contains_key(CACHE_CONTROL) {
+                        CacheControl::new(response.response.headers(), self.storage.ttl)?
+                    } else {
+                        let mut c = CacheControl::default();
+                        c.no_store = true;
+                        c
+                    };
                     update_cache_control(&response.context, &cache_control);
 
                     cache_store_entities_from_response(
