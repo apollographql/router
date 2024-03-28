@@ -1,0 +1,14 @@
+supergraph:
+  listen: 0.0.0.0:4100
+  introspection: true
+plugins:
+  experimental.expose_query_plan: true
+  apollo-test.expose_referenced_fields_by_type: true
+experimental_graphql_validation_mode: both
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+traffic_shaping:
+  router: 
+    timeout: 300s
