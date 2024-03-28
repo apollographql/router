@@ -7,7 +7,9 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
 use apollo_compiler::schema;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
+use apollo_compiler::Parser;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -126,6 +128,68 @@ impl<'a> QueryHashVisitor<'a> {
             ExtendedType::Object(o) => {
                 for directive in &o.directives {
                     self.hash_directive(&directive.node);
+                }
+                if let Some(dir) = o.directives.get("join__type") {
+                    if let Some(key) = dir.argument_by_name("key") {
+                        println!("got key: {:?}", key);
+                        let mut parser = Parser::new();
+                        let field_set = parser
+                            .parse_field_set(
+                                Valid::assume_valid_ref(self.schema),
+                                o.name.clone(),
+                                key.as_str().unwrap(),
+                                &std::path::Path::new("schema.graphql"),
+                            )
+                            .unwrap();
+
+                        println!("got field set: {field_set:?}");
+                        for selection in field_set.selection_set.selections {
+                            match selection {
+                                apollo_compiler::executable::Selection::Field(field) => {
+                                    /*
+                                                                        fn field(
+                                        &mut self,
+                                        parent_type: &str,
+                                        field_def: &ast::FieldDefinition,
+                                        node: &ast::Field,
+                                    ) -> Result<(), BoxError> {
+                                                                     */
+                                    //self.field(o.name.as_str(), &field.definition, field.)
+                                    let parent = o.name.as_str();
+                                    let name = field.name.as_str();
+                                    let field_def = &field.definition;
+                                    if self
+                                        .hashed_fields
+                                        .insert((parent.to_string(), name.to_string()))
+                                    {
+                                        //self.hash_type_by_name(parent_type);
+
+                                        field_def.name.hash(self);
+
+                                        for argument in &field_def.arguments {
+                                            self.hash_input_value_definition(argument);
+                                        }
+
+                                        for argument in &field.arguments {
+                                            self.hash_argument(argument);
+                                        }
+
+                                        self.hash_type(&field_def.ty);
+
+                                        for directive in &field_def.directives {
+                                            self.hash_directive(directive);
+                                        }
+                                    }
+                                }
+                                apollo_compiler::executable::Selection::FragmentSpread(_) => {
+                                    todo!()
+                                }
+                                apollo_compiler::executable::Selection::InlineFragment(_) => {
+                                    todo!()
+                                }
+                            }
+                        }
+                    }
                 }
             }
             ExtendedType::Interface(i) => {
@@ -618,5 +682,66 @@ mod tests {
         println!("hash2: {hash2}");
 
         assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn join_type_key() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID!
+          name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User @test
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID! @test
+          name: String
+        }
+        "#;
+        let query = "query { me { name } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
     }
 }
