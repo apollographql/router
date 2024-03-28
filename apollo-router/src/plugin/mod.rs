@@ -228,6 +228,22 @@ where
     }
 }
 
+impl PluginInit<serde_json::Value> {
+    /// Attempts to convert the plugin configuration from `serde_json::Value` to the desired type `T`
+    pub fn with_deserialized_config<T>(self) -> Result<PluginInit<T>, BoxError>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        PluginInit::try_builder()
+            .config(self.config)
+            .supergraph_schema(self.supergraph_schema)
+            .supergraph_sdl(self.supergraph_sdl)
+            .subgraph_schemas(self.subgraph_schemas)
+            .notify(self.notify.clone())
+            .build()
+    }
+}
+
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
 pub struct PluginFactory {
@@ -261,21 +277,9 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |PluginInit {
-                                   config,
-                                   supergraph_sdl,
-                                   supergraph_schema,
-                                   subgraph_schemas,
-                                   notify,
-                               }| {
+            instance_factory: |init| {
                 Box::pin(async move {
-                    let init = PluginInit::try_builder()
-                        .config(config.clone())
-                        .supergraph_sdl(supergraph_sdl)
-                        .supergraph_schema(supergraph_schema)
-                        .subgraph_schemas(subgraph_schemas)
-                        .notify(notify)
-                        .build()?;
+                    let init = init.with_deserialized_config()?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
@@ -296,21 +300,9 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |PluginInit {
-                                   config,
-                                   supergraph_sdl,
-                                   supergraph_schema,
-                                   subgraph_schemas,
-                                   notify,
-                               }| {
+            instance_factory: |init| {
                 Box::pin(async move {
-                    let init = PluginInit::try_builder()
-                        .config(config.clone())
-                        .supergraph_sdl(supergraph_sdl)
-                        .supergraph_schema(supergraph_schema)
-                        .subgraph_schemas(subgraph_schemas)
-                        .notify(notify)
-                        .build()?;
+                    let init = init.with_deserialized_config()?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
