@@ -52,7 +52,7 @@ use crate::services::supergraph;
 use crate::ListenAddr;
 
 type InstanceFactory =
-    fn(PluginInit<&serde_json::Value>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+    fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
@@ -135,13 +135,13 @@ where
         } else {
             Valid::assume_valid(Schema::new())
         });
-        PluginInit {
-            config,
-            supergraph_schema,
-            supergraph_sdl,
-            subgraph_schemas: Default::default(),
-            notify: Notify::for_tests(),
-        }
+
+        PluginInit::fake_builder()
+            .config(config)
+            .supergraph_sdl(supergraph_sdl)
+            .supergraph_schema(supergraph_schema)
+            .notify(Notify::for_tests())
+            .build()
     }
 
     /// Returns the parsed Schema. This is unstable and may be changed or removed in future router releases.
@@ -322,7 +322,7 @@ impl PluginFactory {
 
     pub(crate) async fn create_instance(
         &self,
-        init: PluginInit<&serde_json::Value>,
+        init: PluginInit<serde_json::Value>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
         (self.instance_factory)(init).await
     }
@@ -332,14 +332,7 @@ impl PluginFactory {
         &self,
         config: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(PluginInit {
-            config,
-            supergraph_sdl: Default::default(),
-            supergraph_schema: Arc::new(Valid::assume_valid(Schema::new())),
-            subgraph_schemas: Arc::new(HashMap::new()),
-            notify: Default::default(),
-        })
-        .await
+        (self.instance_factory)(PluginInit::fake_builder().config(config.clone()).build()).await
     }
 
     pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {

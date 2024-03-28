@@ -681,7 +681,6 @@ fn ensure_id_consistency(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use serde_json::Value;
@@ -704,9 +703,11 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(PluginInit {
-                config: &Value::from_str(
-                    r#"{
+            .create_instance(
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
                 "enabled": true,
                 "mode": {
                     "callback": {
@@ -716,15 +717,12 @@ mod tests {
                     }
                 }
             }"#,
-                )
-                .unwrap(),
-                supergraph_sdl: Default::default(),
-                supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                    apollo_compiler::Schema::new(),
-                )),
-                subgraph_schemas: Default::default(),
-                notify: notify.clone(),
-            })
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -846,27 +844,26 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(PluginInit {
-                config: &Value::from_str(
-                    r#"{
-                "enabled": true,
-                "mode": {
-                    "callback": {
-                        "public_url": "http://localhost:4000/subscription/callback",
-                        "path": "/subscription/callback",
-                        "subgraphs": ["test"]
-                    }
-                }
-            }"#,
-                )
-                .unwrap(),
-                supergraph_sdl: Default::default(),
-                supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                    apollo_compiler::Schema::new(),
-                )),
-                subgraph_schemas: Default::default(),
-                notify: notify.clone(),
-            })
+            .create_instance(
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
+                        "enabled": true,
+                        "mode": {
+                            "callback": {
+                                "public_url": "http://localhost:4000/subscription/callback",
+                                "path": "/subscription/callback",
+                                "subgraphs": ["test"]
+                            }
+                        }
+                    }"#,
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -935,9 +932,11 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(PluginInit {
-                config: &Value::from_str(
-                    r#"{
+            .create_instance(
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
                 "enabled": true,
                 "mode": {
                     "callback": {
@@ -947,15 +946,12 @@ mod tests {
                     }
                 }
             }"#,
-                )
-                .unwrap(),
-                supergraph_sdl: Default::default(),
-                supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                    apollo_compiler::Schema::new(),
-                )),
-                subgraph_schemas: Default::default(),
-                notify: notify.clone(),
-            })
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
+            )
             .await
             .unwrap();
 

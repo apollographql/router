@@ -177,17 +177,19 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 if let Some(plugin_config) = &mut telemetry_config {
                     inject_schema_id(Some(&Schema::schema_id(&schema)), plugin_config);
                     match factory
-                        .create_instance(PluginInit {
-                            config: plugin_config,
-                            supergraph_sdl: Arc::new(schema.clone()),
-                            supergraph_schema: Arc::new(
-                                apollo_compiler::validation::Valid::assume_valid(
-                                    apollo_compiler::Schema::new(),
-                                ),
-                            ),
-                            subgraph_schemas: Arc::new(HashMap::new()),
-                            notify: configuration.notify.clone(),
-                        })
+                        .create_instance(
+                            PluginInit::builder()
+                                .config(plugin_config.clone())
+                                .supergraph_sdl(Arc::new(schema.clone()))
+                                .supergraph_schema(Arc::new(
+                                    apollo_compiler::validation::Valid::assume_valid(
+                                        apollo_compiler::Schema::new(),
+                                    ),
+                                ))
+                                .subgraph_schemas(Arc::new(HashMap::new()))
+                                .notify(configuration.notify.clone())
+                                .build(),
+                        )
                         .await
                     {
                         Ok(plugin) => {
@@ -522,13 +524,15 @@ pub(crate) async fn create_plugins(
     macro_rules! add_plugin {
         ($name: expr, $factory: expr, $plugin_config: expr) => {{
             match $factory
-                .create_instance(PluginInit {
-                    config: &$plugin_config,
-                    supergraph_sdl: schema.as_string().clone(),
-                    supergraph_schema: supergraph_schema.clone(),
-                    subgraph_schemas: subgraph_schemas.clone(),
-                    notify: configuration.notify.clone(),
-                })
+                .create_instance(
+                    PluginInit::builder()
+                        .config($plugin_config)
+                        .supergraph_sdl(schema.as_string().clone())
+                        .supergraph_schema(supergraph_schema.clone())
+                        .subgraph_schemas(subgraph_schemas.clone())
+                        .notify(configuration.notify.clone())
+                        .build(),
+                )
                 .await
             {
                 Ok(plugin) => {
