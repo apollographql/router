@@ -51,6 +51,7 @@ pub mod plugin;
 pub(crate) mod metrics;
 
 pub(crate) mod axum_factory;
+mod batching;
 mod cache;
 mod configuration;
 mod context;

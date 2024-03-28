@@ -9,7 +9,6 @@ stderr:
 stdout:
 List of all experimental configurations with related GitHub discussions:
 
-	- experimental_batching: https://github.com/apollographql/router/discussions/3840
 	- experimental_response_trace_id: https://github.com/apollographql/router/discussions/2147
 	- experimental_retry: https://github.com/apollographql/router/discussions/2241
 	- experimental_when_header: https://github.com/apollographql/router/discussions/1961

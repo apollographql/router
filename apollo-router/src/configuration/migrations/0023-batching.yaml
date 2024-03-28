@@ -1,0 +1,5 @@
+description: Batching is no longer experimental
+actions:
+  - type: move
+    from: experimental_batching
+    to: batching

@@ -98,6 +98,15 @@ pub(crate) enum FetchError {
 
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
+
+    /// Batching error for '{service}': {reason}
+    SubrequestBatchingError {
+        /// The service for which batch processing failed.
+        service: String,
+
+        /// The reason batch processing failed.
+        reason: String,
+    },
 }
 
 impl FetchError {
@@ -171,6 +180,7 @@ impl ErrorExtension for FetchError {
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
+            FetchError::SubrequestBatchingError { .. } => "SUBREQUEST_BATCHING_ERROR",
         }
         .to_string()
     }

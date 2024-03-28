@@ -24,6 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
@@ -604,19 +605,37 @@ async fn plan_query(
         context.extensions().lock().insert::<ParsedDocument>(doc);
     }
 
-    planning
+    let qpr = planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context)
+                .context(context.clone())
                 .build(),
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
             "otel.kind" = "INTERNAL"
         ))
-        .await
+        .await?;
+
+    // We need to operate on the BatchQuery without holding on to the extension lock, but using the
+    // batched query requires awaiting it, which would hold the lock for too long.
+    //
+    // We remove the BatchQuery here and then reinsert it after we've done our call to fix that.
+    let batching = context.extensions().lock().remove::<BatchQuery>();
+    if let Some(mut batch_query) = batching {
+        if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
+            let mut query_hashes = vec![];
+            plan.root.query_hashes(&mut query_hashes);
+            batch_query.set_query_hashes(query_hashes).await;
+            tracing::info!("batch registered: {}", batch_query);
+        }
+
+        context.extensions().lock().insert(batch_query);
+    }
+
+    Ok(qpr)
 }
 
 fn clone_supergraph_request(

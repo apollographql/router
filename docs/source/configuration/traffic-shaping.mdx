@@ -66,7 +66,7 @@ You can change the default timeout for client requests to the router like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  router: 
+  router:
     timeout: 50s # If client requests to the router take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
@@ -74,7 +74,7 @@ You can change the default timeout for all requests between the router and subgr
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  all: 
+  all:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
@@ -93,7 +93,7 @@ Compression is automatically supported on the client side, depending on the `Acc
 The Apollo Router has _experimental_ support for receiving client query batches:
 
 ```yaml title="router.yaml"
-experimental_batching:
+batching:
   enabled: true
   mode: batch_http_link
 ```

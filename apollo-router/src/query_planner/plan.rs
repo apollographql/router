@@ -12,6 +12,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::QueryHash;
 use crate::spec::Query;
 
 /// A planner key.
@@ -190,22 +191,100 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn subgraph_fetches(&self) -> usize {
+    /// Populate a Vec of QueryHashes representing Fetches in this plan.
+    ///
+    /// Do not include any operations which contain "requires" elements.
+    ///
+    /// TODO: Think about the impact of Defer/Subscription/Condition on this function. In
+    /// particular, Condition processing might be causing us to mis-report the number of fetches
+    /// and that would be a big problem. Perhaps we should Abort Batches which contain
+    /// Defer/Subscription/Condition....?
+    ///
+    pub(crate) fn query_hashes(&self, query_hashes: &mut Vec<Arc<QueryHash>>) {
         match self {
-            PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
-            PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
-            PlanNode::Fetch(_) => 1,
-            PlanNode::Flatten(node) => node.node.subgraph_fetches(),
+            PlanNode::Sequence { nodes } => {
+                nodes.iter().for_each(|n| n.query_hashes(query_hashes));
+            }
+            PlanNode::Parallel { nodes } => {
+                nodes.iter().for_each(|n| n.query_hashes(query_hashes));
+            }
+            PlanNode::Fetch(node) => {
+                // If requires.is_empty() we can batch it!
+                if node.requires.is_empty() {
+                    query_hashes.push(node.schema_aware_hash.clone());
+                }
+            }
+            PlanNode::Flatten(node) => node.node.query_hashes(query_hashes),
             PlanNode::Defer { primary, deferred } => {
-                primary.node.as_ref().map_or(0, |n| n.subgraph_fetches())
+                if let Some(n) = primary.node.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
+                deferred.iter().for_each(|n| {
+                    if let Some(n) = n.node.as_ref() {
+                        n.query_hashes(query_hashes);
+                    }
+                });
+            }
+            PlanNode::Subscription { rest, .. } => {
+                if let Some(n) = rest.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
+            }
+            // TODO: Think about impact of this processing
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                if let Some(n) = if_clause.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
+                if let Some(n) = else_clause.as_ref() {
+                    n.query_hashes(query_hashes);
+                }
+            }
+        }
+    }
+
+    /// Count the number of fetches
+    ///
+    pub(crate) fn subgraph_fetches(&self, include_requires: bool) -> usize {
+        match self {
+            PlanNode::Sequence { nodes } => nodes
+                .iter()
+                .map(|n| n.subgraph_fetches(include_requires))
+                .sum(),
+            PlanNode::Parallel { nodes } => nodes
+                .iter()
+                .map(|n| n.subgraph_fetches(include_requires))
+                .sum(),
+            PlanNode::Fetch(node) => {
+                if include_requires || node.requires.is_empty() {
+                    1
+                } else {
+                    0
+                }
+            }
+            PlanNode::Flatten(node) => node.node.subgraph_fetches(include_requires),
+            PlanNode::Defer { primary, deferred } => {
+                primary
+                    .node
+                    .as_ref()
+                    .map_or(0, |n| n.subgraph_fetches(include_requires))
                     + deferred
                         .iter()
-                        .map(|n| n.node.as_ref().map_or(0, |n| n.subgraph_fetches()))
+                        .map(|n| {
+                            n.node
+                                .as_ref()
+                                .map_or(0, |n| n.subgraph_fetches(include_requires))
+                        })
                         .sum::<usize>()
             }
             // A `SubscriptionNode` makes a request to a subgraph, so counting it as 1
             PlanNode::Subscription { rest, .. } => {
-                rest.as_ref().map_or(0, |n| n.subgraph_fetches()) + 1
+                rest.as_ref()
+                    .map_or(0, |n| n.subgraph_fetches(include_requires))
+                    + 1
             }
             // Compute the highest possible value for condition nodes
             PlanNode::Condition {
@@ -215,11 +294,11 @@ impl PlanNode {
             } => std::cmp::max(
                 if_clause
                     .as_ref()
-                    .map(|n| n.subgraph_fetches())
+                    .map(|n| n.subgraph_fetches(include_requires))
                     .unwrap_or(0),
                 else_clause
                     .as_ref()
-                    .map(|n| n.subgraph_fetches())
+                    .map(|n| n.subgraph_fetches(include_requires))
                     .unwrap_or(0),
             ),
         }

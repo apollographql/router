@@ -36,9 +36,12 @@ use tracing::Instrument;
 
 use super::ClientRequestAccepts;
 use crate::axum_factory::CanceledRequest;
+use crate::batching::Batch;
+use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
+use crate::configuration::SubgraphBatchingConfig;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -91,7 +94,7 @@ pub(crate) struct RouterService {
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     http_max_request_bytes: usize,
-    experimental_batching: Batching,
+    batching: Batching,
 }
 
 impl RouterService {
@@ -101,7 +104,7 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         http_max_request_bytes: usize,
-        experimental_batching: Batching,
+        batching: Batching,
     ) -> Self {
         RouterService {
             supergraph_creator,
@@ -109,7 +112,7 @@ impl RouterService {
             persisted_query_layer,
             query_analysis_layer,
             http_max_request_bytes,
-            experimental_batching,
+            batching,
         }
     }
 }
@@ -424,12 +427,39 @@ impl RouterService {
             }
         };
 
+        // We need to handle cases where a failure is part of a batch and thus must be cancelled.
+        // Requests can be cancelled at any point of the router pipeline, but all failures bubble back
+        // up through here, so we can catch them without having to specially handle batch queries in
+        // other portions of the codebase.
         let futures = supergraph_requests
             .into_iter()
-            .map(|supergraph_request| self.process_supergraph_request(supergraph_request));
+            .map(|supergraph_request| async {
+                // TODO: We clone the context here, because if the request results in an Err, the
+                // response context will no longer exist.
+                let context = supergraph_request.context.clone();
+                let result = self.process_supergraph_request(supergraph_request).await;
+
+                // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
+                // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
+                // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
+                let batch_query_opt = context.extensions().lock().remove::<BatchQuery>();
+                if let Some(mut batch_query) = batch_query_opt {
+                    // Only proceed with signalling cancelled if the batch_query is not finished
+                    if !batch_query.finished() {
+                        tracing::info!("cancelling batch query in supergraph response");
+                        batch_query
+                            .signal_cancelled("request terminated by user".to_string())
+                            .await;
+                    }
+                }
+
+                result
+            });
 
         // Use join_all to preserve ordering of concurrent operations
         // (Short circuit processing and propagate any errors in the batch)
+        // Note: We use `join_all` here since it awaits all futures before returning, thus allowing us to
+        // handle cancellation logic without fear of the other futures getting killed.
         let mut results: Vec<router::Response> = join_all(futures)
             .await
             .into_iter()
@@ -476,8 +506,8 @@ impl RouterService {
                 Err(err) => {
                     // It may be a batch of requests, so try that (if config allows) before
                     // erroring out
-                    if self.experimental_batching.enabled
-                        && matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
+                    if self.batching.enabled
+                        && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
                     {
                         result = graphql::Request::batch_from_urlencoded_query(q.to_string())
                             .map_err(|e| TranslateError {
@@ -489,9 +519,9 @@ impl RouterService {
                                 ),
                             })?;
                     } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
-                        let extension_details = if self.experimental_batching.enabled
-                            && !matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink) {
-                            format!("batching not supported for mode `{}`", self.experimental_batching.mode)
+                        let extension_details = if self.batching.enabled
+                            && !matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
+                            format!("batching not supported for mode `{}`", self.batching.mode)
                         } else {
                             "batching not enabled".to_string()
                         };
@@ -535,8 +565,8 @@ impl RouterService {
                 result.push(request);
             }
             Err(err) => {
-                if self.experimental_batching.enabled
-                    && matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
+                if self.batching.enabled
+                    && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
                 {
                     result =
                         graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
@@ -548,13 +578,10 @@ impl RouterService {
                             ),
                         })?;
                 } else if !bytes.is_empty() && bytes[0] == b'[' {
-                    let extension_details = if self.experimental_batching.enabled
-                        && !matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
+                    let extension_details = if self.batching.enabled
+                        && !matches!(self.batching.mode, BatchingMode::BatchHttpLink)
                     {
-                        format!(
-                            "batching not supported for mode `{}`",
-                            self.experimental_batching.mode
-                        )
+                        format!("batching not supported for mode `{}`", self.batching.mode)
                     } else {
                         "batching not enabled".to_string()
                     };
@@ -642,13 +669,25 @@ impl RouterService {
 
         let ok_results = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());
+        let batch_size = ok_results.len();
 
-        if ok_results.len() > 1 {
-            context
-                .extensions()
-                .lock()
-                .insert(self.experimental_batching.clone());
-        }
+        // Insert our batch configuration into Context extensions.
+        // If the results len > 1, we always insert our batching configuration
+        // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
+        let shared_batch_details = (ok_results.len() > 1)
+            .then(|| {
+                context.extensions().lock().insert(self.batching.clone());
+
+                self.batching.subgraph.as_ref()
+            })
+            .flatten()
+            .map(|subgraph_batching_config| match subgraph_batching_config {
+                SubgraphBatchingConfig::All(all_config) => all_config.enabled,
+                SubgraphBatchingConfig::Subgraphs(subgraphs) => {
+                    subgraphs.values().any(|v| v.enabled)
+                }
+            })
+            .and_then(|a| a.then_some(Arc::new(Batch::spawn_handler(batch_size))));
 
         let mut ok_results_it = ok_results.into_iter();
         let first = ok_results_it
@@ -661,16 +700,20 @@ impl RouterService {
         // through the pipeline. This is because there is simply no way to clone http
         // extensions.
         //
-        // Secondly, we can't clone private_entries, but we need to propagate at least
+        // Secondly, we can't clone extensions, but we need to propagate at least
         // ClientRequestAccepts to ensure correct processing of the response. We do that manually,
-        // but the concern is that there may be other private_entries that wish to propagate into
+        // but the concern is that there may be other extensions that wish to propagate into
         // each request or we may add them in future and not know about it here...
         //
-        // (Technically we could clone private entries, since it is held under an `Arc`, but that
-        // would mean all the requests in a batch shared the same set of private entries and review
+        // (Technically we could clone extensions, since it is held under an `Arc`, but that
+        // would mean all the requests in a batch shared the same set of extensions and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        for graphql_request in ok_results_it {
+        // Also: We rely on the fact that there aren't more elements in ok_results_it to avoid
+        // treating non-batch requests as batch requests. I think that is lazy, because really we
+        // should do this processing if shared_batch_details.is_some(). TODO: think about this some
+        // more before end of project.
+        for (index, graphql_request) in ok_results_it.enumerate() {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
@@ -682,22 +725,41 @@ impl RouterService {
                 .lock()
                 .get::<ClientRequestAccepts>()
                 .cloned();
-            if let Some(client_request_accepts) = client_request_accepts_opt {
-                new_context
-                    .extensions()
-                    .lock()
-                    .insert(client_request_accepts);
+            // Sub-scope so that new_context_guard is dropped before pushing into the new
+            // SupergraphRequest
+            {
+                let mut new_context_guard = new_context.extensions().lock();
+                if let Some(client_request_accepts) = client_request_accepts_opt {
+                    new_context_guard.insert(client_request_accepts);
+                }
+                new_context_guard.insert(self.batching.clone());
+                // We are only going to insert a BatchQuery if Subgraph processing is enabled
+                if let Some(shared_batch_details) = &shared_batch_details {
+                    // We need to keep our shared details somewhere or they will drop, let's
+                    // insert them into our various contexts
+                    new_context_guard.insert(shared_batch_details.clone());
+                    new_context_guard.insert(shared_batch_details.query_for_index(index + 1));
+                }
             }
-            new_context
-                .extensions()
-                .lock()
-                .insert(self.experimental_batching.clone());
             results.push(SupergraphRequest {
                 supergraph_request: new,
-                // Build a new context. Cloning would cause issues.
                 context: new_context,
             });
         }
+
+        if let Some(shared_batch_details) = shared_batch_details {
+            // We need to keep our shared details somewhere or they will drop, let's
+            // insert them into our various contexts
+            context
+                .extensions()
+                .lock()
+                .insert(shared_batch_details.clone());
+            context
+                .extensions()
+                .lock()
+                .insert(shared_batch_details.query_for_index(0));
+        }
+
         results.insert(
             0,
             SupergraphRequest {
@@ -705,6 +767,7 @@ impl RouterService {
                 context,
             },
         );
+
         Ok(results)
     }
 
@@ -756,7 +819,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     http_max_request_bytes: usize,
-    experimental_batching: Batching,
+    batching: Batching,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -807,7 +870,7 @@ impl RouterCreator {
             query_analysis_layer,
             http_max_request_bytes: configuration.limits.http_max_request_bytes,
             persisted_query_layer,
-            experimental_batching: configuration.experimental_batching.clone(),
+            batching: configuration.batching.clone(),
         })
     }
 
@@ -825,7 +888,7 @@ impl RouterCreator {
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
             self.http_max_request_bytes,
-            self.experimental_batching.clone(),
+            self.batching.clone(),
         ));
 
         ServiceBuilder::new()
