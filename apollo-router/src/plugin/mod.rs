@@ -51,13 +51,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::ListenAddr;
 
-type InstanceFactory = fn(
-    &serde_json::Value,
-    Arc<String>,
-    Arc<Valid<Schema>>,
-    Arc<HashMap<String, Valid<Schema>>>,
-    Notify<String, graphql::Response>,
-) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+type InstanceFactory =
+    fn(PluginInit<&serde_json::Value>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
@@ -266,15 +261,17 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |configuration,
-                               schema,
-                               supergraph_schema,
-                               subgraph_schemas,
-                               notify| {
+            instance_factory: |PluginInit {
+                                   config,
+                                   supergraph_sdl,
+                                   supergraph_schema,
+                                   subgraph_schemas,
+                                   notify,
+                               }| {
                 Box::pin(async move {
                     let init = PluginInit::try_builder()
-                        .config(configuration.clone())
-                        .supergraph_sdl(schema)
+                        .config(config.clone())
+                        .supergraph_sdl(supergraph_sdl)
                         .supergraph_schema(supergraph_schema)
                         .subgraph_schemas(subgraph_schemas)
                         .notify(notify)
@@ -299,15 +296,17 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |configuration,
-                               schema,
-                               supergraph_schema,
-                               subgraph_schemas,
-                               notify| {
+            instance_factory: |PluginInit {
+                                   config,
+                                   supergraph_sdl,
+                                   supergraph_schema,
+                                   subgraph_schemas,
+                                   notify,
+                               }| {
                 Box::pin(async move {
                     let init = PluginInit::try_builder()
-                        .config(configuration.clone())
-                        .supergraph_sdl(schema)
+                        .config(config.clone())
+                        .supergraph_sdl(supergraph_sdl)
                         .supergraph_schema(supergraph_schema)
                         .subgraph_schemas(subgraph_schemas)
                         .notify(notify)
@@ -323,34 +322,23 @@ impl PluginFactory {
 
     pub(crate) async fn create_instance(
         &self,
-        configuration: &serde_json::Value,
-        supergraph_sdl: Arc<String>,
-        supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
-        notify: Notify<String, graphql::Response>,
+        init: PluginInit<&serde_json::Value>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(
-            configuration,
-            supergraph_sdl,
-            supergraph_schema,
-            subgraph_schemas,
-            notify,
-        )
-        .await
+        (self.instance_factory)(init).await
     }
 
     #[cfg(test)]
     pub(crate) async fn create_instance_without_schema(
         &self,
-        configuration: &serde_json::Value,
+        config: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(
-            configuration,
-            Default::default(),
-            Arc::new(Valid::assume_valid(Schema::new())),
-            Arc::new(HashMap::new()),
-            Default::default(),
-        )
+        (self.instance_factory)(PluginInit {
+            config,
+            supergraph_sdl: Default::default(),
+            supergraph_schema: Arc::new(Valid::assume_valid(Schema::new())),
+            subgraph_schemas: Arc::new(HashMap::new()),
+            notify: Default::default(),
+        })
         .await
     }
 
