@@ -99,7 +99,7 @@ diff = "0.1.13"
 directories = "5.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.28"
-fred = { version = "7.1.2", features = ["enable-rustls"] }
+fred = { version = "8.0.5", features = ["enable-rustls"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.13.0"
 hex = { version = "0.4.3", features = ["serde"] }
@@ -285,7 +285,7 @@ axum = { version = "0.6.20", features = [
     "ws",
 ] }
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "7.1.2", features = ["enable-rustls", "mocks"] }
+fred = { version = "8.0.5", features = ["enable-rustls", "mocks"] }
 futures-test = "0.3.30"
 insta = { version = "1.35.1", features = ["json", "redactions", "yaml"] }
 maplit = "1.0.2"
