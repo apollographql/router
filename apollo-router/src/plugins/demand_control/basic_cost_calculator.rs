@@ -14,6 +14,7 @@ use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::CostCalculator;
 use super::DemandControlError;
+use crate::graphql::Response;
 
 pub(crate) struct BasicCostCalculator {}
 
@@ -168,6 +169,10 @@ impl CostCalculator for BasicCostCalculator {
             cost += BasicCostCalculator::score_operation(op, schema)?;
         }
         Ok(cost)
+    }
+
+    fn actual(response: Response) -> Result<f64, DemandControlError> {
+        todo!()
     }
 }
 

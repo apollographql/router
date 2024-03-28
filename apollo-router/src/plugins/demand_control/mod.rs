@@ -13,9 +13,11 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::graphql;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::execution;
 use crate::services::execution::BoxService;
 
 /// Algorithm for calculating the cost of an incoming query.
@@ -43,6 +45,8 @@ trait CostCalculator {
         query: &ExecutableDocument,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError>;
+
+    fn actual(response: graphql::Response) -> Result<f64, DemandControlError>;
 }
 
 /// Demand control configuration
@@ -81,7 +85,12 @@ impl Plugin for DemandControl {
         if !self.config.enabled {
             service
         } else {
-            ServiceBuilder::new().service(service).boxed()
+            ServiceBuilder::new()
+                .map_response(|res: execution::Response| {
+                    res.map_stream(|graphql_res: graphql::Response| graphql_res)
+                })
+                .service(service)
+                .boxed()
         }
     }
 }
