@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +13,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
+use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -32,6 +35,7 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
@@ -46,11 +50,13 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
+#[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
     metrics: Metrics,
+    private_queries: Arc<RwLock<HashSet<String>>>,
 }
 
 /// Configuration for entity caching
@@ -137,6 +143,7 @@ impl Plugin for EntityCache {
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraphs),
             metrics: init.config.metrics,
+            private_queries: Arc::new(RwLock::new(HashSet::new())),
         })
     }
 
@@ -185,11 +192,13 @@ impl Plugin for EntityCache {
         }
 
         if subgraph_enabled {
+            let private_queries = self.private_queries.clone();
             tower::util::BoxService::new(CacheService(Some(InnerCacheService {
                 service,
                 name: name.to_string(),
                 storage,
                 subgraph_ttl,
+                private_queries,
             })))
         } else {
             service
@@ -211,6 +220,7 @@ impl EntityCache {
             enabled: Some(true),
             subgraphs: Arc::new(subgraphs),
             metrics: Metrics::default(),
+            private_queries: Default::default(),
         })
     }
 }
@@ -221,6 +231,7 @@ struct InnerCacheService {
     name: String,
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
+    private_queries: Arc<RwLock<HashSet<String>>>,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -251,6 +262,21 @@ impl InnerCacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
+        let query = request
+            .subgraph_request
+            .body()
+            .query
+            .clone()
+            .unwrap_or_default();
+
+        let is_known_private = { self.private_queries.read().await.contains(&query) };
+        let private_id = get_private_id(&request.context);
+
+        // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
+        if is_known_private && private_id.is_none() {
+            return self.service.call(request).await;
+        }
+
         if !request
             .subgraph_request
             .body()
@@ -258,17 +284,35 @@ impl InnerCacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
-                match cache_lookup_root(self.name, self.storage.clone(), request)
-                    .instrument(tracing::info_span!("cache_lookup"))
-                    .await?
+                match cache_lookup_root(
+                    self.name,
+                    self.storage.clone(),
+                    is_known_private,
+                    private_id.as_deref(),
+                    request,
+                )
+                .instrument(tracing::info_span!("cache_lookup"))
+                .await?
                 {
                     ControlFlow::Break(response) => Ok(response),
-                    ControlFlow::Continue((request, root_cache_key)) => {
+                    ControlFlow::Continue((request, mut root_cache_key)) => {
                         let response = self.service.call(request).await?;
 
                         let cache_control =
                             CacheControl::new(response.response.headers(), self.storage.ttl)?;
                         update_cache_control(&response.context, &cache_control);
+
+                        // we did not know in advance that this was a query with a private scope, so we update the cache key
+                        if !is_known_private && cache_control.private() {
+                            self.private_queries.write().await.insert(query.to_string());
+
+                            if let Some(s) = private_id.as_ref() {
+                                root_cache_key = format!("{root_cache_key}:{s}");
+                            } else {
+                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                return Ok(response);
+                            }
+                        }
 
                         cache_store_root_from_response(
                             self.storage,
@@ -286,9 +330,15 @@ impl InnerCacheService {
                 self.service.call(request).await
             }
         } else {
-            match cache_lookup_entities(self.name, self.storage.clone(), request)
-                .instrument(tracing::info_span!("cache_lookup"))
-                .await?
+            match cache_lookup_entities(
+                self.name,
+                self.storage.clone(),
+                is_known_private,
+                private_id.as_deref(),
+                request,
+            )
+            .instrument(tracing::info_span!("cache_lookup"))
+            .await?
             {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, cache_result)) => {
@@ -298,12 +348,18 @@ impl InnerCacheService {
                         CacheControl::new(response.response.headers(), self.storage.ttl)?;
                     update_cache_control(&response.context, &cache_control);
 
+                    if !is_known_private && cache_control.private() {
+                        self.private_queries.write().await.insert(query.to_string());
+                    }
+
                     cache_store_entities_from_response(
                         self.storage,
                         self.subgraph_ttl,
                         &mut response,
                         cache_control,
                         cache_result.0,
+                        is_known_private,
+                        private_id,
                     )
                     .await?;
                     Ok(response)
@@ -316,6 +372,8 @@ impl InnerCacheService {
 async fn cache_lookup_root(
     name: String,
     cache: RedisCacheStorage,
+    is_known_private: bool,
+    private_id: Option<&str>,
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
     let body = request.subgraph_request.body_mut();
@@ -326,6 +384,8 @@ async fn cache_lookup_root(
         body,
         &request.context,
         &request.authorization,
+        is_known_private,
+        private_id,
     );
 
     let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
@@ -351,6 +411,8 @@ struct EntityCacheResults(Vec<IntermediateResult>);
 async fn cache_lookup_entities(
     name: String,
     cache: RedisCacheStorage,
+    is_known_private: bool,
+    private_id: Option<&str>,
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
     let body = request.subgraph_request.body_mut();
@@ -361,6 +423,8 @@ async fn cache_lookup_entities(
         body,
         &request.context,
         &request.authorization,
+        is_known_private,
+        private_id,
     )?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
@@ -465,6 +529,8 @@ async fn cache_store_entities_from_response(
     response: &mut subgraph::Response,
     cache_control: CacheControl,
     mut result_from_cache: Vec<IntermediateResult>,
+    is_known_private: bool,
+    private_id: Option<String>,
 ) -> Result<(), BoxError> {
     update_cache_control(&response.context, &cache_control);
 
@@ -475,6 +541,15 @@ async fn cache_store_entities_from_response(
         .and_then(|v| v.as_object_mut())
         .and_then(|o| o.remove(ENTITIES))
     {
+        // if the scope is private but we do not have a way to differentiate users, do not store anything in the cache
+        let should_cache_private = !cache_control.private() || private_id.is_some();
+
+        let update_key_private = if !is_known_private && cache_control.private() {
+            private_id
+        } else {
+            None
+        };
+
         let (new_entities, new_errors) = insert_entities_in_result(
             entities
                 .as_array_mut()
@@ -486,6 +561,8 @@ async fn cache_store_entities_from_response(
             subgraph_ttl,
             cache_control,
             &mut result_from_cache,
+            update_key_private,
+            should_cache_private,
         )
         .await?;
 
@@ -572,6 +649,8 @@ fn extract_cache_key_root(
     body: &mut graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
+    is_known_private: bool,
+    private_id: Option<&str>,
 ) -> String {
     // hash the query and operation name
     let query_hash = hash_query(query_hash, body);
@@ -582,10 +661,18 @@ fn extract_cache_key_root(
     // - subgraph name: caching is done per subgraph
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
-    format!(
-        "subgraph:{}:Query:{}:{}",
-        subgraph_name, query_hash, additional_data_hash
-    )
+    let mut key = String::new();
+    let _ = write!(
+        &mut key,
+        "subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"
+    );
+
+    if is_known_private {
+        if let Some(id) = private_id {
+            let _ = write!(&mut key, ":{id}");
+        }
+    }
+    key
 }
 
 // build a list of keys to get from the cache in one query
@@ -595,6 +682,8 @@ fn extract_cache_keys(
     body: &mut graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
+    is_known_private: bool,
+    private_id: Option<&str>,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
     let query_hash = hash_query(query_hash, body);
@@ -629,10 +718,13 @@ fn extract_cache_keys(
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
-        let key = format!(
-            "subgraph:{}:{}:{}:{}:{}",
-            subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
-        );
+        let mut key = String::new();
+        let _ = write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
+        if is_known_private {
+            if let Some(id) = private_id {
+                let _ = write!(&mut key, ":{id}");
+            }
+        }
 
         representation
             .as_object_mut()
@@ -738,6 +830,8 @@ async fn insert_entities_in_result(
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
+    update_key_private: Option<String>,
+    should_cache_private: bool,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
@@ -756,7 +850,7 @@ async fn insert_entities_in_result(
     for (
         new_entity_idx,
         IntermediateResult {
-            key,
+            mut key,
             typename,
             cache_entry,
         },
@@ -776,6 +870,10 @@ async fn insert_entities_in_result(
 
                 if cache_control.should_store() {
                     *inserted_types.entry(typename).or_default() += 1;
+
+                    if let Some(ref id) = update_key_private {
+                        key = format!("{key}:{id}");
+                    }
 
                     let mut has_errors = false;
                     for error in errors.iter().filter(|e| {
@@ -799,7 +897,7 @@ async fn insert_entities_in_result(
                         has_errors = true;
                     }
 
-                    if !has_errors {
+                    if !has_errors && should_cache_private {
                         to_insert.push((
                             RedisKey(key),
                             RedisValue(CacheEntry {
@@ -833,6 +931,21 @@ async fn insert_entities_in_result(
     Ok((new_entities, new_errors))
 }
 
+fn get_private_id(context: &Context) -> Option<String> {
+    context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .and_then(|value| {
+            value.as_object().and_then(|object| {
+                object.get("sub").and_then(|v| {
+                    v.as_str().map(|s| {
+                        let mut digest = Sha256::new();
+                        digest.update(s);
+                        hex::encode(digest.finalize().as_slice())
+                    })
+                })
+            })
+        })
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Key {
     #[serde(rename = "type")]
