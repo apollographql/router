@@ -95,7 +95,7 @@ telemetry:
           unit: request
           description: "supergraph requests"
           condition:
-            exist:
+            exists:
              subgraph_response_data: "$.products[*].price1"
           attributes:
             subgraph.name: true

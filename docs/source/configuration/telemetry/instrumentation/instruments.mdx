@@ -28,7 +28,7 @@ For more information, see the [OpenTelemetry semantic conventions for HTTP metri
 
 These standard instruments are configurable in `router.yaml`:
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -41,7 +41,7 @@ telemetry:
 
 Standard instruments can be customized by attaching or removing attributes.
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -49,11 +49,7 @@ telemetry:
       router:
         http.server.active_requests: 
           attributes:
-            # Standard attributes
-            http.response.status_code: false
-            # Custom attribute
-            "acme.my_attribute":
-              response_header: "x-my-header"
+            http.request.method: true
 ```
 
 See the [attributes](#attributes) configuration for more information.
@@ -72,7 +68,7 @@ When defining a custom instrument, make sure to reference the [OpenTelemetry sem
 
 In the example configuration below, three custom instruments are defined (`acme.request.duration`, `acme.graphql.requests`, `acme.graphql.subgraph.errors`), one for each service of the router pipeline respectively (`router`, `supergraph`, `subgraph`):
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -83,6 +79,10 @@ telemetry:
           type: counter
           unit: kb
           description: "my description"
+          condition:
+            eq:
+              - 200
+              - response_status: code
           attributes:
             http.response.status_code: true
             "my_attribute":
@@ -127,7 +127,7 @@ Valid values:
 * `required` (default) - required attributes will be attached to standard instruments by default.
 * `recommended` - recommended attributes will be attached to standard instruments by default.
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -137,18 +137,29 @@ telemetry:
 
 Attributes can be configured individually, so that `required` attributes can be overridden or disabled. For example, `http.response.status_code` is set individually to override the standard value:
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
       # Set the default requirement level
       default_attribute_requirement_level: required
       router:
+        # Standard metrics
+        http.server.request.body.size:
+          attributes:
+            # Standard attributes
+            http.response.status_code: false
+            # Custom attribute
+            "acme.my_attribute":
+              response_header: "x-my-header"
+        # Standard metrics
         http.server.active_requests:
           attributes:
-            # Override attributes for this instrument
-            network.transport: true
-            http.response.status_code: false
+            # Standard attributes, different than other ones provides in standard metrics, custom attributes are not available on this standard metric
+            http.request.method: false
+            server.address: true
+            server.port: true
+            url.scheme: true
 ```
 
 <Note>
@@ -165,7 +176,7 @@ The `router`, `supergraph` and `subgraph` sections are used to define custom ins
 
 To define a custom instrument, add a new key to `router.yaml` as `telemetry.instruments.<service>.<custom-instrument>`. For example, add a custom instrument `acme.request.duration`:
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -278,32 +289,44 @@ telemetry:
           condition:
             eq:
               - 200
-              - response_header: Status
+              - response_status: code
 ```
 
 #### `attributes`
 
 Instruments may have attributes attached to them from the router pipeline. These attributes are used to filter and group metrics in your APM. 
 
-Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
+Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors) except for the standard metric `http.server.active_requests`.
 
 The attributes available depend on the service of the pipeline.
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
       router:
         # Standard metrics
-        http.server.active_requests:
+        http.server.request.body.size:
           attributes:
             # Standard attributes
             http.response.status_code: false
             # Custom attribute
             "acme.my_attribute":
               response_header: "x-my-header"
+        # Standard metrics
+        http.server.active_requests:
+          attributes:
+            # Standard attributes, different than other ones provides in standard metrics, custom attributes are not available on this standard metric
+            http.request.method: false
+            server.address: true
+            server.port: true
+            url.scheme: true
         # Custom metric 
         acme.metric: 
+          value: duration
+          type: counter
+          unit: s
+          description: "my description"
           attributes:
             http.response.status_code: true
             "my_attribute":

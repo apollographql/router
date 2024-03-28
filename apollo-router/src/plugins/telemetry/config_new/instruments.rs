@@ -320,9 +320,13 @@ impl DefaultForLevel for RouterInstrumentsConfig {
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ActiveRequestsAttributes {
+    #[serde(rename = "http.request.method")]
     http_request_method: bool,
+    #[serde(rename = "server.address")]
     server_address: bool,
+    #[serde(rename = "server.port")]
     server_port: bool,
+    #[serde(rename = "url.scheme")]
     url_scheme: bool,
 }
 

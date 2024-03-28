@@ -6670,19 +6670,19 @@ expression: "&schema"
                             "attributes": {
                               "type": "object",
                               "properties": {
-                                "http_request_method": {
+                                "http.request.method": {
                                   "default": false,
                                   "type": "boolean"
                                 },
-                                "server_address": {
+                                "server.address": {
                                   "default": false,
                                   "type": "boolean"
                                 },
-                                "server_port": {
+                                "server.port": {
                                   "default": false,
                                   "type": "boolean"
                                 },
-                                "url_scheme": {
+                                "url.scheme": {
                                   "default": false,
                                   "type": "boolean"
                                 }
