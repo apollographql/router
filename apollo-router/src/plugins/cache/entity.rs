@@ -52,7 +52,6 @@ pub(crate) struct EntityCache {
     subgraphs: Arc<HashMap<String, Subgraph>>,
     enabled: Option<bool>,
     metrics: Metrics,
-    ttl: Option<Duration>,
 }
 
 /// Configuration for entity caching
@@ -63,9 +62,6 @@ pub(crate) struct Config {
     /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
     #[serde(default)]
     enabled: Option<bool>,
-    /// Global expiration configuration for all entries, unless overriden in subgraph specific configuration or by the `Cache-Control` header in subgraph responses
-    #[serde(default)]
-    ttl: Option<Ttl>,
     /// Per subgraph configuration
     #[serde(default)]
     subgraphs: HashMap<String, Subgraph>,
@@ -138,7 +134,9 @@ impl Plugin for EntityCache {
             }
         };
 
-        if init.config.ttl.is_none() && init.config.subgraphs.values().any(|s| s.ttl.is_none()) {
+        if init.config.redis.ttl.is_none()
+            && init.config.subgraphs.values().any(|s| s.ttl.is_none())
+        {
             return Err("a TTL must be configured for all subgraphs or globally"
                 .to_string()
                 .into());
@@ -149,7 +147,6 @@ impl Plugin for EntityCache {
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraphs),
             metrics: init.config.metrics,
-            ttl: init.config.ttl.map(|t| t.0),
         })
     }
 
@@ -180,7 +177,7 @@ impl Plugin for EntityCache {
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
             (
-                config.ttl.clone().map(|t| t.0).or_else(|| self.ttl),
+                config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
                 config.enabled.or(self.enabled).unwrap_or(false),
             )
         } else {
@@ -224,7 +221,6 @@ impl EntityCache {
             enabled: Some(true),
             subgraphs: Arc::new(subgraphs),
             metrics: Metrics::default(),
-            ttl: None,
         })
     }
 }

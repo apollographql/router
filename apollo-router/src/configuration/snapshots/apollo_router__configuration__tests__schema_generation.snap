@@ -2282,11 +2282,6 @@ expression: "&schema"
             },
             "additionalProperties": false
           }
-        },
-        "ttl": {
-          "description": "Global expiration configuration for all entries, unless overriden in subgraph specific configuration or by the `Cache-Control` header in subgraph responses",
-          "type": "string",
-          "nullable": true
         }
       },
       "additionalProperties": false
