@@ -8,6 +8,8 @@ telemetry:
         service_name: apollo-router
         views:
           - name: apollo_router_http_request_duration_seconds
+            unit: seconds
+            description: duration of the http request
             aggregation:
               histogram:
                 buckets:
