@@ -8,6 +8,7 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use serde_json_bytes::Value;
 
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
@@ -154,6 +155,28 @@ impl BasicCostCalculator {
 
         false
     }
+
+    fn score_json(value: &Value) -> Result<f64, DemandControlError> {
+        // TODO: The cost directive will need to be accounted for in here eventually
+        match value {
+            Value::Null => Ok(0.0),
+            Value::Bool(_) => Ok(0.0),
+            Value::Number(_) => Ok(0.0),
+            Value::String(_) => Ok(0.0),
+            Value::Array(values) => Self::summed_score_of_values(values),
+            Value::Object(fields) => Ok(1.0 + Self::summed_score_of_values(fields.values())?),
+        }
+    }
+
+    fn summed_score_of_values<'a, I: IntoIterator<Item = &'a Value>>(
+        values: I,
+    ) -> Result<f64, DemandControlError> {
+        let mut score = 0.0;
+        for value in values {
+            score += Self::score_json(value)?;
+        }
+        Ok(score)
+    }
 }
 
 impl CostCalculator for BasicCostCalculator {
@@ -171,13 +194,25 @@ impl CostCalculator for BasicCostCalculator {
         Ok(cost)
     }
 
-    fn actual(response: Response) -> Result<f64, DemandControlError> {
-        todo!()
+    fn actual(response: &Response) -> Result<f64, DemandControlError> {
+        match &response.data {
+            // The top-level query shouldn't count toward the cost, so if we see an object here, score it by
+            // its fields without adding the extra point for the object structure
+            Some(Value::Object(fields)) => Self::summed_score_of_values(fields.values()),
+            Some(value) => Self::score_json(value),
+            None => Ok(0.0),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use serde_json_bytes::json;
+    use test_log::test;
+    use tower::Service;
+
     use super::*;
 
     fn cost(schema_str: &str, query_str: &str) -> f64 {
@@ -272,5 +307,29 @@ mod tests {
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
 
         assert_eq!(cost(schema, query), 10200.0);
+    }
+
+    #[test]
+    fn response_cost() {
+        let response = Response::from_bytes(
+            "ships",
+            json!({
+                "data": {
+                    "ships": [
+                        {
+                            "name": "Boaty McBoatface"
+                        },
+                        {
+                            "name": "HMS Grapherson"
+                        }
+                    ]
+                }
+            })
+            .to_bytes(),
+        )
+        .unwrap();
+
+        let cost = BasicCostCalculator::actual(&response).unwrap();
+        assert_eq!(cost, 2.0);
     }
 }

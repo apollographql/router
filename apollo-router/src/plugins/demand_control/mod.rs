@@ -46,7 +46,7 @@ trait CostCalculator {
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError>;
 
-    fn actual(response: graphql::Response) -> Result<f64, DemandControlError>;
+    fn actual(response: &graphql::Response) -> Result<f64, DemandControlError>;
 }
 
 /// Demand control configuration
