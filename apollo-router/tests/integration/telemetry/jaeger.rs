@@ -9,9 +9,9 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
+use crate::integration::common::Telemetry;
+use crate::integration::common::ValueExt;
 use crate::integration::IntegrationTest;
-use crate::integration::Telemetry;
-use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload() -> Result<(), BoxError> {
