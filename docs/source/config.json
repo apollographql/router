@@ -35,7 +35,8 @@
       "Debugging": {
         "Errors": "/errors",
         "Telemetry": "/configuration/telemetry/overview",
-        "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
+        "Subgraph error inclusion": "/configuration/subgraph-error-inclusion",
+        "Troubleshooting": "/configuration/troubleshooting"
       },
       "Networking": {
         "Header propagation": "/configuration/header-propagation",
