@@ -69,7 +69,12 @@ pub struct Request {
     /// ```
     ///
     /// [APQ]: https://www.apollographql.com/docs/apollo-server/performance/apq/
-    #[serde(skip_serializing_if = "Object::is_empty", default)]
+    /// Note we allow null when deserializing as per [graphql-over-http spec](https://graphql.github.io/graphql-over-http/draft/#sel-EALFPCCBCEtC37P)
+    #[serde(
+        skip_serializing_if = "Object::is_empty",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub extensions: Object,
 }
 
@@ -408,9 +413,7 @@ mod tests {
           "extensions": {"extension": 1}
         })
         .to_string();
-        println!("data: {data}");
         let result = serde_json::from_str::<Request>(data.as_str());
-        println!("result: {result:?}");
         assert_eq!(
             result.unwrap(),
             Request::builder()
@@ -516,5 +519,54 @@ mod tests {
         let req = Request::from_urlencoded_query(query_string).unwrap();
 
         assert_eq!(expected_result, req);
+    }
+
+    #[test]
+    fn null_extensions() {
+        let expected_result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+              "variables": {"date": "2022-01-01T00:00:00+00:00"},
+              "extensions": null
+            })
+                .to_string()
+                .as_str(),
+        ).unwrap();
+        insta::assert_yaml_snapshot!(expected_result);
+    }
+
+    #[test]
+    fn missing_extensions() {
+        let expected_result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+              "variables": {"date": "2022-01-01T00:00:00+00:00"},
+            })
+                .to_string()
+                .as_str(),
+        ).unwrap();
+        insta::assert_yaml_snapshot!(expected_result);
+    }
+
+    #[test]
+    fn extensions() {
+        let expected_result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+              "variables": {"date": "2022-01-01T00:00:00+00:00"},
+              "extensions": {
+                "something_simple": "else",
+                "something_complex": {
+                    "nested": "value"
+                }
+              }
+            })
+                .to_string()
+                .as_str(),
+        ).unwrap();
+        insta::assert_yaml_snapshot!(expected_result);
     }
 }

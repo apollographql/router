@@ -135,7 +135,7 @@ telemetry:
               display_thread_id: true
               display_thread_name: true
               display_timestamp: true
-              display_resource: false
+              display_resource: true
               display_span_list: true
               display_current_span: true
               display_service_name: true
@@ -279,7 +279,7 @@ telemetry:
 
 Example output with span information:
 
-```yaml
+```json
 {
   "timestamp": "2023-10-30T14:09:34.771388Z",
   "level": "INFO",
@@ -300,7 +300,7 @@ Example output with span information:
 
 The `telemetry.exporters.logging.stdout.format.json.display_span_list` option is like [`display_current_span`](#displaycurrentspan) but instead of outputting information for the current span, `display_span_list`  outputs information for all spans that an event was raised in. 
 
-For instance, if you have a custom `trace_id` from a request header, as long as the attribute is configured on the `router` span it will appear on all log events associated with the request.
+For example, if you have a custom `trace_id` from a request header, as long as the attribute is configured on the `router` span it will appear on all log events associated with the request.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -315,7 +315,7 @@ telemetry:
 
 Example output with a list of spans:
 
-```yaml
+```json
 {
   "timestamp": "2023-10-30T14:09:34.771388Z",
   "level": "INFO",
@@ -336,40 +336,26 @@ Example output with a list of spans:
 
 #### `display_resource`
 
-The `telemetry.logging.stdout.format.json.display_span_list` option is like [`display_current_span`](#displaycurrentspan) but instead of outputting information for the current span, `display_span_list`  outputs information for all spans that an event was raised in.
+The `telemetry.logging.stdout.format.json.display_resource` option configures whether resources configured in `router.yaml` are displayed in log messages. By default, `display_resource` is `true`.
 
-For instance, if you have a custom `trace_id` from a request header, as long as the attribute is configured on the `router` span it will appear on all log events associated with the request.
+For example, given a `router.yaml` with `display_resource: true` and a configured `resource`, log messages will display the resource: 
 
 ```yaml title="router.yaml"
 telemetry:
   exporters:
-     logging:
-       stdout:
-         enabled: true
-         format: 
-           json:
-             display_span_list: true
+    logging:
+      stdout:
+        format: 
+          json:
+            display_resource: true
+      common:
+        service_name: bryn-router
+        resource:
+          test.resource: test
 ```
 
-Example output with a list of spans:
-
-```yaml
-{
-  "timestamp": "2023-10-30T14:09:34.771388Z",
-  "level": "INFO",
-  "fields": {
-    "event_attr_1": "event_attr_1",
-    "event_attr_2": "event_attr_2"
-  },
-  "target": "event_target",
-  "spans": [
-    {
-      "span_attr_1": "span_attr_1",
-      "span_attr_2": "span_attr_2",
-      "name": "span_name"
-    }
-  ]
-}
+```text showLineNumbers=false disableCopy=true
+"resource":{"test.resource":"test","service.name":"bryn-router"}
 ```
 
 #### `json` configuration reference
@@ -385,7 +371,7 @@ Example output with a list of spans:
 | `display_thread_name` | `true`\|`false`   | `false` | `thread_name` | The name of the thread where the event was raised.                                     |
 | `display_timestamp`   | `true`\|`false`   | `true`  | `timestamp`   | The timestamp of when the event was raised.                                            |
 | `display_span_list`   | `true`\|`false`   | `false` | `spans`       | A list of all spans to root in which the event was raised and all of their attributes. |
-| `display_resource`    | `true`\|`false`   | `false` | `resource`    | The resource as configured in tracing common.                                          |
+| `display_resource`    | `true`\|`false`   | `true`  | `resource`    | The resource as configured in tracing common.                                          |
 | `display_trace_id`    | `true`\|`false`   | `true`  | `trace_id`    | The trace id of the span in which the event was raised.                                |
 | `display_span_id`     | `true`\|`false`   | `true`  | `span_id`     | The span id of the span in which the event was raised.                                 |
 

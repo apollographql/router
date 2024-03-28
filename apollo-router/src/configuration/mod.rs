@@ -622,6 +622,10 @@ pub(crate) struct Supergraph {
     /// When set to true, some parts of the request pipeline like telemetry will not work properly,
     /// but request handling will stop immediately when the client connection is closed.
     pub(crate) early_cancel: bool,
+
+    /// Log a message if the client closes the connection before the response is sent.
+    /// Default: false.
+    pub(crate) experimental_log_on_broken_pipe: bool,
 }
 
 fn default_defer_support() -> bool {
@@ -639,6 +643,7 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
+        experimental_log_on_broken_pipe: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -648,6 +653,7 @@ impl Supergraph {
             query_planning: query_planning.unwrap_or_default(),
             reuse_query_fragments,
             early_cancel: early_cancel.unwrap_or_default(),
+            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
     }
 }
@@ -664,6 +670,7 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
+        experimental_log_on_broken_pipe: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -673,6 +680,7 @@ impl Supergraph {
             query_planning: query_planning.unwrap_or_default(),
             reuse_query_fragments,
             early_cancel: early_cancel.unwrap_or_default(),
+            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
     }
 }

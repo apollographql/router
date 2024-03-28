@@ -144,7 +144,7 @@ impl ExecutionStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: router response stage error: {error}"
+                            "external extensibility: execution response stage error: {error}"
                         );
                         error
                     });
