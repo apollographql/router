@@ -580,7 +580,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_complex_query() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query UnusedQuery {
             noInputQuery {
@@ -747,7 +747,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_complex_references() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query Query($secondInput: Boolean!) {
             scalarResponseQuery
@@ -881,7 +881,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_basic_whitespace() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query MyQuery {
             noInputQuery {
@@ -918,7 +918,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_anonymous_query() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query {
             noInputQuery {
@@ -955,7 +955,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_anonymous_mutation() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"mutation {
             noInputMutation {
@@ -992,7 +992,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_anonymous_subscription() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str: &str = r#"subscription {
             noInputSubscription {
@@ -1029,7 +1029,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ordered_fields_and_variables() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query VariableScalarInputQuery($idInput: ID!, $boolInput: Boolean!, $floatInput: Float!, $intInput: Int!, $listInput: [String!]!, $stringInput: String!, $nullableStringInput: String) {
             sortQuery(
@@ -1089,7 +1089,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_fragments() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query FragmentQuery {
             noInputQuery {
@@ -1300,7 +1300,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_directives() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"fragment Fragment1 on InterfaceImplementation1 {
             sharedField
@@ -1389,7 +1389,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_aliases() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query AliasQuery {
             xxAlias: enumInputQuery(enumInput: SOME_VALUE_1) {
@@ -1432,7 +1432,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_inline_values() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query InlineInputTypeQuery {
             inputTypeQuery(input: { 
@@ -1477,7 +1477,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_root_type_fragment() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query SomeQuery {
             ... on Query {
@@ -1527,7 +1527,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_directive_arg_spacing() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query {
             basicResponseQuery {
@@ -1564,7 +1564,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_operation_with_single_variable() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query QueryWithVar($input_enum: SomeEnum) {
             enumInputQuery(enumInput: $input_enum) {
@@ -1601,7 +1601,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_operation_with_multiple_variables() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query QueryWithVars($stringInput: String!, $floatInput: Float!, $boolInput: Boolean!) {
             scalarInputQuery(listInput: ["x"], stringInput: $stringInput, intInput: 6, floatInput: $floatInput, boolInput: $boolInput, idInput: "y") {
@@ -1642,7 +1642,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_field_arg_comma_or_space() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query QueryArgLength($StringInputWithAVeryyyLongNameSoLineLengthIs80: String!, $inputType: AnotherInputType, $enumInputWithAVryLongNameSoLineLengthIsOver80: SomeEnum, $enumInputType: EnumInputType) {
             enumInputQuery (enumInput:$enumInputWithAVryLongNameSoLineLengthIsOver80,inputType:$enumInputType) {
@@ -1693,7 +1693,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_operation_arg_always_commas() {
-        let schema_str = include_str!("testdata/schema.graphql");
+        let schema_str = include_str!("testdata/schema_interop.graphql");
 
         let query_str = r#"query QueryArgLength($enumInputWithAVerrrrrrrrrrrryLongNameSoLineLengthIsOver80: SomeEnum, $enumInputType: EnumInputType) {
             enumInputQuery (enumInput:$enumInputWithAVerrrrrrrrrrrryLongNameSoLineLengthIsOver80,inputType:$enumInputType) {

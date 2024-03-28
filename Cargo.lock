@@ -444,9 +444,6 @@ name = "apollo-router-studio-interop"
 version = "1.41.1"
 dependencies = [
  "apollo-compiler",
- "apollo-parser",
- "apollo-smith",
- "arbitrary",
  "router-bridge",
  "serde_json",
  "test-log",
