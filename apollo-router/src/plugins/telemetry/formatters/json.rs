@@ -16,6 +16,7 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
+use super::get_trace_and_span_id;
 use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
@@ -220,6 +221,22 @@ where
                 .parent()
                 .and_then(|id| ctx.span(id))
                 .or_else(|| ctx.lookup_current());
+
+            if let Some(ref span) = current_span {
+                if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
+                    if self.config.display_trace_id {
+                        serializer
+                            .serialize_entry("trace_id", &trace_id.to_string())
+                            .unwrap_or(());
+                    }
+                    if self.config.display_trace_id {
+                        serializer
+                            .serialize_entry("span_id", &span_id.to_string())
+                            .unwrap_or(());
+                    }
+                }
+            }
+
             let mut visitor = tracing_serde::SerdeMapVisitor::new(serializer);
             event.record(&mut visitor);
 
@@ -240,7 +257,6 @@ where
                     serializer.serialize_entry("line_number", &line_number)?;
                 }
             }
-
             if self.config.display_current_span {
                 if let Some(ref span) = current_span {
                     serializer

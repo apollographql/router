@@ -273,6 +273,10 @@ where
                         "apollo_operation_id",
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
+                    let _ = response.context.insert(
+                        "apollo_operation_signature",
+                        usage_reporting.stats_report_key.clone(),
+                    );
                 }
                 response
             })
