@@ -257,7 +257,6 @@ dependencies = [
  "anyhow",
  "apollo-compiler",
  "apollo-federation",
- "apollo-router-studio-interop",
  "arc-swap",
  "askama",
  "async-compression",
@@ -437,17 +436,6 @@ dependencies = [
  "str_inflector",
  "tempfile",
  "toml",
-]
-
-[[package]]
-name = "apollo-router-studio-interop"
-version = "1.41.1"
-dependencies = [
- "apollo-compiler",
- "router-bridge",
- "serde_json",
- "test-log",
- "tokio",
 ]
 
 [[package]]
@@ -5713,7 +5701,6 @@ dependencies = [
  "apollo-compiler",
  "apollo-parser",
  "apollo-router",
- "apollo-router-studio-interop",
  "apollo-smith",
  "async-trait",
  "env_logger",

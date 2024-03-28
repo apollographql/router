@@ -14,7 +14,7 @@ libfuzzer-sys = "0.4"
 apollo-compiler = "=1.0.0-beta.13"
 apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
 apollo-parser = "0.7.6"
-apollo-router-studio-interop = { path = "../apollo-router-studio-interop" }
+apollo-router = { path = "../apollo-router" }
 env_logger = "0.10.2"
 log = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["json", "blocking"] }

@@ -1,3 +1,4 @@
+//! Generation of usage reporting fields
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -23,22 +24,33 @@ use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 
-pub struct UsageReportingResult {
+/// The result of the generate_usage_reporting function which contains a UsageReporting struct and
+/// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
+pub struct ComparableUsageReporting {
+    /// The UsageReporting fields
     pub result: UsageReporting,
 }
 
+/// Enum specifying the result of a comparison.
 pub enum UsageReportingComparisonResult {
+    /// The UsageReporting instances are the same
     Equal,
+    /// The stats_report_key in the UsageReporting instances are different
     StatsReportKeyNotEqual,
+    /// The referenced_fields in the UsageReporting instances are different. When comparing referenced
+    /// fields, we ignore the ordering of field names.
     ReferencedFieldsNotEqual,
+    /// Both the stats_report_key and referenced_fields in the UsageReporting instances are different.
     BothNotEqual,
 }
 
-impl UsageReportingResult {
+impl ComparableUsageReporting {
+    /// Compare this to another ComparableUsageReporting.
     pub fn compare(&self, other: &Self) -> UsageReportingComparisonResult {
         self.compare_usage_reporting(&other.result)
     }
 
+    /// Compare this to another UsageReporting.
     pub fn compare_usage_reporting(
         &self,
         other: &UsageReporting,
@@ -86,23 +98,15 @@ impl UsageReportingResult {
     }
 }
 
-struct UsageReportingGenerator<'a> {
-    signature_doc: &'a ExecutableDocument,
-    references_doc: &'a ExecutableDocument,
-    operation_name: &'a Option<String>,
-    schema: &'a Valid<Schema>,
-    fragments_map: HashMap<String, Node<Fragment>>,
-    fields_by_type: HashMap<String, HashSet<String>>,
-    fields_by_interface: HashMap<String, bool>,
-    fragment_spread_set: HashSet<Name>,
-}
-
+/// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
+/// and referenced fields of an operation. The document used to generate the signature and for the references can be
+/// different to handle cases where the operation has been filtered, but we want to keep the same signature.
 pub fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
-) -> UsageReportingResult {
+) -> ComparableUsageReporting {
     let mut generator = UsageReportingGenerator {
         signature_doc,
         references_doc,
@@ -117,9 +121,20 @@ pub fn generate_usage_reporting(
     generator.generate()
 }
 
+struct UsageReportingGenerator<'a> {
+    signature_doc: &'a ExecutableDocument,
+    references_doc: &'a ExecutableDocument,
+    operation_name: &'a Option<String>,
+    schema: &'a Valid<Schema>,
+    fragments_map: HashMap<String, Node<Fragment>>,
+    fields_by_type: HashMap<String, HashSet<String>>,
+    fields_by_interface: HashMap<String, bool>,
+    fragment_spread_set: HashSet<Name>,
+}
+
 impl UsageReportingGenerator<'_> {
-    pub fn generate(&mut self) -> UsageReportingResult {
-        UsageReportingResult {
+    fn generate(&mut self) -> ComparableUsageReporting {
+        ComparableUsageReporting {
             result: UsageReporting {
                 stats_report_key: self.generate_stats_report_key(),
                 referenced_fields_by_type: self.generate_apollo_reporting_refs(),
@@ -546,10 +561,10 @@ mod tests {
             .plan(query_str.to_string(), None, PlanOptions::default())
             .await
             .unwrap();
-        let bridge_result = UsageReportingResult {
+        let bridge_result = ComparableUsageReporting {
             result: plan.usage_reporting,
         };
-        let expected_result = UsageReportingResult {
+        let expected_result = ComparableUsageReporting {
             result: UsageReporting {
                 stats_report_key: expected_sig.to_string(),
                 referenced_fields_by_type: expected_refs.clone(),
@@ -562,11 +577,11 @@ mod tests {
     }
 
     fn assert_expected_results(
-        actual: &UsageReportingResult,
+        actual: &ComparableUsageReporting,
         expected_sig: &str,
         expected_refs: &HashMap<String, ReferencedFieldsForType>,
     ) {
-        let expected_result = UsageReportingResult {
+        let expected_result = ComparableUsageReporting {
             result: UsageReporting {
                 stats_report_key: expected_sig.to_string(),
                 referenced_fields_by_type: expected_refs.clone(),
@@ -1733,7 +1748,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_compare() {
-        let source = UsageReportingResult {
+        let source = ComparableUsageReporting {
             result: UsageReporting {
                 stats_report_key: "# -\n{basicResponseQuery{field1 field2}}".into(),
                 referenced_fields_by_type: HashMap::from([
@@ -1757,7 +1772,7 @@ mod tests {
 
         // Same signature and ref fields should match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: source.result.stats_report_key.clone(),
                     referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
@@ -1768,7 +1783,7 @@ mod tests {
 
         // Reordered signature should not match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: "# -\n{basicResponseQuery{field2 field1}}".into(),
                     referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
@@ -1779,7 +1794,7 @@ mod tests {
 
         // Different signature should not match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key:
                         "# NamedQuery\nquery NamedQuery {basicResponseQuery{field1 field2}}".into(),
@@ -1791,7 +1806,7 @@ mod tests {
 
         // Reordered parent type should match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: source.result.stats_report_key.clone(),
                     referenced_fields_by_type: HashMap::from([
@@ -1817,7 +1832,7 @@ mod tests {
 
         // Reordered fields should match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: source.result.stats_report_key.clone(),
                     referenced_fields_by_type: HashMap::from([
@@ -1843,7 +1858,7 @@ mod tests {
 
         // Added parent type should not match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: source.result.stats_report_key.clone(),
                     referenced_fields_by_type: HashMap::from([
@@ -1876,7 +1891,7 @@ mod tests {
 
         // Added field should not match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: source.result.stats_report_key.clone(),
                     referenced_fields_by_type: HashMap::from([
@@ -1906,7 +1921,7 @@ mod tests {
 
         // Missing parent type should not match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: source.result.stats_report_key.clone(),
                     referenced_fields_by_type: HashMap::from([(
@@ -1923,7 +1938,7 @@ mod tests {
 
         // Missing field should not match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: source.result.stats_report_key.clone(),
                     referenced_fields_by_type: HashMap::from([
@@ -1949,7 +1964,7 @@ mod tests {
 
         // Both different should not match
         assert!(matches!(
-            source.compare(&UsageReportingResult {
+            source.compare(&ComparableUsageReporting {
                 result: UsageReporting {
                     stats_report_key: "# -\n{basicResponseQuery{field2 field1}}".into(),
                     referenced_fields_by_type: HashMap::from([(

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_router_studio_interop::UsageReportingComparisonResult;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -26,6 +25,8 @@ use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
+use crate::apollo_studio_interop::generate_usage_reporting;
+use crate::apollo_studio_interop::UsageReportingComparisonResult;
 use crate::configuration::ApolloMetricsGenerationMode;
 use crate::configuration::GraphQLValidationMode;
 use crate::error::PlanErrors;
@@ -528,13 +529,12 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let generated_usage_reporting =
-                        apollo_router_studio_interop::generate_usage_reporting(
-                            &signature_doc.executable,
-                            &doc.executable,
-                            &operation,
-                            &self.schema.definitions,
-                        );
+                    let generated_usage_reporting = generate_usage_reporting(
+                        &signature_doc.executable,
+                        &doc.executable,
+                        &operation,
+                        &self.schema.definitions,
+                    );
 
                     if matches!(
                         self.configuration

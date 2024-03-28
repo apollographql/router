@@ -9,8 +9,8 @@ use std::sync::OnceLock;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
-use apollo_router_studio_interop::generate_usage_reporting;
-use apollo_router_studio_interop::UsageReportingComparisonResult;
+use apollo_router::_private::generate_usage_reporting;
+use apollo_router::_private::UsageReportingComparisonResult;
 use libfuzzer_sys::fuzz_target;
 use router_bridge::planner::UsageReporting;
 use router_fuzz::generate_valid_operation;
