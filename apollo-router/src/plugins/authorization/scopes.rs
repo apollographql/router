@@ -799,7 +799,7 @@ mod tests {
         let extracted_scopes = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -815,7 +815,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["profile".to_string(), "internal".to_string()]
@@ -837,7 +837,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: [
@@ -863,7 +863,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: [
@@ -893,7 +893,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -920,7 +920,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -947,7 +947,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -971,7 +971,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1000,7 +1000,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1030,7 +1030,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1044,7 +1044,7 @@ mod tests {
             ["read:user".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string()].into_iter().collect(),
@@ -1060,7 +1060,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string(), "read:username".to_string()]
@@ -1094,7 +1094,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1108,7 +1108,7 @@ mod tests {
             ["read:user".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string()].into_iter().collect(),
@@ -1124,7 +1124,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string(), "read:username".to_string()]
@@ -1155,7 +1155,7 @@ mod tests {
         let extracted_scopes = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1218,7 +1218,7 @@ mod tests {
         let extracted_scopes = extract(INTERFACE_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1232,7 +1232,7 @@ mod tests {
             ["itf".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["itf".to_string()].into_iter().collect(),
@@ -1257,7 +1257,7 @@ mod tests {
         let extracted_scopes = extract(INTERFACE_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1271,7 +1271,7 @@ mod tests {
             ["itf".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: ["itf".to_string()].into_iter().collect(),
@@ -1287,7 +1287,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: ["itf".to_string(), "a".to_string(), "b".to_string()]
@@ -1357,7 +1357,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1385,7 +1385,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1455,7 +1455,7 @@ mod tests {
             ["a".to_string(), "b".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["a".to_string(), "b".to_string()].into_iter().collect(),
@@ -1544,7 +1544,7 @@ mod tests {
 
         let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1625,7 +1625,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1649,7 +1649,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),

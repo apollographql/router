@@ -358,7 +358,7 @@ mod tests {
             fmt::Subscriber::new().with(fmt_layer),
             generate_simple_span,
         );
-        insta::assert_display_snapshot!(buff);
+        insta::assert_snapshot!(buff);
     }
 
     #[tokio::test]
@@ -376,7 +376,7 @@ mod tests {
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -393,7 +393,7 @@ mod tests {
             fmt::Subscriber::new().with(fmt_layer),
             generate_simple_span,
         );
-        insta::assert_display_snapshot!(buff);
+        insta::assert_snapshot!(buff);
     }
 
     #[tokio::test]
@@ -411,7 +411,7 @@ mod tests {
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -435,7 +435,7 @@ mod tests {
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -460,6 +460,6 @@ mod tests {
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 }
