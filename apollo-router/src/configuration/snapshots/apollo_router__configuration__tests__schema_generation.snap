@@ -2658,7 +2658,8 @@ expression: "&schema"
           "experimental_plans_limit": null,
           "experimental_paths_limit": null
         },
-        "early_cancel": false
+        "early_cancel": false,
+        "experimental_log_on_broken_pipe": false
       },
       "type": "object",
       "properties": {
@@ -2669,6 +2670,11 @@ expression: "&schema"
         },
         "early_cancel": {
           "description": "abort request handling when the client drops the connection. Default: false. When set to true, some parts of the request pipeline like telemetry will not work properly, but request handling will stop immediately when the client connection is closed.",
+          "default": false,
+          "type": "boolean"
+        },
+        "experimental_log_on_broken_pipe": {
+          "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
           "default": false,
           "type": "boolean"
         },
