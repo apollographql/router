@@ -68,7 +68,7 @@ pub struct PluginInit<T> {
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
     /// The supergraph schema (parsed)
-    pub(crate) supergraph_schema: Arc<Valid<apollo_compiler::schema::Schema>>,
+    pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
     pub(crate) subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
@@ -82,22 +82,15 @@ where
 {
     #[deprecated = "use PluginInit::builder() instead"]
     /// Create a new PluginInit for the supplied config and SDL.
-    pub fn new(
-        config: T,
-        supergraph_sdl: Arc<String>,
-        subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
-    ) -> Self {
+    pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
         Self::builder()
             .config(config)
             .supergraph_schema(Arc::new(
-                apollo_compiler::schema::Schema::parse_and_validate(
-                    supergraph_sdl.to_string(),
-                    PathBuf::from("synthetic"),
-                )
-                .expect("failed to parse supergraph schema"),
+                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
+                    .expect("failed to parse supergraph schema"),
             ))
             .supergraph_sdl(supergraph_sdl)
-            .subgraph_schemas(subgraph_schemas)
+            .subgraph_schemas(Arc::new(HashMap::new()))
             .notify(Notify::builder().build())
             .build()
     }
@@ -110,7 +103,6 @@ where
     pub fn try_new(
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
-        subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
     ) -> Result<Self, BoxError> {
         Self::try_builder()
             .config(config)
@@ -122,7 +114,7 @@ where
                     })?,
             ))
             .supergraph_sdl(supergraph_sdl)
-            .subgraph_schemas(subgraph_schemas)
+            .subgraph_schemas(Arc::new(HashMap::new()))
             .notify(Notify::builder().build())
             .build()
     }
@@ -322,9 +314,14 @@ impl PluginFactory {
     #[cfg(test)]
     pub(crate) async fn create_instance_without_schema(
         &self,
-        config: &serde_json::Value,
+        configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(PluginInit::fake_builder().config(config.clone()).build()).await
+        (self.instance_factory)(
+            PluginInit::fake_builder()
+                .config(configuration.clone())
+                .build(),
+        )
+        .await
     }
 
     pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
