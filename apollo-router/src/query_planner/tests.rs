@@ -434,7 +434,7 @@ async fn defer_if_condition() {
         .into(),
         query: Arc::new(
             Query::parse(
-                query,
+                query,Some("Me"),
                 &schema,
                 &Configuration::fake_builder().build().unwrap(),
             )

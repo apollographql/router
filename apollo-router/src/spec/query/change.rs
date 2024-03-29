@@ -4,7 +4,9 @@ use std::hash::Hash;
 use std::hash::Hasher;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Selection;
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
@@ -14,8 +16,8 @@ use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
 
-use super::transform;
 use super::traverse;
+use super::traverse::Visitor;
 use crate::plugins::cache::entity::ENTITIES;
 
 /// Calculates a hash of the query and the schema, but only looking at the parts of the
@@ -25,7 +27,7 @@ use crate::plugins::cache::entity::ENTITIES;
 pub(crate) struct QueryHashVisitor<'a> {
     schema: &'a schema::Schema,
     hasher: Sha256,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
@@ -33,11 +35,14 @@ pub(crate) struct QueryHashVisitor<'a> {
 }
 
 impl<'a> QueryHashVisitor<'a> {
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Self {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a executable::ExecutableDocument,
+    ) -> Self {
         Self {
             schema,
             hasher: Sha256::new(),
-            fragments: transform::collect_fragments(executable),
+            fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
             subgraph_query: false,
@@ -106,19 +111,20 @@ impl<'a> QueryHashVisitor<'a> {
         }
     }
 
-    fn hash_type_by_name(&mut self, t: &str) {
+    fn hash_type_by_name(&mut self, t: &str) -> Result<(), BoxError> {
         if self.hashed_types.contains(t) {
-            return;
+            return Ok(());
         }
 
         self.hashed_types.insert(t.to_string());
 
         if let Some(ty) = self.schema.types.get(t) {
-            self.hash_extended_type(ty);
+            self.hash_extended_type(ty)?;
         }
+        Ok(())
     }
 
-    fn hash_extended_type(&mut self, t: &'a ExtendedType) {
+    fn hash_extended_type(&mut self, t: &'a ExtendedType) -> Result<(), BoxError> {
         match t {
             ExtendedType::Scalar(s) => {
                 for directive in &s.directives {
@@ -143,43 +149,33 @@ impl<'a> QueryHashVisitor<'a> {
                             .unwrap();
 
                         println!("got field set: {field_set:?}");
-                        for selection in field_set.selection_set.selections {
+                        let ast = parser
+                            .parse_ast(
+                                key.as_str().unwrap(),
+                                &std::path::Path::new("schema.graphql"),
+                            )
+                            .unwrap();
+                        /*self.selection_set(
+                            o.name.as_str(),
+                            &field_set.selection_set.selections[..],
+                        )?;
+                        traverse::selection_set(
+                            self,
+                            o.name.as_str(),
+                            &field_set.selection_set.selections[..],
+                        )?*/
+
+                        /*for selection in field_set.selection_set.selections {
                             match selection {
                                 apollo_compiler::executable::Selection::Field(field) => {
-                                    /*
-                                                                        fn field(
-                                        &mut self,
-                                        parent_type: &str,
-                                        field_def: &ast::FieldDefinition,
-                                        node: &ast::Field,
-                                    ) -> Result<(), BoxError> {
-                                                                     */
-                                    //self.field(o.name.as_str(), &field.definition, field.)
-                                    let parent = o.name.as_str();
-                                    let name = field.name.as_str();
-                                    let field_def = &field.definition;
-                                    if self
-                                        .hashed_fields
-                                        .insert((parent.to_string(), name.to_string()))
-                                    {
-                                        //self.hash_type_by_name(parent_type);
+                                    self.hash_field(
+                                        o.name.as_str().to_string(),
+                                        field.name.as_str().to_string(),
+                                        &field.definition,
+                                        &field.arguments,
+                                    );
 
-                                        field_def.name.hash(self);
-
-                                        for argument in &field_def.arguments {
-                                            self.hash_input_value_definition(argument);
-                                        }
-
-                                        for argument in &field.arguments {
-                                            self.hash_argument(argument);
-                                        }
-
-                                        self.hash_type(&field_def.ty);
-
-                                        for directive in &field_def.directives {
-                                            self.hash_directive(directive);
-                                        }
-                                    }
+                                    //traverse::field(self, field_def, node)
                                 }
                                 apollo_compiler::executable::Selection::FragmentSpread(_) => {
                                     todo!()
@@ -188,7 +184,7 @@ impl<'a> QueryHashVisitor<'a> {
                                     todo!()
                                 }
                             }
-                        }
+                        }*/
                     }
                 }
             }
@@ -203,7 +199,7 @@ impl<'a> QueryHashVisitor<'a> {
                 }
 
                 for member in &u.members {
-                    self.hash_type_by_name(member.as_str());
+                    self.hash_type_by_name(member.as_str())?;
                 }
             }
             ExtendedType::Enum(e) => {
@@ -226,14 +222,15 @@ impl<'a> QueryHashVisitor<'a> {
                 for (name, ty) in &o.fields {
                     if ty.default_value.is_some() {
                         name.hash(self);
-                        self.hash_input_value_definition(&ty.node);
+                        self.hash_input_value_definition(&ty.node)?;
                     }
                 }
             }
         }
+        Ok(())
     }
 
-    fn hash_type(&mut self, t: &ast::Type) {
+    fn hash_type(&mut self, t: &ast::Type) -> Result<(), BoxError> {
         match t {
             schema::Type::Named(name) => self.hash_type_by_name(name.as_str()),
             schema::Type::NonNullNamed(name) => {
@@ -242,43 +239,74 @@ impl<'a> QueryHashVisitor<'a> {
             }
             schema::Type::List(t) => {
                 "[]".hash(self);
-                self.hash_type(t);
+                self.hash_type(t)
             }
             schema::Type::NonNullList(t) => {
                 "[]!".hash(self);
-                self.hash_type(t);
+                self.hash_type(t)
             }
         }
     }
 
-    fn hash_input_value_definition(&mut self, t: &Node<ast::InputValueDefinition>) {
-        self.hash_type(&t.ty);
+    fn hash_field(
+        &mut self,
+        parent_type: String,
+        type_name: String,
+        field_def: &FieldDefinition,
+        arguments: &[Node<Argument>],
+    ) -> Result<(), BoxError> {
+        if self.hashed_fields.insert((parent_type.clone(), type_name)) {
+            self.hash_type_by_name(&parent_type)?;
+
+            field_def.name.hash(self);
+
+            for argument in &field_def.arguments {
+                self.hash_input_value_definition(argument)?;
+            }
+
+            for argument in arguments {
+                self.hash_argument(argument);
+            }
+
+            self.hash_type(&field_def.ty)?;
+
+            for directive in &field_def.directives {
+                self.hash_directive(directive);
+            }
+        }
+        Ok(())
+    }
+
+    fn hash_input_value_definition(
+        &mut self,
+        t: &Node<ast::InputValueDefinition>,
+    ) -> Result<(), BoxError> {
+        self.hash_type(&t.ty)?;
         for directive in &t.directives {
             self.hash_directive(directive);
         }
         if let Some(value) = t.default_value.as_ref() {
             self.hash_value(value);
         }
+        Ok(())
     }
 
-    fn hash_entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
-        use crate::spec::query::traverse::Visitor;
-
-        if node.selection_set.len() != 1 {
+    fn hash_entities_operation(&mut self, node: &executable::Operation) -> Result<(), BoxError> {
+        if node.selection_set.selections.len() != 1 {
             return Err("invalid number of selections for _entities query".into());
         }
 
-        match node.selection_set.first() {
-            Some(Selection::Field(field)) => {
+        match node.selection_set.selections.first() {
+            Some(executable::Selection::Field(field)) => {
                 if field.name.as_str() != ENTITIES {
                     return Err("expected _entities field".into());
                 }
 
                 "_entities".hash(self);
 
-                for selection in &field.selection_set {
+                for selection in &field.selection_set.selections {
                     match selection {
-                        Selection::InlineFragment(f) => {
+                        executable::Selection::InlineFragment(f) => {
                             match f.type_condition.as_ref() {
                                 None => {
                                     return Err("expected type condition".into());
@@ -286,7 +314,7 @@ impl<'a> QueryHashVisitor<'a> {
                                 Some(condition) => self.inline_fragment(condition.as_str(), f)?,
                             };
                         }
-                        Selection::FragmentSpread(f) => self.fragment_spread(f)?,
+                        executable::Selection::FragmentSpread(f) => self.fragment_spread(f)?,
                         _ => return Err("expected inline fragment".into()),
                     }
                 }
@@ -295,6 +323,39 @@ impl<'a> QueryHashVisitor<'a> {
             _ => Err("expected _entities field".into()),
         }
     }
+
+    /*pub(crate) fn selection_set(
+        &mut self,
+        parent_type: &str,
+        set: &[apollo_compiler::executable::Selection],
+    ) -> Result<(), BoxError> {
+        set.iter().try_for_each(|def| match def {
+            apollo_compiler::executable::Selection::Field(def) => {
+                let field_def = &self
+                    .schema
+                    .type_field(parent_type, &def.name)
+                    .map_err(|e| match e {
+                        FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
+                        FieldLookupError::NoSuchField(_, _) => {
+                            format!("no field `{}` in type `{parent_type}`", &def.name)
+                        }
+                    })?
+                    .clone();
+                self.field(parent_type, field_def, def)
+            }
+            apollo_compiler::executable::Selection::FragmentSpread(def) => {
+                self.fragment_spread(def)
+            }
+            apollo_compiler::executable::Selection::InlineFragment(def) => {
+                let fragment_type = def
+                    .type_condition
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or(parent_type);
+                self.inline_fragment(fragment_type, def)
+            }
+        })
+    }*/
 }
 
 impl<'a> Hasher for QueryHashVisitor<'a> {
@@ -307,14 +368,10 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
-    fn operation(
-        &mut self,
-        root_type: &str,
-        node: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+impl<'a> Visitor for QueryHashVisitor<'a> {
+    fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         root_type.hash(self);
-        self.hash_type_by_name(root_type);
+        self.hash_type_by_name(root_type)?;
 
         if !self.subgraph_query {
             traverse::operation(self, root_type, node)
@@ -327,49 +384,33 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         &mut self,
         parent_type: &str,
         field_def: &ast::FieldDefinition,
-        node: &ast::Field,
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
-        let parent = parent_type.to_string();
-        let name = field_def.name.as_str().to_string();
-
-        if self.hashed_fields.insert((parent, name)) {
-            self.hash_type_by_name(parent_type);
-
-            field_def.name.hash(self);
-
-            for argument in &field_def.arguments {
-                self.hash_input_value_definition(argument);
-            }
-
-            for argument in &node.arguments {
-                self.hash_argument(argument);
-            }
-
-            self.hash_type(&field_def.ty);
-
-            for directive in &field_def.directives {
-                self.hash_directive(directive);
-            }
-        }
+        self.hash_field(
+            parent_type.to_string(),
+            field_def.name.as_str().to_string(),
+            field_def,
+            &node.arguments,
+        )?;
 
         traverse::field(self, field_def, node)
     }
 
-    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
+    fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
         node.name.hash(self);
-        self.hash_type_by_name(&node.type_condition);
+        self.hash_type_by_name(node.type_condition())?;
 
-        traverse::fragment_definition(self, node)
+        traverse::fragment(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
+    fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
         node.fragment_name.hash(self);
         let type_condition = &self
             .fragments
             .get(&node.fragment_name)
             .ok_or("MissingFragment")?
-            .type_condition;
-        self.hash_type_by_name(type_condition);
+            .type_condition();
+        self.hash_type_by_name(type_condition)?;
 
         traverse::fragment_spread(self, node)
     }
@@ -377,10 +418,10 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        node: &ast::InlineFragment,
+        node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
         if let Some(type_condition) = &node.type_condition {
-            self.hash_type_by_name(type_condition);
+            self.hash_type_by_name(type_condition)?;
         }
         traverse::inline_fragment(self, parent_type, node)
     }
@@ -394,6 +435,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
 mod tests {
     use apollo_compiler::ast::Document;
     use apollo_compiler::schema::Schema;
+    use apollo_compiler::validation::Valid;
 
     use super::QueryHashVisitor;
     use crate::spec::query::traverse;
@@ -406,24 +448,29 @@ mod tests {
             .unwrap();
         let doc = Document::parse(query, "query.graphql").unwrap();
 
-        doc.to_executable(&schema)
+        let exec = doc
+            .to_executable(&schema)
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &doc);
-        traverse::document(&mut visitor, &doc).unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &exec);
+        traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
     }
 
     #[track_caller]
     fn hash_subgraph_query(schema: &str, query: &str) -> String {
-        let schema = Schema::parse(schema, "schema.graphql").unwrap();
+        let schema = Valid::assume_valid(Schema::parse(schema, "schema.graphql").unwrap());
         let doc = Document::parse(query, "query.graphql").unwrap();
-        //doc.to_executable(&schema);
-        let mut visitor = QueryHashVisitor::new(&schema, &doc);
+        let exec = doc
+            .to_executable(&schema)
+            .unwrap()
+            .validate(&schema)
+            .unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &exec);
         visitor.subgraph_query = true;
-        traverse::document(&mut visitor, &doc).unwrap();
+        traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
     }

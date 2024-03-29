@@ -125,6 +125,7 @@ impl QueryAnalysisLayer {
                 if self.enable_authorization_directives {
                     AuthorizationPlugin::query_analysis(
                         &query,
+                        op_name.as_deref(),
                         &self.schema,
                         &self.configuration,
                         &context,

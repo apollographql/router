@@ -1,24 +1,24 @@
-use apollo_compiler::ast;
 use apollo_compiler::schema::FieldLookupError;
+use apollo_compiler::{ast, executable, ExecutableDocument};
 use tower::BoxError;
 
 /// Traverse a document with the given visitor.
 pub(crate) fn document(
     visitor: &mut impl Visitor,
-    document: &ast::Document,
+    document: &ExecutableDocument,
+    operation_name: Option<&str>,
 ) -> Result<(), BoxError> {
-    document.definitions.iter().try_for_each(|def| match def {
-        ast::Definition::OperationDefinition(def) => {
-            let root_type = visitor
-                .schema()
-                .root_operation(def.operation_type)
-                .ok_or("missing root operation definition")?
-                .clone();
-            visitor.operation(&root_type, def)
-        }
-        ast::Definition::FragmentDefinition(def) => visitor.fragment_definition(def),
-        _ => Ok(()),
-    })
+    let operation = document
+        .get_operation(operation_name)
+        .map_err(|_| "invalid operation name".to_string())?;
+
+    visitor.operation("root_type TODO", operation)?;
+
+    for fragment in document.fragments.values() {
+        visitor.fragment(fragment)?;
+    }
+
+    Ok(())
 }
 
 pub(crate) trait Visitor: Sized {
@@ -28,11 +28,7 @@ pub(crate) trait Visitor: Sized {
     ///
     /// Call the [`operation`] free function for the default behavior.
     /// Return `Ok(None)` to remove this operation.
-    fn operation(
-        &mut self,
-        root_type: &str,
-        def: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+    fn operation(&mut self, root_type: &str, def: &executable::Operation) -> Result<(), BoxError> {
         operation(self, root_type, def)
     }
 
@@ -40,8 +36,8 @@ pub(crate) trait Visitor: Sized {
     ///
     /// Call the [`fragment_definition`] free function for the default behavior.
     /// Return `Ok(None)` to remove this fragment.
-    fn fragment_definition(&mut self, def: &ast::FragmentDefinition) -> Result<(), BoxError> {
-        fragment_definition(self, def)
+    fn fragment(&mut self, def: &executable::Fragment) -> Result<(), BoxError> {
+        fragment(self, def)
     }
 
     /// Traverse a field within a selection set.
@@ -52,7 +48,7 @@ pub(crate) trait Visitor: Sized {
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
-        def: &ast::Field,
+        def: &executable::Field,
     ) -> Result<(), BoxError> {
         field(self, field_def, def)
     }
@@ -61,7 +57,7 @@ pub(crate) trait Visitor: Sized {
     ///
     /// Call the [`fragment_spread`] free function for the default behavior.
     /// Return `Ok(None)` to remove this fragment spread.
-    fn fragment_spread(&mut self, def: &ast::FragmentSpread) -> Result<(), BoxError> {
+    fn fragment_spread(&mut self, def: &executable::FragmentSpread) -> Result<(), BoxError> {
         fragment_spread(self, def)
     }
 
@@ -72,7 +68,7 @@ pub(crate) trait Visitor: Sized {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        def: &ast::InlineFragment,
+        def: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
         inline_fragment(self, parent_type, def)
     }
@@ -84,19 +80,24 @@ pub(crate) trait Visitor: Sized {
 pub(crate) fn operation(
     visitor: &mut impl Visitor,
     root_type: &str,
-    def: &ast::OperationDefinition,
+    def: &executable::Operation,
 ) -> Result<(), BoxError> {
-    selection_set(visitor, root_type, &def.selection_set)
+    //FIXME: we should look at directives etc on operation
+    selection_set(visitor, root_type, &def.selection_set.selections)
 }
 
 /// The default behavior for traversing a fragment definition.
 ///
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
-pub(crate) fn fragment_definition(
+pub(crate) fn fragment(
     visitor: &mut impl Visitor,
-    def: &ast::FragmentDefinition,
+    def: &executable::Fragment,
 ) -> Result<(), BoxError> {
-    selection_set(visitor, &def.type_condition, &def.selection_set)?;
+    selection_set(
+        visitor,
+        &def.type_condition(),
+        &def.selection_set.selections,
+    )?;
     Ok(())
 }
 
@@ -106,9 +107,13 @@ pub(crate) fn fragment_definition(
 pub(crate) fn field(
     visitor: &mut impl Visitor,
     field_def: &ast::FieldDefinition,
-    def: &ast::Field,
+    def: &executable::Field,
 ) -> Result<(), BoxError> {
-    selection_set(visitor, field_def.ty.inner_named_type(), &def.selection_set)
+    selection_set(
+        visitor,
+        field_def.ty.inner_named_type(),
+        &def.selection_set.selections,
+    )
 }
 
 /// The default behavior for traversing a fragment spread.
@@ -116,7 +121,7 @@ pub(crate) fn field(
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
 pub(crate) fn fragment_spread(
     visitor: &mut impl Visitor,
-    def: &ast::FragmentSpread,
+    def: &executable::FragmentSpread,
 ) -> Result<(), BoxError> {
     let _ = (visitor, def); // Unused, but matches trait method signature
     Ok(())
@@ -128,18 +133,18 @@ pub(crate) fn fragment_spread(
 pub(crate) fn inline_fragment(
     visitor: &mut impl Visitor,
     parent_type: &str,
-    def: &ast::InlineFragment,
+    def: &executable::InlineFragment,
 ) -> Result<(), BoxError> {
-    selection_set(visitor, parent_type, &def.selection_set)
+    selection_set(visitor, parent_type, &def.selection_set.selections)
 }
 
-fn selection_set(
+pub(crate) fn selection_set(
     visitor: &mut impl Visitor,
     parent_type: &str,
-    set: &[ast::Selection],
+    set: &[executable::Selection],
 ) -> Result<(), BoxError> {
     set.iter().try_for_each(|def| match def {
-        ast::Selection::Field(def) => {
+        executable::Selection::Field(def) => {
             let field_def = &visitor
                 .schema()
                 .type_field(parent_type, &def.name)
@@ -152,8 +157,8 @@ fn selection_set(
                 .clone();
             visitor.field(parent_type, field_def, def)
         }
-        ast::Selection::FragmentSpread(def) => visitor.fragment_spread(def),
-        ast::Selection::InlineFragment(def) => {
+        executable::Selection::FragmentSpread(def) => visitor.fragment_spread(def),
+        executable::Selection::InlineFragment(def) => {
             let fragment_type = def
                 .type_condition
                 .as_ref()
@@ -176,7 +181,7 @@ fn test_count_fields() {
             &mut self,
             _parent_type: &str,
             field_def: &ast::FieldDefinition,
-            def: &ast::Field,
+            def: &executable::Field,
         ) -> Result<(), BoxError> {
             self.fields += 1;
             field(self, field_def, def)
@@ -187,14 +192,14 @@ fn test_count_fields() {
         }
     }
 
-    let graphql = "
-        type Query {
-            a(id: ID): String
-            b: Int
-            next: Query
-        }
-        directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
+    let schema = "
+    type Query {
+        a(id: ID): String
+        b: Int
+        next: Query
+    }
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT";
+    let query = "
         query($id: ID = null) {
             a(id: $id)
             ... @defer {
@@ -210,10 +215,12 @@ fn test_count_fields() {
             }
         }
     ";
-    let ast = apollo_compiler::ast::Document::parse(graphql, "").unwrap();
-    let (schema, _doc) = ast.to_mixed_validate().unwrap();
+    let ast = apollo_compiler::ast::Document::parse(schema, "").unwrap();
+    let schema = ast.to_schema_validate().unwrap();
     let schema = schema.into_inner();
+    let executable =
+        ExecutableDocument::parse(Valid::assume_valid_ref(&schema), query, "").unwrap();
     let mut visitor = CountFields { fields: 0, schema };
-    document(&mut visitor, &ast).unwrap();
+    document(&mut visitor, &executable, None).unwrap();
     assert_eq!(visitor.fields, 4)
 }

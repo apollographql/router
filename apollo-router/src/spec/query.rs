@@ -318,6 +318,7 @@ impl Query {
 
     pub(crate) fn parse(
         query: impl Into<String>,
+        operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
@@ -326,7 +327,7 @@ impl Query {
         let doc = Self::parse_document(&query, schema, configuration);
         Self::check_errors(&doc)?;
         let (fragments, operations, defer_stats, schema_aware_hash) =
-            Self::extract_query_information(schema, &doc.executable, &doc.ast)?;
+            Self::extract_query_information(schema, &doc.executable, &doc.ast, operation_name)?;
 
         Ok(Query {
             string: query,
@@ -363,6 +364,7 @@ impl Query {
         schema: &Schema,
         document: &ExecutableDocument,
         ast: &ast::Document,
+        operation_name: Option<&str>,
     ) -> Result<(Fragments, Vec<Operation>, DeferStats, Vec<u8>), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
@@ -375,8 +377,8 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        let mut visitor = QueryHashVisitor::new(&schema.definitions, ast);
-        traverse::document(&mut visitor, ast).map_err(|e| {
+        let mut visitor = QueryHashVisitor::new(&schema.definitions, document);
+        traverse::document(&mut visitor, document, operation_name).map_err(|e| {
             SpecError::ParsingError(format!("could not calculate the query hash: {e}"))
         })?;
         let hash = visitor.finish();
