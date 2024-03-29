@@ -8,11 +8,9 @@ pub(crate) fn document(
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), BoxError> {
-    let operation = document
-        .get_operation(operation_name)
-        .map_err(|_| "invalid operation name".to_string())?;
-
-    visitor.operation(operation.object_type().as_str(), operation)?;
+    if let Some(operation) = document.get_operation(operation_name).ok() {
+        visitor.operation(operation.object_type().as_str(), operation)?;
+    }
 
     for fragment in document.fragments.values() {
         visitor.fragment(fragment)?;

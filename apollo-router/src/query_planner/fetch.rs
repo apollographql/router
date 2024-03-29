@@ -492,13 +492,9 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, schema: &apollo_compiler::Schema) {
-        let doc = ExecutableDocument::parse(
-            Valid::assume_valid_ref(schema),
-            &self.operation,
-            "query.graphql",
-        )
-        .expect("subgraph queries should be valid");
+    pub(crate) fn hash_subquery(&mut self, schema: &Valid<apollo_compiler::Schema>) {
+        let doc = ExecutableDocument::parse(schema, &self.operation, "query.graphql")
+            .expect("subgraph queries should be valid");
 
         let mut visitor = QueryHashVisitor::new(schema, &doc);
         visitor.subgraph_query = !self.requires.is_empty();

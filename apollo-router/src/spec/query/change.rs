@@ -603,7 +603,12 @@ mod tests {
           query: Query
         }
     
+        scalar _Any
+
+        union _Entity = User
+
         type Query {
+        _entities(representations: [_Any!]!): [_Entity]!
           me: User
           customer: User
         }
@@ -619,7 +624,12 @@ mod tests {
             query: Query
         }
     
+        scalar _Any
+
+        union _Entity = User
+
         type Query {
+          _entities(representations: [_Any!]!): [_Entity]!
           me: User
         }
     
