@@ -196,7 +196,6 @@ mod test {
             res.errors.first().unwrap().message,
             "PersistedQueryNotFound"
         );
-;
         let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
         assert!(r.is_none());
 
