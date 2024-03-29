@@ -239,7 +239,9 @@ impl CachingQueryPlanner<BridgeQueryPlanner> {
         self.delegate.planner()
     }
 
-    pub(crate) fn subgraph_schemas(&self) -> Arc<HashMap<String, Valid<apollo_compiler::Schema>>> {
+    pub(crate) fn subgraph_schemas(
+        &self,
+    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
         self.delegate.subgraph_schemas()
     }
 }

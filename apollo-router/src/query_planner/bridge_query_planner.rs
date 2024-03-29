@@ -66,7 +66,7 @@ const VALIDATION_MATCH: &str = "match";
 pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlanResult>>,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Valid<apollo_compiler::Schema>>>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
@@ -240,13 +240,12 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
-        let mut subgraph_schemas: HashMap<String, Valid<apollo_compiler::Schema>> = HashMap::new();
+        let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
+            HashMap::new();
         for (name, schema_str) in planner.subgraphs().await? {
-            subgraph_schemas.insert(
-                name,
-                apollo_compiler::Schema::parse_and_validate(schema_str, "")
-                    .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?,
-            );
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            subgraph_schemas.insert(name, Arc::new(schema));
         }
         let subgraph_schemas = Arc::new(subgraph_schemas);
 
@@ -309,13 +308,12 @@ impl BridgeQueryPlanner {
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
-        let mut subgraph_schemas: HashMap<String, Valid<apollo_compiler::Schema>> = HashMap::new();
+        let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
+            HashMap::new();
         for (name, schema_str) in planner.subgraphs().await? {
-            subgraph_schemas.insert(
-                name,
-                apollo_compiler::Schema::parse_and_validate(schema_str, "")
-                    .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?,
-            );
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            subgraph_schemas.insert(name, Arc::new(schema));
         }
         let subgraph_schemas = Arc::new(subgraph_schemas);
 
@@ -347,7 +345,9 @@ impl BridgeQueryPlanner {
         self.schema.clone()
     }
 
-    pub(crate) fn subgraph_schemas(&self) -> Arc<HashMap<String, Valid<apollo_compiler::Schema>>> {
+    pub(crate) fn subgraph_schemas(
+        &self,
+    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
         self.subgraph_schemas.clone()
     }
 

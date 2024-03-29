@@ -493,7 +493,7 @@ caused by
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
-    subgraph_schemas: Arc<HashMap<String, Valid<apollo_compiler::Schema>>>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {

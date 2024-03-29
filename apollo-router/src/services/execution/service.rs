@@ -595,7 +595,7 @@ async fn consume_responses(
 #[derive(Clone)]
 pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Valid<apollo_compiler::Schema>>>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) plugins: Arc<Plugins>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
 }

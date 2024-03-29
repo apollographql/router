@@ -71,7 +71,7 @@ pub struct PluginInit<T> {
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
 }
@@ -147,7 +147,7 @@ where
     /// future router releases. In addition, Schema is not stable, and may be changed or removed in future
     /// apollo-rs releases.
     #[doc(hidden)]
-    pub fn unsupported_subgraph_schemas(&self) -> Arc<HashMap<String, Valid<Schema>>> {
+    pub fn unsupported_subgraph_schemas(&self) -> Arc<HashMap<String, Arc<Valid<Schema>>>> {
         self.subgraph_schemas.clone()
     }
 }
@@ -166,7 +166,7 @@ where
         config: T,
         supergraph_sdl: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
+        subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
@@ -187,7 +187,7 @@ where
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
+        subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -206,7 +206,7 @@ where
         config: T,
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
-        subgraph_schemas: Option<Arc<HashMap<String, Valid<Schema>>>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
         PluginInit {
