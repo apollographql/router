@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::WithErrors;
@@ -327,7 +326,7 @@ impl Query {
         let doc = Self::parse_document(&query, schema, configuration);
         Self::check_errors(&doc)?;
         let (fragments, operations, defer_stats, schema_aware_hash) =
-            Self::extract_query_information(schema, &doc.executable, &doc.ast, operation_name)?;
+            Self::extract_query_information(schema, &doc.executable, operation_name)?;
 
         Ok(Query {
             string: query,
@@ -363,7 +362,6 @@ impl Query {
     pub(crate) fn extract_query_information(
         schema: &Schema,
         document: &ExecutableDocument,
-        ast: &ast::Document,
         operation_name: Option<&str>,
     ) -> Result<(Fragments, Vec<Operation>, DeferStats, Vec<u8>), SpecError> {
         let mut defer_stats = DeferStats {

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use tower::ServiceExt;
 
