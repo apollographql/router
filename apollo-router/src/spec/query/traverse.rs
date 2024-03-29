@@ -12,7 +12,7 @@ pub(crate) fn document(
         .get_operation(operation_name)
         .map_err(|_| "invalid operation name".to_string())?;
 
-    visitor.operation("root_type TODO", operation)?;
+    visitor.operation(operation.object_type().as_str(), operation)?;
 
     for fragment in document.fragments.values() {
         visitor.fragment(fragment)?;
@@ -171,6 +171,8 @@ pub(crate) fn selection_set(
 
 #[test]
 fn test_count_fields() {
+    use apollo_compiler::validation::Valid;
+
     struct CountFields {
         schema: apollo_compiler::Schema,
         fields: u32,

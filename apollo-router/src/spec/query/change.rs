@@ -149,42 +149,12 @@ impl<'a> QueryHashVisitor<'a> {
                             .unwrap();
 
                         println!("got field set: {field_set:?}");
-                        let ast = parser
-                            .parse_ast(
-                                key.as_str().unwrap(),
-                                &std::path::Path::new("schema.graphql"),
-                            )
-                            .unwrap();
-                        /*self.selection_set(
-                            o.name.as_str(),
-                            &field_set.selection_set.selections[..],
-                        )?;
+
                         traverse::selection_set(
                             self,
                             o.name.as_str(),
                             &field_set.selection_set.selections[..],
-                        )?*/
-
-                        /*for selection in field_set.selection_set.selections {
-                            match selection {
-                                apollo_compiler::executable::Selection::Field(field) => {
-                                    self.hash_field(
-                                        o.name.as_str().to_string(),
-                                        field.name.as_str().to_string(),
-                                        &field.definition,
-                                        &field.arguments,
-                                    );
-
-                                    //traverse::field(self, field_def, node)
-                                }
-                                apollo_compiler::executable::Selection::FragmentSpread(_) => {
-                                    todo!()
-                                }
-                                apollo_compiler::executable::Selection::InlineFragment(_) => {
-                                    todo!()
-                                }
-                            }
-                        }*/
+                        )?;
                     }
                 }
             }
@@ -323,39 +293,6 @@ impl<'a> QueryHashVisitor<'a> {
             _ => Err("expected _entities field".into()),
         }
     }
-
-    /*pub(crate) fn selection_set(
-        &mut self,
-        parent_type: &str,
-        set: &[apollo_compiler::executable::Selection],
-    ) -> Result<(), BoxError> {
-        set.iter().try_for_each(|def| match def {
-            apollo_compiler::executable::Selection::Field(def) => {
-                let field_def = &self
-                    .schema
-                    .type_field(parent_type, &def.name)
-                    .map_err(|e| match e {
-                        FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
-                        FieldLookupError::NoSuchField(_, _) => {
-                            format!("no field `{}` in type `{parent_type}`", &def.name)
-                        }
-                    })?
-                    .clone();
-                self.field(parent_type, field_def, def)
-            }
-            apollo_compiler::executable::Selection::FragmentSpread(def) => {
-                self.fragment_spread(def)
-            }
-            apollo_compiler::executable::Selection::InlineFragment(def) => {
-                let fragment_type = def
-                    .type_condition
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or(parent_type);
-                self.inline_fragment(fragment_type, def)
-            }
-        })
-    }*/
 }
 
 impl<'a> Hasher for QueryHashVisitor<'a> {
