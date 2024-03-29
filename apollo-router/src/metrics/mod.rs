@@ -1007,6 +1007,39 @@ macro_rules! assert_histogram_exists {
 }
 
 #[cfg(test)]
+macro_rules! assert_histogram_not_exists {
+
+    ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty) => {
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
+        assert_metric!(!result, $name, None, None, &[]);
+    };
+}
+
+#[cfg(test)]
 #[allow(unused_macros)]
 macro_rules! assert_metrics_snapshot {
     ($file_name: expr) => {

@@ -62,6 +62,7 @@ telemetry:
             exists:
               request_header: "x-custom"
       subgraph:
+        http.client.request.duration: false
         acme.subgraph.error_reqs:
           value: unit
           type: counter

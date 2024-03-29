@@ -83,74 +83,77 @@ impl InstrumentsConfig {
                     attributes: Vec::new(),
                     selector: None,
                     selectors: match &self.router.attributes.http_server_request_duration {
-                        DefaultedStandardInstrument::Bool(_) => None,
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
                             Some(attributes.clone())
                         }
                     },
                 }),
             });
-        let http_server_request_body_size = self
-            .router
-            .attributes
-            .http_server_request_body_size
-            .is_enabled()
-            .then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.router.attributes.http_server_request_body_size {
-                    DefaultedStandardInstrument::Bool(_) => None,
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
+        let http_server_request_body_size =
+            self.router
+                .attributes
+                .http_server_request_body_size
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.router.attributes.http_server_request_body_size {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Custom(None),
+                            histogram: Some(
+                                meter.f64_histogram("http.server.request.body.size").init(),
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: Some(Arc::new(RouterSelector::RequestHeader {
+                                request_header: "content-length".to_string(),
+                                redact: None,
+                                default: None,
+                            })),
+                            selectors,
+                        }),
                     }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::Custom(None),
-                        histogram: Some(
-                            meter.f64_histogram("http.server.request.body.size").init(),
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(RouterSelector::RequestHeader {
-                            request_header: "content-length".to_string(),
-                            redact: None,
-                            default: None,
-                        })),
-                        selectors,
-                    }),
-                }
-            });
-        let http_server_response_body_size = self
-            .router
-            .attributes
-            .http_server_response_body_size
-            .is_enabled()
-            .then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.router.attributes.http_server_response_body_size {
-                    DefaultedStandardInstrument::Bool(_) => None,
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
+                });
+        let http_server_response_body_size =
+            self.router
+                .attributes
+                .http_server_response_body_size
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.router.attributes.http_server_response_body_size {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
 
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::Custom(None),
-                        histogram: Some(
-                            meter.f64_histogram("http.server.response.body.size").init(),
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(RouterSelector::ResponseHeader {
-                            response_header: "content-length".to_string(),
-                            redact: None,
-                            default: None,
-                        })),
-                        selectors,
-                    }),
-                }
-            });
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Custom(None),
+                            histogram: Some(
+                                meter.f64_histogram("http.server.response.body.size").init(),
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: Some(Arc::new(RouterSelector::ResponseHeader {
+                                response_header: "content-length".to_string(),
+                                redact: None,
+                                default: None,
+                            })),
+                            selectors,
+                        }),
+                    }
+                });
         let http_server_active_requests = self
             .router
             .attributes
@@ -164,7 +167,8 @@ impl InstrumentsConfig {
                             .init(),
                     ),
                     attrs_config: match &self.router.attributes.http_server_active_requests {
-                        DefaultedStandardInstrument::Bool(_) => Default::default(),
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => Default::default(),
                         DefaultedStandardInstrument::Extendable { attributes } => {
                             attributes.clone()
                         }
@@ -191,7 +195,9 @@ impl InstrumentsConfig {
             .then(|| {
                 let mut nb_attributes = 0;
                 let selectors = match &self.subgraph.attributes.http_client_request_duration {
-                    DefaultedStandardInstrument::Bool(_) => None,
+                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                        None
+                    }
                     DefaultedStandardInstrument::Extendable { attributes } => {
                         nb_attributes = attributes.custom.len();
                         Some(attributes.clone())
@@ -207,66 +213,68 @@ impl InstrumentsConfig {
                     }),
                 }
             });
-        let http_client_request_body_size = self
-            .subgraph
-            .attributes
-            .http_client_request_body_size
-            .is_enabled()
-            .then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.subgraph.attributes.http_client_request_body_size {
-                    DefaultedStandardInstrument::Bool(_) => None,
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
+        let http_client_request_body_size =
+            self.subgraph
+                .attributes
+                .http_client_request_body_size
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.subgraph.attributes.http_client_request_body_size {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Custom(None),
+                            histogram: Some(
+                                meter.f64_histogram("http.client.request.body.size").init(),
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
+                                subgraph_request_header: "content-length".to_string(),
+                                redact: None,
+                                default: None,
+                            })),
+                            selectors,
+                        }),
                     }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::Custom(None),
-                        histogram: Some(
-                            meter.f64_histogram("http.client.request.body.size").init(),
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
-                            subgraph_request_header: "content-length".to_string(),
-                            redact: None,
-                            default: None,
-                        })),
-                        selectors,
-                    }),
-                }
-            });
-        let http_client_response_body_size = self
-            .subgraph
-            .attributes
-            .http_client_response_body_size
-            .is_enabled()
-            .then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.subgraph.attributes.http_client_response_body_size {
-                    DefaultedStandardInstrument::Bool(_) => None,
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
+                });
+        let http_client_response_body_size =
+            self.subgraph
+                .attributes
+                .http_client_response_body_size
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.subgraph.attributes.http_client_response_body_size {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Custom(None),
+                            histogram: Some(
+                                meter.f64_histogram("http.client.response.body.size").init(),
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
+                                subgraph_response_header: "content-length".to_string(),
+                                redact: None,
+                                default: None,
+                            })),
+                            selectors,
+                        }),
                     }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::Custom(None),
-                        histogram: Some(
-                            meter.f64_histogram("http.client.response.body.size").init(),
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
-                            subgraph_response_header: "content-length".to_string(),
-                            redact: None,
-                            default: None,
-                        })),
-                        selectors,
-                    }),
-                }
-            });
+                });
         SubgraphInstruments {
             http_client_request_duration,
             http_client_request_body_size,
@@ -346,23 +354,21 @@ impl DefaultForLevel for ActiveRequestsAttributes {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, untagged)]
 enum DefaultedStandardInstrument<T> {
+    #[default]
+    Unset,
     Bool(bool),
-    Extendable { attributes: Arc<T> },
-}
-
-impl<T> Default for DefaultedStandardInstrument<T> {
-    fn default() -> Self {
-        DefaultedStandardInstrument::Bool(true)
-    }
+    Extendable {
+        attributes: Arc<T>,
+    },
 }
 
 impl<T> DefaultedStandardInstrument<T> {
     fn is_enabled(&self) -> bool {
         match self {
+            Self::Unset => false,
             Self::Bool(enabled) => *enabled,
             Self::Extendable { .. } => true,
         }
@@ -379,7 +385,18 @@ where
         kind: TelemetryDataKind,
     ) {
         match self {
-            DefaultedStandardInstrument::Bool(_enabled) => match requirement_level {
+            DefaultedStandardInstrument::Bool(enabled) if *enabled => match requirement_level {
+                DefaultAttributeRequirementLevel::None => {}
+                DefaultAttributeRequirementLevel::Required
+                | DefaultAttributeRequirementLevel::Recommended => {
+                    let mut attrs = T::default();
+                    attrs.defaults_for_levels(requirement_level, kind);
+                    *self = Self::Extendable {
+                        attributes: Arc::new(attrs),
+                    }
+                }
+            },
+            DefaultedStandardInstrument::Unset => match requirement_level {
                 DefaultAttributeRequirementLevel::None => {}
                 DefaultAttributeRequirementLevel::Required
                 | DefaultAttributeRequirementLevel::Recommended => {
@@ -393,6 +410,7 @@ where
             DefaultedStandardInstrument::Extendable { attributes } => {
                 Arc::make_mut(attributes).defaults_for_levels(requirement_level, kind);
             }
+            _ => {}
         }
     }
 }
@@ -406,21 +424,21 @@ where
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::new(),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
     fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::new(),
             Self::Extendable { attributes } => attributes.on_response(response),
         }
     }
 
     fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::new(),
             Self::Extendable { attributes } => attributes.on_error(error),
         }
     }

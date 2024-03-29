@@ -2116,7 +2116,6 @@ mod tests {
                 "http.response.status_code" = 400,
                 "acme.my_attribute" = "application/json"
             );
-            assert_histogram_exists!("http.server.request.duration", f64);
             assert_histogram_sum!("acme.request.length", 55.0);
 
             let router_req = RouterRequest::fake_builder()
@@ -2341,6 +2340,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_custom_subgraph_instruments_level() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/custom_instruments_level.router.yaml"
+            ))
+            .await;
+
+            let mut mock_bad_request_service = MockSubgraphService::new();
+            mock_bad_request_service.expect_call().times(2).returning(
+                move |req: SubgraphRequest| {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
+                    let errors = vec![
+                        graphql::Error::builder()
+                            .message("nope".to_string())
+                            .extension_code("NOPE")
+                            .build(),
+                        graphql::Error::builder()
+                            .message("nok".to_string())
+                            .extension_code("NOK")
+                            .build(),
+                    ];
+                    Ok(SubgraphResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .headers(headers)
+                        .errors(errors)
+                        .build())
+                },
+            );
+            let mut bad_request_subgraph_service =
+                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+            let sub_req = http::Request::builder()
+                .method("POST")
+                .uri("http://test")
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .body(graphql::Request::builder().query("{ me {name} }").build())
+                .unwrap();
+            let subgraph_req = SubgraphRequest::fake_builder()
+                .subgraph_request(sub_req)
+                .subgraph_name("test".to_string())
+                .build();
+
+            let _router_response = bad_request_subgraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(subgraph_req)
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "acme.subgraph.error_reqs",
+                1.0,
+                graphql_error = opentelemetry::Value::Array(opentelemetry::Array::String(vec![
+                    "nope".into(),
+                    "nok".into()
+                ])),
+                subgraph.name = "test"
+            );
+            let sub_req = http::Request::builder()
+                .method("POST")
+                .uri("http://test")
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .body(graphql::Request::builder().query("{ me {name} }").build())
+                .unwrap();
+            let subgraph_req = SubgraphRequest::fake_builder()
+                .subgraph_request(sub_req)
+                .subgraph_name("test".to_string())
+                .build();
+
+            let _router_response = bad_request_subgraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(subgraph_req)
+                .await
+                .unwrap();
+            assert_counter!(
+                "acme.subgraph.error_reqs",
+                2.0,
+                graphql_error = opentelemetry::Value::Array(opentelemetry::Array::String(vec![
+                    "nope".into(),
+                    "nok".into()
+                ])),
+                subgraph.name = "test"
+            );
+            assert_histogram_not_exists!("http.client.request.duration", f64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
     async fn test_custom_subgraph_instruments() {
         async {
             let plugin =
@@ -2435,7 +2536,6 @@ mod tests {
                 ])),
                 subgraph.name = "test"
             );
-            assert_histogram_exists!("http.client.request.duration", f64);
         }
         .with_metrics()
         .await;
