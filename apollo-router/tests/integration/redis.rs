@@ -165,7 +165,7 @@ mod test {
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
         client
-            .del::<String, _>(&format!("apq\x00{query_hash}"))
+            .del::<String, _>(&format!("apq:{query_hash}"))
             .await
             .unwrap();
 
@@ -196,8 +196,8 @@ mod test {
             res.errors.first().unwrap().message,
             "PersistedQueryNotFound"
         );
-
-        let r: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
+;
+        let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
         assert!(r.is_none());
 
         // Now we register the query
@@ -222,7 +222,7 @@ mod test {
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
 
-        let s: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
+        let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
         insta::assert_display_snapshot!(s.unwrap());
 
         // we start a new router with the same config
