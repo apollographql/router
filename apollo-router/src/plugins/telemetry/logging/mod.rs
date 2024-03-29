@@ -2,7 +2,6 @@
 #[cfg(test)]
 mod test {
     use std::any::TypeId;
-    use std::sync::Arc;
 
     use tower::BoxError;
     use tower::ServiceBuilder;
@@ -11,8 +10,8 @@ mod test {
 
     use crate::assert_snapshot_subscriber;
     use crate::graphql;
+    use crate::plugin::DynPlugin;
     use crate::plugin::Plugin;
-    use crate::plugin::PluginInit;
     use crate::plugins::telemetry::Telemetry;
     use crate::services::router;
     use crate::services::subgraph;
@@ -151,39 +150,37 @@ mod test {
     // For now let's try and increase the coverage of the telemetry plugin using this and see how it goes.
 
     struct PluginTestHarness<T: Plugin> {
-        plugin: T,
+        plugin: Box<dyn DynPlugin>,
+        phantom: std::marker::PhantomData<T>,
     }
     #[buildstructor::buildstructor]
     impl<T: Plugin> PluginTestHarness<T> {
         #[builder]
-        async fn new(yaml: Option<&'static str>, supergraph: Option<&'static str>) -> Self {
+        async fn new(yaml: Option<&'static str>) -> Self {
             let factory = crate::plugin::plugins()
                 .find(|factory| factory.type_id == TypeId::of::<T>())
                 .expect("plugin not registered");
             let name = &factory.name.replace("apollo.", "");
             let config = yaml
-                .map(|yaml| serde_yaml::from_str::<serde_yaml::Value>(yaml).unwrap())
+                .map(|yaml| serde_yaml::from_str::<serde_json::Value>(yaml).unwrap())
                 .map(|mut config| {
                     config
-                        .as_mapping_mut()
+                        .as_object_mut()
                         .expect("invalid yaml")
-                        .remove(&serde_yaml::Value::String(name.to_string()))
+                        .remove(name)
                         .expect("no config for plugin")
                 })
-                .unwrap_or_else(|| serde_yaml::Value::Mapping(Default::default()));
+                .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
 
-            let supergraph_sdl = supergraph
-                .map(|s| Arc::new(s.to_string()))
-                .unwrap_or_default();
-            let plugin = T::new(PluginInit {
-                config: serde_yaml::from_value(config).expect("config was invalid"),
-                supergraph_sdl,
-                notify: Default::default(),
-            })
-            .await
-            .expect("failed to initialize plugin");
+            let plugin = factory
+                .create_instance_without_schema(&config)
+                .await
+                .expect("failed to create plugin");
 
-            Self { plugin }
+            Self {
+                plugin,
+                phantom: Default::default(),
+            }
         }
 
         #[allow(dead_code)]
