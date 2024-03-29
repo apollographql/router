@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/plugins/progressive_override/tests.rs
-assertion_line: 262
 expression: query_plan
 ---
 {
@@ -24,7 +23,7 @@ expression: query_plan
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
-              "schemaAwareHash": "3560295fe31a2e33da9dba4d775a6fd64727cb953cf790575bc83c27a486f8d2",
+              "schemaAwareHash": "8f445761c0bcdda90b8da35ccd13fd98e474514f3efc071bd2c39495b5af94e5",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -62,7 +61,7 @@ expression: query_plan
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
-                "schemaAwareHash": "0eb7c697f1b6125db1db0b099e0707e3a2984e4efb4aaee1d3bde8430b34bc6f",
+                "schemaAwareHash": "5cd9630c503efaafc18891c5d4b7e270a9663a760c50bdb645f0adeb5da7952c",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
