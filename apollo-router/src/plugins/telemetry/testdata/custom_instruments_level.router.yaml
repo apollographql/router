@@ -4,12 +4,12 @@ telemetry:
     client_version_header: version_header
   instrumentation:
     instruments:
-      default_requirement_level: none
+      default_requirement_level: recommended
       router:
         http.server.request.body.size:
           attributes:
             # Standard attributes
-            http.response.status_code: true
+            http.request.method: false
             "acme.my_attribute":
               response_header: "content-type"
         acme.request.duration: # The name of your custom instrument/metric

@@ -45,7 +45,7 @@ Standard instruments can be customized by attaching or removing attributes.
 telemetry:
   instrumentation:
     instruments:
-      default_attribute_requirement_level: required
+      default_requirement_level: required
       router:
         http.server.active_requests: 
           attributes:
@@ -118,9 +118,9 @@ Some particular guidelines to note:
 
 ### Instrument configuration
 
-#### `default_attribute_requirement_level`
+#### `default_requirement_level`
 
-The `default_attribute_requirement_level` option sets the default attributes to attach to standard instruments, as defined by [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/otel/common/attribute-requirement-level/).
+The `default_requirement_level` option sets the default attributes to attach to default standard instruments, as defined by [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/otel/common/attribute-requirement-level/).
 
 Valid values:
 
@@ -132,7 +132,7 @@ telemetry:
   instrumentation:
     instruments:
       # Set the default requirement level
-      default_attribute_requirement_level: required #highlight-line
+      default_requirement_level: required #highlight-line
 ```
 
 Attributes can be configured individually, so that `required` attributes can be overridden or disabled. For example, `http.response.status_code` is set individually to override the standard value:
@@ -142,7 +142,7 @@ telemetry:
   instrumentation:
     instruments:
       # Set the default requirement level
-      default_attribute_requirement_level: required
+      default_requirement_level: required
       router:
         # Standard metrics
         http.server.request.body.size:
@@ -342,7 +342,7 @@ telemetry:
 | `<instrument-name>`                   |                                                                              |            | The name of the custom instrument.           |
 | `attributes`                          | [standard attributes](./standard-attributes) or [selectors](./selectors)     |            | The attributes of the custom instrument.     |
 | `condition`                           | [conditions](./conditions)                                                   |            | The a condition for mutating the instrument. |
-| `default_attribute_requirement_level` | `required`\|`recommended`                                                    | `required` | The default attribute requirement level.     |
+| `default_requirement_level` | `required`\|`recommended`                                                    | `required` | The default attribute requirement level.     |
 | `type`                                | `counter`\|`histogram`                                                       |            | The name of the custom instrument.           |
 | `unit`                                |                                                                              |            | A unit name, for example `By` or `{request}`.|
 | `description`                         |                                                                              |            | The description of the custom instrument.    |

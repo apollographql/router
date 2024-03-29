@@ -2148,6 +2148,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_custom_router_instruments_with_requirement_level() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/custom_instruments_level.router.yaml"
+            ))
+            .await;
+
+            let mut mock_bad_request_service = MockRouterService::new();
+            mock_bad_request_service
+                .expect_call()
+                .times(2)
+                .returning(move |req: RouterRequest| {
+                    Ok(RouterResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .build()
+                        .unwrap())
+                });
+            let mut bad_request_router_service =
+                plugin.router_service(BoxService::new(mock_bad_request_service));
+            let router_req = RouterRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql");
+            let _router_response = bad_request_router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            assert_counter!("acme.graphql.custom_req", 1.0);
+            assert_histogram_sum!(
+                "http.server.request.body.size",
+                55.0,
+                "acme.my_attribute" = "application/json",
+                "error.type" = "Bad Request",
+                "http.response.status_code" = 400,
+                "network.protocol.version" = "HTTP/1.1"
+            );
+            assert_histogram_exists!(
+                "http.server.request.duration",
+                f64,
+                "error.type" = "Bad Request",
+                "http.response.status_code" = 400,
+                "network.protocol.version" = "HTTP/1.1",
+                "http.request.method" = "GET"
+            );
+            assert_histogram_sum!("acme.request.length", 55.0);
+
+            let router_req = RouterRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("custom-length", "5")
+                .header("content-length", "5")
+                .header("content-type", "application/graphql");
+            let _router_response = bad_request_router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+            assert_counter!("acme.graphql.custom_req", 1.0);
+            assert_histogram_sum!("acme.request.length", 60.0);
+            assert_histogram_sum!(
+                "http.server.request.body.size",
+                60.0,
+                "http.response.status_code" = 400,
+                "acme.my_attribute" = "application/json",
+                "error.type" = "Bad Request",
+                "http.response.status_code" = 400,
+                "network.protocol.version" = "HTTP/1.1"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
     async fn test_custom_supergraph_instruments() {
         async {
             let plugin =

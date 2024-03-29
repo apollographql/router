@@ -44,6 +44,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
@@ -101,9 +102,13 @@ pub(crate) struct RouterAttributes {
 }
 
 impl DefaultForLevel for RouterAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.common.defaults_for_level(requirement_level);
-        self.server.defaults_for_level(requirement_level);
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.common.defaults_for_level(requirement_level, kind);
+        self.server.defaults_for_level(requirement_level, kind);
     }
 }
 
@@ -134,7 +139,11 @@ pub(crate) struct SupergraphAttributes {
 }
 
 impl DefaultForLevel for SupergraphAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {}
             DefaultAttributeRequirementLevel::Recommended => {
@@ -185,7 +194,11 @@ pub(crate) struct SubgraphAttributes {
 }
 
 impl DefaultForLevel for SubgraphAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {
                 if self.subgraph_name.is_none() {
@@ -300,7 +313,11 @@ pub(crate) struct HttpCommonAttributes {
 }
 
 impl DefaultForLevel for HttpCommonAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {
                 if self.error_type.is_none() {
@@ -315,17 +332,26 @@ impl DefaultForLevel for HttpCommonAttributes {
             }
             DefaultAttributeRequirementLevel::Recommended => {
                 // Recommended
-                if self.http_request_body_size.is_none() {
-                    self.http_request_body_size = Some(true);
-                }
-                if self.http_response_body_size.is_none() {
-                    self.http_response_body_size = Some(true);
-                }
-                if self.network_protocol_version.is_none() {
-                    self.network_protocol_version = Some(true);
-                }
-                if self.network_type.is_none() {
-                    self.network_type = Some(true);
+                match kind {
+                    TelemetryDataKind::Traces => {
+                        if self.http_request_body_size.is_none() {
+                            self.http_request_body_size = Some(true);
+                        }
+                        if self.http_response_body_size.is_none() {
+                            self.http_response_body_size = Some(true);
+                        }
+                        if self.network_protocol_version.is_none() {
+                            self.network_protocol_version = Some(true);
+                        }
+                        if self.network_type.is_none() {
+                            self.network_type = Some(true);
+                        }
+                    }
+                    TelemetryDataKind::Metrics => {
+                        if self.network_protocol_version.is_none() {
+                            self.network_protocol_version = Some(true);
+                        }
+                    }
                 }
             }
             DefaultAttributeRequirementLevel::None => {}
@@ -429,102 +455,57 @@ pub(crate) struct HttpServerAttributes {
 }
 
 impl DefaultForLevel for HttpServerAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
         match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {
-                if self.url_scheme.is_none() {
-                    self.url_scheme = Some(true);
-                }
-                if self.url_path.is_none() {
-                    self.url_path = Some(true);
-                }
-                if self.url_query.is_none() {
-                    self.url_query = Some(true);
-                }
+            DefaultAttributeRequirementLevel::Required => match kind {
+                TelemetryDataKind::Traces => {
+                    if self.url_scheme.is_none() {
+                        self.url_scheme = Some(true);
+                    }
+                    if self.url_path.is_none() {
+                        self.url_path = Some(true);
+                    }
+                    if self.url_query.is_none() {
+                        self.url_query = Some(true);
+                    }
 
-                if self.http_route.is_none() {
-                    self.http_route = Some(true);
+                    if self.http_route.is_none() {
+                        self.http_route = Some(true);
+                    }
                 }
-            }
-            DefaultAttributeRequirementLevel::Recommended => {
-                if self.client_address.is_none() {
-                    self.client_address = Some(true);
+                TelemetryDataKind::Metrics => {
+                    if self.server_address.is_none() {
+                        self.server_address = Some(true);
+                    }
+                    if self.server_port.is_none() && self.server_address.is_some() {
+                        self.server_port = Some(true);
+                    }
                 }
-                if self.server_address.is_none() {
-                    self.server_address = Some(true);
+            },
+            DefaultAttributeRequirementLevel::Recommended => match kind {
+                TelemetryDataKind::Traces => {
+                    if self.client_address.is_none() {
+                        self.client_address = Some(true);
+                    }
+                    if self.server_address.is_none() {
+                        self.server_address = Some(true);
+                    }
+                    if self.server_port.is_none() && self.server_address.is_some() {
+                        self.server_port = Some(true);
+                    }
+                    if self.user_agent_original.is_none() {
+                        self.user_agent_original = Some(true);
+                    }
                 }
-                if self.server_port.is_none() && self.server_address.is_some() {
-                    self.server_port = Some(true);
-                }
-                if self.user_agent_original.is_none() {
-                    self.user_agent_original = Some(true);
-                }
-            }
+                TelemetryDataKind::Metrics => {}
+            },
             DefaultAttributeRequirementLevel::None => {}
         }
     }
-}
-
-/// Attributes for HTTP clients
-/// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct HttpClientAttributes {
-    /// The ordinal number of request resending attempt.
-    /// Examples:
-    /// *
-    /// Requirement level: Recommended: if and only if request was retried.
-    #[serde(rename = "http.resend_count")]
-    http_resend_count: Option<bool>,
-
-    /// Peer address of the network connection - IP address or Unix domain socket name.
-    /// Examples:
-    /// * 10.1.2.80
-    /// * /tmp/my.sock
-    /// Requirement level: Recommended: If different than server.address.
-    #[serde(rename = "network.peer.address")]
-    network_peer_address: Option<bool>,
-
-    /// Peer port number of the network connection.
-    /// Examples:
-    /// * 65123
-    /// Requirement level: Recommended: If network.peer.address is set.
-    #[serde(rename = "network.peer.port")]
-    network_peer_port: Option<bool>,
-
-    /// Host identifier of the “URI origin” HTTP request is sent to.
-    /// Examples:
-    /// * example.com
-    /// * 10.1.2.80
-    /// * /tmp/my.sock
-    /// Requirement level: Required
-    #[serde(rename = "server.address")]
-    server_address: Option<bool>,
-
-    /// Port identifier of the “URI origin” HTTP request is sent to.
-    /// Examples:
-    /// * 80
-    /// * 8080
-    /// * 433
-    /// Requirement level: Conditionally Required
-    #[serde(rename = "server.port")]
-    server_port: Option<bool>,
-
-    /// Absolute URL describing a network resource according to RFC3986
-    /// Examples:
-    /// * https://www.foo.bar/search?q=OpenTelemetry#SemConv;
-    /// * localhost
-    /// Requirement level: Required
-    #[serde(rename = "url.full")]
-    url_full: Option<bool>,
-
-    /// Value of the HTTP User-Agent header sent by the client.
-    /// Examples:
-    /// * CERN-LineMode/2.15
-    /// * libwww/2.17b3
-    /// Requirement level: Opt-In
-    #[serde(rename = "user_agent.original")]
-    user_agent_original: Option<bool>,
 }
 
 impl Selectors for RouterAttributes {

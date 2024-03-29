@@ -10,6 +10,7 @@ use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::span_factory::SpanMode;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -38,12 +39,18 @@ pub(crate) struct Spans {
 impl Spans {
     /// Update the defaults for spans configuration regarding the `default_attribute_requirement_level`
     pub(crate) fn update_defaults(&mut self) {
-        self.router
-            .defaults_for_levels(self.default_attribute_requirement_level);
-        self.supergraph
-            .defaults_for_levels(self.default_attribute_requirement_level);
-        self.subgraph
-            .defaults_for_levels(self.default_attribute_requirement_level);
+        self.router.defaults_for_levels(
+            self.default_attribute_requirement_level,
+            TelemetryDataKind::Traces,
+        );
+        self.supergraph.defaults_for_levels(
+            self.default_attribute_requirement_level,
+            TelemetryDataKind::Traces,
+        );
+        self.subgraph.defaults_for_levels(
+            self.default_attribute_requirement_level,
+            TelemetryDataKind::Traces,
+        );
     }
 }
 
@@ -55,8 +62,12 @@ pub(crate) struct RouterSpans {
 }
 
 impl DefaultForLevel for RouterSpans {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.attributes.defaults_for_level(requirement_level);
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.attributes.defaults_for_level(requirement_level, kind);
     }
 }
 
@@ -67,8 +78,12 @@ pub(crate) struct SupergraphSpans {
     pub(crate) attributes: Extendable<SupergraphAttributes, SupergraphSelector>,
 }
 impl DefaultForLevel for SupergraphSpans {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.attributes.defaults_for_level(requirement_level);
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.attributes.defaults_for_level(requirement_level, kind);
     }
 }
 
@@ -80,8 +95,12 @@ pub(crate) struct SubgraphSpans {
 }
 
 impl DefaultForLevel for SubgraphSpans {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.attributes.defaults_for_level(requirement_level);
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.attributes.defaults_for_level(requirement_level, kind);
     }
 }
 
@@ -105,6 +124,7 @@ mod test {
     use crate::plugins::telemetry::config_new::spans::SupergraphSpans;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
+    use crate::plugins::telemetry::otlp::TelemetryDataKind;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -112,7 +132,10 @@ mod test {
     #[test]
     fn test_router_spans_level_none() {
         let mut spans = RouterSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::None);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::None,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &router::Request::fake_builder()
                 .method(http::Method::POST)
@@ -135,7 +158,10 @@ mod test {
     #[test]
     fn test_router_spans_level_required() {
         let mut spans = RouterSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Required);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::Required,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &router::Request::fake_builder()
                 .method(http::Method::POST)
@@ -158,7 +184,10 @@ mod test {
     #[test]
     fn test_router_spans_level_recommended() {
         let mut spans = RouterSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Recommended);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::Recommended,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &router::Request::fake_builder()
                 .method(http::Method::POST)
@@ -181,7 +210,10 @@ mod test {
     #[test]
     fn test_supergraph_spans_level_none() {
         let mut spans = SupergraphSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::None);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::None,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &supergraph::Request::fake_builder()
                 .query("query { __typename }")
@@ -194,7 +226,10 @@ mod test {
     #[test]
     fn test_supergraph_spans_level_required() {
         let mut spans = SupergraphSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Required);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::Required,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &supergraph::Request::fake_builder()
                 .query("query { __typename }")
@@ -207,7 +242,10 @@ mod test {
     #[test]
     fn test_supergraph_spans_level_recommended() {
         let mut spans = SupergraphSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Recommended);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::Recommended,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &supergraph::Request::fake_builder()
                 .query("query { __typename }")
@@ -220,7 +258,10 @@ mod test {
     #[test]
     fn test_subgraph_spans_level_none() {
         let mut spans = SubgraphSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::None);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::None,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &subgraph::Request::fake_builder()
                 .subgraph_request(
@@ -241,7 +282,10 @@ mod test {
     #[test]
     fn test_subgraph_spans_level_required() {
         let mut spans = SubgraphSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Required);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::Required,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &subgraph::Request::fake_builder()
                 .subgraph_request(
@@ -262,7 +306,10 @@ mod test {
     #[test]
     fn test_subgraph_spans_level_recommended() {
         let mut spans = SubgraphSpans::default();
-        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Recommended);
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::Recommended,
+            TelemetryDataKind::Traces,
+        );
         let values = spans.attributes.on_request(
             &subgraph::Request::fake_builder()
                 .subgraph_request(

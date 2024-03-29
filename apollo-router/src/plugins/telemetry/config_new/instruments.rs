@@ -31,6 +31,7 @@ use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -42,8 +43,8 @@ const METER_NAME: &str = "apollo/router";
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct InstrumentsConfig {
-    /// The attributes to include by default in instruments based on their level as specified in the otel semantic conventions and Apollo documentation.
-    pub(crate) default_attribute_requirement_level: DefaultAttributeRequirementLevel,
+    /// The attributes and instruments to include by default in instruments based on their level as specified in the otel semantic conventions and Apollo documentation.
+    pub(crate) default_requirement_level: DefaultAttributeRequirementLevel,
 
     /// Router service instruments. For more information see documentation on Router lifecycle.
     pub(crate) router:
@@ -61,11 +62,11 @@ impl InstrumentsConfig {
     pub(crate) fn update_defaults(&mut self) {
         self.router
             .attributes
-            .defaults_for_levels(self.default_attribute_requirement_level);
+            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.supergraph
-            .defaults_for_levels(self.default_attribute_requirement_level);
+            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.subgraph
-            .defaults_for_levels(self.default_attribute_requirement_level);
+            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 
     pub(crate) fn new_router_instruments(&self) -> RouterInstruments {
@@ -299,21 +300,19 @@ pub(crate) struct RouterInstrumentsConfig {
 }
 
 impl DefaultForLevel for RouterInstrumentsConfig {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {
-                if !self.http_server_request_duration.is_enabled() {
-                    self.http_server_request_duration = DefaultedStandardInstrument::Bool(true);
-                }
-            }
-            DefaultAttributeRequirementLevel::Recommended => {
-                // Recommended
-                if !self.http_server_request_duration.is_enabled() {
-                    self.http_server_request_duration = DefaultedStandardInstrument::Bool(true);
-                }
-            }
-            DefaultAttributeRequirementLevel::None => {}
-        }
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.http_server_request_duration
+            .defaults_for_levels(requirement_level, kind);
+        self.http_server_active_requests
+            .defaults_for_levels(requirement_level, kind);
+        self.http_server_request_body_size
+            .defaults_for_levels(requirement_level, kind);
+        self.http_server_response_body_size
+            .defaults_for_levels(requirement_level, kind);
     }
 }
 
@@ -328,6 +327,23 @@ pub(crate) struct ActiveRequestsAttributes {
     server_port: bool,
     #[serde(rename = "url.scheme")]
     url_scheme: bool,
+}
+
+impl DefaultForLevel for ActiveRequestsAttributes {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                self.http_request_method = true;
+                self.url_scheme = true;
+            }
+            DefaultAttributeRequirementLevel::Recommended
+            | DefaultAttributeRequirementLevel::None => {}
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -349,6 +365,34 @@ impl<T> DefaultedStandardInstrument<T> {
         match self {
             Self::Bool(enabled) => *enabled,
             Self::Extendable { .. } => true,
+        }
+    }
+}
+
+impl<T> DefaultForLevel for DefaultedStandardInstrument<T>
+where
+    T: DefaultForLevel + Clone + Default,
+{
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        match self {
+            DefaultedStandardInstrument::Bool(_enabled) => match requirement_level {
+                DefaultAttributeRequirementLevel::None => {}
+                DefaultAttributeRequirementLevel::Required
+                | DefaultAttributeRequirementLevel::Recommended => {
+                    let mut attrs = T::default();
+                    attrs.defaults_for_levels(requirement_level, kind);
+                    *self = Self::Extendable {
+                        attributes: Arc::new(attrs),
+                    }
+                }
+            },
+            DefaultedStandardInstrument::Extendable { attributes } => {
+                Arc::make_mut(attributes).defaults_for_levels(requirement_level, kind);
+            }
         }
     }
 }
@@ -388,7 +432,12 @@ where
 pub(crate) struct SupergraphInstruments {}
 
 impl DefaultForLevel for SupergraphInstruments {
-    fn defaults_for_level(&mut self, _requirement_level: DefaultAttributeRequirementLevel) {}
+    fn defaults_for_level(
+        &mut self,
+        _requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
+    }
 }
 
 #[allow(dead_code)]
@@ -412,18 +461,17 @@ pub(crate) struct SubgraphInstrumentsConfig {
 }
 
 impl DefaultForLevel for SubgraphInstrumentsConfig {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {
-                if !self.http_client_request_duration.is_enabled() {
-                    self.http_client_request_duration = DefaultedStandardInstrument::Bool(true);
-                }
-            }
-            DefaultAttributeRequirementLevel::Recommended => {
-                // Recommended
-            }
-            DefaultAttributeRequirementLevel::None => {}
-        }
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.http_client_request_duration
+            .defaults_for_level(requirement_level, kind);
+        self.http_client_request_body_size
+            .defaults_for_level(requirement_level, kind);
+        self.http_client_response_body_size
+            .defaults_for_level(requirement_level, kind);
     }
 }
 

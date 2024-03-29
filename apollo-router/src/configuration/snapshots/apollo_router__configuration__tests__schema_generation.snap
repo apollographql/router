@@ -6677,8 +6677,8 @@ expression: "&schema"
               "description": "Instrument configuration",
               "type": "object",
               "properties": {
-                "default_attribute_requirement_level": {
-                  "description": "The attributes to include by default in instruments based on their level as specified in the otel semantic conventions and Apollo documentation.",
+                "default_requirement_level": {
+                  "description": "The attributes and instruments to include by default in instruments based on their level as specified in the otel semantic conventions and Apollo documentation.",
                   "oneOf": [
                     {
                       "description": "No default attributes set on spans, you have to set it one by one in the configuration to enable some attributes",

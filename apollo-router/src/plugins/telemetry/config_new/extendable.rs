@@ -22,6 +22,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
@@ -38,8 +39,12 @@ impl<Att, Ext> DefaultForLevel for Extendable<Att, Ext>
 where
     Att: DefaultForLevel + Default,
 {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.attributes.defaults_for_level(requirement_level);
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.attributes.defaults_for_level(requirement_level, kind);
     }
 }
 
