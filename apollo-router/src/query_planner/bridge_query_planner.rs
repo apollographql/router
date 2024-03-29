@@ -371,7 +371,7 @@ impl BridgeQueryPlanner {
         };
 
         let (fragments, operations, defer_stats, schema_aware_hash) =
-            Query::extract_query_information(&self.schema, executable, &doc.ast, operation_name)?;
+            Query::extract_query_information(&self.schema, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
