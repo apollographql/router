@@ -6711,6 +6711,9 @@ expression: "&schema"
                       "description": "Counter of active requests",
                       "anyOf": [
                         {
+                          "type": "null"
+                        },
+                        {
                           "type": "boolean"
                         },
                         {
@@ -6749,6 +6752,9 @@ expression: "&schema"
                     "http.server.request.body.size": {
                       "description": "Histogram of server request body size",
                       "anyOf": [
+                        {
+                          "type": "null"
+                        },
                         {
                           "type": "boolean"
                         },
@@ -7301,6 +7307,9 @@ expression: "&schema"
                       "description": "Histogram of server request duration",
                       "anyOf": [
                         {
+                          "type": "null"
+                        },
+                        {
                           "type": "boolean"
                         },
                         {
@@ -7851,6 +7860,9 @@ expression: "&schema"
                     "http.server.response.body.size": {
                       "description": "Histogram of server response body size",
                       "anyOf": [
+                        {
+                          "type": "null"
+                        },
                         {
                           "type": "boolean"
                         },
@@ -10315,6 +10327,9 @@ expression: "&schema"
                       "description": "Histogram of client request body size",
                       "anyOf": [
                         {
+                          "type": "null"
+                        },
+                        {
                           "type": "boolean"
                         },
                         {
@@ -11205,6 +11220,9 @@ expression: "&schema"
                       "description": "Histogram of client request duration",
                       "anyOf": [
                         {
+                          "type": "null"
+                        },
+                        {
                           "type": "boolean"
                         },
                         {
@@ -12094,6 +12112,9 @@ expression: "&schema"
                     "http.client.response.body.size": {
                       "description": "Histogram of client response body size",
                       "anyOf": [
+                        {
+                          "type": "null"
+                        },
                         {
                           "type": "boolean"
                         },
