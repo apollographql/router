@@ -1,6 +1,7 @@
 //! Demand control plugin.
 mod basic_cost_calculator;
 mod directives;
+mod schema_aware_response;
 
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::validation::Valid;
@@ -46,7 +47,11 @@ trait CostCalculator {
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError>;
 
-    fn actual(response: &graphql::Response) -> Result<f64, DemandControlError>;
+    fn actual(
+        response: &graphql::Response,
+        query: &ExecutableDocument,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError>;
 }
 
 /// Demand control configuration
@@ -64,6 +69,8 @@ pub(crate) struct DemandControlConfig {
 pub(crate) enum DemandControlError {
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
+    /// The response body could not be properly matched with its query's structure: {0}
+    ResponseTypingFailure(String),
 }
 
 #[derive(Clone, Debug)]

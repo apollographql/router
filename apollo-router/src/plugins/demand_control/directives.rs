@@ -8,6 +8,28 @@ use tower::BoxError;
 
 use super::DemandControlError;
 
+pub(super) struct CostDirective {
+    pub(super) weight: f64,
+}
+
+impl CostDirective {
+    pub(super) fn from_field(field: &Field) -> Result<Option<Self>, DemandControlError> {
+        let directive = field
+            .definition
+            .directives
+            .get("cost")
+            .and_then(|cost| cost.argument_by_name("weight"))
+            .and_then(|arg| arg.to_f64())
+            .map(|weight| Self { weight });
+
+        Ok(directive)
+    }
+
+    pub(super) fn weight(&self) -> f64 {
+        self.weight
+    }
+}
+
 pub(super) struct IncludeDirective {
     pub(super) is_included: bool,
 }

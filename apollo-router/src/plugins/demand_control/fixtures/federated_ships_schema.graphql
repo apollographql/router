@@ -5,6 +5,14 @@ schema
   query: Query
 }
 
+directive @cost(weight: Float!) on 
+  | ARGUMENT_DEFINITION
+  | ENUM
+  | FIELD_DEFINITION
+  | INPUT_FIELD_DEFINITION
+  | OBJECT
+  | SCALAR
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
@@ -60,7 +68,7 @@ type Ship
   @join__type(graph: VEHICLES, key: "id")
 {
   id: ID!
-  name: String!
+  name: String! @cost(weight: 2.0)
   owner: User!
   registrationFee: Float @join__field(graph: VEHICLES, requires: "owner { addresses { zipCode } }")
 }

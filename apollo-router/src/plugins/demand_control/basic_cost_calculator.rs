@@ -8,14 +8,25 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 
+use super::directives::CostDirective;
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
+use super::schema_aware_response::Root;
+use super::schema_aware_response::TypedArray;
+use super::schema_aware_response::TypedObject;
+use super::schema_aware_response::WithField;
 use super::CostCalculator;
 use super::DemandControlError;
 use crate::graphql::Response;
+use crate::plugins::demand_control::schema_aware_response::TypedValue;
+use crate::query_planner::DeferredNode;
+use crate::query_planner::PlanNode;
+use crate::query_planner::Primary;
+use crate::query_planner::QueryPlan;
 
 pub(crate) struct BasicCostCalculator {}
 
@@ -156,24 +167,91 @@ impl BasicCostCalculator {
         false
     }
 
-    fn score_json(value: &Value) -> Result<f64, DemandControlError> {
-        // TODO: The cost directive will need to be accounted for in here eventually
+    fn score_json(
+        value: &TypedValue,
+        query: &ExecutableDocument,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError> {
+        // It's fine to pass None as parent_type_name in all of these because that's
+        // used for @requires, and that doesn't apply when counting the actual values.
         match value {
-            Value::Null => Ok(0.0),
-            Value::Bool(_) => Ok(0.0),
-            Value::Number(_) => Ok(0.0),
-            Value::String(_) => Ok(0.0),
-            Value::Array(values) => Self::summed_score_of_values(values),
-            Value::Object(fields) => Ok(1.0 + Self::summed_score_of_values(fields.values())?),
+            // TODO(tninesling): This is a shitty experience
+            TypedValue::Null => Ok(0.0),
+            // BOOL
+            TypedValue::Bool(WithField { field, value: _ }) => {
+                let cost_directive = CostDirective::from_field(field)?;
+                let cost = if let Some(CostDirective { weight }) = cost_directive {
+                    weight
+                } else {
+                    0.0
+                };
+                println!("Bool field {}, cost: {}", field.name, cost);
+                Ok(cost)
+            }
+            // NUMBER
+            TypedValue::Number(WithField { field, value: _ }) => {
+                let cost_directive = CostDirective::from_field(field)?;
+                let cost = if let Some(CostDirective { weight }) = cost_directive {
+                    weight
+                } else {
+                    0.0
+                };
+                println!("Number field {}, cost: {}", field.name, cost);
+                Ok(cost)
+            }
+            // STRING
+            TypedValue::String(WithField { field, value: _ }) => {
+                let cost_directive = CostDirective::from_field(field)?;
+                let cost = if let Some(CostDirective { weight }) = cost_directive {
+                    weight
+                } else {
+                    0.0
+                };
+                println!("String field {}, cost: {}", field.name, cost);
+                Ok(cost)
+            }
+            // ARRAY
+            TypedValue::Array(TypedArray { field, items }) => {
+                let cost_directive = CostDirective::from_field(field);
+                let mut cost = 0.0;
+                if let Ok(Some(CostDirective { weight })) = cost_directive {
+                    cost = weight;
+                }
+                cost += Self::summed_score_of_values(items, query, schema)?;
+                println!("Array field {}, cost: {}", field.name, cost);
+
+                Ok(cost)
+            }
+            // OBJECT
+            TypedValue::Object(TypedObject { field, children }) => {
+                let cost_directive = CostDirective::from_field(field);
+                let mut cost = 1.0;
+                if let Ok(Some(CostDirective { weight })) = cost_directive {
+                    cost = weight;
+                }
+                cost += Self::summed_score_of_values(children.values(), query, schema)?;
+                println!("Object field {}, cost: {}", field.name, cost);
+
+                Ok(cost)
+            }
+            // TOP-LEVEL QUERY
+            TypedValue::Query(Root { children }) => {
+                let cost = Self::summed_score_of_values(children.values(), query, schema)?;
+                println!("Response root, cost {}", cost);
+
+                Ok(cost)
+            }
         }
     }
 
-    fn summed_score_of_values<'a, I: IntoIterator<Item = &'a Value>>(
+    fn summed_score_of_values<'a, I: IntoIterator<Item = &'a TypedValue<'a>>>(
         values: I,
+        query: &ExecutableDocument,
+        schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         let mut score = 0.0;
         for value in values {
-            score += Self::score_json(value)?;
+            score += Self::score_json(value, query, schema)?;
         }
         Ok(score)
     }
@@ -194,24 +272,26 @@ impl CostCalculator for BasicCostCalculator {
         Ok(cost)
     }
 
-    fn actual(response: &Response) -> Result<f64, DemandControlError> {
-        match &response.data {
-            // The top-level query shouldn't count toward the cost, so if we see an object here, score it by
-            // its fields without adding the extra point for the object structure
-            Some(Value::Object(fields)) => Self::summed_score_of_values(fields.values()),
-            Some(value) => Self::score_json(value),
-            None => Ok(0.0),
+    fn actual(
+        response: &Response,
+        query: &ExecutableDocument,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError> {
+        if let Some(value) = &response.data {
+            let operation = &query.anonymous_operation.clone().unwrap();
+            let value_tree = &TypedValue::for_operation(operation, value)?;
+            let cost = Self::score_json(value_tree, query, schema)?;
+            Ok(cost)
+        } else {
+            Ok(0.0)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use serde_json_bytes::json;
     use test_log::test;
-    use tower::Service;
 
     use super::*;
 
@@ -219,6 +299,13 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         BasicCostCalculator::estimated(&query, &schema).unwrap()
+    }
+
+    fn actual_cost(schema_str: &str, query_str: &str, response_body: Value) -> f64 {
+        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
+        let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let response = Response::from_bytes("test_service", response_body.to_bytes()).unwrap();
+        BasicCostCalculator::actual(&response, &query, &schema).unwrap()
     }
 
     #[test]
@@ -311,25 +398,30 @@ mod tests {
 
     #[test]
     fn response_cost() {
-        let response = Response::from_bytes(
-            "ships",
-            json!({
-                "data": {
-                    "ships": [
-                        {
-                            "name": "Boaty McBoatface"
-                        },
-                        {
-                            "name": "HMS Grapherson"
-                        }
-                    ]
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = r#"
+            {
+                ships {
+                    id
+                    name
                 }
-            })
-            .to_bytes(),
-        )
-        .unwrap();
+            }
+        "#;
+        let response_body = json!({
+            "data": {
+                "ships": [
+                    {
+                        "id": 1,
+                        "name": "Boaty McBoatface"
+                    },
+                    {
+                        "id": 2,
+                        "name": "HMS Grapherson"
+                    }
+                ]
+            }
+        });
 
-        let cost = BasicCostCalculator::actual(&response).unwrap();
-        assert_eq!(cost, 2.0);
+        assert_eq!(actual_cost(schema, query, response_body), 6.0);
     }
 }
