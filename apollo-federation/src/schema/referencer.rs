@@ -9,8 +9,7 @@ use crate::schema::position::{
     UnionTypenameFieldDefinitionPosition,
 };
 use apollo_compiler::schema::Name;
-use indexmap::{Equivalent, IndexMap, IndexSet};
-use std::hash::Hash;
+use indexmap::{IndexMap, IndexSet};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Referencers {
@@ -24,7 +23,7 @@ pub(crate) struct Referencers {
 }
 
 impl Referencers {
-    pub(crate) fn contains_type_name<Q: Hash + Equivalent<Name>>(&self, name: &Q) -> bool {
+    pub(crate) fn contains_type_name(&self, name: &str) -> bool {
         self.scalar_types.contains_key(name)
             || self.object_types.contains_key(name)
             || self.interface_types.contains_key(name)
@@ -33,9 +32,9 @@ impl Referencers {
             || self.input_object_types.contains_key(name)
     }
 
-    pub(crate) fn get_scalar_type<Q: Hash + Equivalent<Name>>(
+    pub(crate) fn get_scalar_type(
         &self,
-        name: &Q,
+        name: &str,
     ) -> Result<&ScalarTypeReferencers, FederationError> {
         self.scalar_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
@@ -45,9 +44,9 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_object_type<Q: Hash + Equivalent<Name>>(
+    pub(crate) fn get_object_type(
         &self,
-        name: &Q,
+        name: &str,
     ) -> Result<&ObjectTypeReferencers, FederationError> {
         self.object_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
@@ -57,9 +56,9 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_interface_type<Q: Hash + Equivalent<Name>>(
+    pub(crate) fn get_interface_type(
         &self,
-        name: &Q,
+        name: &str,
     ) -> Result<&InterfaceTypeReferencers, FederationError> {
         self.interface_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
@@ -69,9 +68,9 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_union_type<Q: Hash + Equivalent<Name>>(
+    pub(crate) fn get_union_type(
         &self,
-        name: &Q,
+        name: &str,
     ) -> Result<&UnionTypeReferencers, FederationError> {
         self.union_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
@@ -81,9 +80,9 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_enum_type<Q: Hash + Equivalent<Name>>(
+    pub(crate) fn get_enum_type(
         &self,
-        name: &Q,
+        name: &str,
     ) -> Result<&EnumTypeReferencers, FederationError> {
         self.enum_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
@@ -93,9 +92,9 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_input_object_type<Q: Hash + Equivalent<Name>>(
+    pub(crate) fn get_input_object_type(
         &self,
-        name: &Q,
+        name: &str,
     ) -> Result<&InputObjectTypeReferencers, FederationError> {
         self.input_object_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
@@ -105,9 +104,9 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_directive<Q: Hash + Equivalent<Name>>(
+    pub(crate) fn get_directive(
         &self,
-        name: &Q,
+        name: &str,
     ) -> Result<&DirectiveReferencers, FederationError> {
         self.directives.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
