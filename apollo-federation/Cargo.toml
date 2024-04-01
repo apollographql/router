@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "cli"]
+
 [package]
 name = "apollo-federation"
 version = "0.0.9"

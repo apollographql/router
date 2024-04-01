@@ -18,6 +18,10 @@ Checkout the [Federation 2 docs](https://www.apollographql.com/docs/federation) 
 
 TODO
 
+### CLI tool
+
+`cargo cli --help`
+
 ## Contributing
 
 TODO

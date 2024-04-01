@@ -1,5 +1,5 @@
 [alias]
-xtask = "run --package xtask --"
+cli = "run -p apollo-federation-cli --"
 
 # circle seems to install cargo packages via ssh:// rather than https://
 [net]
