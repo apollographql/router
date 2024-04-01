@@ -186,7 +186,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                         apollo_compiler::Schema::new(),
                                     ),
                                 ))
-                                .subgraph_schemas(Arc::new(HashMap::new()))
                                 .notify(configuration.notify.clone())
                                 .build(),
                         )

@@ -90,7 +90,6 @@ where
                     .expect("failed to parse supergraph schema"),
             ))
             .supergraph_sdl(supergraph_sdl)
-            .subgraph_schemas(Arc::new(HashMap::new()))
             .notify(Notify::builder().build())
             .build()
     }
@@ -114,7 +113,6 @@ where
                     })?,
             ))
             .supergraph_sdl(supergraph_sdl)
-            .subgraph_schemas(Arc::new(HashMap::new()))
             .notify(Notify::builder().build())
             .build()
     }
@@ -166,14 +164,14 @@ where
         config: T,
         supergraph_sdl: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
             config,
             supergraph_sdl,
             supergraph_schema,
-            subgraph_schemas,
+            subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify,
         }
     }
@@ -187,7 +185,7 @@ where
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -195,7 +193,7 @@ where
             config,
             supergraph_sdl,
             supergraph_schema,
-            subgraph_schemas,
+            subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify,
         })
     }
@@ -214,7 +212,7 @@ where
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
             supergraph_schema: supergraph_schema
                 .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
-            subgraph_schemas: subgraph_schemas.unwrap_or_else(|| Arc::new(HashMap::new())),
+            subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify: notify.unwrap_or_else(Notify::for_tests),
         }
     }
