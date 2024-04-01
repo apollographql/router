@@ -18,10 +18,6 @@ use super::CostCalculator;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::plugins::demand_control::schema_aware_response::TypedValue;
-use crate::query_planner::DeferredNode;
-use crate::query_planner::PlanNode;
-use crate::query_planner::Primary;
-use crate::query_planner::QueryPlan;
 
 pub(crate) struct BasicCostCalculator {}
 
@@ -269,12 +265,11 @@ impl CostCalculator for BasicCostCalculator {
 
     fn actual(
         response: &Response,
-        query: &ExecutableDocument,
+        request: &ExecutableDocument,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
-        let operation = &query.anonymous_operation.clone().unwrap(); // TODO: Handle named ops
-        let schema_aware_response = SchemaAwareResponse::zip(operation, response)?;
-        Self::score_json(&schema_aware_response.value, query, schema)
+        let schema_aware_response = SchemaAwareResponse::zip(request, response)?;
+        Self::score_json(&schema_aware_response.value, request, schema)
     }
 }
 

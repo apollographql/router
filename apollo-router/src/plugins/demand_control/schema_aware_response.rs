@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use apollo_compiler::executable::Field;
-use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::ExecutableDocument;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
 use crate::graphql::Response;
@@ -10,37 +13,26 @@ use crate::graphql::Response;
 use super::DemandControlError;
 
 pub(crate) struct SchemaAwareResponse<'a> {
-    pub(crate) operation: &'a Operation,
-    pub(crate) response: &'a Response,
     pub(crate) value: TypedValue<'a>,
 }
 
 impl<'a> SchemaAwareResponse<'a> {
     pub(crate) fn zip(
-        operation: &'a Operation,
+        request: &'a ExecutableDocument,
         response: &'a Response,
     ) -> Result<Self, DemandControlError> {
         if let Some(Value::Object(children)) = &response.data {
-            // Since selections aren't indexed, we have to loop over them one by one, using the
-            // response's map as a lookup for the corresponding value.
-            let mut typed_fields: HashMap<String, TypedValue> = HashMap::new();
-            for selection in &operation.selection_set.selections {
-                match selection {
-                    Selection::Field(field) => {
-                        if let Some(value) = children.get(field.name.as_str()) {
-                            typed_fields
-                                .insert(field.name.to_string(), TypedValue::zip(field, value)?);
-                        } else {
-                            todo!("The response is missing a field it's supposed to include from the query")
-                        }
-                    }
-                    Selection::FragmentSpread(_) => todo!("Handle fragment spread"),
-                    Selection::InlineFragment(_) => todo!("Handle inline fragment"),
-                }
-            }
+            let typed_fields = TypedValue::zip_selections(
+                request,
+                &request
+                    .anonymous_operation
+                    .as_ref()
+                    .unwrap() // TODO: Remove call to unwrap()
+                    .selection_set,
+                children,
+            )?;
+
             Ok(Self {
-                operation,
-                response,
                 value: TypedValue::Query(typed_fields),
             })
         } else {
@@ -63,7 +55,11 @@ pub(crate) enum TypedValue<'a> {
 }
 
 impl<'a> TypedValue<'a> {
-    fn zip(field: &'a Field, value: &'a Value) -> Result<TypedValue<'a>, DemandControlError> {
+    fn zip_field(
+        request: &'a ExecutableDocument,
+        field: &'a Field,
+        value: &'a Value,
+    ) -> Result<TypedValue<'a>, DemandControlError> {
         match value {
             Value::Null => Ok(TypedValue::Null),
             Value::Bool(b) => Ok(TypedValue::Bool(field, b)),
@@ -72,28 +68,60 @@ impl<'a> TypedValue<'a> {
             Value::Array(items) => {
                 let mut typed_items = Vec::new();
                 for item in items {
-                    typed_items.push(TypedValue::zip(field, item)?);
+                    typed_items.push(TypedValue::zip_field(request, field, item)?);
                 }
                 Ok(TypedValue::Array(field, typed_items))
             }
             Value::Object(children) => {
-                let mut typed_children: HashMap<String, TypedValue> = HashMap::new();
-                for selection in &field.selection_set.selections {
-                    match selection {
-                        Selection::Field(inner_field) => {
-                            let value = children.get(inner_field.name.as_str()).unwrap();
-                            typed_children.insert(
-                                field.name.to_string(),
-                                TypedValue::zip(inner_field.as_ref(), value)?,
-                            );
-                        }
-                        Selection::FragmentSpread(_) => todo!("Handle fragment spread"),
-                        Selection::InlineFragment(_) => todo!("Handle inline fragment"),
-                    }
-                }
+                let typed_children = Self::zip_selections(request, &field.selection_set, children)?;
                 Ok(TypedValue::Object(field, typed_children))
             }
         }
+    }
+
+    fn zip_selections(
+        request: &'a ExecutableDocument,
+        selection_set: &'a SelectionSet,
+        fields: &'a Map<ByteString, Value>,
+    ) -> Result<HashMap<String, TypedValue<'a>>, DemandControlError> {
+        let mut typed_children: HashMap<String, TypedValue> = HashMap::new();
+        for selection in &selection_set.selections {
+            match selection {
+                Selection::Field(inner_field) => {
+                    if let Some(value) = fields.get(inner_field.name.as_str()) {
+                        typed_children.insert(
+                            inner_field.name.to_string(),
+                            TypedValue::zip_field(request, inner_field.as_ref(), value)?,
+                        );
+                    } else {
+                        tracing::warn!("The response did not include a field corresponding to query field {:?}", inner_field);
+                    }
+                }
+                Selection::FragmentSpread(fragment_spread) => {
+                    let fragment = fragment_spread.fragment_def(request);
+                    if let Some(f) = fragment {
+                        typed_children.extend(Self::zip_selections(
+                            request,
+                            &f.selection_set,
+                            fields,
+                        )?);
+                    } else {
+                        return Err(DemandControlError::ResponseTypingFailure(format!(
+                            "The fragment {} was not found.",
+                            fragment_spread.fragment_name
+                        )));
+                    }
+                }
+                Selection::InlineFragment(inline_fragment) => {
+                    typed_children.extend(Self::zip_selections(
+                        request,
+                        &inline_fragment.selection_set,
+                        fields,
+                    )?);
+                }
+            }
+        }
+        Ok(typed_children)
     }
 }
 
@@ -101,7 +129,7 @@ impl<'a> TypedValue<'a> {
 mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use serde_json_bytes::json;
+    use bytes::Bytes;
 
     use crate::graphql::Response;
     use crate::plugins::demand_control::schema_aware_response::SchemaAwareResponse;
@@ -109,35 +137,41 @@ mod tests {
     #[test]
     fn response_zipper() {
         let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
-        let query_str = r#"
-            {
-                ships {
-                    name
-                }
-            }
-        "#;
-        let response_body = json!({
-            "data": {
-                "ships": [
-                    {
-                        "name": "Boaty McBoatface"
-                    },
-                    {
-                        "name": "HMS Grapherson"
-                    }
-                ]
-            }
-        });
+        let query_str = include_str!("./fixtures/federated_ships_required_query.graphql");
+        let response_bytes = include_bytes!("./fixtures/federated_ships_required_response.json");
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
-        let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
-        let response = Response::from_bytes("test_service", response_body.to_bytes()).unwrap();
+        let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let zipped = SchemaAwareResponse::zip(&request, &response);
 
-        println!("{:?}\n", query);
-        println!("{:?}\n", response.data);
+        assert!(zipped.is_ok())
+    }
 
-        let operation = query.anonymous_operation.unwrap();
-        let zipped = SchemaAwareResponse::zip(&operation, &response);
+    #[test]
+    fn fragment_response_zipper() {
+        let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query_str = include_str!("./fixtures/federated_ships_fragment_query.graphql");
+        let response_bytes = include_bytes!("./fixtures/federated_ships_fragment_response.json");
+
+        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
+        let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let zipped = SchemaAwareResponse::zip(&request, &response);
+
+        assert!(zipped.is_ok())
+    }
+
+    #[test]
+    fn inline_fragment_zipper() {
+        let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query_str = include_str!("./fixtures/federated_ships_inline_fragment_query.graphql");
+        let response_bytes = include_bytes!("./fixtures/federated_ships_fragment_response.json");
+
+        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
+        let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let zipped = SchemaAwareResponse::zip(&request, &response);
 
         assert!(zipped.is_ok())
     }
