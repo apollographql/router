@@ -68,7 +68,7 @@ type Ship
   @join__type(graph: VEHICLES, key: "id")
 {
   id: ID!
-  name: String! @cost(weight: 2.0)
+  name: String!
   owner: User!
   registrationFee: Float @join__field(graph: VEHICLES, requires: "owner { addresses { zipCode } }")
 }

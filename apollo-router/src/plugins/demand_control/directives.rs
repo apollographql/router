@@ -24,10 +24,6 @@ impl CostDirective {
 
         Ok(directive)
     }
-
-    pub(super) fn weight(&self) -> f64 {
-        self.weight
-    }
 }
 
 pub(super) struct IncludeDirective {

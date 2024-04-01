@@ -161,7 +161,6 @@ impl BasicCostCalculator {
     fn score_json(
         value: &TypedValue,
         query: &ExecutableDocument,
-        schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         // It's fine to pass None as parent_type_name in all of these because that's
         // used for @requires, and that doesn't apply when counting the actual values.
@@ -208,7 +207,7 @@ impl BasicCostCalculator {
                 if let Ok(Some(CostDirective { weight })) = cost_directive {
                     cost = weight;
                 }
-                cost += Self::summed_score_of_values(items, query, schema)?;
+                cost += Self::summed_score_of_values(items, query)?;
                 println!("Array field {}, cost: {}", field.name, cost);
 
                 Ok(cost)
@@ -220,14 +219,14 @@ impl BasicCostCalculator {
                 if let Ok(Some(CostDirective { weight })) = cost_directive {
                     cost = weight;
                 }
-                cost += Self::summed_score_of_values(children.values(), query, schema)?;
+                cost += Self::summed_score_of_values(children.values(), query)?;
                 println!("Object field {}, cost: {}", field.name, cost);
 
                 Ok(cost)
             }
             // TOP-LEVEL QUERY
             TypedValue::Query(children) => {
-                let cost = Self::summed_score_of_values(children.values(), query, schema)?;
+                let cost = Self::summed_score_of_values(children.values(), query)?;
                 println!("Response root, cost {}", cost);
 
                 Ok(cost)
@@ -238,11 +237,10 @@ impl BasicCostCalculator {
     fn summed_score_of_values<'a, I: IntoIterator<Item = &'a TypedValue<'a>>>(
         values: I,
         query: &ExecutableDocument,
-        schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         let mut score = 0.0;
         for value in values {
-            score += Self::score_json(value, query, schema)?;
+            score += Self::score_json(value, query)?;
         }
         Ok(score)
     }
@@ -266,32 +264,30 @@ impl CostCalculator for BasicCostCalculator {
     fn actual(
         response: &Response,
         request: &ExecutableDocument,
-        schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         let schema_aware_response = SchemaAwareResponse::zip(request, response)?;
-        Self::score_json(&schema_aware_response.value, request, schema)
+        Self::score_json(&schema_aware_response.value, request)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json_bytes::json;
-    use serde_json_bytes::Value;
+    use bytes::Bytes;
     use test_log::test;
 
     use super::*;
 
-    fn cost(schema_str: &str, query_str: &str) -> f64 {
+    fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         BasicCostCalculator::estimated(&query, &schema).unwrap()
     }
 
-    fn actual_cost(schema_str: &str, query_str: &str, response_body: Value) -> f64 {
+    fn actual_cost(schema_str: &str, query_str: &str, response_bytes: &'static [u8]) -> f64 {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
-        let response = Response::from_bytes("test_service", response_body.to_bytes()).unwrap();
-        BasicCostCalculator::actual(&response, &query, &schema).unwrap()
+        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        BasicCostCalculator::actual(&response, &query).unwrap()
     }
 
     #[test]
@@ -299,7 +295,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -307,7 +303,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_mutation.graphql");
 
-        assert_eq!(cost(schema, query), 10.0)
+        assert_eq!(estimated_cost(schema, query), 10.0)
     }
 
     #[test]
@@ -315,7 +311,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_query.graphql");
 
-        assert_eq!(cost(schema, query), 1.0)
+        assert_eq!(estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -323,7 +319,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_interface_query.graphql");
 
-        assert_eq!(cost(schema, query), 1.0)
+        assert_eq!(estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -331,7 +327,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_union_query.graphql");
 
-        assert_eq!(cost(schema, query), 1.0)
+        assert_eq!(estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -339,7 +335,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_list_query.graphql");
 
-        assert_eq!(cost(schema, query), 100.0)
+        assert_eq!(estimated_cost(schema, query), 100.0)
     }
 
     #[test]
@@ -347,7 +343,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_scalar_list_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -355,7 +351,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_nested_list_query.graphql");
 
-        assert_eq!(cost(schema, query), 10100.0)
+        assert_eq!(estimated_cost(schema, query), 10100.0)
     }
 
     #[test]
@@ -363,7 +359,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_skipped_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -371,43 +367,46 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_excluded_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
     #[test]
     fn requires_adds_required_field_cost() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_required_response.json");
 
-        assert_eq!(cost(schema, query), 10200.0);
+        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(actual_cost(schema, query, response), 2.0);
     }
 
-    #[test]
-    fn response_cost() {
+    #[test(tokio::test)]
+    async fn federated_query_with_fragments() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
-        let query = r#"
-            {
-                ships {
-                    id
-                    name
-                }
-            }
-        "#;
-        let response_body = json!({
-            "data": {
-                "ships": [
-                    {
-                        "id": 1,
-                        "name": "Boaty McBoatface"
-                    },
-                    {
-                        "id": 2,
-                        "name": "HMS Grapherson"
-                    }
-                ]
-            }
-        });
+        let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
-        assert_eq!(actual_cost(schema, query, response_body), 6.0);
+        assert_eq!(estimated_cost(schema, query), 300.0);
+        assert_eq!(actual_cost(schema, query, response), 6.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_inline_fragments() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_inline_fragment_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
+
+        assert_eq!(estimated_cost(schema, query), 300.0);
+        assert_eq!(actual_cost(schema, query, response), 6.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_defer() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_deferred_response.json");
+
+        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(actual_cost(schema, query, response), 2.0);
     }
 }

@@ -50,7 +50,6 @@ trait CostCalculator {
     fn actual(
         response: &graphql::Response,
         query: &ExecutableDocument,
-        schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError>;
 }
 
