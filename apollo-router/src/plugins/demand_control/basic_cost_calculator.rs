@@ -9,7 +9,6 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 
-use super::directives::CostDirective;
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
@@ -158,89 +157,27 @@ impl BasicCostCalculator {
         false
     }
 
-    fn score_json(
-        value: &TypedValue,
-        query: &ExecutableDocument,
-    ) -> Result<f64, DemandControlError> {
-        // It's fine to pass None as parent_type_name in all of these because that's
-        // used for @requires, and that doesn't apply when counting the actual values.
+    fn score_json(value: &TypedValue) -> Result<f64, DemandControlError> {
         match value {
-            // TODO(tninesling): This is a shitty experience
             TypedValue::Null => Ok(0.0),
-            // BOOL
-            TypedValue::Bool(field, _) => {
-                let cost_directive = CostDirective::from_field(field)?;
-                let cost = if let Some(CostDirective { weight }) = cost_directive {
-                    weight
-                } else {
-                    0.0
-                };
-                println!("Bool field {}, cost: {}", field.name, cost);
-                Ok(cost)
+            TypedValue::Bool(_, _) => Ok(0.0),
+            TypedValue::Number(_, _) => Ok(0.0),
+            TypedValue::String(_, _) => Ok(0.0),
+            TypedValue::Array(_, items) => Self::summed_score_of_values(items),
+            TypedValue::Object(_, children) => {
+                let cost_of_children = Self::summed_score_of_values(children.values())?;
+                Ok(1.0 + cost_of_children)
             }
-            // NUMBER
-            TypedValue::Number(field, _) => {
-                let cost_directive = CostDirective::from_field(field)?;
-                let cost = if let Some(CostDirective { weight }) = cost_directive {
-                    weight
-                } else {
-                    0.0
-                };
-                println!("Number field {}, cost: {}", field.name, cost);
-                Ok(cost)
-            }
-            // STRING
-            TypedValue::String(field, _) => {
-                let cost_directive = CostDirective::from_field(field)?;
-                let cost = if let Some(CostDirective { weight }) = cost_directive {
-                    weight
-                } else {
-                    0.0
-                };
-                println!("String field {}, cost: {}", field.name, cost);
-                Ok(cost)
-            }
-            // ARRAY
-            TypedValue::Array(field, items) => {
-                let cost_directive = CostDirective::from_field(field);
-                let mut cost = 0.0;
-                if let Ok(Some(CostDirective { weight })) = cost_directive {
-                    cost = weight;
-                }
-                cost += Self::summed_score_of_values(items, query)?;
-                println!("Array field {}, cost: {}", field.name, cost);
-
-                Ok(cost)
-            }
-            // OBJECT
-            TypedValue::Object(field, children) => {
-                let cost_directive = CostDirective::from_field(field);
-                let mut cost = 1.0;
-                if let Ok(Some(CostDirective { weight })) = cost_directive {
-                    cost = weight;
-                }
-                cost += Self::summed_score_of_values(children.values(), query)?;
-                println!("Object field {}, cost: {}", field.name, cost);
-
-                Ok(cost)
-            }
-            // TOP-LEVEL QUERY
-            TypedValue::Query(children) => {
-                let cost = Self::summed_score_of_values(children.values(), query)?;
-                println!("Response root, cost {}", cost);
-
-                Ok(cost)
-            }
+            TypedValue::Query(children) => Self::summed_score_of_values(children.values()),
         }
     }
 
     fn summed_score_of_values<'a, I: IntoIterator<Item = &'a TypedValue<'a>>>(
         values: I,
-        query: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         let mut score = 0.0;
         for value in values {
-            score += Self::score_json(value, query)?;
+            score += Self::score_json(value)?;
         }
         Ok(score)
     }
@@ -266,7 +203,7 @@ impl CostCalculator for BasicCostCalculator {
         request: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         let schema_aware_response = SchemaAwareResponse::zip(request, response)?;
-        Self::score_json(&schema_aware_response.value, request)
+        Self::score_json(&schema_aware_response.value)
     }
 }
 
