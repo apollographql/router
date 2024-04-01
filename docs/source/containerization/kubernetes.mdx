@@ -185,20 +185,20 @@ To enable metrics endpoints in your deployed router through a YAML configuration
 
 ## Deploy with Rhai scripts
 
-The router supports [Rhai scripting](../../customizations/rhai) to add custom functionality.
+The router supports [Rhai scripting](../customizations/rhai) to add custom functionality.
 
 Enabling Rhai scripts in your deployed router requires mounting an extra volume for your Rhai scripts and getting your scripts onto the volume. That can be done by following steps in [a separate example for creating a custom in-house router chart](https://github.com/apollographql/in-house-router-example). The example creates a new (in-house) chart that wraps (and depends on) the released router chart, and the new chart has templates that add the necessary configuration to allow Rhai scripts for a deployed router.
 
 ## Deploy with a coprocessor
 
-The router supports [external coprocessing](../../customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](../../customizations/rhai/#router-request-lifecycle).
+The router supports [external coprocessing](../customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](../customizations/rhai/#router-request-lifecycle).
 
 A deployed coprocessor has its own application image and container in the router pod. 
 
 To configure a coprocessor and its container for your deployed router through a YAML configuration file:
 
 1. Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
-1. Edit `my_values.yaml` to configure a coprocessor for the router. For reference, follow the [typical](../../customizations/coprocessor#typical-configuration) and [minimal](../../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
+1. Edit `my_values.yaml` to configure a coprocessor for the router. For reference, follow the [typical](../customizations/coprocessor#typical-configuration) and [minimal](../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
 
   <ExpansionPanel title="Example of typical configuration for a coprocessor">
 

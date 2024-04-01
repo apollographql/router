@@ -89,6 +89,12 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let span = (self.span_fn)(&req);
-        self.inner.call(req).instrument(span)
+
+        // since other spans may be created while generating the future, enter this span right now so it will appear as parent
+        let _guard = span.enter();
+        let res = self.inner.call(req);
+        drop(_guard);
+
+        res.instrument(span)
     }
 }
