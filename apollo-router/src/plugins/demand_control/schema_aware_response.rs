@@ -22,15 +22,22 @@ impl<'a> SchemaAwareResponse<'a> {
         response: &'a Response,
     ) -> Result<Self, DemandControlError> {
         if let Some(Value::Object(children)) = &response.data {
-            let typed_fields = TypedValue::zip_selections(
-                request,
-                &request
-                    .anonymous_operation
-                    .as_ref()
-                    .unwrap() // TODO: Remove call to unwrap()
-                    .selection_set,
-                children,
-            )?;
+            let mut typed_fields: HashMap<String, TypedValue<'a>> = HashMap::new();
+
+            if let Some(operation) = &request.anonymous_operation {
+                typed_fields.extend(TypedValue::zip_selections(
+                    request,
+                    &operation.selection_set,
+                    children,
+                )?);
+            }
+            for operation in request.named_operations.values() {
+                typed_fields.extend(TypedValue::zip_selections(
+                    request,
+                    &operation.selection_set,
+                    children,
+                )?);
+            }
 
             Ok(Self {
                 value: TypedValue::Query(typed_fields),
@@ -167,6 +174,20 @@ mod tests {
         let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
         let query_str = include_str!("./fixtures/federated_ships_inline_fragment_query.graphql");
         let response_bytes = include_bytes!("./fixtures/federated_ships_fragment_response.json");
+
+        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
+        let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let zipped = SchemaAwareResponse::zip(&request, &response);
+
+        assert!(zipped.is_ok())
+    }
+
+    #[test]
+    fn named_operation_zipper() {
+        let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query_str = include_str!("./fixtures/federated_ships_named_query.graphql");
+        let response_bytes = include_bytes!("./fixtures/federated_ships_named_response.json");
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();

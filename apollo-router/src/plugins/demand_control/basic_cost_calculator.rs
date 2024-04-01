@@ -370,8 +370,18 @@ mod tests {
         assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
-    #[test]
-    fn requires_adds_required_field_cost() {
+    #[test(tokio::test)]
+    async fn federated_query_with_name() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_named_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_named_response.json");
+
+        assert_eq!(estimated_cost(schema, query), 100.0);
+        assert_eq!(actual_cost(schema, query, response), 2.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_requires() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
         let response = include_bytes!("./fixtures/federated_ships_required_response.json");
