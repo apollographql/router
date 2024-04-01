@@ -23,7 +23,7 @@ use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 
 pub(crate) struct BasicCostCalculator {
-    subgraph_schemas: Arc<HashMap<String, Valid<Schema>>>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 }
 
 impl BasicCostCalculator {
