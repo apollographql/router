@@ -8,17 +8,12 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 
 use super::directives::CostDirective;
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
-use super::schema_aware_response::Root;
-use super::schema_aware_response::TypedArray;
-use super::schema_aware_response::TypedObject;
-use super::schema_aware_response::WithField;
+use super::schema_aware_response::SchemaAwareResponse;
 use super::CostCalculator;
 use super::DemandControlError;
 use crate::graphql::Response;
@@ -178,7 +173,7 @@ impl BasicCostCalculator {
             // TODO(tninesling): This is a shitty experience
             TypedValue::Null => Ok(0.0),
             // BOOL
-            TypedValue::Bool(WithField { field, value: _ }) => {
+            TypedValue::Bool(field, _) => {
                 let cost_directive = CostDirective::from_field(field)?;
                 let cost = if let Some(CostDirective { weight }) = cost_directive {
                     weight
@@ -189,7 +184,7 @@ impl BasicCostCalculator {
                 Ok(cost)
             }
             // NUMBER
-            TypedValue::Number(WithField { field, value: _ }) => {
+            TypedValue::Number(field, _) => {
                 let cost_directive = CostDirective::from_field(field)?;
                 let cost = if let Some(CostDirective { weight }) = cost_directive {
                     weight
@@ -200,7 +195,7 @@ impl BasicCostCalculator {
                 Ok(cost)
             }
             // STRING
-            TypedValue::String(WithField { field, value: _ }) => {
+            TypedValue::String(field, _) => {
                 let cost_directive = CostDirective::from_field(field)?;
                 let cost = if let Some(CostDirective { weight }) = cost_directive {
                     weight
@@ -211,7 +206,7 @@ impl BasicCostCalculator {
                 Ok(cost)
             }
             // ARRAY
-            TypedValue::Array(TypedArray { field, items }) => {
+            TypedValue::Array(field, items) => {
                 let cost_directive = CostDirective::from_field(field);
                 let mut cost = 0.0;
                 if let Ok(Some(CostDirective { weight })) = cost_directive {
@@ -223,7 +218,7 @@ impl BasicCostCalculator {
                 Ok(cost)
             }
             // OBJECT
-            TypedValue::Object(TypedObject { field, children }) => {
+            TypedValue::Object(field, children) => {
                 let cost_directive = CostDirective::from_field(field);
                 let mut cost = 1.0;
                 if let Ok(Some(CostDirective { weight })) = cost_directive {
@@ -235,7 +230,7 @@ impl BasicCostCalculator {
                 Ok(cost)
             }
             // TOP-LEVEL QUERY
-            TypedValue::Query(Root { children }) => {
+            TypedValue::Query(children) => {
                 let cost = Self::summed_score_of_values(children.values(), query, schema)?;
                 println!("Response root, cost {}", cost);
 
@@ -277,20 +272,16 @@ impl CostCalculator for BasicCostCalculator {
         query: &ExecutableDocument,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
-        if let Some(value) = &response.data {
-            let operation = &query.anonymous_operation.clone().unwrap();
-            let value_tree = &TypedValue::for_operation(operation, value)?;
-            let cost = Self::score_json(value_tree, query, schema)?;
-            Ok(cost)
-        } else {
-            Ok(0.0)
-        }
+        let operation = &query.anonymous_operation.clone().unwrap(); // TODO: Handle named ops
+        let schema_aware_response = SchemaAwareResponse::zip(operation, response)?;
+        Self::score_json(&schema_aware_response.value, query, schema)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json_bytes::json;
+    use serde_json_bytes::Value;
     use test_log::test;
 
     use super::*;

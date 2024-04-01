@@ -3,53 +3,24 @@ use std::collections::HashMap;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::executable::SelectionSet;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+
+use crate::graphql::Response;
 
 use super::DemandControlError;
 
-#[derive(Debug)]
-pub(crate) enum TypedValue<'a> {
-    Null,
-    Bool(WithField<'a, bool>),
-    Number(WithField<'a, ()>),
-    String(WithField<'a, String>),
-    Array(TypedArray<'a>),
-    Object(TypedObject<'a>),
-    Query(Root<'a>),
+pub(crate) struct SchemaAwareResponse<'a> {
+    pub(crate) operation: &'a Operation,
+    pub(crate) response: &'a Response,
+    pub(crate) value: TypedValue<'a>,
 }
 
-#[derive(Debug)]
-pub(crate) struct WithField<'a, T> {
-    pub(crate) field: &'a Field,
-    pub(crate) value: T,
-}
-
-#[derive(Debug)]
-pub(crate) struct Root<'a> {
-    pub(crate) children: HashMap<String, TypedValue<'a>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct TypedObject<'a> {
-    pub(crate) field: &'a Field,
-    pub(crate) children: HashMap<String, TypedValue<'a>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct TypedArray<'a> {
-    pub(crate) field: &'a Field,
-    pub(crate) items: Vec<TypedValue<'a>>,
-}
-
-impl<'a> TypedValue<'a> {
-    pub(crate) fn for_operation(
+impl<'a> SchemaAwareResponse<'a> {
+    pub(crate) fn zip(
         operation: &'a Operation,
-        value: &Value,
-    ) -> Result<TypedValue<'a>, DemandControlError> {
-        if let Value::Object(children) = value {
+        response: &'a Response,
+    ) -> Result<Self, DemandControlError> {
+        if let Some(Value::Object(children)) = &response.data {
             // Since selections aren't indexed, we have to loop over them one by one, using the
             // response's map as a lookup for the corresponding value.
             let mut typed_fields: HashMap<String, TypedValue> = HashMap::new();
@@ -67,34 +38,43 @@ impl<'a> TypedValue<'a> {
                     Selection::InlineFragment(_) => todo!("Handle inline fragment"),
                 }
             }
-            Ok(TypedValue::Query(Root {
-                children: typed_fields,
-            }))
+            Ok(Self {
+                operation,
+                response,
+                value: TypedValue::Query(typed_fields),
+            })
         } else {
             Err(DemandControlError::ResponseTypingFailure(
                 "Can't zip an operation with a non-object!".to_string(),
             ))
         }
     }
+}
 
-    fn zip(field: &'a Field, value: &Value) -> Result<TypedValue<'a>, DemandControlError> {
+#[derive(Debug)]
+pub(crate) enum TypedValue<'a> {
+    Null,
+    Bool(&'a Field, &'a bool),
+    Number(&'a Field, &'a serde_json::Number),
+    String(&'a Field, &'a str),
+    Array(&'a Field, Vec<TypedValue<'a>>),
+    Object(&'a Field, HashMap<String, TypedValue<'a>>),
+    Query(HashMap<String, TypedValue<'a>>),
+}
+
+impl<'a> TypedValue<'a> {
+    fn zip(field: &'a Field, value: &'a Value) -> Result<TypedValue<'a>, DemandControlError> {
         match value {
             Value::Null => Ok(TypedValue::Null),
-            Value::Bool(_) => todo!("bool"),
-            Value::Number(n) => Ok(TypedValue::Number(WithField { field, value: () })),
-            Value::String(s) => Ok(TypedValue::String(WithField {
-                field,
-                value: s.as_str().to_string(),
-            })),
+            Value::Bool(b) => Ok(TypedValue::Bool(field, b)),
+            Value::Number(n) => Ok(TypedValue::Number(field, n)),
+            Value::String(s) => Ok(TypedValue::String(field, s.as_str())),
             Value::Array(items) => {
                 let mut typed_items = Vec::new();
                 for item in items {
                     typed_items.push(TypedValue::zip(field, item)?);
                 }
-                Ok(TypedValue::Array(TypedArray {
-                    field,
-                    items: typed_items,
-                }))
+                Ok(TypedValue::Array(field, typed_items))
             }
             Value::Object(children) => {
                 let mut typed_children: HashMap<String, TypedValue> = HashMap::new();
@@ -111,10 +91,7 @@ impl<'a> TypedValue<'a> {
                         Selection::InlineFragment(_) => todo!("Handle inline fragment"),
                     }
                 }
-                Ok(TypedValue::Object(TypedObject {
-                    field,
-                    children: typed_children,
-                }))
+                Ok(TypedValue::Object(field, typed_children))
             }
         }
     }
@@ -122,10 +99,12 @@ impl<'a> TypedValue<'a> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::{ExecutableDocument, Schema};
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
     use serde_json_bytes::json;
 
-    use crate::{graphql::Response, plugins::demand_control::schema_aware_response::TypedValue};
+    use crate::graphql::Response;
+    use crate::plugins::demand_control::schema_aware_response::SchemaAwareResponse;
 
     #[test]
     fn response_zipper() {
@@ -158,10 +137,8 @@ mod tests {
         println!("{:?}\n", response.data);
 
         let operation = query.anonymous_operation.unwrap();
-        let zipped =
-            TypedValue::for_operation(operation.as_ref(), &response.data.unwrap()).unwrap();
-        println!("{:?}\n", zipped);
+        let zipped = SchemaAwareResponse::zip(&operation, &response);
 
-        assert_eq!(1.0, 2.0)
+        assert!(zipped.is_ok())
     }
 }
