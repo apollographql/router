@@ -36,7 +36,7 @@ async fn test_reload() -> Result<(), BoxError> {
             id,
             &query,
             Some("ExampleQuery"),
-            &["my_app", "router", "products"],
+            &["client", "router", "subgraph"],
             false,
         )
         .await?;
@@ -69,7 +69,7 @@ async fn test_remote_root() -> Result<(), BoxError> {
         id,
         &query,
         Some("ExampleQuery"),
-        &["my_app", "router", "products"],
+        &["client", "router", "subgraph"],
         false,
     )
     .await?;
@@ -100,7 +100,7 @@ async fn test_local_root() -> Result<(), BoxError> {
         id,
         &query,
         Some("ExampleQuery"),
-        &["router", "products"],
+        &["router", "subgraph"],
         false,
     )
     .await?;
@@ -148,7 +148,7 @@ async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
                 id,
                 &query,
                 Some("ExampleQuery"),
-                &["router", "products"],
+                &["router", "subgraph"],
                 false,
             )
             .await
@@ -206,7 +206,7 @@ async fn test_default_operation() -> Result<(), BoxError> {
         id,
         &query,
         Some("ExampleQuery1"),
-        &["my_app", "router", "products"],
+        &["client", "router", "subgraph"],
         false,
     )
     .await?;
@@ -233,7 +233,7 @@ async fn test_anonymous_operation() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
-    validate_trace(id, &query, None, &["my_app", "router", "products"], false).await?;
+    validate_trace(id, &query, None, &["client", "router", "subgraph"], false).await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -260,7 +260,7 @@ async fn test_selected_operation() -> Result<(), BoxError> {
         id,
         &query,
         Some("ExampleQuery2"),
-        &["my_app", "router", "products"],
+        &["client", "router", "subgraph"],
         false,
     )
     .await?;
@@ -286,7 +286,7 @@ async fn test_span_customization() -> Result<(), BoxError> {
             id,
             &query,
             Some("ExampleQuery"),
-            &["my_app", "router", "products"],
+            &["client", "router", "subgraph"],
             true,
         )
         .await?;
@@ -527,7 +527,7 @@ fn verify_spans_present(
     let mut expected_operation_names: HashSet<String> = HashSet::from(
         [
             "execution",
-            "HTTP POST",
+            "subgraph server",
             operation_name
                 .map(|name| format!("query {name}"))
                 .unwrap_or("query".to_string())
@@ -540,7 +540,7 @@ fn verify_spans_present(
         ]
         .map(|s| s.into()),
     );
-    if services.contains(&"my_app") {
+    if services.contains(&"client") {
         expected_operation_names.insert("client_request".into());
     }
     tracing::debug!("found spans {:?}", operation_names);
@@ -557,7 +557,7 @@ fn verify_spans_present(
 }
 
 fn verify_span_parenting(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
-    let root_span = if services.contains(&"my_app") {
+    let root_span = if services.contains(&"client") {
         trace.select_path("$..spans[?(@.operationName == 'client_request')]")?[0]
     } else {
         trace.select_path("$..spans[?(@.operationName == 'query ExampleQuery')]")?[0]
