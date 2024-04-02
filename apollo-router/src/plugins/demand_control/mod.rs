@@ -48,8 +48,8 @@ trait CostCalculator {
     ) -> Result<f64, DemandControlError>;
 
     fn actual(
+        request: &ExecutableDocument,
         response: &graphql::Response,
-        query: &ExecutableDocument,
     ) -> Result<f64, DemandControlError>;
 }
 

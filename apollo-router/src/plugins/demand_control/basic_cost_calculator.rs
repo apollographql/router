@@ -13,10 +13,10 @@ use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::schema_aware_response::SchemaAwareResponse;
+use super::schema_aware_response::TypedValue;
 use super::CostCalculator;
 use super::DemandControlError;
 use crate::graphql::Response;
-use crate::plugins::demand_control::schema_aware_response::TypedValue;
 
 pub(crate) struct BasicCostCalculator {}
 
@@ -168,7 +168,7 @@ impl BasicCostCalculator {
                 let cost_of_children = Self::summed_score_of_values(children.values())?;
                 Ok(1.0 + cost_of_children)
             }
-            TypedValue::Query(children) => Self::summed_score_of_values(children.values()),
+            TypedValue::Root(children) => Self::summed_score_of_values(children.values()),
         }
     }
 
@@ -199,8 +199,8 @@ impl CostCalculator for BasicCostCalculator {
     }
 
     fn actual(
-        response: &Response,
         request: &ExecutableDocument,
+        response: &Response,
     ) -> Result<f64, DemandControlError> {
         let schema_aware_response = SchemaAwareResponse::zip(request, response)?;
         Self::score_json(&schema_aware_response.value)
@@ -224,7 +224,7 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
-        BasicCostCalculator::actual(&response, &query).unwrap()
+        BasicCostCalculator::actual(&query, &response).unwrap()
     }
 
     #[test]

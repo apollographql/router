@@ -21,17 +21,17 @@ impl<'a> SchemaAwareResponse<'a> {
         response: &'a Response,
     ) -> Result<Self, DemandControlError> {
         if let Some(Value::Object(children)) = &response.data {
-            let mut typed_fields: HashMap<String, TypedValue<'a>> = HashMap::new();
+            let mut typed_children: HashMap<String, TypedValue<'a>> = HashMap::new();
 
             if let Some(operation) = &request.anonymous_operation {
-                typed_fields.extend(TypedValue::zip_selections(
+                typed_children.extend(TypedValue::zip_selections(
                     request,
                     &operation.selection_set,
                     children,
                 )?);
             }
             for operation in request.named_operations.values() {
-                typed_fields.extend(TypedValue::zip_selections(
+                typed_children.extend(TypedValue::zip_selections(
                     request,
                     &operation.selection_set,
                     children,
@@ -39,7 +39,7 @@ impl<'a> SchemaAwareResponse<'a> {
             }
 
             Ok(Self {
-                value: TypedValue::Query(typed_fields),
+                value: TypedValue::Root(typed_children),
             })
         } else {
             Err(DemandControlError::ResponseTypingFailure(
@@ -57,7 +57,7 @@ pub(crate) enum TypedValue<'a> {
     String(&'a Field, &'a str),
     Array(&'a Field, Vec<TypedValue<'a>>),
     Object(&'a Field, HashMap<String, TypedValue<'a>>),
-    Query(HashMap<String, TypedValue<'a>>),
+    Root(HashMap<String, TypedValue<'a>>),
 }
 
 impl<'a> TypedValue<'a> {
@@ -104,11 +104,10 @@ impl<'a> TypedValue<'a> {
                     }
                 }
                 Selection::FragmentSpread(fragment_spread) => {
-                    let fragment = fragment_spread.fragment_def(request);
-                    if let Some(f) = fragment {
+                    if let Some(fragment) = fragment_spread.fragment_def(request) {
                         typed_children.extend(Self::zip_selections(
                             request,
-                            &f.selection_set,
+                            &fragment.selection_set,
                             fields,
                         )?);
                     } else {
