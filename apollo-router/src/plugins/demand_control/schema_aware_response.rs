@@ -8,9 +8,8 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
-use crate::graphql::Response;
-
 use super::DemandControlError;
+use crate::graphql::Response;
 
 pub(crate) struct SchemaAwareResponse<'a> {
     pub(crate) value: TypedValue<'a>,
