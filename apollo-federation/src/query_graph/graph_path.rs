@@ -178,6 +178,15 @@ pub(crate) enum OpGraphPathTrigger {
     Context(OpGraphPathContext),
 }
 
+impl Display for OpGraphPathTrigger {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpGraphPathTrigger::OpPathElement(ele) => ele.fmt(f),
+            OpGraphPathTrigger::Context(ctx) => ctx.fmt(f),
+        }
+    }
+}
+
 /// A path of operation elements within a GraphQL operation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
@@ -302,6 +311,18 @@ impl OpGraphPathContext {
                 .extend(new_conditionals.into_iter().map(Arc::new));
         }
         Ok(new_context)
+    }
+}
+
+impl Display for OpGraphPathContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        let mut iter = self.conditionals.iter();
+        if let Some(cond) = iter.next() {
+            write!(f, "@{}(if: {})", cond.kind, cond.value)?;
+            iter.try_for_each(|cond| write!(f, ", @{}(if: {})", cond.kind, cond.value))?;
+        }
+        write!(f, "]")
     }
 }
 
@@ -1378,7 +1399,7 @@ impl OpGraphPath {
                             {
                                 let edge_weight = self.graph.edge_weight(edge)?;
                                 return Err(FederationError::internal(format!(
-                                    "Unexpectedly missing {} for {} from {}",
+                                    "Unexpectedly missing {} for {} from path {}",
                                     operation_field, edge_weight, self,
                                 )));
                             }
@@ -2011,8 +2032,41 @@ impl OpGraphPath {
 }
 
 impl Display for OpGraphPath {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // If the path is length is 0 return "[]"
+        // Traverse the path, getting the of the edge.
+        let head = &self.graph.graph()[self.head];
+        if head.root_kind.is_some() && self.edges.is_empty() {
+            return write!(f, "_");
+        }
+        if head.root_kind.is_some() {
+            write!(f, "{head}")?;
+        }
+        self.edges
+            .iter()
+            .cloned()
+            .enumerate()
+            .try_for_each(|(i, e)| match e {
+                Some(e) => {
+                    let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
+                    let node = &self.graph.graph()[tail];
+                    let edge = &self.graph.graph()[e];
+                    let label = edge.transition.to_string();
+                    write!(f, " --[{label}]--> {node}")
+                }
+                None => write!(f, " ({}) ", self.edge_triggers[i].as_ref()),
+            })?;
+        if let Some(label) = self.defer_on_tail.as_ref().and_then(|d| d.label()) {
+            write!(f, "<defer='{label}'>")?;
+        }
+        if !self.runtime_types_of_tail.is_empty() {
+            write!(f, " (types: [")?;
+            for ty in self.runtime_types_of_tail.iter() {
+                write!(f, "{ty}")?;
+            }
+            write!(f, "])")?;
+        }
+        Ok(())
     }
 }
 
@@ -2457,5 +2511,103 @@ impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
                 })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use apollo_compiler::{executable::DirectiveList, schema::Name, NodeStr, Schema};
+    use petgraph::stable_graph::{EdgeIndex, NodeIndex};
+
+    use crate::{
+        query_graph::{
+            build_query_graph::build_query_graph,
+            condition_resolver::ConditionResolution,
+            graph_path::{OpGraphPath, OpGraphPathTrigger, OpPathElement},
+        },
+        query_plan::operation::normalized_field_selection::{NormalizedField, NormalizedFieldData},
+        schema::{
+            position::{FieldDefinitionPosition, ObjectFieldDefinitionPosition},
+            ValidFederationSchema,
+        },
+    };
+
+    #[test]
+    fn path_display() {
+        let src = r#"
+       type Query
+       {
+          t: T
+       }
+
+       type T
+       {
+          otherId: ID!
+          id: ID!
+       }
+        "#;
+        let schema = Schema::parse_and_validate(src, "./").unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+        let name = NodeStr::new("S1");
+        let graph = build_query_graph(name, schema.clone()).unwrap();
+        let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
+        assert_eq!(path.to_string(), "_");
+        let pos = ObjectFieldDefinitionPosition {
+            type_name: Name::new("T").unwrap(),
+            field_name: Name::new("t").unwrap(),
+        };
+        let data = NormalizedFieldData {
+            schema: schema.clone(),
+            field_position: FieldDefinitionPosition::Object(pos),
+            alias: None,
+            arguments: Arc::new(Vec::new()),
+            directives: Arc::new(DirectiveList::new()),
+            sibling_typename: None,
+        };
+        let trigger =
+            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(NormalizedField::new(data)));
+        let path = path
+            .add(
+                trigger,
+                Some(EdgeIndex::new(3)),
+                ConditionResolution::Satisfied {
+                    cost: 0,
+                    path_tree: None,
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(path.to_string(), "Query(S1)* --[t]--> T(S1) (types: [T])");
+        let pos = ObjectFieldDefinitionPosition {
+            type_name: Name::new("ID").unwrap(),
+            field_name: Name::new("id").unwrap(),
+        };
+        let data = NormalizedFieldData {
+            schema,
+            field_position: FieldDefinitionPosition::Object(pos),
+            alias: None,
+            arguments: Arc::new(Vec::new()),
+            directives: Arc::new(DirectiveList::new()),
+            sibling_typename: None,
+        };
+        let trigger =
+            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(NormalizedField::new(data)));
+        let path = path
+            .add(
+                trigger,
+                Some(EdgeIndex::new(1)),
+                ConditionResolution::Satisfied {
+                    cost: 0,
+                    path_tree: None,
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            path.to_string(),
+            "Query(S1)* --[t]--> T(S1) --[id]--> ID(S1)"
+        );
     }
 }
