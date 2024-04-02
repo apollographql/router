@@ -29,7 +29,16 @@ impl Plugin for ExposeReferencedFieldsByType {
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        ServiceBuilder::new()
+        ServiceBuilder::new().map_request(|mut req:supergraph::Request| {
+            let mut body = req.supergraph_request.body_mut();
+            let mut query = body.query.as_mut();
+
+            body.query =  body.query.as_ref().map(|query| {
+                let query_name = format!("query Query{} (", rand::random::<usize>());
+                query.replace("query (", query_name.as_str())
+            });
+            req
+        })
             .map_first_graphql_response(
                 |context, http_parts, mut graphql_response: graphql::Response| {
                     let stuff = {

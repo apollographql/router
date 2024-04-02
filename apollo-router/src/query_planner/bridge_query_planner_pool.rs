@@ -35,12 +35,13 @@ impl BridgeQueryPlannerPool {
         configuration: Arc<Configuration>,
         size: NonZeroUsize,
     ) -> Result<Self, ServiceBuildError> {
+        // let size  = NonZeroUsize::new(1).unwrap();
         let mut join_set = JoinSet::new();
 
         let (sender, receiver) = bounded::<(
             QueryPlannerRequest,
             oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
-        )>(CHANNEL_SIZE);
+        )>(1);
 
         (0..size.into()).for_each(|_| {
             let sdl = sdl.clone();
@@ -59,6 +60,7 @@ impl BridgeQueryPlannerPool {
 
             let receiver = receiver.clone();
             let inner = planner.clone();
+
             tokio::spawn(async move {
                 while let Ok((request, res_sender)) = receiver.recv().await {
                     let res = inner.clone().oneshot(request).await;
