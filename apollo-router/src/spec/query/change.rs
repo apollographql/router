@@ -141,6 +141,7 @@ impl<'a> QueryHashVisitor<'a> {
                 for directive in &i.directives {
                     self.hash_directive(&directive.node);
                 }
+                self.hash_join_type(&i.name, &i.directives)?;
             }
             ExtendedType::Union(u) => {
                 for directive in &u.directives {
@@ -666,12 +667,20 @@ mod tests {
         type Query {
           me: User
           customer: User
+          itf: I
         }
 
         type User @join__type(graph: ACCOUNTS, key: "id") {
           id: ID!
           name: String
         }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name :String
+        }
+
+        union U = User
         "#;
 
         let schema2: &str = r#"
@@ -694,14 +703,23 @@ mod tests {
         type Query {
           me: User
           customer: User @test
+          itf: I
         }
 
         type User @join__type(graph: ACCOUNTS, key: "id") {
           id: ID! @test
           name: String
         }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID! @test
+            name :String
+        }
         "#;
         let query = "query { me { name } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { itf { name } }";
         assert_ne!(hash(schema1, query), hash(schema2, query));
     }
 }
