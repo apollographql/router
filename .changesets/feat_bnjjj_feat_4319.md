@@ -1,6 +1,9 @@
 ### Add support of instruments in configuration for telemetry ([Issue #4319](https://github.com/apollographql/router/issues/4319))
 
-Add support for custom and standard instruments through the configuration file. You'll be able to add your own custom metrics just using the configuration file. It can be conditional, get values from selectors like headers, context, body. And the metrics can have different types like `histogram` or `counter`.
+Add support for custom and standard instruments through the configuration file. You'll be able to add your own custom metrics just using the configuration file. They may:
+- be conditional
+- get values from selectors, for instance headers, context or body
+- have different types like `histogram` or `counter`.
 
 Example:
 
