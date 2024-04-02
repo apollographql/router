@@ -1,6 +1,9 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
+use std::str::FromStr;
 
+use http::uri::Parts;
+use http::uri::PathAndQuery;
 use http::Uri;
 use lazy_static::lazy_static;
 use opentelemetry::sdk::metrics::reader::TemporalitySelector;
@@ -27,6 +30,8 @@ lazy_static! {
     static ref DEFAULT_GRPC_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4317");
     static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
 }
+
+const DEFAULT_HTTP_ENDPOINT_PATH: &str = "/v1/traces";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
@@ -60,9 +65,16 @@ pub(crate) struct Config {
     pub(crate) temporality: Temporality,
 }
 
+#[derive(Copy, Clone)]
+pub(crate) enum TelemetryDataKind {
+    Traces,
+    Metrics,
+}
+
 impl Config {
     pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
         &self,
+        kind: TelemetryDataKind,
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
@@ -82,7 +94,12 @@ impl Config {
                 Ok(exporter)
             }
             Protocol::Http => {
-                let endpoint = self.endpoint.to_uri(&DEFAULT_HTTP_ENDPOINT);
+                let endpoint = add_missing_path(
+                    kind,
+                    self.endpoint
+                        .to_uri(&DEFAULT_HTTP_ENDPOINT)
+                        .map(|e| e.into_parts()),
+                )?;
                 let http = self.http.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .http()
@@ -97,6 +114,48 @@ impl Config {
             }
         }
     }
+}
+
+// Waiting for https://github.com/open-telemetry/opentelemetry-rust/issues/1618 to be fixed
+fn add_missing_path(
+    kind: TelemetryDataKind,
+    mut endpoint_parts: Option<Parts>,
+) -> Result<Option<Uri>, BoxError> {
+    if let Some(endpoint_parts) = &mut endpoint_parts {
+        if let TelemetryDataKind::Traces = kind {
+            match &mut endpoint_parts.path_and_query {
+                Some(path_and_query) => {
+                    if !path_and_query.path().ends_with(DEFAULT_HTTP_ENDPOINT_PATH) {
+                        match path_and_query.query() {
+                            Some(query) => {
+                                endpoint_parts.path_and_query =
+                                    Some(PathAndQuery::from_str(&format!(
+                                        "{}{DEFAULT_HTTP_ENDPOINT_PATH}?{query}",
+                                        path_and_query.path().trim_end_matches('/')
+                                    ))?);
+                            }
+                            None => {
+                                *path_and_query = PathAndQuery::from_str(&format!(
+                                    "{}{DEFAULT_HTTP_ENDPOINT_PATH}",
+                                    path_and_query.path().trim_end_matches('/')
+                                ))?;
+                            }
+                        }
+                    }
+                }
+                None => {
+                    endpoint_parts.path_and_query =
+                        Some(PathAndQuery::from_static(DEFAULT_HTTP_ENDPOINT_PATH));
+                }
+            }
+        }
+    }
+    let endpoint = match endpoint_parts {
+        Some(endpoint_parts) => Some(Uri::from_parts(endpoint_parts)?),
+        None => None,
+    };
+
+    Ok(endpoint)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -249,5 +308,44 @@ mod tests {
         };
         let domain = exporter.default_tls_domain(&url);
         assert_eq!(domain, Some("foo.bar"));
+    }
+
+    #[test]
+    fn test_add_missing_path() {
+        let url = Uri::from_str("https://api.apm.com:433/v1/traces").unwrap();
+        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            url.to_string(),
+            String::from("https://api.apm.com:433/v1/traces")
+        );
+
+        let url = Uri::from_str("https://api.apm.com:433/").unwrap();
+        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            url.to_string(),
+            String::from("https://api.apm.com:433/v1/traces")
+        );
+
+        let url = Uri::from_str("https://api.apm.com:433/?hi=hello").unwrap();
+        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            url.to_string(),
+            String::from("https://api.apm.com:433/v1/traces?hi=hello")
+        );
+
+        let url = Uri::from_str("https://api.apm.com:433/v1?hi=hello").unwrap();
+        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            url.to_string(),
+            String::from("https://api.apm.com:433/v1/v1/traces?hi=hello")
+        );
     }
 }

@@ -185,19 +185,19 @@ pub(crate) mod test_utils {
         ) -> bool {
             let attributes = AttributeSet::from(attributes);
             if let Some(value) = value.to_u64() {
-                if self.metric_exists(name, &ty, value, &attributes) {
+                if self.metric_matches(name, &ty, value, &attributes) {
                     return true;
                 }
             }
 
             if let Some(value) = value.to_i64() {
-                if self.metric_exists(name, &ty, value, &attributes) {
+                if self.metric_matches(name, &ty, value, &attributes) {
                     return true;
                 }
             }
 
             if let Some(value) = value.to_f64() {
-                if self.metric_exists(name, &ty, value, &attributes) {
+                if self.metric_matches(name, &ty, value, &attributes) {
                     return true;
                 }
             }
@@ -205,7 +205,7 @@ pub(crate) mod test_utils {
             false
         }
 
-        fn metric_exists<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
+        pub(crate) fn metric_matches<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
             &self,
             name: &str,
             ty: &MetricType,
@@ -231,11 +231,47 @@ pub(crate) mod test_utils {
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
                 {
                     if matches!(ty, MetricType::Histogram) {
-                        if let Some(value) = value.to_u64() {
-                            return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.attributes == *attributes && datapoint.count == value
-                            });
-                        }
+                        return histogram.data_points.iter().any(|datapoint| {
+                            datapoint.attributes == *attributes && datapoint.sum == value
+                        });
+                    }
+                }
+            }
+            false
+        }
+
+        pub(crate) fn metric_exists<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
+            &self,
+            name: &str,
+            ty: MetricType,
+            attributes: &[KeyValue],
+        ) -> bool {
+            let attributes = AttributeSet::from(attributes);
+            if let Some(metric) = self.find(name) {
+                // Try to downcast the metric to each type of aggregation and assert that the value is correct.
+                if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
+                    // Find the datapoint with the correct attributes.
+                    if matches!(ty, MetricType::Gauge) {
+                        return gauge
+                            .data_points
+                            .iter()
+                            .any(|datapoint| datapoint.attributes == attributes);
+                    }
+                } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
+                    // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
+                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
+                        return sum
+                            .data_points
+                            .iter()
+                            .any(|datapoint| datapoint.attributes == attributes);
+                    }
+                } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
+                {
+                    if matches!(ty, MetricType::Histogram) {
+                        return histogram
+                            .data_points
+                            .iter()
+                            .any(|datapoint| datapoint.attributes == attributes);
                     }
                 }
             }
@@ -905,7 +941,7 @@ macro_rules! assert_gauge {
 }
 
 #[cfg(test)]
-macro_rules! assert_histogram {
+macro_rules! assert_histogram_sum {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
@@ -932,8 +968,74 @@ macro_rules! assert_histogram {
     };
 
     ($name:literal, $value: expr) => {
-        let result = crate::metrics::collect_metrics().assert($name, $value, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &[]);
         assert_metric!(result, $name, None, Some($value.into()), &[]);
+    };
+}
+
+#[cfg(test)]
+macro_rules! assert_histogram_exists {
+
+    ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(result, $name, None, None, &attributes);
+    };
+
+    ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty) => {
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
+        assert_metric!(result, $name, None, None, &[]);
+    };
+}
+
+#[cfg(test)]
+macro_rules! assert_histogram_not_exists {
+
+    ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
+        assert_metric!(!result, $name, None, None, &attributes);
+    };
+
+    ($name:literal, $value: ty) => {
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
+        assert_metric!(!result, $name, None, None, &[]);
     };
 }
 
@@ -1143,7 +1245,7 @@ mod test {
     async fn test_u64_histogram() {
         async {
             u64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1153,7 +1255,7 @@ mod test {
     async fn test_i64_histogram() {
         async {
             i64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1163,7 +1265,7 @@ mod test {
     async fn test_f64_histogram() {
         async {
             f64_histogram!("test", "test description", 1.0, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1185,7 +1287,7 @@ mod test {
     async fn test_type_counter() {
         async {
             f64_counter!("test", "test description", 1.0, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1196,7 +1298,7 @@ mod test {
     async fn test_type_up_down_counter() {
         async {
             f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1211,7 +1313,7 @@ mod test {
                 .u64_observable_gauge("test")
                 .with_callback(|m| m.observe(5, &[]))
                 .init();
-            assert_histogram!("test", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;

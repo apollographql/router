@@ -553,16 +553,27 @@ where
     RF: RouterFactory,
 {
     let early_cancel = configuration.supergraph.early_cancel;
+    let experimental_log_on_broken_pipe = configuration.supergraph.experimental_log_on_broken_pipe;
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
         get({
             move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
-                handle_graphql(service.create().boxed(), early_cancel, request)
+                handle_graphql(
+                    service.create().boxed(),
+                    early_cancel,
+                    experimental_log_on_broken_pipe,
+                    request,
+                )
             }
         })
         .post({
             move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
-                handle_graphql(service.create().boxed(), early_cancel, request)
+                handle_graphql(
+                    service.create().boxed(),
+                    early_cancel,
+                    experimental_log_on_broken_pipe,
+                    request,
+                )
             }
         }),
     );
@@ -573,13 +584,23 @@ where
             get({
                 move |Extension(service): Extension<RF>,
                       request: Request<DecompressionBody<Body>>| {
-                    handle_graphql(service.create().boxed(), early_cancel, request)
+                    handle_graphql(
+                        service.create().boxed(),
+                        early_cancel,
+                        experimental_log_on_broken_pipe,
+                        request,
+                    )
                 }
             })
             .post({
                 move |Extension(service): Extension<RF>,
                       request: Request<DecompressionBody<Body>>| {
-                    handle_graphql(service.create().boxed(), early_cancel, request)
+                    handle_graphql(
+                        service.create().boxed(),
+                        early_cancel,
+                        experimental_log_on_broken_pipe,
+                        request,
+                    )
                 }
             }),
         );
@@ -591,6 +612,7 @@ where
 async fn handle_graphql(
     service: router::BoxService,
     early_cancel: bool,
+    experimental_log_on_broken_pipe: bool,
     http_request: Request<DecompressionBody<Body>>,
 ) -> impl IntoResponse {
     let _guard = SessionCountGuard::start();
@@ -615,7 +637,7 @@ async fn handle_graphql(
         // means it went through the entire pipeline at least once (not looking at deferred responses or
         // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
         // the context a flag to indicate that the request is canceled and subgraph calls should not be made
-        let mut cancel_handler = CancelHandler::new(&context);
+        let mut cancel_handler = CancelHandler::new(&context, experimental_log_on_broken_pipe);
         let task = service
             .oneshot(request)
             .with_current_subscriber()
@@ -688,14 +710,16 @@ async fn handle_graphql(
 struct CancelHandler<'a> {
     context: &'a Context,
     got_first_response: bool,
+    experimental_log_on_broken_pipe: bool,
     span: tracing::Span,
 }
 
 impl<'a> CancelHandler<'a> {
-    fn new(context: &'a Context) -> Self {
+    fn new(context: &'a Context, experimental_log_on_broken_pipe: bool) -> Self {
         CancelHandler {
             context,
             got_first_response: false,
+            experimental_log_on_broken_pipe,
             span: tracing::Span::current(),
         }
     }
@@ -708,8 +732,10 @@ impl<'a> CancelHandler<'a> {
 impl<'a> Drop for CancelHandler<'a> {
     fn drop(&mut self) {
         if !self.got_first_response {
-            self.span
-                .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
+            if self.experimental_log_on_broken_pipe {
+                self.span
+                    .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
+            }
             self.context.extensions().lock().insert(CanceledRequest);
         }
     }
@@ -756,8 +782,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_cancel() {
+    async fn request_cancel_log() {
         let mut http_router = crate::TestHarness::builder()
+            .configuration_yaml(include_str!("testdata/log_on_broken_pipe.router.yaml"))
+            .expect("invalid configuration")
+            .schema(include_str!("../testdata/supergraph.graphql"))
+            .build_http_service()
+            .await
+            .unwrap();
+
+        async {
+            let _res = tokio::time::timeout(
+                std::time::Duration::from_micros(100),
+                http_router.call(
+                    http::Request::builder()
+                        .method("POST")
+                        .uri("/")
+                        .header(ACCEPT, "application/json")
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(hyper::Body::from(r#"{"query":"query { me { name }}"}"#))
+                        .unwrap(),
+                ),
+            )
+            .await;
+
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!(
+            tracing_core::LevelFilter::ERROR
+        ))
+        .await
+    }
+    #[tokio::test]
+    async fn request_cancel_no_log() {
+        let mut http_router = crate::TestHarness::builder()
+            .configuration_yaml(include_str!("testdata/no_log_on_broken_pipe.router.yaml"))
+            .expect("invalid configuration")
             .schema(include_str!("../testdata/supergraph.graphql"))
             .build_http_service()
             .await
