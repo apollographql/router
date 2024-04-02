@@ -78,7 +78,8 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::validation::Valid;
-    use apollo_compiler::{ExecutableDocument, Schema};
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
 
     use crate::plugins::progressive_override::visitor::OverrideLabelVisitor;
     use crate::spec::query::traverse;
@@ -149,7 +150,7 @@ mod tests {
         let schema = Schema::parse(SCHEMA, "supergraph.graphql").expect("parse schema");
         let operation_string = "{ t { k a b } }";
         let operation = ExecutableDocument::parse(
-            &Valid::assume_valid_ref(&schema),
+            Valid::assume_valid_ref(&schema),
             operation_string,
             "query.graphql",
         )
@@ -170,7 +171,7 @@ mod tests {
         let schema = Schema::parse(SCHEMA, "supergraph.graphql").expect("parse schema");
         let operation_string = "{ t { k a b } t2 }";
         let operation = ExecutableDocument::parse(
-            &Valid::assume_valid_ref(&schema),
+            Valid::assume_valid_ref(&schema),
             operation_string,
             "query.graphql",
         )

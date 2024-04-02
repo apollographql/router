@@ -6,8 +6,10 @@ use std::hash::Hasher;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
+use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
@@ -132,28 +134,8 @@ impl<'a> QueryHashVisitor<'a> {
                 for directive in &o.directives {
                     self.hash_directive(&directive.node);
                 }
-                if let Some(dir) = o.directives.get("join__type") {
-                    if let Some(key) = dir.argument_by_name("key") {
-                        println!("got key: {:?}", key);
-                        let mut parser = Parser::new();
-                        let field_set = parser
-                            .parse_field_set(
-                                Valid::assume_valid_ref(self.schema),
-                                o.name.clone(),
-                                key.as_str().unwrap(),
-                                &std::path::Path::new("schema.graphql"),
-                            )
-                            .unwrap();
 
-                        println!("got field set: {field_set:?}");
-
-                        traverse::selection_set(
-                            self,
-                            o.name.as_str(),
-                            &field_set.selection_set.selections[..],
-                        )?;
-                    }
-                }
+                self.hash_join_type(&o.name, &o.directives)?;
             }
             ExtendedType::Interface(i) => {
                 for directive in &i.directives {
@@ -255,6 +237,31 @@ impl<'a> QueryHashVisitor<'a> {
         if let Some(value) = t.default_value.as_ref() {
             self.hash_value(value);
         }
+        Ok(())
+    }
+
+    fn hash_join_type(&mut self, name: &Name, directives: &DirectiveList) -> Result<(), BoxError> {
+        if let Some(dir) = directives.get("join__type") {
+            if let Some(key) = dir.argument_by_name("key") {
+                println!("got key: {:?}", key);
+                let mut parser = Parser::new();
+                if let Ok(field_set) = parser.parse_field_set(
+                    Valid::assume_valid_ref(self.schema),
+                    name.clone(),
+                    key.as_str().unwrap(),
+                    std::path::Path::new("schema.graphql"),
+                ) {
+                    println!("got field set: {field_set:?}");
+
+                    traverse::selection_set(
+                        self,
+                        name.as_str(),
+                        &field_set.selection_set.selections[..],
+                    )?;
+                }
+            }
+        }
+
         Ok(())
     }
 }

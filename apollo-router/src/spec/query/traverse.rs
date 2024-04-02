@@ -1,5 +1,7 @@
+use apollo_compiler::ast;
+use apollo_compiler::executable;
 use apollo_compiler::schema::FieldLookupError;
-use apollo_compiler::{ast, executable, ExecutableDocument};
+use apollo_compiler::ExecutableDocument;
 use tower::BoxError;
 
 /// Traverse a document with the given visitor.
@@ -8,7 +10,7 @@ pub(crate) fn document(
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), BoxError> {
-    if let Some(operation) = document.get_operation(operation_name).ok() {
+    if let Ok(operation) = document.get_operation(operation_name) {
         visitor.operation(operation.object_type().as_str(), operation)?;
     }
 
@@ -91,11 +93,7 @@ pub(crate) fn fragment(
     visitor: &mut impl Visitor,
     def: &executable::Fragment,
 ) -> Result<(), BoxError> {
-    selection_set(
-        visitor,
-        &def.type_condition(),
-        &def.selection_set.selections,
-    )?;
+    selection_set(visitor, def.type_condition(), &def.selection_set.selections)?;
     Ok(())
 }
 
