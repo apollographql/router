@@ -2431,15 +2431,24 @@ expression: "&schema"
               "properties": {
                 "heartbeat_interval": {
                   "description": "Heartbeat interval for callback mode (default: 5secs)",
-                  "default": "5s",
+                  "default": "enabled",
                   "anyOf": [
                     {
+                      "description": "disable heartbeat",
                       "type": "string",
                       "enum": [
                         "disabled"
                       ]
                     },
                     {
+                      "description": "enable with default interval of 5s",
+                      "type": "string",
+                      "enum": [
+                        "enabled"
+                      ]
+                    },
+                    {
+                      "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
                       "type": "string"
                     }
                   ]
@@ -2491,6 +2500,30 @@ expression: "&schema"
                   "default": null,
                   "type": "object",
                   "properties": {
+                    "heartbeat_interval": {
+                      "description": "Heartbeat interval for graphql-ws protocol (default: disabled)",
+                      "default": "disabled",
+                      "anyOf": [
+                        {
+                          "description": "disable heartbeat",
+                          "type": "string",
+                          "enum": [
+                            "disabled"
+                          ]
+                        },
+                        {
+                          "description": "enable with default interval of 5s",
+                          "type": "string",
+                          "enum": [
+                            "enabled"
+                          ]
+                        },
+                        {
+                          "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "path": {
                       "description": "Path on which WebSockets are listening",
                       "default": null,
@@ -2518,6 +2551,30 @@ expression: "&schema"
                     "description": "WebSocket configuration for a specific subgraph",
                     "type": "object",
                     "properties": {
+                      "heartbeat_interval": {
+                        "description": "Heartbeat interval for graphql-ws protocol (default: disabled)",
+                        "default": "disabled",
+                        "anyOf": [
+                          {
+                            "description": "disable heartbeat",
+                            "type": "string",
+                            "enum": [
+                              "disabled"
+                            ]
+                          },
+                          {
+                            "description": "enable with default interval of 5s",
+                            "type": "string",
+                            "enum": [
+                              "enabled"
+                            ]
+                          },
+                          {
+                            "description": "enable with custom interval, e.g. '100ms', '10s' or '1m'",
+                            "type": "string"
+                          }
+                        ]
+                      },
                       "path": {
                         "description": "Path on which WebSockets are listening",
                         "default": null,
@@ -2573,13 +2630,25 @@ expression: "&schema"
           "warmed_up_queries": null,
           "experimental_plans_limit": null,
           "experimental_paths_limit": null
-        }
+        },
+        "early_cancel": false,
+        "experimental_log_on_broken_pipe": false
       },
       "type": "object",
       "properties": {
         "defer_support": {
           "description": "Set to false to disable defer support",
           "default": true,
+          "type": "boolean"
+        },
+        "early_cancel": {
+          "description": "abort request handling when the client drops the connection. Default: false. When set to true, some parts of the request pipeline like telemetry will not work properly, but request handling will stop immediately when the client connection is closed.",
+          "default": false,
+          "type": "boolean"
+        },
+        "experimental_log_on_broken_pipe": {
+          "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
+          "default": false,
           "type": "boolean"
         },
         "experimental_reuse_query_fragments": {
@@ -3254,6 +3323,11 @@ expression: "&schema"
                                   "default": true,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3276,6 +3350,11 @@ expression: "&schema"
                                 },
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
@@ -3342,6 +3421,11 @@ expression: "&schema"
                                   "default": false,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: false)",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3365,6 +3449,11 @@ expression: "&schema"
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: false)",
+                                  "default": false,
                                   "type": "boolean"
                                 }
                               },
@@ -3447,6 +3536,11 @@ expression: "&schema"
                                   "default": true,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3469,6 +3563,11 @@ expression: "&schema"
                                 },
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
@@ -3535,6 +3634,11 @@ expression: "&schema"
                                   "default": false,
                                   "type": "boolean"
                                 },
+                                "display_span_id": {
+                                  "description": "Include the span id (if any) with the log event. (default: false)",
+                                  "default": false,
+                                  "type": "boolean"
+                                },
                                 "display_span_list": {
                                   "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
@@ -3558,6 +3662,11 @@ expression: "&schema"
                                 "display_timestamp": {
                                   "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
+                                  "type": "boolean"
+                                },
+                                "display_trace_id": {
+                                  "description": "Include the trace id (if any) with the log event. (default: false)",
+                                  "default": false,
                                   "type": "boolean"
                                 }
                               },
