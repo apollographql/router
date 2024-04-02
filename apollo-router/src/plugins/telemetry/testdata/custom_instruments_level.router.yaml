@@ -1,0 +1,77 @@
+telemetry:
+  apollo:
+    client_name_header: name_header
+    client_version_header: version_header
+  instrumentation:
+    instruments:
+      default_requirement_level: recommended
+      router:
+        http.server.request.body.size:
+          attributes:
+            # Standard attributes
+            http.request.method: false
+            "acme.my_attribute":
+              response_header: "content-type"
+        acme.request.duration: # The name of your custom instrument/metric
+          value: duration
+          type: counter
+          unit: s
+          description: "my description"
+        acme.graphql.custom_req:
+          value: unit
+          type: counter
+          unit: request
+          description: "supergraph requests"
+          condition:
+            exists:
+              request_header: "conditional-custom"
+        acme.request.size: # The name of your custom instrument/metric
+          value:
+           request_header: "custom-length"
+          type: counter
+          unit: s
+          condition:
+            all:
+            - eq:
+              - request_header: "x-custom"
+              - "TEST"
+            - eq:
+              - response_header: "content-type"
+              - "application/graphql"
+          description: "my description" 
+            
+        acme.request.length: # The name of your custom instrument/metric
+          value:
+           request_header: "custom-length"
+          type: histogram
+          unit: s
+          description: "my description"
+      supergraph:
+        acme.graphql.requests:
+          value: unit
+          type: counter
+          unit: request
+          description: "supergraph requests"
+          attributes:
+            graphql.document: true
+            graphql_query: 
+              query: string
+            "acme.my_attribute":
+              response_header: "content-type"
+          condition:
+            exists:
+              request_header: "x-custom"
+      subgraph:
+        http.client.request.duration: false
+        acme.subgraph.error_reqs:
+          value: unit
+          type: counter
+          unit: request
+          description: "subgraph requests in error"
+          attributes:
+            subgraph.name: true
+            graphql_error:
+              subgraph_response_errors: "$[*].message"
+          condition:
+            exists:
+              subgraph_response_errors: "$[*].message"

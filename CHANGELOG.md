@@ -4,6 +4,166 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.43.1] - 2024-03-29
+
+## 🚀 Features
+
+### Logs can display trace and span IDs ([PR #4823](https://github.com/apollographql/router/pull/4823))
+
+To enable correlation between traces and logs, `trace_id` and `span_id` can now be displayed in log messages.
+
+For JSON logs, trace and span IDs are displayed by default:
+```json
+{"timestamp":"2024-03-19T15:37:41.516453239Z","level":"INFO","trace_id":"54ac7e5f0e8ab90ae67b822e95ffcbb8","span_id":"9b3f88c602de0ceb","message":"Supergraph GraphQL response", ...}
+```
+
+For text logs, trace and span IDs aren't displayed by default:
+```log
+2024-03-19T15:14:46.040435Z INFO trace_id: bbafc3f048b6137375dd78c10df18f50 span_id: 40ede28c5df1b5cc router{
+```
+
+To configure, set the `display_span_id` and `display_trace_id` options in the logging exporter configuration.
+
+JSON (defaults to true):
+```yaml
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format:
+          json:
+            display_span_id: true
+            display_trace_id: true
+```
+
+Text (defaults to false):
+```yaml
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format:
+          text:
+            display_span_id: false
+            display_trace_id: false
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4823
+
+### Count errors with apollo.router.graphql_error metrics ([Issue #4749](https://github.com/apollographql/router/issues/4749))
+
+The router supports a new metric, `apollo.router.graphql_error`, that is a counter of GraphQL errors. It has a `code` attribute to differentiate counts of different error codes.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4751
+
+### Expose operation signature to plugins ([Issue #4558](https://github.com/apollographql/router/issues/4558))
+
+The router now exposes [operation signatures](https://www.apollographql.com/docs/graphos/metrics/operation-signatures) to plugins with the context key `apollo_operation_signature`. The exposed operation signature is the string representation of the full signature.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4864
+
+### Experimental logging of broken pipe errors ([PR #4870](https://github.com/apollographql/router/pull/4870))
+
+The router can now emit a log message each time a client closes its connection early, which can help you debug issues with clients that close connections before the server can respond.
+
+This feature is disabled by default but can be enabled by setting the `experimental_log_broken_pipe` option to `true`:
+
+```yaml title="router.yaml"
+supergraph:
+  experimental_log_on_broken_pipe: true
+```
+
+Note: users with internet-facing routers will likely not want to opt in to this log message, as they have no control over the clients.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4770 and [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4870
+
+## 🐛 Fixes
+
+### Entity cache: fix support for Redis cluster ([PR #4790](https://github.com/apollographql/router/pull/4790))
+
+In a Redis cluster, entities can be stored in different nodes, and a query to one node should only refer to the keys it manages. This is challenging for the Redis MGET operation, which requests multiple entities in the same request from the same node.
+
+This fix splits the MGET query into multiple MGET calls, where the calls are grouped by key hash to ensure each one gets to the corresponding node, and then merges the responses in the correct order.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4790
+
+### Give spans their proper parent in the plugin stack ([Issue #4827](https://github.com/apollographql/router/issues/4827))
+
+Previously, spans in plugin stacks appeared incorrectly as siblings rather than being nested. This was problematic when displaying traces or accounting for time spent in Datadog.
+
+This release fixes the issue, and plugin spans are now correctly nested within each other.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4877
+
+### Fix(telemetry): keep consistency between tracing OTLP endpoint ([Issue #4798](https://github.com/apollographql/router/issues/4798))
+
+Previously, when [exporting tracing data using OTLP](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/otlp/#otlp-configuration) using only the base address of the OTLP endpoint, the router succeeded with gRPC but failed with HTTP due to [this bug](https://github.com/open-telemetry/opentelemetry-rust/issues/1618) in `opentelemetry-rust`.
+
+This release implements a workaround for the bug, where you must specify the correct HTTP path:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: "http://localhost:4318"
+        protocol: http
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4801
+
+### Execute the entire request pipeline if the client closed the connection ([Issue #4569](https://github.com/apollographql/router/issues/4569)), ([Issue #4576](https://github.com/apollographql/router/issues/4576)), ([Issue #4589](https://github.com/apollographql/router/issues/4589)), ([Issue #4590](https://github.com/apollographql/router/issues/4590)), ([Issue #4611](https://github.com/apollographql/router/issues/4611))
+
+The router now ensures that the entire request handling pipeline is executed when the client closes the connection early to allow telemetry, Rhai scripts, or coprocessors to complete their tasks before canceling.
+
+Previously, when a client canceled a request, the entire execution was dropped, and parts of the router, including telemetry, couldn't run to completion. Now, the router executes up to the first response event (in the case of subscriptions or `@defer` usage), adds a `499` status code to the response, and skips the remaining subgraph requests.
+
+Note that this change will report more requests to Studio and the configured telemetry, and it will appear like a sudden increase in errors because the failing requests were not previously reported.
+
+You can keep the previous behavior of immediately dropping execution for canceled requests by setting the `early_cancel` option:
+
+```yaml
+supergraph:
+  early_cancel: true
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4770
+
+### `null` extensions incorrectly disallowed on request ([Issue #4856](https://github.com/apollographql/router/issues/4856))
+
+Previously the router incorrectly rejected requests with `null` extensions, which are allowed according to the [GraphQL over HTTP specification](https://graphql.github.io/graphql-over-http/draft/#sel-EALFPCCBCEtC37P).
+
+This issue has been fixed, and the router now allows requests with `null` extensions, like the following:
+
+```json
+{
+  "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+  "variables": {
+    "date": "2022-01-01T00:00:00+00:00"
+  },
+  "extensions": null
+}
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4865
+
+### Fix external extensibility error log messages ([PR #4869](https://github.com/apollographql/router/pull/4869))
+
+Previously, log messages for external extensibility errors from `execution` and `supergraph` responses were incorrectly logged as `router` responses. This issue has been fixed.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4869
+
+### Remove invalid payload on graphql-ws Ping message ([Issue #4852](https://github.com/apollographql/router/issues/4852))
+
+Previously, the router sent a string as a `Ping` payload, but that was incompatible with the [graphql-ws specification](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md#ping), which specifies that the payload is optional and should be an object or null.
+
+To ensure compatibility, the router now sends no payload for `Ping` messages.
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/4852
+
+
+
 # [1.43.0] - 2024-03-21
 
 ## 🚀 Features

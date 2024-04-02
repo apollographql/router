@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -28,7 +29,9 @@ use super::QueryKey;
 use crate::configuration::GraphQLValidationMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
+use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
+use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
@@ -63,6 +66,7 @@ const VALIDATION_MATCH: &str = "match";
 pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlanResult>>,
     schema: Arc<Schema>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
@@ -236,6 +240,16 @@ impl BridgeQueryPlanner {
         let api_schema = Schema::parse(&api_schema_string, &configuration)?;
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
+
+        let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
+            HashMap::new();
+        for (name, schema_str) in planner.subgraphs().await? {
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            subgraph_schemas.insert(name, Arc::new(schema));
+        }
+        let subgraph_schemas = Arc::new(subgraph_schemas);
+
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
@@ -248,6 +262,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
+            subgraph_schemas,
             introspection,
             enable_authorization_directives,
             configuration,
@@ -295,6 +310,15 @@ impl BridgeQueryPlanner {
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
+        let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
+            HashMap::new();
+        for (name, schema_str) in planner.subgraphs().await? {
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            subgraph_schemas.insert(name, Arc::new(schema));
+        }
+        let subgraph_schemas = Arc::new(subgraph_schemas);
+
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
@@ -307,6 +331,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
+            subgraph_schemas,
             introspection,
             enable_authorization_directives,
             configuration,
@@ -320,6 +345,12 @@ impl BridgeQueryPlanner {
 
     pub(crate) fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
+    }
+
+    pub(crate) fn subgraph_schemas(
+        &self,
+    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+        self.subgraph_schemas.clone()
     }
 
     async fn parse_selections(
