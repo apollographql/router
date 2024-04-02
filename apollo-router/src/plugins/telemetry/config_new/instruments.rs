@@ -79,6 +79,7 @@ impl InstrumentsConfig {
             .then(|| CustomHistogram {
                 inner: Mutex::new(CustomHistogramInner {
                     increment: Increment::Duration(Instant::now()),
+                    condition: Condition::True,
                     histogram: Some(meter.f64_histogram("http.server.request.duration").init()),
                     attributes: Vec::new(),
                     selector: None,
@@ -109,6 +110,7 @@ impl InstrumentsConfig {
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
                             increment: Increment::Custom(None),
+                            condition: Condition::True,
                             histogram: Some(
                                 meter.f64_histogram("http.server.request.body.size").init(),
                             ),
@@ -141,6 +143,7 @@ impl InstrumentsConfig {
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
                             increment: Increment::Custom(None),
+                            condition: Condition::True,
                             histogram: Some(
                                 meter.f64_histogram("http.server.response.body.size").init(),
                             ),
@@ -206,6 +209,7 @@ impl InstrumentsConfig {
                 CustomHistogram {
                     inner: Mutex::new(CustomHistogramInner {
                         increment: Increment::Duration(Instant::now()),
+                        condition: Condition::True,
                         histogram: Some(meter.f64_histogram("http.client.request.duration").init()),
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: None,
@@ -231,6 +235,7 @@ impl InstrumentsConfig {
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
                             increment: Increment::Custom(None),
+                            condition: Condition::True,
                             histogram: Some(
                                 meter.f64_histogram("http.client.request.body.size").init(),
                             ),
@@ -262,6 +267,7 @@ impl InstrumentsConfig {
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
                             increment: Increment::Custom(None),
+                            condition: Condition::True,
                             histogram: Some(
                                 meter.f64_histogram("http.client.response.body.size").init(),
                             ),
@@ -698,6 +704,7 @@ where
                     };
                     let histogram = CustomHistogramInner {
                         increment,
+                        condition: instrument.condition.clone(),
                         histogram: Some(meter.f64_histogram(instrument_name.clone()).init()),
                         attributes: Vec::new(),
                         selector,
@@ -948,6 +955,7 @@ where
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
         if inner.condition.evaluate_request(request) == Some(false) {
+            let _ = inner.counter.take();
             return;
         }
         inner.attributes = inner.selectors.on_request(request).into_iter().collect();
@@ -1128,6 +1136,7 @@ where
     T: Selector<Request = Request, Response = Response>,
 {
     increment: Increment,
+    condition: Condition<T>,
     selector: Option<Arc<T>>,
     selectors: Option<Arc<Extendable<A, T>>>,
     histogram: Option<Histogram<f64>>,
@@ -1144,6 +1153,10 @@ where
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
+        if inner.condition.evaluate_request(request) == Some(false) {
+            let _ = inner.histogram.take();
+            return;
+        }
         if let Some(selectors) = &inner.selectors {
             inner.attributes = selectors.on_request(request).into_iter().collect();
         }
@@ -1154,6 +1167,10 @@ where
 
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_response(response) {
+            let _ = inner.histogram.take();
+            return;
+        }
         let mut attrs: Vec<KeyValue> = inner
             .selectors
             .as_ref()
@@ -1271,6 +1288,25 @@ mod tests {
                                 "http.response.status_code": true
                             }
                         },
+                        "acme.request.on_error_histo": {
+                            "value": "unit",
+                            "type": "histogram",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "not": {
+                                    "eq": [
+                                        200,
+                                        {
+                                            "response_status": "code"
+                                        }
+                                    ]
+                                }
+                            },
+                            "attributes": {
+                                "http.response.status_code": true
+                            }
+                        },
                         "acme.request.header_value": {
                             "value": {
                                 "request_header": "x-my-header-count"
@@ -1312,6 +1348,11 @@ mod tests {
                 1.0,
                 "http.response.status_code" = 400
             );
+            assert_histogram_sum!(
+                "acme.request.on_error_histo",
+                1.0,
+                "http.response.status_code" = 400
+            );
             assert_histogram_sum!("http.server.request.body.size", 35.0);
             assert_histogram_sum!(
                 "http.server.response.body.size",
@@ -1340,6 +1381,11 @@ mod tests {
             assert_counter!("acme.request.header_value", 60.0);
             assert_counter!(
                 "acme.request.on_error",
+                2.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!(
+                "acme.request.on_error_histo",
                 2.0,
                 "http.response.status_code" = 400
             );
@@ -1375,6 +1421,11 @@ mod tests {
             assert_counter!("acme.request.header_value", 60.0);
             assert_counter!(
                 "acme.request.on_error",
+                2.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!(
+                "acme.request.on_error_histo",
                 2.0,
                 "http.response.status_code" = 400
             );
