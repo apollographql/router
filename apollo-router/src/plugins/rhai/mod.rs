@@ -337,7 +337,6 @@ macro_rules! gen_map_request {
                         tracing::error!("map_request callback failed: {error_details:#?}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-
                         return $base::request_failure(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
