@@ -6,6 +6,7 @@
 //! graphql Requests to/from batch representation in a variety of formats: JSON, bytes
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
@@ -209,18 +210,16 @@ impl Batch {
             ///
             #[derive(Debug)]
             struct BatchQueryState {
-                registered: Vec<Arc<QueryHash>>,
-                committed: Vec<Arc<QueryHash>>,
-                cancelled: Vec<Arc<QueryHash>>,
+                registered: HashSet<Arc<QueryHash>>,
+                committed: HashSet<Arc<QueryHash>>,
+                cancelled: HashSet<Arc<QueryHash>>,
             }
 
             impl BatchQueryState {
-                // A BatchQuery is "ready" when registered = committed + cancelled
+                // We are ready when everything we registered is in either cancelled or
+                // committed.
                 fn is_ready(&self) -> bool {
-                    // For now, just check the length of the various vectors
-                    // TODO: Improve the quality of this check by examining the contents of the
-                    // various lists
-                    self.registered.len() == self.committed.len() + self.cancelled.len()
+                    self.registered.difference(&self.committed.union(&self.cancelled).cloned().collect()).collect::<Vec<_>>().is_empty()
                 }
             }
 
@@ -278,9 +277,9 @@ impl Batch {
                         batch_state.insert(
                             index,
                             BatchQueryState {
-                                cancelled: Vec::with_capacity(query_hashes.len()),
-                                committed: Vec::with_capacity(query_hashes.len()),
-                                registered: query_hashes,
+                                cancelled: HashSet::with_capacity(query_hashes.len()),
+                                committed: HashSet::with_capacity(query_hashes.len()),
+                                registered: HashSet::from_iter(query_hashes),
                             },
                         );
                     }
@@ -299,7 +298,7 @@ impl Batch {
                         tracing::info!("Progress index: {index}");
 
                         if let Some(state) = batch_state.get_mut(&index) {
-                            state.committed.push(request.query_hash.clone());
+                            state.committed.insert(request.query_hash.clone());
                         }
 
                         if master_client_factory.is_none() {
@@ -437,18 +436,6 @@ pub(crate) async fn assemble_batch(
     (operation_name, context, request, txs)
 }
 
-// If a Batch is dropped and it still contains waiters, it's important to notify those waiters that
-// their calls have failed.
-//
-// TODO: Figure out the implications, but panic for now if waiters is not empty
-// impl Drop for Batch {
-//     fn drop(&mut self) {
-//         if !self.waiters.is_empty() {
-//             panic!("TODO: waiters must be empty when a Batch is dropped");
-//         }
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -462,43 +449,6 @@ mod tests {
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::Context;
-
-    // Possible example test
-    // #[tokio::test(flavor = "multi_thread")]
-    // async fn it_assembles_batch() {
-    //     // For this test we'll create a mock batch where each subrequest makes
-    //     // 2 times its index in fetches.
-    //     const BATCH_SIZE: usize = 4;
-
-    //     let batch = Batch::spawn_handler(BATCH_SIZE);
-    //     let queries: Vec<_> = (0..BATCH_SIZE)
-    //         .map(|index| batch.query_for_index(index))
-    //         .collect();
-
-    //     // Notify the handler about the needed fetch count for each subrequest
-    //     for (index, query) in queries.iter().enumerate() {
-    //         query.set_subgraph_fetches(index * 2);
-    //     }
-
-    //     // Add some delay to simulate the time between router stages
-    //     tokio::time::sleep(Duration::from_millis(200)).await;
-
-    //     // Notify that each query is ready
-    //     let receivers =
-    //         futures::future::join_all(queries.iter().map(BatchQuery::signal_ready)).await;
-
-    //     // Make sure that we get back the correct responses for them all
-    //     for (index, rx) in receivers.into_iter().enumerate() {
-    //         let result = rx.await.unwrap().unwrap();
-
-    //         assert_eq!(
-    //             result.response.body().data,
-    //             Some(serde_json_bytes::Value::String(
-    //                 format!("{index}: {}", index * 2).into()
-    //             ))
-    //         );
-    //     }
-    // }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_assembles_batch() {
