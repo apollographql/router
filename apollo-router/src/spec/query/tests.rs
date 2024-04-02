@@ -126,8 +126,8 @@ impl FormatTest {
             Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
         let api_schema = schema.api_schema();
-        let query = Query::parse(query, None, &schema, &Default::default())
-            .expect("could not parse query");
+        let query =
+            Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
         let mut response = Response::builder().data(response).build();
 
         query.format_response(
@@ -5838,7 +5838,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(&schema.definitions).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, &ast, None).unwrap();
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5865,7 +5865,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(&schema.definitions).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, &ast, None).unwrap();
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
