@@ -18,7 +18,6 @@ use crate::graphql;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::execution;
 use crate::services::execution::BoxService;
 
 /// Algorithm for calculating the cost of an incoming query.
@@ -91,12 +90,7 @@ impl Plugin for DemandControl {
         if !self.config.enabled {
             service
         } else {
-            ServiceBuilder::new()
-                .map_response(|res: execution::Response| {
-                    res.map_stream(|graphql_res: graphql::Response| graphql_res)
-                })
-                .service(service)
-                .boxed()
+            ServiceBuilder::new().service(service).boxed()
         }
     }
 }
