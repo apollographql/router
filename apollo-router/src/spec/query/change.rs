@@ -856,6 +856,8 @@ mod tests {
           id: ID!
           name: String
           username: String @join__field(graph:ACCOUNTS, requires: "name")
+          a: String @join__field(graph:ACCOUNTS, requires: "itf { ... on A { name } }")
+          itf: I
         }
 
         interface I @join__type(graph: ACCOUNTS, key: "id") {
@@ -863,7 +865,10 @@ mod tests {
             name: String
         }
 
-        union U = User
+        type A implements I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name: String
+        }
         "#;
 
         let schema2: &str = r#"
@@ -911,14 +916,24 @@ mod tests {
           id: ID!
           name: String @test
           username: String @join__field(graph:ACCOUNTS, requires: "name")
+          a: String @join__field(graph:ACCOUNTS, requires: "itf { ... on A { name } }")
+          itf: I
         }
 
         interface I @join__type(graph: ACCOUNTS, key: "id") {
-            id: ID! @test
-            name :String
+            id: ID!
+            name: String @test
+        }
+
+        type A implements I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name: String @test
         }
         "#;
         let query = "query { me { username } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { me { a } }";
         assert_ne!(hash(schema1, query), hash(schema2, query));
     }
 }
