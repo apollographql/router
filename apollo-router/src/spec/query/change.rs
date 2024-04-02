@@ -13,6 +13,7 @@ use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
 use apollo_compiler::Parser;
 use sha2::Digest;
 use sha2::Sha256;
@@ -223,6 +224,8 @@ impl<'a> QueryHashVisitor<'a> {
             for directive in &field_def.directives {
                 self.hash_directive(directive);
             }
+
+            self.hash_join_field(&parent_type, &field_def.directives)?;
         }
         Ok(())
     }
@@ -259,6 +262,36 @@ impl<'a> QueryHashVisitor<'a> {
                         name.as_str(),
                         &field_set.selection_set.selections[..],
                     )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn hash_join_field(
+        &mut self,
+        parent_type: &str,
+        directives: &ast::DirectiveList,
+    ) -> Result<(), BoxError> {
+        if let Some(dir) = directives.get("join__field") {
+            if let Some(requires) = dir.argument_by_name("requires") {
+                println!("got requires: {requires:?}");
+                if let Ok(parent_type) = Name::new(NodeStr::new(parent_type)) {
+                    let mut parser = Parser::new();
+                    if let Ok(field_set) = parser.parse_field_set(
+                        Valid::assume_valid_ref(self.schema),
+                        parent_type.clone(),
+                        requires.as_str().unwrap(),
+                        std::path::Path::new("schema.graphql"),
+                    ) {
+                        println!("got field set: {field_set:?}");
+                        traverse::selection_set(
+                            self,
+                            parent_type.as_str(),
+                            &field_set.selection_set.selections[..],
+                        )?;
+                    }
                 }
             }
         }
@@ -720,6 +753,85 @@ mod tests {
         assert_ne!(hash(schema1, query), hash(schema2, query));
 
         let query = "query { itf { name } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+    }
+
+    #[test]
+    fn join_field_requires() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User
+          itf: I
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID!
+          name: String
+          username: String @join__field(graph:ACCOUNTS, requires: "name")
+        }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name :String
+        }
+
+        union U = User
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User @test
+          itf: I
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID!
+          name: String @test
+          username: String @join__field(graph:ACCOUNTS, requires: "name")
+        }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID! @test
+            name :String
+        }
+        "#;
+        let query = "query { me { username } }";
         assert_ne!(hash(schema1, query), hash(schema2, query));
     }
 }
