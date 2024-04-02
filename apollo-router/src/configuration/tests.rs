@@ -1013,6 +1013,6 @@ fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
         .build()
         .unwrap();
 
-    assert_eq!(conf.supergraph.generate_query_fragments, true);
+    assert!(conf.supergraph.generate_query_fragments);
     assert_eq!(conf.supergraph.reuse_query_fragments, Some(true));
 }
