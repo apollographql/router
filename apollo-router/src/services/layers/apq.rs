@@ -158,7 +158,7 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 }
 
 fn redis_key(query_hash: &str) -> String {
-    format!("apq\0{query_hash}")
+    format!("apq:{query_hash}")
 }
 
 pub(crate) fn calculate_hash_for_query(query: &str) -> String {
