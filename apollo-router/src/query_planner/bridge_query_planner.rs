@@ -100,7 +100,7 @@ impl BridgeQueryPlanner {
             sdl,
             QueryPlannerConfig {
                 reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-                generate_query_fragments: configuration.supergraph.generate_query_fragments,
+                generate_query_fragments: Some(configuration.supergraph.generate_query_fragments),
                 incremental_delivery: Some(IncrementalDeliverySupport {
                     enable_defer: Some(configuration.supergraph.defer_support),
                 }),
@@ -288,7 +288,7 @@ impl BridgeQueryPlanner {
                             GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                         ),
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-                        generate_query_fragments: configuration.supergraph.generate_query_fragments,
+                        generate_query_fragments: Some(configuration.supergraph.generate_query_fragments),
                         debug: Some(QueryPlannerDebugConfig {
                             bypass_planner_for_single_subgraph: None,
                             max_evaluated_plans: configuration

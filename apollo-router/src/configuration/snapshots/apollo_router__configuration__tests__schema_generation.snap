@@ -2620,7 +2620,7 @@ expression: "&schema"
         "path": "/",
         "introspection": false,
         "experimental_reuse_query_fragments": null,
-        "generate_query_fragments": null,
+        "generate_query_fragments": false,
         "defer_support": true,
         "query_planning": {
           "cache": {
@@ -2661,9 +2661,8 @@ expression: "&schema"
         },
         "generate_query_fragments": {
           "description": "Enable QP generation of fragments for subgraph requests Default: false",
-          "default": null,
-          "type": "boolean",
-          "nullable": true
+          "default": false,
+          "type": "boolean"
         },
         "introspection": {
           "description": "Enable introspection Default: false",
