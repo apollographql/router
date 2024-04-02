@@ -536,11 +536,16 @@ impl BridgeQueryPlanner {
                         &self.schema.definitions,
                     );
 
-                    if matches!(
+                    // Ignore comparison if the operation name is an empty string since there is a known issue where
+                    // router behaviour is incorrect in that case, and it also generates incorrect usage reports.
+                    // https://github.com/apollographql/router/issues/4837
+                    let is_empty_operation_name = operation.map_or(false, |s| s.is_empty());
+                    let is_in_both_metrics_mode = matches!(
                         self.configuration
                             .experimental_apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::Both
-                    ) {
+                    );
+                    if !is_empty_operation_name && is_in_both_metrics_mode {
                         let comparison_result =
                             generated_usage_reporting.compare_usage_reporting(&usage_reporting);
 

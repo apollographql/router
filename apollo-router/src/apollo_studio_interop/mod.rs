@@ -150,7 +150,7 @@ impl UsageReportingGenerator<'_> {
             .get_operation(self.operation_name.as_deref())
             .ok()
         {
-            None => "".to_string(), // todo ensure we can't get into this situation (https://github.com/apollographql/router/issues/4837)
+            None => "".to_string(),
             Some(operation) => {
                 self.extract_signature_fragments(&operation.selection_set);
                 self.format_operation_for_report(operation)
@@ -215,7 +215,7 @@ impl UsageReportingGenerator<'_> {
             .get_operation(self.operation_name.as_deref())
             .ok()
         {
-            None => HashMap::new(), // todo ensure we can't get into this situation (https://github.com/apollographql/router/issues/4837)
+            None => HashMap::new(),
             Some(operation) => {
                 let operation_type = match operation.operation_type {
                     OperationType::Query => "Query",
