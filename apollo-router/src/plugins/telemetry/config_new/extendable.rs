@@ -1,7 +1,7 @@
 use std::any::type_name;
 use std::collections::HashMap;
-use std::collections::LinkedList;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use schemars::gen::SchemaGenerator;
@@ -22,6 +22,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
@@ -38,13 +39,23 @@ impl<Att, Ext> DefaultForLevel for Extendable<Att, Ext>
 where
     Att: DefaultForLevel + Default,
 {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.attributes.defaults_for_level(requirement_level);
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.attributes.defaults_for_level(requirement_level, kind);
     }
 }
 
 impl Extendable<(), ()> {
     pub(crate) fn empty<A, E>() -> Extendable<A, E>
+    where
+        A: Default,
+    {
+        Default::default()
+    }
+    pub(crate) fn empty_arc<A, E>() -> Arc<Extendable<A, E>>
     where
         A: Default,
     {
@@ -154,7 +165,7 @@ where
     type Request = Request;
     type Response = Response;
 
-    fn on_request(&self, request: &Self::Request) -> LinkedList<KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -166,7 +177,7 @@ where
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> LinkedList<KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_response(response);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -178,7 +189,7 @@ where
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue> {
+    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
         self.attributes.on_error(error)
     }
 }

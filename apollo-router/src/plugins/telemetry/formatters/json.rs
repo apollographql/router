@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::collections::LinkedList;
 use std::fmt;
 use std::io;
 
@@ -28,7 +27,7 @@ use crate::plugins::telemetry::formatters::to_list;
 #[derive(Debug)]
 pub(crate) struct Json {
     config: JsonFormat,
-    resource: LinkedList<(String, serde_json::Value)>,
+    resource: Vec<(String, serde_json::Value)>,
     excluded_attributes: HashSet<&'static str>,
 }
 
@@ -52,7 +51,7 @@ impl Default for Json {
     }
 }
 
-struct SerializableResources<'a>(&'a LinkedList<(String, serde_json::Value)>);
+struct SerializableResources<'a>(&'a Vec<(String, serde_json::Value)>);
 
 impl<'a> serde::ser::Serialize for SerializableResources<'a> {
     fn serialize<Ser>(&self, serializer_o: Ser) -> Result<Ser::Ok, Ser::Error>
