@@ -446,7 +446,7 @@ impl RouterService {
                 if let Some(mut batch_query) = batch_query_opt {
                     // Only proceed with signalling cancelled if the batch_query is not finished
                     if !batch_query.finished() {
-                        tracing::info!("cancelling batch query in supergraph response");
+                        tracing::debug!("cancelling batch query in supergraph response");
                         batch_query
                             .signal_cancelled("request terminated by user".to_string())
                             .await;

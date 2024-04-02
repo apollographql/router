@@ -240,7 +240,7 @@ impl Batch {
                     // Just clear out the fetch and error out the requests
                     BatchHandlerMessage::Cancel { index, reason } => {
                         // Log the reason for cancelling, update the state
-                        tracing::info!("Cancelling index: {index}, {reason}");
+                        tracing::debug!("Cancelling index: {index}, {reason}");
 
                         // TODO: Handle missing index
                         if let Some(state) = batch_state.get_mut(&index) {
@@ -295,7 +295,7 @@ impl Batch {
                     } => {
                         // Progress the index
 
-                        tracing::info!("Progress index: {index}");
+                        tracing::debug!("Progress index: {index}");
 
                         if let Some(state) = batch_state.get_mut(&index) {
                             state.committed.insert(request.query_hash.clone());

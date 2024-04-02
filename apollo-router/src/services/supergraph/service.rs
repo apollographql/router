@@ -629,7 +629,7 @@ async fn plan_query(
             let mut query_hashes = vec![];
             plan.root.query_hashes(&mut query_hashes);
             batch_query.set_query_hashes(query_hashes).await;
-            tracing::info!("batch registered: {}", batch_query);
+            tracing::debug!("batch registered: {}", batch_query);
         }
 
         context.extensions().lock().insert(batch_query);
