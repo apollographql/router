@@ -18,7 +18,6 @@ use tower::BoxError;
 
 use super::traverse;
 use super::traverse::Visitor;
-use crate::plugins::cache::entity::ENTITIES;
 
 /// Calculates a hash of the query and the schema, but only looking at the parts of the
 /// schema which affect the query.
@@ -31,7 +30,6 @@ pub(crate) struct QueryHashVisitor<'a> {
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
-    pub(crate) subgraph_query: bool,
 }
 
 impl<'a> QueryHashVisitor<'a> {
@@ -45,7 +43,6 @@ impl<'a> QueryHashVisitor<'a> {
             fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
-            subgraph_query: false,
         }
     }
 
@@ -260,39 +257,6 @@ impl<'a> QueryHashVisitor<'a> {
         }
         Ok(())
     }
-
-    fn hash_entities_operation(&mut self, node: &executable::Operation) -> Result<(), BoxError> {
-        if node.selection_set.selections.len() != 1 {
-            return Err("invalid number of selections for _entities query".into());
-        }
-
-        match node.selection_set.selections.first() {
-            Some(executable::Selection::Field(field)) => {
-                if field.name.as_str() != ENTITIES {
-                    return Err("expected _entities field".into());
-                }
-
-                "_entities".hash(self);
-
-                for selection in &field.selection_set.selections {
-                    match selection {
-                        executable::Selection::InlineFragment(f) => {
-                            match f.type_condition.as_ref() {
-                                None => {
-                                    return Err("expected type condition".into());
-                                }
-                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
-                            };
-                        }
-                        executable::Selection::FragmentSpread(f) => self.fragment_spread(f)?,
-                        _ => return Err("expected inline fragment".into()),
-                    }
-                }
-                Ok(())
-            }
-            _ => Err("expected _entities field".into()),
-        }
-    }
 }
 
 impl<'a> Hasher for QueryHashVisitor<'a> {
@@ -310,11 +274,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         root_type.hash(self);
         self.hash_type_by_name(root_type)?;
 
-        if !self.subgraph_query {
-            traverse::operation(self, root_type, node)
-        } else {
-            self.hash_entities_operation(node)
-        }
+        traverse::operation(self, root_type, node)
     }
 
     fn field(
@@ -406,7 +366,6 @@ mod tests {
             .validate(&schema)
             .unwrap();
         let mut visitor = QueryHashVisitor::new(&schema, &exec);
-        visitor.subgraph_query = true;
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())

@@ -497,7 +497,6 @@ impl FetchNode {
             .expect("subgraph queries should be valid");
 
         let mut visitor = QueryHashVisitor::new(schema, &doc);
-        visitor.subgraph_query = !self.requires.is_empty();
         if traverse::document(&mut visitor, &doc, self.operation_name.as_deref()).is_ok() {
             self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
         }
