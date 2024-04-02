@@ -1,6 +1,7 @@
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
 extern crate core;
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -35,7 +36,7 @@ async fn test_basic() -> Result<(), BoxError> {
             id,
             &query,
             Some("ExampleQuery"),
-            &["my_app", "router", "products"],
+            &["client", "router", "subgraph"],
             false,
         )
         .await?;
@@ -71,7 +72,7 @@ async fn validate_trace(
         {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
     find_valid_trace(
         &url,
@@ -88,11 +89,10 @@ async fn find_valid_trace(
     url: &str,
     _query: &Value,
     _operation_name: Option<&str>,
-    _services: &[&'static str],
+    services: &[&'static str],
     _custom_span_instrumentation: bool,
 ) -> Result<(), BoxError> {
     // A valid trace has:
-    // * A valid service name
     // * All three services
     // * The correct spans
     // * All spans are parented
@@ -105,17 +105,27 @@ async fn find_valid_trace(
         .json()
         .await?;
     tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
-    validate_service_name(trace)?;
+    verify_trace_participants(&trace, services)?;
 
     Ok(())
 }
 
-fn validate_service_name(trace: Value) -> Result<(), BoxError> {
-    let service_name = trace.select_path("$..localEndpoint.serviceName")?;
+fn verify_trace_participants(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
+    let actual_services: HashSet<String> = trace
+        .select_path("$..serviceName")?
+        .into_iter()
+        .filter_map(|service| service.as_string())
+        .collect();
+    tracing::debug!("found services {:?}", actual_services);
 
-    assert_eq!(
-        service_name.first(),
-        Some(&&Value::String("router".to_string()))
-    );
+    let expected_services = services
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<HashSet<_>>();
+    if actual_services != expected_services {
+        return Err(BoxError::from(format!(
+            "incomplete traces, got {actual_services:?} expected {expected_services:?}"
+        )));
+    }
     Ok(())
 }

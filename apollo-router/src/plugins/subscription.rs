@@ -681,7 +681,6 @@ fn ensure_id_consistency(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use serde_json::Value;
@@ -705,8 +704,10 @@ mod tests {
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(
-                    r#"{
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
                 "enabled": true,
                 "mode": {
                     "callback": {
@@ -716,13 +717,11 @@ mod tests {
                     }
                 }
             }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                    apollo_compiler::Schema::new(),
-                )),
-                notify.clone(),
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
             )
             .await
             .unwrap();
@@ -846,24 +845,24 @@ mod tests {
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(
-                    r#"{
-                "enabled": true,
-                "mode": {
-                    "callback": {
-                        "public_url": "http://localhost:4000/subscription/callback",
-                        "path": "/subscription/callback",
-                        "subgraphs": ["test"]
-                    }
-                }
-            }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                    apollo_compiler::Schema::new(),
-                )),
-                notify.clone(),
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
+                        "enabled": true,
+                        "mode": {
+                            "callback": {
+                                "public_url": "http://localhost:4000/subscription/callback",
+                                "path": "/subscription/callback",
+                                "subgraphs": ["test"]
+                            }
+                        }
+                    }"#,
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
             )
             .await
             .unwrap();
@@ -934,8 +933,10 @@ mod tests {
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(
-                    r#"{
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
                 "enabled": true,
                 "mode": {
                     "callback": {
@@ -945,13 +946,11 @@ mod tests {
                     }
                 }
             }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                    apollo_compiler::Schema::new(),
-                )),
-                notify.clone(),
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
             )
             .await
             .unwrap();
