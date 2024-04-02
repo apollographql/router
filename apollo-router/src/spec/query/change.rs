@@ -21,6 +21,11 @@ use tower::BoxError;
 
 use super::traverse;
 use super::traverse::Visitor;
+use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
+use crate::plugins::progressive_override::JOIN_SPEC_BASE_URL;
+use crate::spec::Schema;
+
+pub(crate) const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
 
 /// Calculates a hash of the query and the schema, but only looking at the parts of the
 /// schema which affect the query.
@@ -33,6 +38,8 @@ pub(crate) struct QueryHashVisitor<'a> {
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
+    join_field_directive_name: Option<String>,
+    join_type_directive_name: Option<String>,
 }
 
 impl<'a> QueryHashVisitor<'a> {
@@ -46,6 +53,19 @@ impl<'a> QueryHashVisitor<'a> {
             fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
+            // should we just return an error if we do not find those directives?
+            join_field_directive_name: Schema::directive_name(
+                schema,
+                JOIN_SPEC_BASE_URL,
+                ">=0.1.0",
+                JOIN_FIELD_DIRECTIVE_NAME,
+            ),
+            join_type_directive_name: Schema::directive_name(
+                schema,
+                JOIN_SPEC_BASE_URL,
+                ">=0.1.0",
+                JOIN_TYPE_DIRECTIVE_NAME,
+            ),
         }
     }
 
@@ -245,23 +265,22 @@ impl<'a> QueryHashVisitor<'a> {
     }
 
     fn hash_join_type(&mut self, name: &Name, directives: &DirectiveList) -> Result<(), BoxError> {
-        if let Some(dir) = directives.get("join__type") {
-            if let Some(key) = dir.argument_by_name("key") {
-                println!("got key: {:?}", key);
-                let mut parser = Parser::new();
-                if let Ok(field_set) = parser.parse_field_set(
-                    Valid::assume_valid_ref(self.schema),
-                    name.clone(),
-                    key.as_str().unwrap(),
-                    std::path::Path::new("schema.graphql"),
-                ) {
-                    println!("got field set: {field_set:?}");
-
-                    traverse::selection_set(
-                        self,
-                        name.as_str(),
-                        &field_set.selection_set.selections[..],
-                    )?;
+        if let Some(dir_name) = self.join_type_directive_name.as_deref() {
+            if let Some(dir) = directives.get(dir_name) {
+                if let Some(key) = dir.argument_by_name("key") {
+                    let mut parser = Parser::new();
+                    if let Ok(field_set) = parser.parse_field_set(
+                        Valid::assume_valid_ref(self.schema),
+                        name.clone(),
+                        key.as_str().unwrap(),
+                        std::path::Path::new("schema.graphql"),
+                    ) {
+                        traverse::selection_set(
+                            self,
+                            name.as_str(),
+                            &field_set.selection_set.selections[..],
+                        )?;
+                    }
                 }
             }
         }
@@ -274,23 +293,23 @@ impl<'a> QueryHashVisitor<'a> {
         parent_type: &str,
         directives: &ast::DirectiveList,
     ) -> Result<(), BoxError> {
-        if let Some(dir) = directives.get("join__field") {
-            if let Some(requires) = dir.argument_by_name("requires") {
-                println!("got requires: {requires:?}");
-                if let Ok(parent_type) = Name::new(NodeStr::new(parent_type)) {
-                    let mut parser = Parser::new();
-                    if let Ok(field_set) = parser.parse_field_set(
-                        Valid::assume_valid_ref(self.schema),
-                        parent_type.clone(),
-                        requires.as_str().unwrap(),
-                        std::path::Path::new("schema.graphql"),
-                    ) {
-                        println!("got field set: {field_set:?}");
-                        traverse::selection_set(
-                            self,
-                            parent_type.as_str(),
-                            &field_set.selection_set.selections[..],
-                        )?;
+        if let Some(dir_name) = self.join_field_directive_name.as_deref() {
+            if let Some(dir) = directives.get(dir_name) {
+                if let Some(requires) = dir.argument_by_name("requires") {
+                    if let Ok(parent_type) = Name::new(NodeStr::new(parent_type)) {
+                        let mut parser = Parser::new();
+                        if let Ok(field_set) = parser.parse_field_set(
+                            Valid::assume_valid_ref(self.schema),
+                            parent_type.clone(),
+                            requires.as_str().unwrap(),
+                            std::path::Path::new("schema.graphql"),
+                        ) {
+                            traverse::selection_set(
+                                self,
+                                parent_type.as_str(),
+                                &field_set.selection_set.selections[..],
+                            )?;
+                        }
                     }
                 }
             }
@@ -681,14 +700,31 @@ mod tests {
     #[test]
     fn join_type_key() {
         let schema1: &str = r#"
-        schema {
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
           query: Query
         }
         directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
         directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
 
         enum join__Graph {
             ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
@@ -717,14 +753,31 @@ mod tests {
         "#;
 
         let schema2: &str = r#"
-        schema {
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
             query: Query
         }
         directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
         directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
 
         enum join__Graph {
             ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
@@ -759,15 +812,32 @@ mod tests {
     #[test]
     fn join_field_requires() {
         let schema1: &str = r#"
-        schema {
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
           query: Query
         }
         directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
         directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
         directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
 
         enum join__Graph {
             ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
@@ -790,22 +860,39 @@ mod tests {
 
         interface I @join__type(graph: ACCOUNTS, key: "id") {
             id: ID!
-            name :String
+            name: String
         }
 
         union U = User
         "#;
 
         let schema2: &str = r#"
-        schema {
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
             query: Query
         }
         directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
         directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
         directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
 
         enum join__Graph {
             ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
