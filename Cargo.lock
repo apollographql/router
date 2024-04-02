@@ -232,7 +232,7 @@ dependencies = [
  "petgraph",
  "salsa",
  "serde_json",
- "strum 0.26.1",
+ "strum 0.26.2",
  "strum_macros 0.26.1",
  "thiserror",
  "url",
@@ -259,6 +259,7 @@ dependencies = [
  "apollo-federation",
  "arc-swap",
  "askama",
+ "async-channel 1.9.0",
  "async-compression",
  "async-trait",
  "aws-config",
@@ -6472,9 +6473,9 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "723b93e8addf9aa965ebe2d11da6d7540fa2283fcea14b3371ff055f7ba13f5f"
+checksum = "5d8cec3501a5194c432b2b7976db6b7d10ec95c253208b45f83f7136aa985e29"
 
 [[package]]
 name = "strum_macros"

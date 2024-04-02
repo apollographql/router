@@ -27,7 +27,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -233,9 +233,9 @@ where
     }
 }
 
-impl CachingQueryPlanner<BridgeQueryPlanner> {
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.delegate.planner()
+impl CachingQueryPlanner<BridgeQueryPlannerPool> {
+    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.delegate.planners()
     }
 }
 

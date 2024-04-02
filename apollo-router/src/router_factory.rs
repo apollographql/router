@@ -9,6 +9,7 @@ use multimap::MultiMap;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
+use std::thread::available_parallelism;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -28,7 +29,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
@@ -265,19 +266,27 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = match previous_supergraph.as_ref().map(|router| router.planner())
-        {
-            None => {
-                BridgeQueryPlanner::new(schema.clone(), configuration.clone())
+        let bridge_query_planner =
+            match previous_supergraph.as_ref().map(|router| router.planners()) {
+                None => {
+                    BridgeQueryPlannerPool::new(
+                        schema.clone(),
+                        configuration.clone(),
+                        available_parallelism()?,
+                    )
                     .instrument(query_planner_span)
                     .await?
-            }
-            Some(planner) => {
-                BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                }
+                Some(planners) => {
+                    BridgeQueryPlannerPool::new_from_planners(
+                        planners,
+                        schema.clone(),
+                        configuration.clone(),
+                    )
                     .instrument(query_planner_span)
                     .await?
-            }
-        };
+                }
+            };
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl.as_ref() == &schema)

@@ -67,6 +67,7 @@ anyhow = "1.0.80"
 apollo-compiler = "=1.0.0-beta.13"
 apollo-federation = "=0.0.8"
 arc-swap = "1.6.0"
+async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",
@@ -349,3 +350,11 @@ harness = false
 [[bench]]
 name = "deeply_nested"
 harness = false
+
+[[bench]]
+name = "planner"
+harness = false
+
+[[example]]
+name = "planner"
+path = "benches/planner.rs"
