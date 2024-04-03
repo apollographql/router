@@ -36,58 +36,14 @@ impl BridgeQueryPlannerPool {
         configuration: Arc<Configuration>,
         size: NonZeroUsize,
     ) -> Result<Self, ServiceBuildError> {
-        let mut join_set = JoinSet::new();
-
-        let (sender, receiver) = bounded::<(
-            QueryPlannerRequest,
-            oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
-        )>(1);
-
-        (0..size.into()).for_each(|_| {
-            let sdl = sdl.clone();
-            let configuration = configuration.clone();
-
-            join_set.spawn(async move { BridgeQueryPlanner::new(sdl, configuration).await });
-        });
-
-        let mut planners = Vec::new();
-
-        while let Some(task_result) = join_set.join_next().await {
-            // TODO: Error Type
-            let planner = task_result.map_err(|_e| {
-                ServiceBuildError::QueryPlannerError(QueryPlannerError::UnhandledPlannerResult)
-            })??;
-
-            let receiver = receiver.clone();
-            let inner = planner.clone();
-
-            tokio::spawn(async move {
-                while let Ok((request, res_sender)) = receiver.recv().await {
-                    let res = inner.clone().oneshot(request).await;
-                    // todo: err
-                    let _ = res_sender.send(res);
-                }
-            });
-
-            planners.push(planner);
-        }
-
-        let schema = planners
-            .first()
-            .expect("There should be at least 1 service in pool")
-            .schema();
-
-        Ok(Self {
-            planners,
-            sender,
-            schema,
-        })
+        Self::new_from_planners(Default::default(), sdl, configuration, size).await
     }
 
     pub(crate) async fn new_from_planners(
         old_planners: Vec<Arc<Planner<QueryPlanResult>>>,
         schema: String,
         configuration: Arc<Configuration>,
+        size: NonZeroUsize,
     ) -> Result<Self, ServiceBuildError> {
         let mut join_set = JoinSet::new();
 
@@ -96,13 +52,19 @@ impl BridgeQueryPlannerPool {
             oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
         )>(CHANNEL_SIZE);
 
-        old_planners.into_iter().for_each(|old_planner| {
+        let mut old_planners_iterator = old_planners.into_iter();
+
+        (0..size.into()).for_each(|_| {
             let sdl = schema.clone();
             let configuration = configuration.clone();
 
-            join_set.spawn(async move {
-                BridgeQueryPlanner::new_from_planner(old_planner, sdl, configuration).await
-            });
+            if let Some(old_planner) = old_planners_iterator.next() {
+                join_set.spawn(async move {
+                    BridgeQueryPlanner::new_from_planner(old_planner, sdl, configuration).await
+                });
+            } else {
+                join_set.spawn(async move { BridgeQueryPlanner::new(sdl, configuration).await });
+            }
         });
 
         let mut planners = Vec::new();
@@ -169,9 +131,9 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         Box::pin(async move {
             let _ = sender.send((req, response_sender)).await;
 
-            response_receiver.await.map_err(|_| {
-                QueryPlannerError::UnhandledPlannerResult
-            })?
+            response_receiver
+                .await
+                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?
         })
     }
 }

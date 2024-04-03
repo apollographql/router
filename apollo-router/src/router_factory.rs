@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
-use std::thread::available_parallelism;
 
 use axum::response::IntoResponse;
 use http::StatusCode;
@@ -272,7 +271,9 @@ impl YamlRouterFactory {
                     BridgeQueryPlannerPool::new(
                         schema.clone(),
                         configuration.clone(),
-                        available_parallelism()?,
+                        configuration
+                            .supergraph
+                            .experimental_query_planner_parallelism()?,
                     )
                     .instrument(query_planner_span)
                     .await?
@@ -282,6 +283,9 @@ impl YamlRouterFactory {
                         planners,
                         schema.clone(),
                         configuration.clone(),
+                        configuration
+                            .supergraph
+                            .experimental_query_planner_parallelism()?,
                     )
                     .instrument(query_planner_span)
                     .await?

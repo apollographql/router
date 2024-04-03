@@ -1,6 +1,7 @@
 supergraph:
   listen: 0.0.0.0:4100
   introspection: true
+  experimental_available_parallelism: auto
 plugins:
   experimental.expose_query_plan: true
   apollo-test.do_not_execute: true

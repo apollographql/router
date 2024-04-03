@@ -625,6 +625,80 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+
+    /// Set the size of a pool of workers to enable query planning parallelism.
+    /// Default: 1.
+    pub(crate) experimental_available_parallelism: AvailableParallelism,
+}
+
+#[derive(Debug, Clone, JsonSchema)]
+#[serde(untagged)]
+pub(crate) enum AvailableParallelism {
+    Fixed(NonZeroUsize),
+    Automatic(String),
+}
+
+impl Serialize for AvailableParallelism {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Fixed(n) => {
+                let as_u64 = u64::try_from(n.get()).map_err(|_| {
+                    serde::ser::Error::custom(format!("{} is out of range", n).as_str())
+                })?;
+                serializer.serialize_u64(as_u64)
+            }
+            Self::Automatic(_) => serializer.serialize_str("auto"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AvailableParallelism {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        #[serde(deny_unknown_fields)]
+        enum AdHoc {
+            Fixed(NonZeroUsize),
+            Automatic(String),
+        }
+
+        let ad_hoc: AdHoc = serde::Deserialize::deserialize(deserializer)?;
+
+        match ad_hoc {
+            AdHoc::Fixed(n) => Ok(Self::Fixed(n)),
+            AdHoc::Automatic(s) => {
+                if s.as_str() == "auto" {
+                    Ok(Self::Automatic(s))
+                } else {
+                    Err(serde::de::Error::custom(format!(
+                        "expected a non zero number, or 'auto', found {}",
+                        s
+                    )))
+                }
+            }
+        }
+    }
+}
+
+impl Default for AvailableParallelism {
+    fn default() -> Self {
+        Self::Fixed(NonZeroUsize::new(1).expect("cannot fail"))
+    }
+}
+
+impl Supergraph {
+    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
+        match self.experimental_available_parallelism {
+            AvailableParallelism::Automatic(_) => std::thread::available_parallelism(),
+            AvailableParallelism::Fixed(n) => Ok(n),
+        }
+    }
 }
 
 fn default_defer_support() -> bool {
@@ -643,6 +717,7 @@ impl Supergraph {
         reuse_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        experimental_available_parallelism: Option<AvailableParallelism>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -653,6 +728,8 @@ impl Supergraph {
             reuse_query_fragments,
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            experimental_available_parallelism: experimental_available_parallelism
+                .unwrap_or_default(),
         }
     }
 }
@@ -670,6 +747,7 @@ impl Supergraph {
         reuse_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        experimental_available_parallelism: Option<AvailableParallelism>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -680,6 +758,8 @@ impl Supergraph {
             reuse_query_fragments,
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            experimental_available_parallelism: experimental_available_parallelism
+                .unwrap_or_default(),
         }
     }
 }
