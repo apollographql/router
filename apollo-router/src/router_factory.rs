@@ -238,12 +238,12 @@ impl YamlRouterFactory {
         let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         if let Some(previous_router) = previous_router {
-            let cache_keys = previous_router
-                .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
-                .await;
+            let previous_cache = previous_router
+                .previous_cache()
+               ;
 
             supergraph_creator
-                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, cache_keys)
+                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, previous_cache, configuration.supergraph.query_planning.warmed_up_queries)
                 .await;
         };
         RouterCreator::new(

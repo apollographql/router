@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
@@ -19,6 +20,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
+use crate::cache::storage::InMemoryCache;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -42,8 +44,12 @@ use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
+use super::fetch::QueryHash;
+
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
+pub(crate) type InMemoryCachePlanner =
+    InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 
 /// A query planner wrapper that caches results.
 ///
@@ -94,32 +100,22 @@ where
         })
     }
 
-    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
-        let keys = self.cache.in_memory_keys().await;
-        let count = count.unwrap_or(keys.len() / 3);
-        keys.into_iter()
-            .take(count)
-            .map(|key| WarmUpCachingQueryKey {
-                query: key.query,
-                operation: key.operation,
-                metadata: key.metadata,
-                plan_options: key.plan_options,
-            })
-            .collect()
+    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+        self.cache.in_memory_cache()
     }
 
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        mut cache_keys: Vec<WarmUpCachingQueryKey>,
+        previous_cache: InMemoryCachePlanner,
+        count: Option<usize>,
     ) {
         let _timer = Timer::new(|duration| {
             ::tracing::info!(
                 histogram.apollo.router.query.planning.warmup.duration = duration.as_secs_f64()
             );
         });
-        let schema_id = self.schema.schema_id.clone();
 
         let mut service = ServiceBuilder::new().service(
             self.plugins
@@ -129,6 +125,35 @@ where
                     e.query_planner_service(acc)
                 }),
         );
+
+        let mut cache_keys = {
+            let cache = previous_cache.lock().await;
+
+            let count = count.unwrap_or(cache.len() / 3);
+
+            cache
+                .iter()
+                .map(
+                    |(
+                        CachingQueryKey {
+                            query,
+                            operation,
+                            hash,
+                            metadata,
+                            plan_options,
+                        },
+                        _,
+                    )| WarmUpCachingQueryKey {
+                        query: query.clone(),
+                        operation: operation.clone(),
+                        hash: Some(hash.clone()),
+                        metadata: metadata.clone(),
+                        plan_options: plan_options.clone(),
+                    },
+                )
+                .take(count)
+                .collect::<Vec<_>>()
+        };
 
         cache_keys.shuffle(&mut thread_rng());
 
@@ -152,6 +177,7 @@ where
                 all_cache_keys.push(WarmUpCachingQueryKey {
                     query,
                     operation: None,
+                    hash: None,
                     metadata: CacheKeyMetadata::default(),
                     plan_options: PlanOptions::default(),
                 });
@@ -161,28 +187,48 @@ where
         all_cache_keys.extend(cache_keys.into_iter());
 
         let mut count = 0usize;
+        let mut reused = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
             operation,
+            hash,
             metadata,
             plan_options,
         } in all_cache_keys
         {
+            let context = Context::new();
+            let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
+                Ok(doc) => doc,
+                Err(_) => continue,
+            };
+
             let caching_key = CachingQueryKey {
-                schema_id: schema_id.clone(),
                 query: query.clone(),
                 operation: operation.clone(),
+                hash: doc.hash.clone(),
                 metadata,
                 plan_options,
             };
-            let context = Context::new();
+
+            // if the query hash did not change with the schema update, we can reuse the previously cached entry
+            if let Some(hash) = hash {
+                if hash == doc.hash {
+                    if let Some(entry) = {
+                        previous_cache
+                            .lock()
+                            .await
+                            .get(&caching_key)
+                            .map(|res| res.clone())
+                    } {
+                        self.cache.insert_in_memory(caching_key, entry).await;
+                        reused += 1;
+                        continue;
+                    }
+                }
+            }
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
-                    Ok(doc) => doc,
-                    Err(_) => continue,
-                };
                 let err_res = Query::check_errors(&doc);
                 if let Err(error) = err_res {
                     let e = Arc::new(QueryPlannerError::SpecError(error));
@@ -232,7 +278,7 @@ where
             }
         }
 
-        tracing::debug!("warmed up the query planner cache with {count} queries");
+        tracing::debug!("warmed up the query planner cache with {count} queries planned and {reused} queries reused");
     }
 }
 
@@ -302,8 +348,6 @@ where
         mut self,
         request: query_planner::CachingRequest,
     ) -> Result<<T as tower::Service<QueryPlannerRequest>>::Response, CacheResolverError> {
-        let schema_id = self.schema.schema_id.clone();
-
         if self.enable_authorization_directives {
             AuthorizationPlugin::update_cache_key(&request.context);
         }
@@ -316,10 +360,21 @@ where
                 .unwrap_or_default(),
         };
 
+        let doc = match request.context.extensions().lock().get::<ParsedDocument>() {
+            None => {
+                return Err(CacheResolverError::RetrievalError(Arc::new(
+                    QueryPlannerError::SpecError(SpecError::ParsingError(
+                        "missing parsed document".to_string(),
+                    )),
+                )))
+            }
+            Some(d) => d.clone(),
+        };
+
         let caching_key = CachingQueryKey {
-            schema_id,
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
+            hash: doc.hash.clone(),
             metadata: request
                 .context
                 .extensions()
@@ -338,17 +393,6 @@ where
                 operation_name,
                 context,
             } = request;
-
-            let doc = match context.extensions().lock().get::<ParsedDocument>() {
-                None => {
-                    return Err(CacheResolverError::RetrievalError(Arc::new(
-                        QueryPlannerError::SpecError(SpecError::ParsingError(
-                            "missing parsed document".to_string(),
-                        )),
-                    )))
-                }
-                Some(d) => d.clone(),
-            };
 
             let schema = &self.schema.api_schema().definitions;
             if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
@@ -486,11 +530,11 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
     hex::encode(result)
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CachingQueryKey {
-    pub(crate) schema_id: Option<String>,
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
+    pub(crate) hash: QueryHash,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
 }
@@ -500,29 +544,21 @@ const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut hasher = Sha256::new();
-        hasher.update(&self.query);
-        let query = hex::encode(hasher.finalize());
-
-        let mut hasher = Sha256::new();
-        hasher.update(self.operation.as_deref().unwrap_or("-"));
-        let operation = hex::encode(hasher.finalize());
-
-        let mut hasher = Sha256::new();
         hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
         let metadata = hex::encode(hasher.finalize());
 
-        write!(
-            f,
-            "plan:{}:{}:{}:{}:{}",
-            FEDERATION_VERSION,
-            self.schema_id.as_deref().unwrap_or("-"),
-            query,
-            operation,
-            metadata,
-        )
+        write!(f, "plan:{}:{}:{}", FEDERATION_VERSION, self.hash, metadata,)
+    }
+}
+
+impl Hash for CachingQueryKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.0.hash(state);
+        self.metadata.hash(state);
+        self.plan_options.hash(state);
     }
 }
 
@@ -530,6 +566,7 @@ impl std::fmt::Display for CachingQueryKey {
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
+    pub(crate) hash: Option<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
 }

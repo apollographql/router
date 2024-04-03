@@ -129,7 +129,7 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
-#[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
 
 impl std::fmt::Debug for QueryHash {
@@ -137,6 +137,12 @@ impl std::fmt::Debug for QueryHash {
         f.debug_tuple("QueryHash")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl Display for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
     }
 }
 
