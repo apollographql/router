@@ -24,7 +24,7 @@ mod test {
         // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
         // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
         // 4. Run this test and yank the updated cache key from the redis logs.
-        let known_cache_key = "plan:v2.7.1:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
+        let known_cache_key = "plan:v2.7.1:af1ee357bc75cfbbcc6adda41089a56e7d1d52f6d44c049739dde2c259314f58:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
 
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
         let client = RedisClient::new(config, None, None, None);
