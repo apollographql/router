@@ -316,7 +316,7 @@ impl Query {
         Ok(Arc::new(ParsedDocumentInner {
             ast,
             executable: Arc::new(executable_document),
-            hash: QueryHash(hash),
+            hash: Arc::new(QueryHash(hash)),
             parse_errors,
             validation_errors,
         }))

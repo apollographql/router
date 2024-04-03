@@ -619,7 +619,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     doc = Arc::new(ParsedDocumentInner {
                         executable: Arc::new(executable_document),
                         ast: modified_query,
-                        hash: QueryHash(hash),
+                        hash: Arc::new(QueryHash(hash)),
                         // Carry errors from previous ParsedDocument
                         // and assume transformation doesn’t introduce new errors.
                         // TODO: check the latter?
@@ -746,7 +746,7 @@ impl BridgeQueryPlanner {
             doc = Arc::new(ParsedDocumentInner {
                 executable: Arc::new(executable_document),
                 ast: new_doc,
-                hash: QueryHash(hash),
+                hash: Arc::new(QueryHash(hash)),
                 // Carry errors from previous ParsedDocument
                 // and assume transformation doesn’t introduce new errors.
                 // TODO: check the latter?

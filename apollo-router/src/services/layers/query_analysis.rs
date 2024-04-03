@@ -201,7 +201,7 @@ pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: Arc<ExecutableDocument>,
-    pub(crate) hash: QueryHash,
+    pub(crate) hash: Arc<QueryHash>,
     pub(crate) parse_errors: Option<DiagnosticList>,
     pub(crate) validation_errors: Option<DiagnosticList>,
 }

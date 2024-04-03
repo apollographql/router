@@ -131,7 +131,6 @@ mod forbid_http_get_mutations_tests {
     use crate::graphql::Response;
     use crate::plugin::test::MockSupergraphService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::query_planner::fetch::QueryHash;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
     use crate::Context;
 
@@ -288,7 +287,7 @@ mod forbid_http_get_mutations_tests {
             .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
                 ast,
                 executable: Arc::new(executable),
-                hash: QueryHash(vec![]),
+                hash: Default::default(),
                 parse_errors: None,
                 validation_errors: None,
             }));

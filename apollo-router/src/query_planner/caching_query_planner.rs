@@ -528,7 +528,7 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
-    pub(crate) hash: QueryHash,
+    pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
 }
@@ -560,7 +560,7 @@ impl Hash for CachingQueryKey {
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
-    pub(crate) hash: Option<QueryHash>,
+    pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
 }
