@@ -853,9 +853,16 @@ impl SupergraphCreator {
         persisted_query_layer: &PersistedQueryLayer,
         previous_cache: InMemoryCachePlanner,
         count: Option<usize>,
+        experimental_reuse_query_plans: bool,
     ) {
         self.query_planner_service
-            .warm_up(query_parser, persisted_query_layer, previous_cache, count)
+            .warm_up(
+                query_parser,
+                persisted_query_layer,
+                previous_cache,
+                count,
+                experimental_reuse_query_plans,
+            )
             .await
     }
 }

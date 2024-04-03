@@ -110,6 +110,7 @@ where
         persisted_query_layer: &PersistedQueryLayer,
         previous_cache: InMemoryCachePlanner,
         count: Option<usize>,
+        experimental_reuse_query_plans: bool,
     ) {
         let _timer = Timer::new(|duration| {
             ::tracing::info!(
@@ -210,14 +211,17 @@ where
                 plan_options,
             };
 
-            // if the query hash did not change with the schema update, we can reuse the previously cached entry
-            if let Some(hash) = hash {
-                if hash == doc.hash {
-                    if let Some(entry) = { previous_cache.lock().await.get(&caching_key).cloned() }
-                    {
-                        self.cache.insert_in_memory(caching_key, entry).await;
-                        reused += 1;
-                        continue;
+            if experimental_reuse_query_plans {
+                // if the query hash did not change with the schema update, we can reuse the previously cached entry
+                if let Some(hash) = hash {
+                    if hash == doc.hash {
+                        if let Some(entry) =
+                            { previous_cache.lock().await.get(&caching_key).cloned() }
+                        {
+                            self.cache.insert_in_memory(caching_key, entry).await;
+                            reused += 1;
+                            continue;
+                        }
                     }
                 }
             }

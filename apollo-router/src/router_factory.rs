@@ -252,6 +252,10 @@ impl YamlRouterFactory {
                     &persisted_query_layer,
                     previous_cache,
                     configuration.supergraph.query_planning.warmed_up_queries,
+                    configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_reuse_query_plans,
                 )
                 .await;
         };

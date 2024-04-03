@@ -85,7 +85,16 @@ If the Router is using distributed caching for query plans, the warm-up phase wi
 
 #### Schema aware query hashing
 
-The query plan cache key uses a hashing algorithm specifically designed for GraphQL queries, using the schema. If a schema update does not affect a query (example: a field was added), then the query hash will stay the same. The query plan cache uses that key during warm up to check if a cached entry can be reused instead of planning it again.
+The query plan cache key uses a hashing algorithm specifically designed for GraphQL queries, using the schema. If a schema update does not affect a query (example: a field was added), then the query hash will stay the same. The query plan cache can use that key during warm up to check if a cached entry can be reused instead of planning it again.
+
+It can be activated through this option:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    warmed_up_queries: 100
+    experimental_reuse_query_plans: true
+```
 
 ## Caching automatic persisted queries (APQ)
 
