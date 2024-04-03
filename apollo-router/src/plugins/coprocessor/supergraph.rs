@@ -33,6 +33,9 @@ pub(super) struct SupergraphRequestConf {
     pub(super) sdl: bool,
     /// Send the method
     pub(super) method: bool,
+    /// Blocks the request handling in the router
+    #[serde(default = "super::default_blocking")]
+    pub(super) blocking: bool,
 }
 
 /// What information is passed to a router request/response stage
@@ -218,6 +221,25 @@ where
         .and_method(method)
         .and_sdl(sdl_to_send)
         .build();
+
+    if !request_config.blocking {
+        let context = request.context.clone();
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let guard = context.enter_active_request();
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            drop(guard);
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::SupergraphRequest,
+            );
+        });
+
+        request.supergraph_request = http::Request::from_parts(parts, body);
+        return Ok(ControlFlow::Continue(request));
+    }
 
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
@@ -571,6 +593,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -704,6 +727,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
+                blocking: true,
             },
             response: Default::default(),
         };

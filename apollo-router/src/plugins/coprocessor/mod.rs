@@ -225,8 +225,14 @@ pub(super) struct RouterRequestConf {
     pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
+    /// Blocks the request handling in the router
+    #[serde(default = "default_blocking")]
+    pub(super) blocking: bool,
 }
 
+fn default_blocking() -> bool {
+    true
+}
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -258,6 +264,9 @@ pub(super) struct SubgraphRequestConf {
     pub(super) method: bool,
     /// Send the service name
     pub(super) service_name: bool,
+    /// Blocks the request handling in the router
+    #[serde(default = "default_blocking")]
+    pub(super) blocking: bool,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -611,6 +620,25 @@ where
         .method(parts.method.to_string())
         .build();
 
+    if !request_config.blocking {
+        let context = request.context.clone();
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let guard = context.enter_active_request();
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            drop(guard);
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::RouterRequest,
+            );
+        });
+
+        request.router_request = http::Request::from_parts(parts, Body::from(bytes));
+        return Ok(ControlFlow::Continue(request));
+    }
+
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
     let start = Instant::now();
@@ -946,6 +974,25 @@ where
         .and_service_name(service_name)
         .and_uri(uri)
         .build();
+
+    if !request_config.blocking {
+        let context = request.context.clone();
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let guard = context.enter_active_request();
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            drop(guard);
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::SubgraphRequest,
+            );
+        });
+
+        request.subgraph_request = http::Request::from_parts(parts, body);
+        return Ok(ControlFlow::Continue(request));
+    }
 
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
