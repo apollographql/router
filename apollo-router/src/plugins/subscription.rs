@@ -32,6 +32,7 @@ use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
+use crate::notification::NotifyError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
@@ -612,18 +613,53 @@ impl Service<router::Request> for CallbackService {
                                 ..
                             }) => {
                                 if let Some(errors) = errors {
-                                    let mut handle =
-                                        notify.subscribe(id.clone()).await?.into_sink();
+                                    let mut handle = match notify.subscribe(id.clone()).await {
+                                         Ok(handle) => handle.into_sink(),
+                                         Err(NotifyError::UnknownTopic) => {
+                                            return Ok(router::Response {
+                                                response: http::Response::builder()
+                                                    .status(StatusCode::NOT_FOUND)
+                                                    .body("unknown topic".into())
+                                                    .map_err(BoxError::from)?,
+                                                context: req.context,
+                                            });
+                                         },
+                                         Err(err) => {
+                                            return Ok(router::Response {
+                                                response: http::Response::builder()
+                                                    .status(StatusCode::NOT_FOUND)
+                                                    .body(err.to_string().into())
+                                                    .map_err(BoxError::from)?,
+                                                context: req.context,
+                                            });
+                                         } 
+                                    };
                                     tracing::info!(
                                         monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
                                         subscriptions.mode="callback",
                                         subscriptions.complete=true
                                     );
-                                    handle.send_sync(
+                                    if let Err(_err) = handle.send_sync(
                                         graphql::Response::builder().errors(errors).build(),
-                                    )?;
+                                    ) {
+                                        return Ok(router::Response {
+                                            response: http::Response::builder()
+                                                .status(StatusCode::NOT_FOUND)
+                                                .body("cannot send errors to the client".into())
+                                                .map_err(BoxError::from)?,
+                                            context: req.context,
+                                        });
+                                    }
                                 }
-                                notify.force_delete(id).await?;
+                                if let Err(err) = notify.force_delete(id).await {
+                                    return Ok(router::Response {
+                                        response: http::Response::builder()
+                                            .status(StatusCode::NOT_FOUND)
+                                            .body("cannot force delete".into())
+                                            .map_err(BoxError::from)?,
+                                        context: req.context,
+                                    });
+                                }
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::ACCEPTED)
