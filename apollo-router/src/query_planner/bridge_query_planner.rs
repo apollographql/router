@@ -442,10 +442,16 @@ impl BridgeQueryPlanner {
                 rs_validation_error,
             ) {
                 (false, Some(validation_error)) => {
+                    let error_code = validation_error
+                        .errors
+                        .iter()
+                        .next()
+                        .and_then(|err| err.error.unstable_error_name());
                     tracing::warn!(
                         monotonic_counter.apollo.router.operations.validation = 1u64,
                         validation.source = VALIDATION_SOURCE_OPERATION,
                         validation.result = VALIDATION_FALSE_POSITIVE,
+                        validation.code = error_code,
                         "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
                     );
                     tracing::warn!(
