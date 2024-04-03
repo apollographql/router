@@ -13,14 +13,23 @@ batching:
   enabled: true
   mode: batch_http_link
   subgraph:
+    # Enable batching on all subgraphs
     all:
       enabled: true
+```
+
+```yaml
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Configure batching support per subgraph
     subgraphs:
       subgraph_1:
         enabled: true
       subgraph_2:
-        enabled:true
-````
+        enabled: true
+```
 
 Note: `all` and `subgraphs` are mutually exclusive. This applies in general for all router subgraph configuration options.
 

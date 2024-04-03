@@ -10,6 +10,14 @@ Learn about query batching and how to configure the Apollo Router to receive que
 
 Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead—different components may be requesting the same data—it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client operations, issued close together, into a single HTTP request. This is supported in Apollo Client and Apollo Server.
 
+The router's batching support is provided by two sets of functionality:
+ - client batching
+ - subgraph batching
+
+With client batching, the router will accept batched requests from a client and then process each batch item separately. This means that requests to subgraphs are still processed individually. i.e.: they are not presented to subgraphs in batch form.
+
+With subgraph batching, which is an extension to client batching and requires participating subgraphs to support batching request, the router analyses input client batch requests and issues batch requests to subgraphs. The analysis may result in multiple batches or requests being issued if data is required to be present in the router execution engine before further requests can be made. See the examples below to see illustrations of how this works in practice.
+
 The Apollo Router supports client and subgraph query batching.
 
 If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual operations sent to the router.
