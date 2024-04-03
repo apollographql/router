@@ -121,8 +121,11 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         &mut self,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        // todo: check if the queue is empty
-        std::task::Poll::Ready(Ok(()))
+        if self.sender.is_full() {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(Ok(()))
+        }
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
