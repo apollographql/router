@@ -1,12 +1,12 @@
 ### Subgraph support for query batching ([Issue #2002](https://github.com/apollographql/router/issues/2002))
 
-This project is an extension of the existing work to support [client side batching in the router](https://github.com/apollographql/router/issues/126). The current implementation is experimental and is publicly [documented](https://www.apollographql.com/docs/router/executing-operations/query-batching/).
+As an extension to the ongoing work to support [client-side query batching in the router](https://github.com/apollographql/router/issues/126), the router now supports batching of subgraph requests. Each subgraph batch request retains the same external format as a client batch request. This optimization reduces the number of round-trip requests from the router to subgraphs.
 
-Currently the concept of a batch is preserved until the end of the `RouterRequest` processing. At this point, we convert each batch request item into a separate `SupergraphRequest`. These are then planned and executed concurrently within the router and re-assembled into a batch when they complete. It's important to note that, with this implementation, the concept of a batch, from the perspective of an executing router, now disappears and each request is planned and executed separately.
+Also, batching in the router is now a generally available feature: the `experimental_batching` router configuration option has been deprecated and is replaced by the `batching` option.
 
-This extension will modify the router so that the concept of a batch is preserved, at least outwardly, so that multiple subgraph requests are "batched" (in exactly the same format as a client batch request) for onward transmission to subgraphs. The goal of this work is to provide an optimisation by reducing the number of round-trips to a subgraph from the router.
+Previously, the router preserved the concept of a batch until a `RouterRequest` finished processing. From that point, the router converted each batch request item into a separate `SupergraphRequest`, and the router planned and executed those requests concurrently within the router, then reassembled them into a batch after they all completed. Now with the implementation in this release, the concept of a "batch" from the perspective of an executing router disappears, and instead each batch request is planned and executed separately.
 
-Illustrative configuration.
+To configure subgraph batching, you can enable `batching.subgraph.all` for all subgraphs. You can also enable batching per subgraph with `batching.subgraph.subgraphs.*`. For example:
 
 ```yaml
 batching:
@@ -22,6 +22,8 @@ batching:
         enabled:true
 ````
 
-As with other router subgraph configuration options, `all` and `subgraphs` are mutually exclusive.
+Note: `all` and `subgraphs` are mutually exclusive. This applies in general for all router subgraph configuration options.
+
+To learn more, see [query batching in Apollo docs](https://www.apollographql.com/docs/router/executing-operations/query-batching/).
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4661
