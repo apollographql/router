@@ -54,6 +54,10 @@ pub(super) struct ExecutionResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// Blocks the response handling in the router
+    #[serde(default = "super::default_blocking")]
+    pub(super) blocking: bool,
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -396,6 +400,27 @@ where
         .and_has_next(first.has_next)
         .build();
 
+        if !response_config.blocking {
+            let context = response.context.clone();
+            tokio::task::spawn(async move {
+                tracing::debug!(?payload, "externalized output");
+                let guard = context.enter_active_request();
+                let start = Instant::now();
+                let _ = payload.call(http_client, &coprocessor_url).await;
+                let duration = start.elapsed().as_secs_f64();
+                drop(guard);
+                tracing::info!(
+                    histogram.apollo.router.operations.coprocessor.duration = duration,
+                    coprocessor.stage = %PipelineStep::ExecutionRequest,
+                );
+            });
+    
+            //FIXME: how to handle a stream
+            response.response = http::Response::from_parts(parts, body);
+            return Ok(ControlFlow::Continue(request));
+        }
+
+        
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();

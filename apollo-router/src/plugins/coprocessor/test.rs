@@ -604,6 +604,7 @@ mod tests {
                 body: true,
                 service_name: false,
                 status_code: false,
+                blocking: true,
             },
         };
 

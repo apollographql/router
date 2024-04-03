@@ -283,6 +283,9 @@ pub(super) struct SubgraphResponseConf {
     pub(super) service_name: bool,
     /// Send the http status
     pub(super) status_code: bool,
+    /// Blocks the response handling in the router
+    #[serde(default = "default_blocking")]
+    pub(super) blocking: bool,
 }
 
 /// Configures the externalization plugin
@@ -1138,6 +1141,25 @@ where
         .and_status_code(status_to_send)
         .and_service_name(service_name)
         .build();
+
+    if !response_config.blocking {
+        let context = response.context.clone();
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let guard = context.enter_active_request();
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            drop(guard);
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::SubgraphResponse,
+            );
+        });
+
+        response.response = http::Response::from_parts(parts, body);
+        return Ok(response);
+    }
 
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();
