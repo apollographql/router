@@ -27,6 +27,7 @@ use tracing_futures::Instrument;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
@@ -598,7 +599,13 @@ async fn plan_query(
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
     if !context.extensions().lock().contains_key::<ParsedDocument>() {
-        let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
+        let doc = Query::parse_document(
+            &query_str,
+            operation_name.as_deref(),
+            &schema,
+            &Configuration::default(),
+        )
+        .map_err(QueryPlannerError::SpecError)?;
         Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
         Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
         context.extensions().lock().insert::<ParsedDocument>(doc);

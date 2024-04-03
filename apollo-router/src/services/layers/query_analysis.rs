@@ -12,12 +12,16 @@ use tokio::sync::Mutex;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::graphql::Error;
+use crate::graphql::ErrorExtension;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
@@ -56,8 +60,17 @@ impl QueryAnalysisLayer {
         }
     }
 
-    pub(crate) fn parse_document(&self, query: &str) -> ParsedDocument {
-        Query::parse_document(query, self.schema.api_schema(), &self.configuration)
+    pub(crate) fn parse_document(
+        &self,
+        query: &str,
+        operation_name: Option<&str>,
+    ) -> Result<ParsedDocument, SpecError> {
+        Query::parse_document(
+            query,
+            operation_name,
+            self.schema.api_schema(),
+            &self.configuration,
+        )
     }
 
     pub(crate) async fn supergraph_request(
@@ -107,7 +120,20 @@ impl QueryAnalysisLayer {
         let (context, doc) = match entry {
             None => {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-                let doc = span.in_scope(|| self.parse_document(&query));
+                let doc = match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
+                    Ok(doc) => doc,
+                    Err(err) => {
+                        return Err(SupergraphResponse::builder()
+                            .errors(vec![Error::builder()
+                                .message(err.to_string())
+                                .extension_code(err.extension_code())
+                                .build()])
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(request.context)
+                            .build()
+                            .expect("response is valid"));
+                    }
+                };
 
                 let context = Context::new();
 
@@ -123,13 +149,23 @@ impl QueryAnalysisLayer {
                     .expect("cannot insert operation kind in the context; this is a bug");
 
                 if self.enable_authorization_directives {
-                    AuthorizationPlugin::query_analysis(
+                    if let Err(err) = AuthorizationPlugin::query_analysis(
                         &query,
                         op_name.as_deref(),
                         &self.schema,
                         &self.configuration,
                         &context,
-                    );
+                    ) {
+                        return Err(SupergraphResponse::builder()
+                            .errors(vec![Error::builder()
+                                .message(err.to_string())
+                                .extension_code(err.extension_code())
+                                .build()])
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(request.context)
+                            .build()
+                            .expect("response is valid"));
+                    }
                 }
 
                 (*self.cache.lock().await).put(
@@ -165,6 +201,7 @@ pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: Arc<ExecutableDocument>,
+    pub(crate) hash: QueryHash,
     pub(crate) parse_errors: Option<DiagnosticList>,
     pub(crate) validation_errors: Option<DiagnosticList>,
 }
@@ -177,7 +214,7 @@ impl Display for ParsedDocumentInner {
 
 impl Hash for ParsedDocumentInner {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.ast.hash(state);
+        self.hash.0.hash(state);
     }
 }
 

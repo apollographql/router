@@ -180,8 +180,8 @@ impl AuthorizationPlugin {
         schema: &Schema,
         configuration: &Configuration,
         context: &Context,
-    ) {
-        let doc = Query::parse_document(query, schema, configuration);
+    ) -> Result<(), SpecError> {
+        let doc = Query::parse_document(query, operation_name, schema, configuration)?;
 
         let CacheKeyMetadata {
             is_authenticated,
@@ -206,6 +206,8 @@ impl AuthorizationPlugin {
                 policies.into_iter().map(|policy| (policy, None)).collect();
             context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
         }
+
+        Ok(())
     }
 
     pub(crate) fn generate_cache_metadata(

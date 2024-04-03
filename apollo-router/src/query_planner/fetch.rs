@@ -28,7 +28,6 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
-use crate::spec::query::traverse;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
@@ -496,9 +495,9 @@ impl FetchNode {
         let doc = ExecutableDocument::parse(schema, &self.operation, "query.graphql")
             .expect("subgraph queries should be valid");
 
-        let mut visitor = QueryHashVisitor::new(schema, &doc);
-        if traverse::document(&mut visitor, &doc, self.operation_name.as_deref()).is_ok() {
-            self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
+        if let Ok(hash) = QueryHashVisitor::hash_query(schema, &doc, self.operation_name.as_deref())
+        {
+            self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
     }
 

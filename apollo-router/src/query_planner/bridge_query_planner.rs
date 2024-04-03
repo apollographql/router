@@ -41,12 +41,14 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -608,9 +610,16 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         .to_executable(schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .unwrap_or_else(|invalid| invalid.partial);
+                    let hash = QueryHashVisitor::hash_query(
+                        &schema,
+                        &executable_document,
+                        operation_name.as_deref(),
+                    )
+                    .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
                     doc = Arc::new(ParsedDocumentInner {
                         executable: Arc::new(executable_document),
                         ast: modified_query,
+                        hash: QueryHash(hash),
                         // Carry errors from previous ParsedDocument
                         // and assume transformation doesn’t introduce new errors.
                         // TODO: check the latter?
@@ -728,9 +737,16 @@ impl BridgeQueryPlanner {
                 .to_executable(&self.schema.api_schema().definitions)
                 // Assume transformation creates a valid document: ignore conversion errors
                 .unwrap_or_else(|invalid| invalid.partial);
+            let hash = QueryHashVisitor::hash_query(
+                &self.schema.definitions,
+                &executable_document,
+                key.operation_name.as_deref(),
+            )
+            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
             doc = Arc::new(ParsedDocumentInner {
                 executable: Arc::new(executable_document),
                 ast: new_doc,
+                hash: QueryHash(hash),
                 // Carry errors from previous ParsedDocument
                 // and assume transformation doesn’t introduce new errors.
                 // TODO: check the latter?
@@ -1106,7 +1122,7 @@ mod tests {
             .await
             .unwrap();
 
-        let doc = Query::parse_document(query, &schema, &Configuration::default());
+        let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
         let selections = planner
             .parse_selections(query.to_string(), None, &doc)
@@ -1489,9 +1505,11 @@ mod tests {
 
         let doc = Query::parse_document(
             original_query,
+            operation_name.as_deref(),
             planner.schema().api_schema(),
             &configuration,
-        );
+        )
+        .unwrap();
 
         planner
             .get(

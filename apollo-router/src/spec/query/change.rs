@@ -69,6 +69,16 @@ impl<'a> QueryHashVisitor<'a> {
         }
     }
 
+    pub(crate) fn hash_query(
+        schema: &'a schema::Schema,
+        executable: &'a executable::ExecutableDocument,
+        operation_name: Option<&str>,
+    ) -> Result<Vec<u8>, BoxError> {
+        let mut visitor = QueryHashVisitor::new(schema, executable);
+        traverse::document(&mut visitor, executable, operation_name)?;
+        Ok(visitor.finish())
+    }
+
     pub(crate) fn finish(self) -> Vec<u8> {
         self.hasher.finalize().as_slice().into()
     }

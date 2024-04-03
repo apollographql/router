@@ -179,7 +179,10 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let doc = query_analysis.parse_document(&query);
+                let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
+                    Ok(doc) => doc,
+                    Err(_) => continue,
+                };
                 let err_res = Query::check_errors(&doc);
                 if let Err(error) = err_res {
                     let e = Arc::new(QueryPlannerError::SpecError(error));
@@ -612,7 +615,13 @@ mod tests {
         let schema =
             Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
-        let doc1 = Query::parse_document("query Me { me { username } }", &schema, &configuration);
+        let doc1 = Query::parse_document(
+            "query Me { me { username } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
 
         let context = Context::new();
         context.extensions().lock().insert::<ParsedDocument>(doc1);
@@ -629,9 +638,11 @@ mod tests {
         }
         let doc2 = Query::parse_document(
             "query Me { me { name { first } } }",
+            None,
             &schema,
             &configuration,
-        );
+        )
+        .unwrap();
 
         let context = Context::new();
         context.extensions().lock().insert::<ParsedDocument>(doc2);
@@ -685,7 +696,13 @@ mod tests {
         let schema =
             Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
-        let doc = Query::parse_document("query Me { me { username } }", &schema, &configuration);
+        let doc = Query::parse_document(
+            "query Me { me { username } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
 
         let mut planner =
             CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
