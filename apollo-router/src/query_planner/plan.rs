@@ -229,7 +229,7 @@ impl PlanNode {
 
     pub(crate) fn hash_subqueries(
         &mut self,
-        schemas: &HashMap<String, Valid<apollo_compiler::Schema>>,
+        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
     ) {
         match self {
             PlanNode::Fetch(fetch_node) => {

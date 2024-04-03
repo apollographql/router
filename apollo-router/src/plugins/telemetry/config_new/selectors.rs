@@ -82,6 +82,11 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    /// The request method.
+    RequestMethod {
+        /// The request method enabled or not
+        request_method: bool,
+    },
     /// A header from the response
     ResponseHeader {
         /// The name of the request header.
@@ -93,7 +98,7 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
-    /// A header from the response
+    /// A status from the response
     ResponseStatus {
         /// The http response status code.
         response_status: ResponseStatus,
@@ -200,6 +205,11 @@ pub(crate) enum SupergraphSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
+    },
+    /// A status from the response
+    ResponseStatus {
+        /// The http response status code.
+        response_status: ResponseStatus,
     },
     RequestContext {
         /// The request context key.
@@ -446,6 +456,9 @@ impl Selector for RouterSelector {
 
     fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
         match self {
+            RouterSelector::RequestMethod { request_method } if *request_method => {
+                Some(request.router_request.method().to_string().into())
+            }
             RouterSelector::RequestHeader {
                 request_header,
                 default,
@@ -618,6 +631,16 @@ impl Selector for SupergraphSelector {
                 .and_then(|h| Some(h.to_str().ok()?.to_string()))
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
+            SupergraphSelector::ResponseStatus { response_status } => match response_status {
+                ResponseStatus::Code => Some(opentelemetry::Value::I64(
+                    response.response.status().as_u16() as i64,
+                )),
+                ResponseStatus::Reason => response
+                    .response
+                    .status()
+                    .canonical_reason()
+                    .map(|reason| reason.to_string().into()),
+            },
             SupergraphSelector::ResponseContext {
                 response_context,
                 default,

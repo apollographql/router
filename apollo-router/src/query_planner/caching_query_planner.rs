@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
+use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
@@ -279,6 +280,12 @@ where
 impl CachingQueryPlanner<BridgeQueryPlanner> {
     pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
         self.delegate.planner()
+    }
+
+    pub(crate) fn subgraph_schemas(
+        &self,
+    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+        self.delegate.subgraph_schemas()
     }
 }
 

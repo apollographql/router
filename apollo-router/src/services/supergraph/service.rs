@@ -471,7 +471,7 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None, None).await {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, execution_service_factory.subgraph_schemas.clone(), None, None).await {
                         Ok(plugins) => Arc::new(plugins),
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
@@ -488,6 +488,7 @@ async fn subscription_task(
 
                     execution_service_factory = ExecutionServiceFactory {
                         schema: execution_service_factory.schema.clone(),
+                        subgraph_schemas: execution_service_factory.subgraph_schemas.clone(),
                         plugins: plugins.clone(),
                         subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())),
 
@@ -808,6 +809,7 @@ impl SupergraphCreator {
             .query_planner_service(self.query_planner_service.clone())
             .execution_service_factory(ExecutionServiceFactory {
                 schema: self.schema.clone(),
+                subgraph_schemas: self.query_planner_service.subgraph_schemas(),
                 plugins: self.plugins.clone(),
                 subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
