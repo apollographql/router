@@ -1,10 +1,8 @@
-### Ability to ignore other auth prefixes in the JWT plugin
+### Ignore other auth prefixes in the JWT plugin
 
-You can now choose whether to ignore other header prefixes with the JWT plugin. Many applications will use the format of `Authorization: <scheme> <token>` and this will enable the use of other schemes within the `Authorization` header. 
+If the router encounters an authorization header with a different prefix in the value than what it expects, it will now ignore it. If the router was configured without the `require_authentication` option or without the authorization directives, then some requests that came with a different header prefix that were rejected before will now go through the router. If those options were configured, then there will be no change in behaviour.
 
-If the header prefix is an empty string, this option will be ignored. 
-
-You can configure this, such as:
+As an example, with a router configure like this:
 
 ```yaml title="router.yaml"
 authentication:
@@ -12,7 +10,6 @@ authentication:
     jwt:
       header_name: authorization
       header_value_prefix: "Bearer"
-      ignore_mismatched_prefix: true
 ```
 
 In the above, the router will ignore `Authorization: Basic <token>`, but process requests with `Authorization: Bearer <token>` defined.

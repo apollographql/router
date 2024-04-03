@@ -139,7 +139,7 @@ The default value is `Authorization`.
 
 The string that will always precede the JWT in the header value corresponding to [`header_name`](#header_name). This value must not include whitespace.
 
-The default value is `Bearer`.
+The default value is `Bearer`. If the router encounters authorization headers with a different prefix, it will ignore them.
 
 </td>
 </tr>
@@ -167,23 +167,6 @@ This is an array of possible token sources, as it could be provided in different
             - type: cookie
               name: authz
 ```
-
-</td>
-</tr>
-
-<tr>
-<td style="min-width: 150px;">
-
-##### `ignore_other_prefixes`
-
-</td>
-<td>
-
-Whether to ignore other prefixes in the `Authorization` header. If set to `false`, or unspecified, the router will only accept tokens with the prefix specified in `header_value_prefix`. If set to `true`, the router will ignore any requests that don't start with the prefix specified in `header_value_prefix`.
-
-If a header prefix is set to an empty string, this option is ignored.
-
-The default value is `false`.
 
 </td>
 </tr>
