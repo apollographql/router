@@ -169,8 +169,7 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         Box::pin(async move {
             let _ = sender.send((req, response_sender)).await;
 
-            response_receiver.await.map_err(|e| {
-                dbg!(e);
+            response_receiver.await.map_err(|_| {
                 QueryPlannerError::UnhandledPlannerResult
             })?
         })
