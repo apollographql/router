@@ -70,9 +70,8 @@ impl BridgeQueryPlannerPool {
         let mut planners = Vec::new();
 
         while let Some(task_result) = join_set.join_next().await {
-            // TODO: Error Type
-            let planner = task_result.map_err(|_e| {
-                ServiceBuildError::QueryPlannerError(QueryPlannerError::UnhandledPlannerResult)
+            let planner = task_result.map_err(|e| {
+                ServiceBuildError::ServiceError(Box::new(e))
             })??;
 
             let receiver = receiver.clone();
@@ -80,8 +79,10 @@ impl BridgeQueryPlannerPool {
             tokio::spawn(async move {
                 while let Ok((request, res_sender)) = receiver.recv().await {
                     let res = inner.clone().oneshot(request).await;
-                    // todo: err
-                    let _ = res_sender.send(res);
+
+                    if res_sender.send(res).is_err() {
+                        failfast_error!("receiver channel for query plan response was closed, this should never happen");
+                    }
                 }
             });
 
