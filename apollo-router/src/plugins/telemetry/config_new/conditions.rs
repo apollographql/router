@@ -52,6 +52,7 @@ impl<T> Condition<T>
 where
     T: Selector,
 {
+    // Returns Some(false) if it doesn't fulfill the condition
     pub(crate) fn evaluate_request(&mut self, request: &T::Request) -> Option<bool> {
         match self {
             Condition::Eq(eq) => match (eq[0].on_request(request), eq[1].on_request(request)) {
