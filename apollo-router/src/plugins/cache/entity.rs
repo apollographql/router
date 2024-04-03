@@ -823,6 +823,7 @@ fn filter_representations(
 }
 
 // fill in the entities for the response
+#[allow(clippy::too_many_arguments)
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
