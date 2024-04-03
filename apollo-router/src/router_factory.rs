@@ -238,12 +238,15 @@ impl YamlRouterFactory {
         let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         if let Some(previous_router) = previous_router {
-            let previous_cache = previous_router
-                .previous_cache()
-               ;
+            let previous_cache = previous_router.previous_cache();
 
             supergraph_creator
-                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, previous_cache, configuration.supergraph.query_planning.warmed_up_queries)
+                .warm_up_query_planner(
+                    &query_analysis_layer,
+                    &persisted_query_layer,
+                    previous_cache,
+                    configuration.supergraph.query_planning.warmed_up_queries,
+                )
                 .await;
         };
         RouterCreator::new(
@@ -839,7 +842,10 @@ mod test {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let mut config = json!({ "apollo": {} });
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        inject_schema_id(schema.api_schema().schema_id.as_deref(), &mut config);
+        inject_schema_id(
+            Some(&Schema::schema_id(&schema.api_schema().raw_sdl)),
+            &mut config,
+        );
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(

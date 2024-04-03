@@ -20,6 +20,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
+use super::fetch::QueryHash;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
@@ -43,8 +44,6 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
-
-use super::fetch::QueryHash;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -213,13 +212,8 @@ where
             // if the query hash did not change with the schema update, we can reuse the previously cached entry
             if let Some(hash) = hash {
                 if hash == doc.hash {
-                    if let Some(entry) = {
-                        previous_cache
-                            .lock()
-                            .await
-                            .get(&caching_key)
-                            .map(|res| res.clone())
-                    } {
+                    if let Some(entry) = { previous_cache.lock().await.get(&caching_key).cloned() }
+                    {
                         self.cache.insert_in_memory(caching_key, entry).await;
                         reused += 1;
                         continue;

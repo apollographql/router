@@ -277,12 +277,12 @@ impl<'a> QueryHashVisitor<'a> {
     fn hash_join_type(&mut self, name: &Name, directives: &DirectiveList) -> Result<(), BoxError> {
         if let Some(dir_name) = self.join_type_directive_name.as_deref() {
             if let Some(dir) = directives.get(dir_name) {
-                if let Some(key) = dir.argument_by_name("key") {
+                if let Some(key) = dir.argument_by_name("key").and_then(|arg| arg.as_str()) {
                     let mut parser = Parser::new();
                     if let Ok(field_set) = parser.parse_field_set(
                         Valid::assume_valid_ref(self.schema),
                         name.clone(),
-                        key.as_str().unwrap(),
+                        key,
                         std::path::Path::new("schema.graphql"),
                     ) {
                         traverse::selection_set(
@@ -305,13 +305,17 @@ impl<'a> QueryHashVisitor<'a> {
     ) -> Result<(), BoxError> {
         if let Some(dir_name) = self.join_field_directive_name.as_deref() {
             if let Some(dir) = directives.get(dir_name) {
-                if let Some(requires) = dir.argument_by_name("requires") {
+                if let Some(requires) = dir
+                    .argument_by_name("requires")
+                    .and_then(|arg| arg.as_str())
+                {
                     if let Ok(parent_type) = Name::new(NodeStr::new(parent_type)) {
                         let mut parser = Parser::new();
+
                         if let Ok(field_set) = parser.parse_field_set(
                             Valid::assume_valid_ref(self.schema),
                             parent_type.clone(),
-                            requires.as_str().unwrap(),
+                            requires,
                             std::path::Path::new("schema.graphql"),
                         ) {
                             traverse::selection_set(

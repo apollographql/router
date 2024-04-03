@@ -130,7 +130,8 @@ mod forbid_http_get_mutations_tests {
     use crate::error::Error;
     use crate::graphql::Response;
     use crate::plugin::test::MockSupergraphService;
-    use crate::query_planner::fetch::{OperationKind, QueryHash};
+    use crate::query_planner::fetch::OperationKind;
+    use crate::query_planner::fetch::QueryHash;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
     use crate::Context;
 

@@ -611,7 +611,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         // Assume transformation creates a valid document: ignore conversion errors
                         .unwrap_or_else(|invalid| invalid.partial);
                     let hash = QueryHashVisitor::hash_query(
-                        &schema,
+                        schema,
                         &executable_document,
                         operation_name.as_deref(),
                     )

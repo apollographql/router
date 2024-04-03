@@ -841,9 +841,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) fn previous_cache(
-        &self,
-    ) -> InMemoryCachePlanner {
+    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
         self.supergraph_creator.previous_cache()
     }
 }
