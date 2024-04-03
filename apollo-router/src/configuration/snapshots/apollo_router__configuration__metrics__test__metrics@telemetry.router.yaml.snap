@@ -8,7 +8,11 @@ expression: "&metrics.non_zero()"
       - value: 1
         attributes:
           opt.events: false
-          opt.instruments: false
+          opt.instruments: true
+          opt.instruments.default_attribute_requirement_level: false
+          opt.instruments.router: true
+          opt.instruments.subgraph: true
+          opt.instruments.supergraph: true
           opt.logging.experimental_when_header: true
           opt.metrics.otlp: true
           opt.metrics.prometheus: true
