@@ -710,10 +710,7 @@ impl Supergraph {
 
 impl Default for Supergraph {
     fn default() -> Self {
-        Self::builder()
-            .generate_query_fragments(false)
-            .reuse_query_fragments(true)
-            .build()
+        Self::builder().build()
     }
 }
 
