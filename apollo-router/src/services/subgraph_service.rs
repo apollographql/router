@@ -1048,6 +1048,7 @@ mod tests {
     use crate::graphql::Response;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SubgraphPassthroughMode;
+    use crate::plugins::subscription::SubscriptionLimit;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::traffic_shaping::Http2Config;
@@ -1647,7 +1648,7 @@ mod tests {
                 }),
             },
             enable_deduplication: true,
-            max_opened_subscriptions: None,
+            max_opened_subscriptions: SubscriptionLimit::Disabled(Disabled::Disabled),
             queue_capacity: None,
         }
     }
