@@ -758,7 +758,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "method": false,
-              "query_plan": false
+              "query_plan": false,
+              "blocking": false
             },
             "response": {
               "headers": false,
@@ -778,10 +779,16 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "method": false,
-                "query_plan": false
+                "query_plan": false,
+                "blocking": false
               },
               "type": "object",
               "properties": {
+                "blocking": {
+                  "description": "Blocks the request handling in the router",
+                  "default": true,
+                  "type": "boolean"
+                },
                 "body": {
                   "description": "Send the body",
                   "default": false,
@@ -865,7 +872,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "path": false,
-              "method": false
+              "method": false,
+              "blocking": false
             },
             "response": {
               "headers": false,
@@ -885,10 +893,16 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "path": false,
-                "method": false
+                "method": false,
+                "blocking": false
               },
               "type": "object",
               "properties": {
+                "blocking": {
+                  "description": "Blocks the request handling in the router",
+                  "default": true,
+                  "type": "boolean"
+                },
                 "body": {
                   "description": "Send the body",
                   "default": false,
@@ -973,7 +987,8 @@ expression: "&schema"
                 "body": false,
                 "uri": false,
                 "method": false,
-                "service_name": false
+                "service_name": false,
+                "blocking": false
               },
               "response": {
                 "headers": false,
@@ -995,7 +1010,8 @@ expression: "&schema"
                   "body": false,
                   "uri": false,
                   "method": false,
-                  "service_name": false
+                  "service_name": false,
+                  "blocking": false
                 },
                 "response": {
                   "headers": false,
@@ -1015,10 +1031,16 @@ expression: "&schema"
                     "body": false,
                     "uri": false,
                     "method": false,
-                    "service_name": false
+                    "service_name": false,
+                    "blocking": false
                   },
                   "type": "object",
                   "properties": {
+                    "blocking": {
+                      "description": "Blocks the request handling in the router",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "body": {
                       "description": "Send the body",
                       "default": false,
@@ -1105,7 +1127,8 @@ expression: "&schema"
               "context": false,
               "body": false,
               "sdl": false,
-              "method": false
+              "method": false,
+              "blocking": false
             },
             "response": {
               "headers": false,
@@ -1124,10 +1147,16 @@ expression: "&schema"
                 "context": false,
                 "body": false,
                 "sdl": false,
-                "method": false
+                "method": false,
+                "blocking": false
               },
               "type": "object",
               "properties": {
+                "blocking": {
+                  "description": "Blocks the request handling in the router",
+                  "default": true,
+                  "type": "boolean"
+                },
                 "body": {
                   "description": "Send the body",
                   "default": false,

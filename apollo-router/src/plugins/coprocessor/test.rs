@@ -99,6 +99,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -158,6 +159,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -217,6 +219,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -275,6 +278,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -337,6 +341,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -466,6 +471,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -534,6 +540,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -708,6 +715,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -826,6 +834,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -954,6 +963,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                blocking: true,
             },
             response: Default::default(),
         };
@@ -1042,6 +1052,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                blocking: true,
             },
             response: Default::default(),
         };
