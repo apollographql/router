@@ -632,7 +632,7 @@ impl Service<router::Request> for CallbackService {
                                                     .map_err(BoxError::from)?,
                                                 context: req.context,
                                             });
-                                         } 
+                                         }
                                     };
                                     tracing::info!(
                                         monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
