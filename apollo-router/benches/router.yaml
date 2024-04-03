@@ -3,7 +3,7 @@ supergraph:
   introspection: true
 plugins:
   experimental.expose_query_plan: true
-  apollo-test.expose_referenced_fields_by_type: true
+  apollo-test.do_not_execute: true
 experimental_graphql_validation_mode: both
 sandbox:
   enabled: true

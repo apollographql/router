@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
+use std::thread::available_parallelism;
 
 use axum::response::IntoResponse;
 use http::StatusCode;
@@ -9,7 +10,6 @@ use multimap::MultiMap;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
-use std::thread::available_parallelism;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceBuilder;

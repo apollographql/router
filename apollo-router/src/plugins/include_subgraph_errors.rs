@@ -77,6 +77,7 @@ impl Plugin for IncludeSubgraphErrors {
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -90,7 +91,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlanner;
+    use crate::query_planner::BridgeQueryPlannerPool;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -190,9 +191,13 @@ mod test {
 
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let planner = BridgeQueryPlanner::new(schema.to_string(), Default::default())
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlannerPool::new(
+            schema.to_string(),
+            Default::default(),
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
         let schema = planner.schema();
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);

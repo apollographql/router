@@ -1,11 +1,13 @@
 use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
+use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -46,8 +48,7 @@ where
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     caller: String,
-    inner: PhantomData<K>,  //Arc<Mutex<LruCache<K, V>>>,
-    inner2: PhantomData<V>, //Arc<Mutex<LruCache<K, V>>>,
+    inner: Arc<Mutex<LruCache<K, V>>>,
     redis: Option<RedisCacheStorage>,
 }
 
@@ -63,8 +64,7 @@ where
     ) -> Result<Self, BoxError> {
         Ok(Self {
             caller: caller.to_string(),
-            inner: PhantomData, // Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            inner2: PhantomData, // Arc::new(Mutex::new(LruCache::new(max_capacity))),
+            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
                 match RedisCacheStorage::new(config).await {
@@ -89,7 +89,7 @@ where
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
         let instant_memory = Instant::now();
-        let res = None; // self.inner.lock().await.get(key).cloned();
+        let res = self.inner.lock().await.get(key).cloned();
 
         match res {
             Some(v) => {
@@ -124,7 +124,7 @@ where
                     let inner_key = RedisKey(key.clone());
                     match redis.get::<K, V>(inner_key).await {
                         Some(v) => {
-                            // self.inner.lock().await.put(key.clone(), v.0.clone());
+                            self.inner.lock().await.put(key.clone(), v.0.clone());
 
                             tracing::info!(
                                 monotonic_counter.apollo_router_cache_hit_count = 1u64,
@@ -168,30 +168,28 @@ where
                 .await;
         }
 
-        // let mut in_memory = self.inner.lock().await;
-        // in_memory.put(key, value);
-        // let size = in_memory.len() as u64;
-        // tracing::info!(
-        //     value.apollo_router_cache_size = size,
-        //     kind = %self.caller,
-        //     storage = &tracing::field::display(CacheStorageName::Memory),
-        // );
+        let mut in_memory = self.inner.lock().await;
+        in_memory.put(key, value);
+        let size = in_memory.len() as u64;
+        tracing::info!(
+            value.apollo_router_cache_size = size,
+            kind = %self.caller,
+            storage = &tracing::field::display(CacheStorageName::Memory),
+        );
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
-        Default::default()
-        // self.inner
-        //     .lock()
-        //     .await
-        //     .iter()
-        //     .map(|(k, _)| k.clone())
-        //     .collect()
+        self.inner
+            .lock()
+            .await
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 
     #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
-        0
-        // self.inner.lock().await.len()
+        self.inner.lock().await.len()
     }
 }
 

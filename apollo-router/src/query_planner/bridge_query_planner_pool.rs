@@ -1,7 +1,8 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use async_channel::{bounded, Receiver, Sender};
+use async_channel::bounded;
+use async_channel::Sender;
 use futures::future::BoxFuture;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
@@ -35,7 +36,6 @@ impl BridgeQueryPlannerPool {
         configuration: Arc<Configuration>,
         size: NonZeroUsize,
     ) -> Result<Self, ServiceBuildError> {
-        // let size  = NonZeroUsize::new(1).unwrap();
         let mut join_set = JoinSet::new();
 
         let (sender, receiver) = bounded::<(
