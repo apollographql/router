@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Instant;
 
 use apollo_compiler::validation::Valid;
 use async_channel::bounded;
 use async_channel::Sender;
 use futures::future::BoxFuture;
+use opentelemetry::KeyValue;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
@@ -77,9 +79,20 @@ impl BridgeQueryPlannerPool {
 
             let receiver = receiver.clone();
             let inner = planner.clone();
+            let worker_id = planners.len();
+
             tokio::spawn(async move {
                 while let Ok((request, res_sender)) = receiver.recv().await {
+                    let start = Instant::now();
+
                     let res = inner.clone().oneshot(request).await;
+
+                    f64_histogram!(
+                        "apollo.router.query_planner.duration",
+                        "Duration of the query planning.",
+                        start.elapsed().as_secs_f64(),
+                        [KeyValue::new("workerId", worker_id.to_string())]
+                    );
 
                     if res_sender.send(res).is_err() {
                         failfast_error!("receiver channel for query plan response was closed, this should never happen");
@@ -140,15 +153,25 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let (response_sender, response_receiver) = oneshot::channel();
-
         let sender = self.sender.clone();
+
         Box::pin(async move {
+            let start = Instant::now();
             let _ = sender.send((req, response_sender)).await;
+
             tracing::info!(value.apollo_router_query_planner_queue_size = sender.len());
             let res = response_receiver
                 .await
                 .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
             tracing::info!(value.apollo_router_query_planner_queue_size = sender.len());
+
+            f64_histogram!(
+                "apollo_router_query_planning_time",
+                "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
+                start.elapsed().as_secs_f64(),
+                []
+            );
+
             res
         })
     }
