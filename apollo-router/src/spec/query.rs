@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::WithErrors;
@@ -17,6 +16,7 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
 use self::change::QueryHashVisitor;
@@ -35,6 +35,7 @@ use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::fetch::QueryHash;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::spec::FieldType;
@@ -278,9 +279,10 @@ impl Query {
 
     pub(crate) fn parse_document(
         query: &str,
+        operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> ParsedDocument {
+    ) -> Result<ParsedDocument, SpecError> {
         let parser = &mut apollo_compiler::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
@@ -308,25 +310,30 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        Arc::new(ParsedDocumentInner {
+        let hash = QueryHashVisitor::hash_query(schema, &executable_document, operation_name)
+            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+
+        Ok(Arc::new(ParsedDocumentInner {
             ast,
             executable: Arc::new(executable_document),
+            hash: Arc::new(QueryHash(hash)),
             parse_errors,
             validation_errors,
-        })
+        }))
     }
 
     pub(crate) fn parse(
         query: impl Into<String>,
+        operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> Result<Self, SpecError> {
+    ) -> Result<Self, BoxError> {
         let query = query.into();
 
-        let doc = Self::parse_document(&query, schema, configuration);
+        let doc = Self::parse_document(&query, operation_name, schema, configuration)?;
         Self::check_errors(&doc)?;
         let (fragments, operations, defer_stats, schema_aware_hash) =
-            Self::extract_query_information(schema, &doc.executable, &doc.ast)?;
+            Self::extract_query_information(schema, &doc.executable, operation_name)?;
 
         Ok(Query {
             string: query,
@@ -362,7 +369,7 @@ impl Query {
     pub(crate) fn extract_query_information(
         schema: &Schema,
         document: &ExecutableDocument,
-        ast: &ast::Document,
+        operation_name: Option<&str>,
     ) -> Result<(Fragments, Vec<Operation>, DeferStats, Vec<u8>), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
@@ -375,8 +382,8 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        let mut visitor = QueryHashVisitor::new(&schema.definitions, ast);
-        traverse::document(&mut visitor, ast).map_err(|e| {
+        let mut visitor = QueryHashVisitor::new(&schema.definitions, document);
+        traverse::document(&mut visitor, document, operation_name).map_err(|e| {
             SpecError::ParsingError(format!("could not calculate the query hash: {e}"))
         })?;
         let hash = visitor.finish();

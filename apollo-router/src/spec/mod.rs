@@ -47,6 +47,8 @@ pub(crate) enum SpecError {
     UnknownOperation(String),
     /// subscription operation is not supported
     SubscriptionNotSupported,
+    /// query hashing failed: {0}
+    QueryHashing(String),
 }
 
 pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "## GraphQLValidationFailure\n";
@@ -75,6 +77,7 @@ impl ErrorExtension for SpecError {
             SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
+            SpecError::QueryHashing(_) => "QUERY_HASHING",
         }
         .to_string()
     }
