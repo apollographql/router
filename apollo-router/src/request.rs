@@ -419,13 +419,12 @@ mod tests {
 
     #[test]
     fn test_no_variables() {
-        let result = check_deserialization(
-            json!(
-            {
-              "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-              "operationName": "aTest",
-              "extensions": {"extension": 1}
-            }));
+        let result = check_deserialization(json!(
+        {
+          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
+          "operationName": "aTest",
+          "extensions": {"extension": 1}
+        }));
         assert_eq!(
             result,
             Request::builder()
@@ -440,14 +439,13 @@ mod tests {
     // rover sends { "variables": null } when running the introspection query,
     // and possibly running other queries as well.
     fn test_variables_is_null() {
-        let result = check_deserialization(
-            json!(
-            {
-              "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-              "operationName": "aTest",
-              "variables": null,
-              "extensions": {"extension": 1}
-            }));
+        let result = check_deserialization(json!(
+        {
+          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
+          "operationName": "aTest",
+          "variables": null,
+          "extensions": {"extension": 1}
+        }));
         assert_eq!(
             result,
             Request::builder()
@@ -462,17 +460,16 @@ mod tests {
     fn from_urlencoded_query_works() {
         let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
 
-        let expected_result = check_deserialization(
-            json!(
-            {
-              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-              "extensions": {
-                  "persistedQuery": {
-                      "version": 1,
-                      "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
-                  }
-                }
-            }));
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "extensions": {
+              "persistedQuery": {
+                  "version": 1,
+                  "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
+              }
+            }
+        }));
 
         let req = Request::from_urlencoded_query(query_string).unwrap();
 
@@ -483,18 +480,17 @@ mod tests {
     fn from_urlencoded_query_with_variables_works() {
         let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&variables=%7B%22date%22%3A%222022-01-01T00%3A00%3A00%2B00%3A00%22%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
 
-        let expected_result = check_deserialization(
-            json!(
-            {
-              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-              "variables": {"date": "2022-01-01T00:00:00+00:00"},
-              "extensions": {
-                  "persistedQuery": {
-                      "version": 1,
-                      "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
-                  }
-                }
-            }));
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+          "extensions": {
+              "persistedQuery": {
+                  "version": 1,
+                  "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
+              }
+            }
+        }));
 
         let req = Request::from_urlencoded_query(query_string).unwrap();
 
@@ -503,53 +499,52 @@ mod tests {
 
     #[test]
     fn null_extensions() {
-        let expected_result = check_deserialization(
-            json!(
-            {
-              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-              "variables": {"date": "2022-01-01T00:00:00+00:00"},
-              "extensions": null
-            }));
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+          "extensions": null
+        }));
         insta::assert_yaml_snapshot!(expected_result);
     }
 
     #[test]
     fn missing_extensions() {
-        let expected_result = check_deserialization(
-            json!(
-            {
-              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-              "variables": {"date": "2022-01-01T00:00:00+00:00"},
-            }));
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+        }));
         insta::assert_yaml_snapshot!(expected_result);
     }
 
     #[test]
     fn extensions() {
-        let expected_result = check_deserialization(
-            json!(
-            {
-              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-              "variables": {"date": "2022-01-01T00:00:00+00:00"},
-              "extensions": {
-                "something_simple": "else",
-                "something_complex": {
-                    "nested": "value"
-                }
-              }
-            }),
-        );
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+          "extensions": {
+            "something_simple": "else",
+            "something_complex": {
+                "nested": "value"
+            }
+          }
+        }));
         insta::assert_yaml_snapshot!(expected_result);
     }
 
-
-    fn check_deserialization(request: serde_json::Value) -> Request{
+    fn check_deserialization(request: serde_json::Value) -> Request {
         let string = serde_json::to_string(&request).expect("could not serialize request");
-        let string_deserialized = serde_json::from_str(&string).expect("could not deserialize string");
+        let string_deserialized =
+            serde_json::from_str(&string).expect("could not deserialize string");
         let bytes = Bytes::copy_from_slice(string.as_bytes());
-        let bytes_deserialized = Request::deserialize_from_bytes(&bytes).expect("could not deserialize from bytes");
-        assert_eq!(string_deserialized, bytes_deserialized, "string and bytes deserialization did not match");
+        let bytes_deserialized =
+            Request::deserialize_from_bytes(&bytes).expect("could not deserialize from bytes");
+        assert_eq!(
+            string_deserialized, bytes_deserialized,
+            "string and bytes deserialization did not match"
+        );
         string_deserialized
     }
-
 }
