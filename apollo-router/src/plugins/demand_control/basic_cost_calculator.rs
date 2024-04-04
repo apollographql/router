@@ -344,7 +344,7 @@ mod tests {
             .unwrap();
 
         let schema = spec::Schema::parse(schema_str, &config).unwrap();
-        let query = Query::parse_document(query_str, &schema, &config);
+        let query = Query::parse_document(query_str, None, &schema, &config).unwrap();
 
         let ctx = Context::new();
         ctx.extensions().lock().insert::<ParsedDocument>(query);

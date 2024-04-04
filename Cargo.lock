@@ -192,15 +192,14 @@ checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.13"
+version = "1.0.0-beta.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e779ed0ba21149a5ffc7266aedd34779da85405da2b2b4f4bc326b85375439a6"
+checksum = "00ed7af048c0beb66c9201c032b25a81b1b450397ddb2cb277ca57bcae2d9e13"
 dependencies = [
  "apollo-parser",
  "ariadne",
  "indexmap 2.2.3",
  "rowan",
- "salsa",
  "serde",
  "serde_json_bytes",
  "sptr",
@@ -221,9 +220,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "0.0.8"
+version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c810d52e0d9ac684ac2b0583df9479a4efbe3035b466b4c374eeaa388f4a1e93"
+checksum = "45c675747dd20db0f124d07b9764265b3ae67afbdd1044345673c184888cd018"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -251,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.43.1"
+version = "1.43.2"
 dependencies = [
  "access-json",
  "anyhow",
@@ -411,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.43.1"
+version = "1.43.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -427,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.43.1"
+version = "1.43.2"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -3125,9 +3124,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.24"
+version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb2c4422095b67ee78da96fbb51a4cc413b3b25883c7717ff7ca1ab31022c9c9"
+checksum = "81fe527a889e1532da5c525686d96d4c2e74cdd345badf8dfef9f6b39dd5f5e8"
 dependencies = [
  "bytes",
  "fnv",
@@ -3423,7 +3422,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.5",
+ "socket2 0.4.9",
  "tokio",
  "tower-service",
  "tracing",
