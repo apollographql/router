@@ -603,8 +603,7 @@ async fn plan_query(
     // Some tests do populate the document, so we only do it if it's not already there.
     if !{
         let lock = context.extensions().lock();
-        let contains = lock.contains_key::<ParsedDocument>();
-        contains
+        lock.contains_key::<ParsedDocument>()
     } {
         let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
         Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
