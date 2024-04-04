@@ -2629,7 +2629,8 @@ expression: "&schema"
           },
           "warmed_up_queries": null,
           "experimental_plans_limit": null,
-          "experimental_paths_limit": null
+          "experimental_paths_limit": null,
+          "experimental_reuse_query_plans": false
         },
         "early_cancel": false,
         "experimental_log_on_broken_pipe": false
@@ -2692,7 +2693,8 @@ expression: "&schema"
             },
             "warmed_up_queries": null,
             "experimental_plans_limit": null,
-            "experimental_paths_limit": null
+            "experimental_paths_limit": null,
+            "experimental_reuse_query_plans": false
           },
           "type": "object",
           "properties": {
@@ -2838,6 +2840,11 @@ expression: "&schema"
               "format": "uint32",
               "minimum": 0.0,
               "nullable": true
+            },
+            "experimental_reuse_query_plans": {
+              "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
+              "default": false,
+              "type": "boolean"
             },
             "warmed_up_queries": {
               "description": "Warms up the cache on reloads by running the query plan over a list of the most used queries (from the in memory cache) Configures the number of queries warmed up. Defaults to 1/3 of the in memory cache",

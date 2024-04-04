@@ -33,7 +33,6 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<Box<Schema>>,
-    pub(crate) schema_id: Option<String>,
 }
 
 impl Schema {
@@ -133,7 +132,6 @@ impl Schema {
             }
         }
 
-        let schema_id = Some(Self::schema_id(sdl));
         tracing::info!(
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
@@ -147,7 +145,6 @@ impl Schema {
             subgraphs,
             implementers_map,
             api_schema: None,
-            schema_id,
         })
     }
 
@@ -585,17 +582,13 @@ mod tests {
             let schema = Schema::parse_test(schema, &Default::default()).unwrap();
 
             assert_eq!(
-                schema.schema_id,
-                Some(
-                    "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
-                )
+                Schema::schema_id(&schema.raw_sdl),
+                "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
             );
 
             assert_eq!(
-                schema.api_schema().schema_id,
-                Some(
-                    "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
-                )
+                Schema::schema_id(&schema.api_schema().raw_sdl),
+                "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
             );
         }
     }
