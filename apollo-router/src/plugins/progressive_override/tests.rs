@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
+use apollo_compiler::Schema;
 use tower::ServiceExt;
 
 use crate::metrics::FutureMetricsExt;
@@ -137,8 +138,12 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
 
     // plugin depends on the parsed document being in the context so we'll add
     // it ourselves for testing purposes
+    let schema = Schema::parse_and_validate(SCHEMA, "").unwrap();
+    let document = Document::parse(query, "query.graphql").unwrap();
+    let executable = document.to_executable(&schema).unwrap();
     let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
+        ast: document,
+        executable: Arc::new(executable),
         ..Default::default()
     });
 
@@ -206,8 +211,12 @@ async fn plugin_supergraph_service_trims_0pc_label() {
 }
 
 async fn get_json_query_plan(query: &str) -> serde_json::Value {
+    let schema = Schema::parse_and_validate(SCHEMA, "").unwrap();
+    let document = Document::parse(query, "query.graphql").unwrap();
+    let executable = document.to_executable(&schema).unwrap();
     let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
+        ast: document,
+        executable: Arc::new(executable),
         ..Default::default()
     });
 
@@ -279,8 +288,12 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
 
     // plugin depends on the parsed document being in the context so we'll add
     // it ourselves for testing purposes
+    let schema = Schema::parse_and_validate(SCHEMA, "").unwrap();
+    let document = Document::parse(query, "query.graphql").unwrap();
+    let executable = document.to_executable(&schema).unwrap();
     let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
+        ast: document,
+        executable: Arc::new(executable),
         ..Default::default()
     });
 

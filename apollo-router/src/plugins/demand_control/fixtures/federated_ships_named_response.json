@@ -1,0 +1,14 @@
+{
+    "data": {
+        "users": [
+            {
+                "licenseNumber": 1,
+                "name": "Kate Chopin"
+            },
+            {
+                "licenseNumber": 2,
+                "name": "Paul Auster"
+            }
+        ]
+    }
+}
