@@ -15,8 +15,11 @@ use apollo_compiler::Schema;
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
+use super::schema_aware_response::SchemaAwareResponse;
+use super::schema_aware_response::TypedValue;
 use super::CostCalculator;
 use super::DemandControlError;
+use crate::graphql::Response;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
@@ -255,6 +258,31 @@ impl BasicCostCalculator {
         }
         Ok(sum)
     }
+
+    fn score_json(value: &TypedValue) -> Result<f64, DemandControlError> {
+        match value {
+            TypedValue::Null => Ok(0.0),
+            TypedValue::Bool(_, _) => Ok(0.0),
+            TypedValue::Number(_, _) => Ok(0.0),
+            TypedValue::String(_, _) => Ok(0.0),
+            TypedValue::Array(_, items) => Self::summed_score_of_values(items),
+            TypedValue::Object(_, children) => {
+                let cost_of_children = Self::summed_score_of_values(children.values())?;
+                Ok(1.0 + cost_of_children)
+            }
+            TypedValue::Root(children) => Self::summed_score_of_values(children.values()),
+        }
+    }
+
+    fn summed_score_of_values<'a, I: IntoIterator<Item = &'a TypedValue<'a>>>(
+        values: I,
+    ) -> Result<f64, DemandControlError> {
+        let mut score = 0.0;
+        for value in values {
+            score += Self::score_json(value)?;
+        }
+        Ok(score)
+    }
 }
 
 impl CostCalculator for BasicCostCalculator {
@@ -275,12 +303,21 @@ impl CostCalculator for BasicCostCalculator {
     fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
         self.score_plan_node(&query_plan.root)
     }
+
+    fn actual(
+        request: &ExecutableDocument,
+        response: &Response,
+    ) -> Result<f64, DemandControlError> {
+        let schema_aware_response = SchemaAwareResponse::new(request, response)?;
+        Self::score_json(&schema_aware_response.value)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use test_log::test;
     use tower::Service;
 
@@ -307,7 +344,7 @@ mod tests {
             .unwrap();
 
         let schema = spec::Schema::parse(schema_str, &config).unwrap();
-        let query = Query::parse_document(query_str, &schema, &config);
+        let query = Query::parse_document(query_str, None, &schema, &config).unwrap();
 
         let ctx = Context::new();
         ctx.extensions().lock().insert::<ParsedDocument>(query);
@@ -326,6 +363,13 @@ mod tests {
         };
 
         calculator.planned(&query_plan).unwrap()
+    }
+
+    fn actual_cost(schema_str: &str, query_str: &str, response_bytes: &'static [u8]) -> f64 {
+        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
+        let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        BasicCostCalculator::actual(&query, &response).unwrap()
     }
 
     #[test]
@@ -409,29 +453,56 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn federated_query_with_name() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_named_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_named_response.json");
+
+        assert_eq!(estimated_cost(schema, query), 100.0);
+        assert_eq!(actual_cost(schema, query, response), 2.0);
+    }
+
+    #[test(tokio::test)]
     async fn federated_query_with_requires() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_required_response.json");
 
         assert_eq!(estimated_cost(schema, query), 10200.0);
         assert_eq!(planned_cost(schema, query).await, 10400.0);
+        assert_eq!(actual_cost(schema, query, response), 2.0);
     }
 
     #[test(tokio::test)]
     async fn federated_query_with_fragments() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
         assert_eq!(estimated_cost(schema, query), 300.0);
         assert_eq!(planned_cost(schema, query).await, 400.0);
+        assert_eq!(actual_cost(schema, query, response), 6.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_inline_fragments() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_inline_fragment_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
+
+        assert_eq!(estimated_cost(schema, query), 300.0);
+        assert_eq!(planned_cost(schema, query).await, 400.0);
+        assert_eq!(actual_cost(schema, query, response), 6.0);
     }
 
     #[test(tokio::test)]
     async fn federated_query_with_defer() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+        let response = include_bytes!("./fixtures/federated_ships_deferred_response.json");
 
         assert_eq!(estimated_cost(schema, query), 10200.0);
         assert_eq!(planned_cost(schema, query).await, 10400.0);
+        assert_eq!(actual_cost(schema, query, response), 2.0);
     }
 }
