@@ -704,8 +704,10 @@ mod tests {
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(
-                    r#"{
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
                 "enabled": true,
                 "mode": {
                     "callback": {
@@ -715,10 +717,11 @@ mod tests {
                     }
                 }
             }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                notify.clone(),
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
             )
             .await
             .unwrap();
@@ -842,21 +845,24 @@ mod tests {
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(
-                    r#"{
-                "enabled": true,
-                "mode": {
-                    "callback": {
-                        "public_url": "http://localhost:4000/subscription/callback",
-                        "path": "/subscription/callback",
-                        "subgraphs": ["test"]
-                    }
-                }
-            }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                notify.clone(),
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
+                        "enabled": true,
+                        "mode": {
+                            "callback": {
+                                "public_url": "http://localhost:4000/subscription/callback",
+                                "path": "/subscription/callback",
+                                "subgraphs": ["test"]
+                            }
+                        }
+                    }"#,
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
             )
             .await
             .unwrap();
@@ -927,8 +933,10 @@ mod tests {
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(
-                    r#"{
+                PluginInit::fake_builder()
+                    .config(
+                        Value::from_str(
+                            r#"{
                 "enabled": true,
                 "mode": {
                     "callback": {
@@ -938,10 +946,11 @@ mod tests {
                     }
                 }
             }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                notify.clone(),
+                        )
+                        .unwrap(),
+                    )
+                    .notify(notify.clone())
+                    .build(),
             )
             .await
             .unwrap();
@@ -1076,15 +1085,13 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &Value::from_str(
                     r#"{
                     "enabled": false
                 }"#,
                 )
                 .unwrap(),
-                Default::default(),
-                Default::default(),
             )
             .await
             .unwrap();
