@@ -83,7 +83,7 @@ impl MockStore {
 
 impl Mocks for MockStore {
     fn process_command(&self, command: MockCommand) -> Result<RedisValue, RedisError> {
-        println!("mock2 received redis command: {command:?}");
+        println!("mock received redis command: {command:?}");
 
         match &*command.cmd {
             "GET" => {
@@ -116,6 +116,7 @@ impl Mocks for MockStore {
         Err(RedisError::new(RedisErrorKind::NotFound, "mock not found"))
     }
 }
+
 #[tokio::test]
 async fn insert() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
@@ -294,54 +295,6 @@ async fn no_cache_control() {
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response);
-}
-
-#[derive(Debug)]
-pub(crate) struct MockStore {
-    map: Arc<Mutex<HashMap<Bytes, Bytes>>>,
-}
-
-impl MockStore {
-    fn new() -> MockStore {
-        MockStore {
-            map: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-}
-impl Mocks for MockStore {
-    fn process_command(&self, command: MockCommand) -> Result<RedisValue, RedisError> {
-        println!("mock2 received redis command: {command:?}");
-
-        match &*command.cmd {
-            "GET" => {
-                if let Some(RedisValue::Bytes(b)) = command.args.first() {
-                    if let Some(bytes) = self.map.lock().get(b) {
-                        return Ok(RedisValue::Bytes(bytes.clone()));
-                    }
-                }
-            }
-            "SET" => {
-                if let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
-                    (command.args.first(), command.args.get(1))
-                {
-                    self.map.lock().insert(key.clone(), value.clone());
-                    return Ok(RedisValue::Null);
-                }
-            }
-            "MSET" => {
-                let mut args_it = command.args.iter();
-                while let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
-                    (args_it.next(), args_it.next())
-                {
-                    self.map.lock().insert(key.clone(), value.clone());
-                }
-                return Ok(RedisValue::Null);
-            }
-
-            _ => {}
-        }
-        Err(RedisError::new(RedisErrorKind::NotFound, "mock not found"))
-    }
 }
 
 #[tokio::test]
