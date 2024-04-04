@@ -350,10 +350,7 @@ impl Batch {
 
             // If we don't have a master_client_factory, we can't do anything.
             if let Some(client_factory) = master_client_factory {
-                if let Err(err) = process_batches(client_factory, svc_map)
-                    .await {
-                        tracing::error!(err, "process batches failed")
-                }
+                process_batches(client_factory, svc_map).await?;
             }
             Ok(())
         }.instrument(tracing::info_span!("batch_request", size)));

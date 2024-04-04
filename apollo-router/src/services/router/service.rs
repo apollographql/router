@@ -757,7 +757,6 @@ impl RouterService {
             context
                 .extensions()
                 .lock()
-                // .insert(shared_batch_details.query_for_index(0));
                 .insert(Batch::query_for_index(shared_batch_details, 0));
         }
 
