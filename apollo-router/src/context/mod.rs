@@ -418,6 +418,7 @@ mod test {
             crate::services::layers::query_analysis::ParsedDocumentInner {
                 ast: Default::default(),
                 executable: Default::default(),
+                hash: Default::default(),
                 parse_errors: Default::default(),
                 validation_errors: Default::default(),
             },

@@ -9,3 +9,5 @@ telemetry:
       zipkin:
         enabled: true
         endpoint: default
+        batch_processor:
+          scheduled_delay: 10ms
