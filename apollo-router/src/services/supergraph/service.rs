@@ -226,7 +226,11 @@ async fn service_call(
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
 
-            if let Some(batching) = context.extensions().lock().get::<Batching>() {
+            if let Some(batching) = {
+                let lock = context.extensions().lock();
+                let batching = lock.get::<Batching>();
+                batching.cloned()
+            } {
                 if batching.enabled && (is_deferred || is_subscription) {
                     let message = if is_deferred {
                         "BATCHING_DEFER_UNSUPPORTED"
@@ -597,7 +601,11 @@ async fn plan_query(
     // tests will pass.
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
-    if !context.extensions().lock().contains_key::<ParsedDocument>() {
+    if !{
+        let lock = context.extensions().lock();
+        let contains = lock.contains_key::<ParsedDocument>();
+        contains
+    } {
         let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
         Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
         Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;

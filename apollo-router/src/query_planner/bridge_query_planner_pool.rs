@@ -133,10 +133,12 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         let sender = self.sender.clone();
         Box::pin(async move {
             let _ = sender.send((req, response_sender)).await;
-
-            response_receiver
+            tracing::info!(value.apollo_router_query_planner_queue_size = sender.len());
+            let res = response_receiver
                 .await
-                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?
+                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
+            tracing::info!(value.apollo_router_query_planner_queue_size = sender.len());
+            res
         })
     }
 }

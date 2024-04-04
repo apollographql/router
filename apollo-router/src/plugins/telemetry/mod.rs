@@ -470,8 +470,11 @@ impl Plugin for Telemetry {
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) =
-                    resp.context.extensions().lock().get::<Arc<UsageReporting>>()
+                if let Some(usage_reporting) = {
+                    let extensions = resp.context.extensions().lock();
+                    let urp = extensions.get::<Arc<UsageReporting>>();
+                    urp.cloned()
+                }
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -1282,9 +1285,11 @@ impl Telemetry {
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
     ) {
-        let metrics = if let Some(usage_reporting) =
-            context.extensions().lock().get::<Arc<UsageReporting>>()
-        {
+        let metrics = if let Some(usage_reporting) = {
+            let lock = context.extensions().lock();
+            let urp = lock.get::<Arc<UsageReporting>>();
+            urp.cloned()
+        } {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context

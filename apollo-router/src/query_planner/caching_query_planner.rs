@@ -263,11 +263,9 @@ where
             let context = request.context.clone();
             qp.plan(request).await.map(|response| {
                 if let Some(usage_reporting) = {
-                    context
-                        .extensions()
-                        .lock()
-                        .get::<Arc<UsageReporting>>()
-                        .cloned()
+                    let lock = context.extensions().lock();
+                    let urp = lock.get::<Arc<UsageReporting>>();
+                    urp.cloned()
                 } {
                     let _ = response.context.insert(
                         "apollo_operation_id",
@@ -336,7 +334,7 @@ where
                 context,
             } = request;
 
-            let doc = match context.extensions().lock().get::<ParsedDocument>() {
+            let doc = match context.extensions().lock().get::<ParsedDocument>().cloned() {
                 None => {
                     return Err(CacheResolverError::RetrievalError(Arc::new(
                         QueryPlannerError::SpecError(SpecError::ParsingError(
@@ -344,7 +342,7 @@ where
                         )),
                     )))
                 }
-                Some(d) => d.clone(),
+                Some(d) => d,
             };
 
             let schema = &self.schema.api_schema().definitions;

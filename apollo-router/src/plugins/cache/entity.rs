@@ -143,8 +143,12 @@ impl Plugin for EntityCache {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
-                if let Some(cache_control) =
-                    response.context.extensions().lock().get::<CacheControl>()
+                if let Some(cache_control) = response
+                    .context
+                    .extensions()
+                    .lock()
+                    .get::<CacheControl>()
+                    .cloned()
                 {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
