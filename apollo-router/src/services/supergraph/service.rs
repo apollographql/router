@@ -629,7 +629,10 @@ async fn plan_query(
         if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
             let mut query_hashes = vec![];
             plan.root.query_hashes(&mut query_hashes);
-            batch_query.set_query_hashes(query_hashes).await;
+            batch_query
+                .set_query_hashes(query_hashes)
+                .await
+                .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
             tracing::debug!("batch registered: {}", batch_query);
         }
 

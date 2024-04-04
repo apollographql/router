@@ -199,16 +199,23 @@ impl From<QueryPlannerError> for FetchError {
 pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
+    /// batch processing failed: {0}
+    BatchingError(String),
 }
 
 impl IntoGraphQLErrors for CacheResolverError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
-        let CacheResolverError::RetrievalError(retrieval_error) = self;
-        retrieval_error
-            .deref()
-            .clone()
-            .into_graphql_errors()
-            .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error))
+        match self {
+            CacheResolverError::RetrievalError(retrieval_error) => retrieval_error
+                .deref()
+                .clone()
+                .into_graphql_errors()
+                .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error)),
+            CacheResolverError::BatchingError(msg) => Ok(vec![Error::builder()
+                .message(msg)
+                .extension_code("BATCH_PROCESSING_FAILED")
+                .build()]),
+        }
     }
 }
 
@@ -624,6 +631,19 @@ impl std::fmt::Display for ValidationErrors {
         }
         Ok(())
     }
+}
+
+/// Error during subgraph batch processing
+#[derive(Debug, Error, Display)]
+pub(crate) enum SubgraphBatchingError {
+    /// Sender unavailable
+    SenderUnavailable,
+    /// Request does not have a subgraph name
+    MissingSubgraphName,
+    /// Requests is empty
+    RequestsIsEmpty,
+    /// Batch processing failed: {0}
+    ProcessingFailed(String),
 }
 
 #[cfg(test)]

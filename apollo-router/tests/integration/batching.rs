@@ -9,6 +9,10 @@ use crate::integration::common::ValueExt as _;
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
 const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
 
+fn test_is_enabled() -> bool {
+    std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 5;
@@ -30,8 +34,9 @@ async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
     )
     .await?;
 
-    // Make sure that we got back what we wanted
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        // Make sure that we got back what we wanted
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -49,6 +54,7 @@ async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
         entryA:
           index: 4
     "###);
+    }
 
     Ok(())
 }
@@ -82,8 +88,9 @@ async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
     )
     .await?;
 
-    // Make sure that we got back what we wanted
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        // Make sure that we got back what we wanted
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -104,6 +111,7 @@ async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
         entryB:
           index: 2
     "###);
+    }
 
     Ok(())
 }
@@ -129,8 +137,9 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
     )
     .await?;
 
-    // Make sure that we got back what we wanted
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        // Make sure that we got back what we wanted
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -144,6 +153,7 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
         entryA:
           index: 3
     "###);
+    }
 
     Ok(())
 }
@@ -177,7 +187,8 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
     )
     .await?;
 
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -196,6 +207,7 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
         entryB:
           index: 2
     "###);
+    }
 
     Ok(())
 }
@@ -230,7 +242,8 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
     )
     .await?;
 
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -253,6 +266,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
             service: b
             reason: request timed out
     "###);
+    }
 
     Ok(())
 }
@@ -301,7 +315,8 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
 
     // verify the output
     let responses = [results_a, results_b].concat();
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -334,6 +349,7 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
             service: b
             reason: request timed out
     "###);
+    }
 
     Ok(())
 }
@@ -369,7 +385,8 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     )
     .await?;
 
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -382,6 +399,7 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     - errors:
         - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
     "###);
+    }
 
     Ok(())
 }
@@ -455,7 +473,8 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
     )
     .await?;
 
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -469,6 +488,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
     - errors:
         - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
     "###);
+    }
 
     Ok(())
 }
@@ -547,8 +567,8 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
     )
     .await?;
 
-    // TODO: Fill this in once we know how this response should look
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - errors:
         - message: Subgraph A is not allowed
@@ -565,6 +585,7 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
         entryB:
           index: 1
     "###);
+    }
 
     Ok(())
 }
@@ -689,8 +710,8 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
     )
     .await?;
 
-    // TODO: Fill this in once we know how this response should look
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -718,6 +739,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
         entryB:
           index: 3
     "###);
+    }
 
     Ok(())
 }
@@ -782,8 +804,9 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
     )
     .await?;
 
-    // Make sure that we got back what we wanted
-    assert_yaml_snapshot!(responses, @r###"
+    if test_is_enabled() {
+        // Make sure that we got back what we wanted
+        assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
         entryA:
@@ -802,6 +825,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
         entryA:
           index: 4
     "###);
+    }
 
     Ok(())
 }
@@ -818,6 +842,7 @@ mod helper {
     use wiremock::Respond;
     use wiremock::ResponseTemplate;
 
+    use super::test_is_enabled;
     use crate::integration::common::IntegrationTest;
 
     /// Helper type for specifying a valid handler
@@ -854,9 +879,7 @@ mod helper {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !test_is_enabled() {
             return Ok(Vec::new());
         };
 

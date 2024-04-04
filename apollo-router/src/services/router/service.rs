@@ -434,7 +434,7 @@ impl RouterService {
         let futures = supergraph_requests
             .into_iter()
             .map(|supergraph_request| async {
-                // TODO: We clone the context here, because if the request results in an Err, the
+                // We clone the context here, because if the request results in an Err, the
                 // response context will no longer exist.
                 let context = supergraph_request.context.clone();
                 let result = self.process_supergraph_request(supergraph_request).await;
@@ -449,7 +449,7 @@ impl RouterService {
                         tracing::debug!("cancelling batch query in supergraph response");
                         batch_query
                             .signal_cancelled("request terminated by user".to_string())
-                            .await;
+                            .await?;
                     }
                 }
 
@@ -735,10 +735,10 @@ impl RouterService {
                 new_context_guard.insert(self.batching.clone());
                 // We are only going to insert a BatchQuery if Subgraph processing is enabled
                 if let Some(shared_batch_details) = &shared_batch_details {
-                    // We need to keep our shared details somewhere or they will drop, let's
-                    // insert them into our various contexts
-                    new_context_guard.insert(shared_batch_details.clone());
-                    new_context_guard.insert(shared_batch_details.query_for_index(index + 1));
+                    new_context_guard.insert(Batch::query_for_index(
+                        shared_batch_details.clone(),
+                        index + 1,
+                    ));
                 }
             }
             results.push(SupergraphRequest {
@@ -757,7 +757,8 @@ impl RouterService {
             context
                 .extensions()
                 .lock()
-                .insert(shared_batch_details.query_for_index(0));
+                // .insert(shared_batch_details.query_for_index(0));
+                .insert(Batch::query_for_index(shared_batch_details, 0));
         }
 
         results.insert(

@@ -23,6 +23,7 @@ use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::error::FetchError;
+use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
@@ -46,6 +47,9 @@ pub(crate) struct BatchQuery {
 
     /// How many more progress updates are we expecting to send?
     remaining: usize,
+
+    /// Batch to which this BatchQuery belongs
+    batch: Arc<Batch>,
 }
 
 impl fmt::Display for BatchQuery {
@@ -53,29 +57,33 @@ impl fmt::Display for BatchQuery {
         write!(f, "index: {}, ", self.index)?;
         write!(f, "remaining: {}, ", self.remaining)?;
         write!(f, "sender: {:?}, ", self.sender)?;
+        write!(f, "batch: {:?}, ", self.batch)?;
         Ok(())
     }
 }
 
 impl BatchQuery {
+    /// Is this BatchQuery finished?
     pub(crate) fn finished(&self) -> bool {
         self.remaining == 0
     }
 
     /// Inform the batch of query hashes representing fetches needed by this element of the batch query
-    pub(crate) async fn set_query_hashes(&mut self, query_hashes: Vec<Arc<QueryHash>>) {
+    pub(crate) async fn set_query_hashes(
+        &mut self,
+        query_hashes: Vec<Arc<QueryHash>>,
+    ) -> Result<(), BoxError> {
         self.remaining = query_hashes.len();
 
-        // TODO: How should we handle the sender dying?
         self.sender
             .as_ref()
-            .expect("set query hashes has a sender")
+            .ok_or(SubgraphBatchingError::SenderUnavailable)?
             .send(BatchHandlerMessage::Begin {
                 index: self.index,
                 query_hashes,
             })
-            .await
-            .expect("set query hashes could send");
+            .await?;
+        Ok(())
     }
 
     /// Signal to the batch handler that this specific batch query has made some progress.
@@ -86,64 +94,53 @@ impl BatchQuery {
         client_factory: HttpClientServiceFactory,
         request: SubgraphRequest,
         gql_request: graphql::Request,
-    ) -> oneshot::Receiver<Result<SubgraphResponse, BoxError>> {
+    ) -> Result<oneshot::Receiver<Result<SubgraphResponse, BoxError>>, BoxError> {
         // Create a receiver for this query so that it can eventually get the request meant for it
         let (tx, rx) = oneshot::channel();
 
         tracing::debug!("index: {}, REMAINING: {}", self.index, self.remaining);
-        if self.sender.is_some() {
-            // TODO: How should we handle the sender dying?
-            self.sender
-                .as_ref()
-                .expect("signal progress has a sender")
-                .send(BatchHandlerMessage::Progress {
-                    index: self.index,
-                    client_factory,
-                    request,
-                    gql_request,
-                    response_sender: tx,
-                    span_context: Span::current().context(),
-                })
-                .await
-                .expect("signal progress could send");
+        self.sender
+            .as_ref()
+            .ok_or(SubgraphBatchingError::SenderUnavailable)?
+            .send(BatchHandlerMessage::Progress {
+                index: self.index,
+                client_factory,
+                request,
+                gql_request,
+                response_sender: tx,
+                span_context: Span::current().context(),
+            })
+            .await?;
 
-            self.remaining -= 1;
-            if self.remaining == 0 {
-                self.sender = None;
-            }
+        self.remaining -= 1;
+        if self.remaining == 0 {
+            self.sender = None;
         }
-        rx
+        Ok(rx)
     }
 
     /// Signal to the batch handler that this specific batch query is cancelled
-    ///
-    pub(crate) async fn signal_cancelled(&mut self, reason: String) {
-        // TODO: How should we handle the sender dying?
-        if self.sender.is_some() {
-            self.sender
-                .as_ref()
-                .expect("signal cancelled has a sender")
-                .send(BatchHandlerMessage::Cancel {
-                    index: self.index,
-                    reason,
-                })
-                .await
-                .expect("signal cancelled could send");
+    pub(crate) async fn signal_cancelled(&mut self, reason: String) -> Result<(), BoxError> {
+        self.sender
+            .as_ref()
+            .ok_or(SubgraphBatchingError::SenderUnavailable)?
+            .send(BatchHandlerMessage::Cancel {
+                index: self.index,
+                reason,
+            })
+            .await?;
 
-            self.remaining -= 1;
-            if self.remaining == 0 {
-                self.sender = None;
-            }
-        } else {
-            tracing::warn!("attempted to cancel completed batch query");
+        self.remaining -= 1;
+        if self.remaining == 0 {
+            self.sender = None;
         }
+        Ok(())
     }
 }
 
 // #[derive(Debug)]
 enum BatchHandlerMessage {
     /// Cancel one of the sub requests
-    // TODO: How do we know which of the subfetches of the entire query to cancel? Is it all of them?
     Cancel { index: usize, reason: String },
 
     /// A query has reached the subgraph service and we should update its state
@@ -178,15 +175,21 @@ pub(crate) struct BatchQueryInfo {
     sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
 }
 
-// #[derive(Debug)]
+#[derive(Debug)]
 pub(crate) struct Batch {
     /// A sender channel to communicate with the batching handler
     senders: Mutex<Vec<Option<mpsc::Sender<BatchHandlerMessage>>>>,
 
     /// The spawned batching handler task handle
     ///
-    /// Note: This _must_ be aborted or else the spawned task may run forever.
-    spawn_handle: JoinHandle<()>,
+    /// Note: We keep this as a failsafe. If the task doesn't terminate _before_ the batch is
+    /// dropped, then we will abort() the task on drop.
+    // spawn_handle: JoinHandle<()>,
+    spawn_handle: JoinHandle<Result<(), BoxError>>,
+
+    /// What is the size (number of input operations) of the batch?
+    #[allow(dead_code)]
+    size: usize,
 }
 
 impl Batch {
@@ -237,12 +240,10 @@ impl Batch {
             // When recv() returns None, we want to stop processing message
             while let Some(msg) = rx.recv().await {
                 match msg {
-                    // Just clear out the fetch and error out the requests
                     BatchHandlerMessage::Cancel { index, reason } => {
                         // Log the reason for cancelling, update the state
                         tracing::debug!("Cancelling index: {index}, {reason}");
 
-                        // TODO: Handle missing index
                         if let Some(state) = batch_state.get_mut(&index) {
                             // Short-circuit any requests that are waiting for this cancelled request to complete.
                             let cancelled_requests = std::mem::take(&mut requests[index]);
@@ -250,14 +251,13 @@ impl Batch {
                                 request, sender, ..
                             } in cancelled_requests
                             {
-                                sender
-                                    .send(Err(Box::new(FetchError::SubrequestBatchingError {
-                                        service: request
-                                            .subgraph_name
-                                            .expect("request has a subgraph_name"),
+                                let subgraph_name = request.subgraph_name.ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                                if let Err(log_error) = sender.send(Err(Box::new(FetchError::SubrequestBatchingError {
+                                        service: subgraph_name.clone(),
                                         reason: format!("request cancelled: {reason}"),
-                                    })))
-                                    .expect("batcher could send request cancelled to waiter");
+                                    }))) {
+                                    tracing::error!(service=subgraph_name, error=?log_error, "failed to notify waiter that request is cancelled");
+                                }
                             }
 
                             // Clear out everything that has committed, now that they are cancelled, and
@@ -267,7 +267,6 @@ impl Batch {
                         }
                     }
 
-                    // TODO: Do we want to handle if a query is outside of the range of the batch size?
                     BatchHandlerMessage::Begin {
                         index,
                         query_hashes,
@@ -284,7 +283,6 @@ impl Batch {
                         );
                     }
 
-                    // TODO: Do we want to handle if a query is outside of the range of the batch size?
                     BatchHandlerMessage::Progress {
                         index,
                         client_factory,
@@ -317,7 +315,8 @@ impl Batch {
             // Make sure that we are actually ready and haven't forgotten to update something somewhere
             if batch_state.values().any(|f| !f.is_ready()) {
                 tracing::error!("All senders for the batch have dropped before reaching the ready state: {batch_state:#?}");
-                panic!("all senders for the batch have dropped before reaching the ready state");
+                // There's not much else we can do, so perform an early return
+                return Err(SubgraphBatchingError::ProcessingFailed("batch senders not ready when required".to_string()).into());
             }
 
             // TODO: Do we want to generate a UUID for a batch for observability reasons?
@@ -325,10 +324,8 @@ impl Batch {
 
             // We now have a bunch of requests which are organised by index and we would like to
             // convert them into a bunch of requests organised by service...
-            // tracing::debug!("requests: {requests:?}");
 
             let all_in_one: Vec<_> = requests.into_iter().flatten().collect();
-            // tracing::debug!("all_in_one: {all_in_one:?}");
 
             // Now build up a Service oriented view to use in constructing our batches
             let mut svc_map: HashMap<String, Vec<BatchQueryInfo>> = HashMap::new();
@@ -338,12 +335,10 @@ impl Batch {
                 sender: tx,
             } in all_in_one
             {
+                let subgraph_name = sg_request.subgraph_name.clone().ok_or(SubgraphBatchingError::MissingSubgraphName)?;
                 let value = svc_map
                     .entry(
-                        sg_request
-                            .subgraph_name
-                            .clone()
-                            .expect("request has a subgraph_name"),
+                        subgraph_name,
                     )
                     .or_default();
                 value.push(BatchQueryInfo {
@@ -353,51 +348,57 @@ impl Batch {
                 });
             }
 
-            // tracing::debug!("svc_map: {svc_map:?}");
             // If we don't have a master_client_factory, we can't do anything.
             if let Some(client_factory) = master_client_factory {
-                process_batches(client_factory, svc_map)
-                    .await
-                    .expect("XXX NEEDS TO WORK FOR NOW");
+                if let Err(err) = process_batches(client_factory, svc_map)
+                    .await {
+                        tracing::error!(err, "process batches failed")
+                }
             }
+            Ok(())
         }.instrument(tracing::info_span!("batch_request", size)));
 
         Self {
             senders: Mutex::new(senders),
             spawn_handle,
+            size,
         }
     }
 
     /// Create a batch query for a specific index in this batch
     // TODO: Do we want to panic / error if the index is out of range?
-    pub(crate) fn query_for_index(&self, index: usize) -> BatchQuery {
-        let mut guard = self.senders.lock();
+    pub(crate) fn query_for_index(batch: Arc<Batch>, index: usize) -> BatchQuery {
+        let mut guard = batch.senders.lock();
         let opt_sender = std::mem::take(&mut guard[index]);
+        drop(guard);
         BatchQuery {
             index,
             sender: opt_sender,
             remaining: 0,
+            batch,
         }
     }
 }
 
 impl Drop for Batch {
     fn drop(&mut self) {
-        // Make sure that we kill the background task if the batch itself is dropped
+        // Failsafe: nake sure that we kill the background task if the batch itself is dropped
         self.spawn_handle.abort();
     }
 }
 
 // Assemble a single batch request to a subgraph
 pub(crate) async fn assemble_batch(
-    // context: Context,
     requests: Vec<BatchQueryInfo>,
-) -> (
-    String,
-    Context,
-    http::Request<Body>,
-    Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
-) {
+) -> Result<
+    (
+        String,
+        Context,
+        http::Request<Body>,
+        Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
+    ),
+    BoxError,
+> {
     // Extract the collection of parts from the requests
     let (txs, request_pairs): (Vec<_>, Vec<_>) = requests
         .into_iter()
@@ -406,22 +407,18 @@ pub(crate) async fn assemble_batch(
     let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
 
     // Construct the actual byte body of the batched request
-    let bytes = hyper::body::to_bytes(
-        serde_json::to_string(&gql_requests).expect("JSON serialization should not fail"),
-    )
-    .await
-    .expect("byte serialization should not fail");
+    let bytes = hyper::body::to_bytes(serde_json::to_string(&gql_requests)?).await?;
 
     // Grab the common info from the first request
     let context = requests
         .first()
-        .expect("batch to assemble had no requests")
+        .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
         .context
         .clone();
     let first_request = requests
         .into_iter()
         .next()
-        .expect("batch to assemble had no requests")
+        .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
         .subgraph_request;
     let operation_name = first_request
         .body()
@@ -431,9 +428,8 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    // TODO: The previous implementation reversed the txs here. Is that necessary?
     let request = http::Request::from_parts(parts, Body::from(bytes));
-    (operation_name, context, request, txs)
+    Ok((operation_name, context, request, txs))
 }
 
 #[cfg(test)]
@@ -478,7 +474,9 @@ mod tests {
             .unzip();
 
         // Assemble them
-        let (op_name, _context, request, txs) = assemble_batch(requests).await;
+        let (op_name, _context, request, txs) = assemble_batch(requests)
+            .await
+            .expect("it can assemble a batch");
 
         // Make sure that the name of the entire batch is that of the first
         assert_eq!(op_name, "batch_test_0");
