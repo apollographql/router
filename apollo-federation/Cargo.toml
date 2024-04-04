@@ -14,6 +14,7 @@ autotests = false                                               # Integration te
 
 [dependencies]
 apollo-compiler = "=1.0.0-beta.14"
+time = { version = "0.3.34", default-features = false, features = ["local-offset"] }
 derive_more = "0.99.17"
 indexmap = "2.1.0"
 lazy_static = "1.4.0"
