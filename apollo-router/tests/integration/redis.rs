@@ -9,6 +9,8 @@ mod test {
     use fred::cmd;
     use fred::prelude::*;
     use futures::StreamExt;
+    use http::header::CACHE_CONTROL;
+    use http::HeaderValue;
     use http::Method;
     use serde::Deserialize;
     use serde::Serialize;
@@ -285,6 +287,7 @@ mod test {
                             }]
                     }}},
                 )
+                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
         subgraphs.insert("reviews", MockSubgraph::builder().with_json(
@@ -316,7 +319,7 @@ mod test {
                     ]
                 }
             }},
-        ).build());
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build());
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -392,6 +395,7 @@ mod test {
                             }]
                     }}},
                 )
+                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
 
@@ -417,7 +421,7 @@ mod test {
                     ]
                 }
             }},
-        ).build());
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build());
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -508,14 +512,14 @@ mod test {
                     }
                 }},
             ).with_json(
-                    serde_json::json! {{"query":"{me{id}}"}},
-                    serde_json::json! {{"data": {
-                        "me": {
-                            "id": "1"
-                        }
-                    }}},
-                )
-                .build(),
+                serde_json::json! {{"query":"{me{id}}"}},
+                serde_json::json! {{"data": {
+                    "me": {
+                        "id": "1"
+                    }
+                }}},
+            ).with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
+            .build(),
         );
         subgraphs.insert(
             "products",
@@ -535,6 +539,7 @@ mod test {
                             }]
                     }}},
                 )
+                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
         subgraphs.insert(
@@ -609,7 +614,7 @@ mod test {
                             ]
                         }
                     }},
-                )
+                ).with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
 

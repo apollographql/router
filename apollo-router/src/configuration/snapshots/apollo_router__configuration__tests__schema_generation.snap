@@ -2275,7 +2275,7 @@ expression: "&schema"
                 "nullable": true
               },
               "ttl": {
-                "description": "expiration for all keys",
+                "description": "expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses",
                 "type": "string",
                 "nullable": true
               }
