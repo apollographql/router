@@ -165,7 +165,7 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
         if self.sender.is_full() {
-            std::task::Poll::Pending
+            std::task::Poll::Ready(QueryPlannerError::PoolError("query plan queue is full"))
         } else {
             std::task::Poll::Ready(Ok(()))
         }
