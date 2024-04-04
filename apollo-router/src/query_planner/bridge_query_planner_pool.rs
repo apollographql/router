@@ -70,9 +70,8 @@ impl BridgeQueryPlannerPool {
         let mut planners = Vec::new();
 
         while let Some(task_result) = join_set.join_next().await {
-            let planner = task_result.map_err(|e| {
-                ServiceBuildError::ServiceError(Box::new(e))
-            })??;
+            let planner =
+                task_result.map_err(|e| ServiceBuildError::ServiceError(Box::new(e)))??;
 
             let receiver = receiver.clone();
             let inner = planner.clone();
