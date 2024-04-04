@@ -16,7 +16,7 @@ pub(crate) struct SchemaAwareResponse<'a> {
 }
 
 impl<'a> SchemaAwareResponse<'a> {
-    pub(crate) fn zip(
+    pub(crate) fn new(
         request: &'a ExecutableDocument,
         response: &'a Response,
     ) -> Result<Self, DemandControlError> {
@@ -148,7 +148,7 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
-        let zipped = SchemaAwareResponse::zip(&request, &response);
+        let zipped = SchemaAwareResponse::new(&request, &response);
 
         assert!(zipped.is_ok())
     }
@@ -162,7 +162,7 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
-        let zipped = SchemaAwareResponse::zip(&request, &response);
+        let zipped = SchemaAwareResponse::new(&request, &response);
 
         assert!(zipped.is_ok())
     }
@@ -176,7 +176,7 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
-        let zipped = SchemaAwareResponse::zip(&request, &response);
+        let zipped = SchemaAwareResponse::new(&request, &response);
 
         assert!(zipped.is_ok())
     }
@@ -190,7 +190,7 @@ mod tests {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
-        let zipped = SchemaAwareResponse::zip(&request, &response);
+        let zipped = SchemaAwareResponse::new(&request, &response);
 
         assert!(zipped.is_ok())
     }

@@ -308,7 +308,7 @@ impl CostCalculator for BasicCostCalculator {
         request: &ExecutableDocument,
         response: &Response,
     ) -> Result<f64, DemandControlError> {
-        let schema_aware_response = SchemaAwareResponse::zip(request, response)?;
+        let schema_aware_response = SchemaAwareResponse::new(request, response)?;
         Self::score_json(&schema_aware_response.value)
     }
 }
