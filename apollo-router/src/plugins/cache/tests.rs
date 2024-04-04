@@ -86,12 +86,12 @@ impl Mocks for Mock1 {
         match &*command.cmd {
             "GET" => {
                 if let Some(RedisValue::Bytes(b)) = command.args.first() {
-                    if b == &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..]{
+                    if b == &b"subgraph:user:Query:3c13e047244d0fc7283c4f09328c841ebd5aeeae17625ddf4b6173b1d94a8ff6:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..]{
                         let set = self.set.lock();
                         if *set {
                             return Ok(RedisValue::Bytes(Bytes::from(USER_RESPONSE)));
                         }
-                    } else if b == &b"subgraph:orga:Organization:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:655f22a6af21d7ffe671d3ce4b33464a76ddfea0bf179740b15e804b11983c04:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..] {
+                    } else if b == &b"subgraph:orga:Organization:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:14f7294f5ca99ecfc3a4c6d9acc249aa33bd03446be80e60eb3fdc42d5293c47:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..] {
                         return Ok(RedisValue::Bytes(Bytes::from(ORGA_RESPONSE)));
                     }
                 }
@@ -99,7 +99,7 @@ impl Mocks for Mock1 {
             "SET" => {
                 if let Some(RedisValue::Bytes(b)) = command.args.first() {
                     if b ==
-                        &b"subgraph:user:Query:146a735f805c55554b5233253c17756deaa6ffd06696fafa4d6e3186e6efe592:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..] {
+                        &b"subgraph:user:Query:3c13e047244d0fc7283c4f09328c841ebd5aeeae17625ddf4b6173b1d94a8ff6:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"[..] {
                             let mut set = self.set.lock();
                             *set = true;
 

@@ -976,6 +976,10 @@ pub(crate) struct QueryPlanning {
     ///
     /// The default value is None, which specifies no limit.
     pub(crate) experimental_paths_limit: Option<u32>,
+
+    /// If cache warm up is configured, this will allow the router to keep a query plan created with
+    /// the old schema, if it determines that the schema update does not affect the corresponding query
+    pub(crate) experimental_reuse_query_plans: bool,
 }
 
 /// Cache configuration

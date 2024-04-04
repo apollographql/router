@@ -1,5 +1,5 @@
 ---
-source: apollo-router/tests/redis_test.rs
+source: apollo-router/tests/integration/redis.rs
 expression: query_plan
 ---
 {
@@ -12,7 +12,7 @@ expression: query_plan
   "id": null,
   "inputRewrites": null,
   "outputRewrites": null,
-  "schemaAwareHash": "7026c8330d32f98093b2f24fe09aeff9526e19780a595d09c6c440aaf0cbd6c1",
+  "schemaAwareHash": "af1ee357bc75cfbbcc6adda41089a56e7d1d52f6d44c049739dde2c259314f58",
   "authorization": {
     "is_authenticated": false,
     "scopes": [],

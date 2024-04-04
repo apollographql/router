@@ -27,6 +27,7 @@ use tracing_futures::Instrument;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
@@ -42,8 +43,8 @@ use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlanResult;
-use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;
@@ -606,7 +607,13 @@ async fn plan_query(
         let lock = context.extensions().lock();
         lock.contains_key::<ParsedDocument>()
     } {
-        let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
+        let doc = Query::parse_document(
+            &query_str,
+            operation_name.as_deref(),
+            &schema,
+            &Configuration::default(),
+        )
+        .map_err(QueryPlannerError::SpecError)?;
         Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
         Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
         context.extensions().lock().insert::<ParsedDocument>(doc);
@@ -839,8 +846,8 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
-        self.query_planner_service.cache_keys(count).await
+    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+        self.query_planner_service.previous_cache()
     }
 
     pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
@@ -851,10 +858,18 @@ impl SupergraphCreator {
         &mut self,
         query_parser: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        cache_keys: Vec<WarmUpCachingQueryKey>,
+        previous_cache: InMemoryCachePlanner,
+        count: Option<usize>,
+        experimental_reuse_query_plans: bool,
     ) {
         self.query_planner_service
-            .warm_up(query_parser, persisted_query_layer, cache_keys)
+            .warm_up(
+                query_parser,
+                persisted_query_layer,
+                previous_cache,
+                count,
+                experimental_reuse_query_plans,
+            )
             .await
     }
 }
