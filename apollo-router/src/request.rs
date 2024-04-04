@@ -535,6 +535,8 @@ mod tests {
     }
 
     fn check_deserialization(request: serde_json::Value) -> Request {
+        // check that deserialize_from_bytes agrees with Deserialize impl
+
         let string = serde_json::to_string(&request).expect("could not serialize request");
         let string_deserialized =
             serde_json::from_str(&string).expect("could not deserialize string");
