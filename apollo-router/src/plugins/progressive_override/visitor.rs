@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::executable;
 use apollo_compiler::schema;
 use tower::BoxError;
 
@@ -33,11 +34,7 @@ impl<'a> traverse::Visitor for OverrideLabelVisitor<'a> {
         self.schema
     }
 
-    fn operation(
-        &mut self,
-        root_type: &str,
-        node: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+    fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         traverse::operation(self, root_type, node)
     }
 
@@ -45,7 +42,7 @@ impl<'a> traverse::Visitor for OverrideLabelVisitor<'a> {
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
-        node: &ast::Field,
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
         let new_override_labels = field_def
             .directives
@@ -80,7 +77,8 @@ pub(crate) struct OverrideLabelVisitor<'a> {
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::ast::Document;
+    use apollo_compiler::validation::Valid;
+    use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
 
     use crate::plugins::progressive_override::visitor::OverrideLabelVisitor;
@@ -151,12 +149,16 @@ mod tests {
     fn collects() {
         let schema = Schema::parse(SCHEMA, "supergraph.graphql").expect("parse schema");
         let operation_string = "{ t { k a b } }";
-        let operation =
-            Document::parse(operation_string, "query.graphql").expect("parse operation");
+        let operation = ExecutableDocument::parse(
+            Valid::assume_valid_ref(&schema),
+            operation_string,
+            "query.graphql",
+        )
+        .expect("parse operation");
 
         let mut visitor = OverrideLabelVisitor::new(&schema).expect("create visitor");
 
-        traverse::document(&mut visitor, &operation).unwrap();
+        traverse::document(&mut visitor, &operation, None).unwrap();
 
         assert_eq!(
             visitor.override_labels,
@@ -168,12 +170,16 @@ mod tests {
     fn collects2() {
         let schema = Schema::parse(SCHEMA, "supergraph.graphql").expect("parse schema");
         let operation_string = "{ t { k a b } t2 }";
-        let operation =
-            Document::parse(operation_string, "query.graphql").expect("parse operation");
+        let operation = ExecutableDocument::parse(
+            Valid::assume_valid_ref(&schema),
+            operation_string,
+            "query.graphql",
+        )
+        .expect("parse operation");
 
         let mut visitor = OverrideLabelVisitor::new(&schema).expect("create visitor");
 
-        traverse::document(&mut visitor, &operation).unwrap();
+        traverse::document(&mut visitor, &operation, None).unwrap();
 
         assert_eq!(
             visitor.override_labels,

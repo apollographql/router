@@ -9,6 +9,8 @@ mod test {
     use fred::cmd;
     use fred::prelude::*;
     use futures::StreamExt;
+    use http::header::CACHE_CONTROL;
+    use http::HeaderValue;
     use http::Method;
     use serde::Deserialize;
     use serde::Serialize;
@@ -24,7 +26,7 @@ mod test {
         // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
         // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
         // 4. Run this test and yank the updated cache key from the redis logs.
-        let known_cache_key = "plan:v2.7.1:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
+        let known_cache_key = "plan:v2.7.1:af1ee357bc75cfbbcc6adda41089a56e7d1d52f6d44c049739dde2c259314f58:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
 
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
         let client = RedisClient::new(config, None, None, None);
@@ -165,7 +167,7 @@ mod test {
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
         client
-            .del::<String, _>(&format!("apq\x00{query_hash}"))
+            .del::<String, _>(&format!("apq:{query_hash}"))
             .await
             .unwrap();
 
@@ -196,8 +198,7 @@ mod test {
             res.errors.first().unwrap().message,
             "PersistedQueryNotFound"
         );
-
-        let r: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
+        let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
         assert!(r.is_none());
 
         // Now we register the query
@@ -222,7 +223,7 @@ mod test {
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
 
-        let s: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
+        let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
         insta::assert_display_snapshot!(s.unwrap());
 
         // we start a new router with the same config
@@ -286,6 +287,7 @@ mod test {
                             }]
                     }}},
                 )
+                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
         subgraphs.insert("reviews", MockSubgraph::builder().with_json(
@@ -317,7 +319,7 @@ mod test {
                     ]
                 }
             }},
-        ).build());
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build());
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -363,16 +365,13 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:products:Query:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:Query:07bd08ba4eb8b85451edd3b3aae3c3ad3dc0892d86deedde6e6d53f6415f807f:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-        let s:String = client
-        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
-        .await
-        .unwrap();
+        let s: String = client.get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -396,6 +395,7 @@ mod test {
                             }]
                     }}},
                 )
+                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
 
@@ -421,7 +421,7 @@ mod test {
                     ]
                 }
             }},
-        ).build());
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build());
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -467,7 +467,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -512,14 +512,14 @@ mod test {
                     }
                 }},
             ).with_json(
-                    serde_json::json! {{"query":"{me{id}}"}},
-                    serde_json::json! {{"data": {
-                        "me": {
-                            "id": "1"
-                        }
-                    }}},
-                )
-                .build(),
+                serde_json::json! {{"query":"{me{id}}"}},
+                serde_json::json! {{"data": {
+                    "me": {
+                        "id": "1"
+                    }
+                }}},
+            ).with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
+            .build(),
         );
         subgraphs.insert(
             "products",
@@ -539,6 +539,7 @@ mod test {
                             }]
                     }}},
                 )
+                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
         subgraphs.insert(
@@ -613,7 +614,7 @@ mod test {
                             ]
                         }
                     }},
-                )
+                ).with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
                 .build(),
         );
 
@@ -677,7 +678,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:products:Query:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:Query:07bd08ba4eb8b85451edd3b3aae3c3ad3dc0892d86deedde6e6d53f6415f807f:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -698,7 +699,7 @@ mod test {
         );
 
         let s: String = client
-        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -742,7 +743,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:dc8e1fb584d7ad114b3e836a5fe4f642732b82eb39bb8d6dff000d844d0e3baf:f1d914240cfd0c60d5388f3f2d2ae00b5f1e2400ef2c9320252439f354515ce9")
+          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:c75297b98da101021e30020db99a3a11c2f9ac2008de94ce410c47940162e304:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
