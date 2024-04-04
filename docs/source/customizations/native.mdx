@@ -291,9 +291,9 @@ Make sure to [enable OpenTelemtry tracing](../configuration/telemetry/exporters/
 To create custom spans and traces you can use the [tracing macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate a span.
 
 ```rust
-use tracing::{Level, span};
+use tracing::info_span;
 
-span!(target: "app_spans", Level::TRACE, "my span");
+info_span!("my_span");
 ```
 
 
