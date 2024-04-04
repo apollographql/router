@@ -205,7 +205,7 @@ impl Plugin for ProgressiveOverridePlugin {
                         .or_insert_with(|| {
                             OverrideLabelVisitor::new(&schema)
                                 .map(|mut visitor| {
-                                    let _ = traverse::document(&mut visitor, &parsed_doc.ast);
+                                    let _ = traverse::document(&mut visitor, &parsed_doc.executable, operation_name.as_deref());
                                     visitor.override_labels.into_iter().collect::<Vec<_>>()
                                 })
                                 .unwrap_or_default()

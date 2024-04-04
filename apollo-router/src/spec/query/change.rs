@@ -4,17 +4,28 @@ use std::hash::Hash;
 use std::hash::Hasher;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Selection;
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Name;
+use apollo_compiler::executable;
 use apollo_compiler::schema;
+use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use apollo_compiler::Parser;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
 
-use super::transform;
 use super::traverse;
-use crate::plugins::cache::entity::ENTITIES;
+use super::traverse::Visitor;
+use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
+use crate::plugins::progressive_override::JOIN_SPEC_BASE_URL;
+use crate::spec::Schema;
+
+pub(crate) const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
 
 /// Calculates a hash of the query and the schema, but only looking at the parts of the
 /// schema which affect the query.
@@ -23,23 +34,49 @@ use crate::plugins::cache::entity::ENTITIES;
 pub(crate) struct QueryHashVisitor<'a> {
     schema: &'a schema::Schema,
     hasher: Sha256,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
-    pub(crate) subgraph_query: bool,
+    join_field_directive_name: Option<String>,
+    join_type_directive_name: Option<String>,
 }
 
 impl<'a> QueryHashVisitor<'a> {
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Self {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a executable::ExecutableDocument,
+    ) -> Self {
         Self {
             schema,
             hasher: Sha256::new(),
-            fragments: transform::collect_fragments(executable),
+            fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
-            subgraph_query: false,
+            // should we just return an error if we do not find those directives?
+            join_field_directive_name: Schema::directive_name(
+                schema,
+                JOIN_SPEC_BASE_URL,
+                ">=0.1.0",
+                JOIN_FIELD_DIRECTIVE_NAME,
+            ),
+            join_type_directive_name: Schema::directive_name(
+                schema,
+                JOIN_SPEC_BASE_URL,
+                ">=0.1.0",
+                JOIN_TYPE_DIRECTIVE_NAME,
+            ),
         }
+    }
+
+    pub(crate) fn hash_query(
+        schema: &'a schema::Schema,
+        executable: &'a executable::ExecutableDocument,
+        operation_name: Option<&str>,
+    ) -> Result<Vec<u8>, BoxError> {
+        let mut visitor = QueryHashVisitor::new(schema, executable);
+        traverse::document(&mut visitor, executable, operation_name)?;
+        Ok(visitor.finish())
     }
 
     pub(crate) fn finish(self) -> Vec<u8> {
@@ -104,19 +141,20 @@ impl<'a> QueryHashVisitor<'a> {
         }
     }
 
-    fn hash_type_by_name(&mut self, t: &str) {
+    fn hash_type_by_name(&mut self, t: &str) -> Result<(), BoxError> {
         if self.hashed_types.contains(t) {
-            return;
+            return Ok(());
         }
 
         self.hashed_types.insert(t.to_string());
 
         if let Some(ty) = self.schema.types.get(t) {
-            self.hash_extended_type(ty);
+            self.hash_extended_type(ty)?;
         }
+        Ok(())
     }
 
-    fn hash_extended_type(&mut self, t: &'a ExtendedType) {
+    fn hash_extended_type(&mut self, t: &'a ExtendedType) -> Result<(), BoxError> {
         match t {
             ExtendedType::Scalar(s) => {
                 for directive in &s.directives {
@@ -127,11 +165,14 @@ impl<'a> QueryHashVisitor<'a> {
                 for directive in &o.directives {
                     self.hash_directive(&directive.node);
                 }
+
+                self.hash_join_type(&o.name, &o.directives)?;
             }
             ExtendedType::Interface(i) => {
                 for directive in &i.directives {
                     self.hash_directive(&directive.node);
                 }
+                self.hash_join_type(&i.name, &i.directives)?;
             }
             ExtendedType::Union(u) => {
                 for directive in &u.directives {
@@ -139,7 +180,7 @@ impl<'a> QueryHashVisitor<'a> {
                 }
 
                 for member in &u.members {
-                    self.hash_type_by_name(member.as_str());
+                    self.hash_type_by_name(member.as_str())?;
                 }
             }
             ExtendedType::Enum(e) => {
@@ -162,14 +203,15 @@ impl<'a> QueryHashVisitor<'a> {
                 for (name, ty) in &o.fields {
                     if ty.default_value.is_some() {
                         name.hash(self);
-                        self.hash_input_value_definition(&ty.node);
+                        self.hash_input_value_definition(&ty.node)?;
                     }
                 }
             }
         }
+        Ok(())
     }
 
-    fn hash_type(&mut self, t: &ast::Type) {
+    fn hash_type(&mut self, t: &ast::Type) -> Result<(), BoxError> {
         match t {
             schema::Type::Named(name) => self.hash_type_by_name(name.as_str()),
             schema::Type::NonNullNamed(name) => {
@@ -178,58 +220,116 @@ impl<'a> QueryHashVisitor<'a> {
             }
             schema::Type::List(t) => {
                 "[]".hash(self);
-                self.hash_type(t);
+                self.hash_type(t)
             }
             schema::Type::NonNullList(t) => {
                 "[]!".hash(self);
-                self.hash_type(t);
+                self.hash_type(t)
             }
         }
     }
 
-    fn hash_input_value_definition(&mut self, t: &Node<ast::InputValueDefinition>) {
-        self.hash_type(&t.ty);
+    fn hash_field(
+        &mut self,
+        parent_type: String,
+        type_name: String,
+        field_def: &FieldDefinition,
+        arguments: &[Node<Argument>],
+    ) -> Result<(), BoxError> {
+        if self.hashed_fields.insert((parent_type.clone(), type_name)) {
+            self.hash_type_by_name(&parent_type)?;
+
+            field_def.name.hash(self);
+
+            for argument in &field_def.arguments {
+                self.hash_input_value_definition(argument)?;
+            }
+
+            for argument in arguments {
+                self.hash_argument(argument);
+            }
+
+            self.hash_type(&field_def.ty)?;
+
+            for directive in &field_def.directives {
+                self.hash_directive(directive);
+            }
+
+            self.hash_join_field(&parent_type, &field_def.directives)?;
+        }
+        Ok(())
+    }
+
+    fn hash_input_value_definition(
+        &mut self,
+        t: &Node<ast::InputValueDefinition>,
+    ) -> Result<(), BoxError> {
+        self.hash_type(&t.ty)?;
         for directive in &t.directives {
             self.hash_directive(directive);
         }
         if let Some(value) = t.default_value.as_ref() {
             self.hash_value(value);
         }
+        Ok(())
     }
 
-    fn hash_entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
-        use crate::spec::query::traverse::Visitor;
-
-        if node.selection_set.len() != 1 {
-            return Err("invalid number of selections for _entities query".into());
-        }
-
-        match node.selection_set.first() {
-            Some(Selection::Field(field)) => {
-                if field.name.as_str() != ENTITIES {
-                    return Err("expected _entities field".into());
-                }
-
-                "_entities".hash(self);
-
-                for selection in &field.selection_set {
-                    match selection {
-                        Selection::InlineFragment(f) => {
-                            match f.type_condition.as_ref() {
-                                None => {
-                                    return Err("expected type condition".into());
-                                }
-                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
-                            };
-                        }
-                        Selection::FragmentSpread(f) => self.fragment_spread(f)?,
-                        _ => return Err("expected inline fragment".into()),
+    fn hash_join_type(&mut self, name: &Name, directives: &DirectiveList) -> Result<(), BoxError> {
+        if let Some(dir_name) = self.join_type_directive_name.as_deref() {
+            if let Some(dir) = directives.get(dir_name) {
+                if let Some(key) = dir.argument_by_name("key").and_then(|arg| arg.as_str()) {
+                    let mut parser = Parser::new();
+                    if let Ok(field_set) = parser.parse_field_set(
+                        Valid::assume_valid_ref(self.schema),
+                        name.clone(),
+                        key,
+                        std::path::Path::new("schema.graphql"),
+                    ) {
+                        traverse::selection_set(
+                            self,
+                            name.as_str(),
+                            &field_set.selection_set.selections[..],
+                        )?;
                     }
                 }
-                Ok(())
             }
-            _ => Err("expected _entities field".into()),
         }
+
+        Ok(())
+    }
+
+    fn hash_join_field(
+        &mut self,
+        parent_type: &str,
+        directives: &ast::DirectiveList,
+    ) -> Result<(), BoxError> {
+        if let Some(dir_name) = self.join_field_directive_name.as_deref() {
+            if let Some(dir) = directives.get(dir_name) {
+                if let Some(requires) = dir
+                    .argument_by_name("requires")
+                    .and_then(|arg| arg.as_str())
+                {
+                    if let Ok(parent_type) = Name::new(NodeStr::new(parent_type)) {
+                        let mut parser = Parser::new();
+
+                        if let Ok(field_set) = parser.parse_field_set(
+                            Valid::assume_valid_ref(self.schema),
+                            parent_type.clone(),
+                            requires,
+                            std::path::Path::new("schema.graphql"),
+                        ) {
+                            traverse::selection_set(
+                                self,
+                                parent_type.as_str(),
+                                &field_set.selection_set.selections[..],
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -243,69 +343,45 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
-    fn operation(
-        &mut self,
-        root_type: &str,
-        node: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+impl<'a> Visitor for QueryHashVisitor<'a> {
+    fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         root_type.hash(self);
-        self.hash_type_by_name(root_type);
+        self.hash_type_by_name(root_type)?;
 
-        if !self.subgraph_query {
-            traverse::operation(self, root_type, node)
-        } else {
-            self.hash_entities_operation(node)
-        }
+        traverse::operation(self, root_type, node)
     }
 
     fn field(
         &mut self,
         parent_type: &str,
         field_def: &ast::FieldDefinition,
-        node: &ast::Field,
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
-        let parent = parent_type.to_string();
-        let name = field_def.name.as_str().to_string();
-
-        if self.hashed_fields.insert((parent, name)) {
-            self.hash_type_by_name(parent_type);
-
-            field_def.name.hash(self);
-
-            for argument in &field_def.arguments {
-                self.hash_input_value_definition(argument);
-            }
-
-            for argument in &node.arguments {
-                self.hash_argument(argument);
-            }
-
-            self.hash_type(&field_def.ty);
-
-            for directive in &field_def.directives {
-                self.hash_directive(directive);
-            }
-        }
+        self.hash_field(
+            parent_type.to_string(),
+            field_def.name.as_str().to_string(),
+            field_def,
+            &node.arguments,
+        )?;
 
         traverse::field(self, field_def, node)
     }
 
-    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
+    fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
         node.name.hash(self);
-        self.hash_type_by_name(&node.type_condition);
+        self.hash_type_by_name(node.type_condition())?;
 
-        traverse::fragment_definition(self, node)
+        traverse::fragment(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
+    fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
         node.fragment_name.hash(self);
         let type_condition = &self
             .fragments
             .get(&node.fragment_name)
             .ok_or("MissingFragment")?
-            .type_condition;
-        self.hash_type_by_name(type_condition);
+            .type_condition();
+        self.hash_type_by_name(type_condition)?;
 
         traverse::fragment_spread(self, node)
     }
@@ -313,10 +389,10 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        node: &ast::InlineFragment,
+        node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
         if let Some(type_condition) = &node.type_condition {
-            self.hash_type_by_name(type_condition);
+            self.hash_type_by_name(type_condition)?;
         }
         traverse::inline_fragment(self, parent_type, node)
     }
@@ -330,6 +406,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
 mod tests {
     use apollo_compiler::ast::Document;
     use apollo_compiler::schema::Schema;
+    use apollo_compiler::validation::Valid;
 
     use super::QueryHashVisitor;
     use crate::spec::query::traverse;
@@ -342,24 +419,28 @@ mod tests {
             .unwrap();
         let doc = Document::parse(query, "query.graphql").unwrap();
 
-        doc.to_executable(&schema)
+        let exec = doc
+            .to_executable(&schema)
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &doc);
-        traverse::document(&mut visitor, &doc).unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &exec);
+        traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
     }
 
     #[track_caller]
     fn hash_subgraph_query(schema: &str, query: &str) -> String {
-        let schema = Schema::parse(schema, "schema.graphql").unwrap();
+        let schema = Valid::assume_valid(Schema::parse(schema, "schema.graphql").unwrap());
         let doc = Document::parse(query, "query.graphql").unwrap();
-        //doc.to_executable(&schema);
-        let mut visitor = QueryHashVisitor::new(&schema, &doc);
-        visitor.subgraph_query = true;
-        traverse::document(&mut visitor, &doc).unwrap();
+        let exec = doc
+            .to_executable(&schema)
+            .unwrap()
+            .validate(&schema)
+            .unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &exec);
+        traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
     }
@@ -555,7 +636,12 @@ mod tests {
           query: Query
         }
     
+        scalar _Any
+
+        union _Entity = User
+
         type Query {
+        _entities(representations: [_Any!]!): [_Entity]!
           me: User
           customer: User
         }
@@ -571,7 +657,12 @@ mod tests {
             query: Query
         }
     
+        scalar _Any
+
+        union _Entity = User
+
         type Query {
+          _entities(representations: [_Any!]!): [_Entity]!
           me: User
         }
     
@@ -618,5 +709,245 @@ mod tests {
         println!("hash2: {hash2}");
 
         assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn join_type_key() {
+        let schema1: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+          query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User
+          itf: I
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID!
+          name: String
+        }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name :String
+        }
+
+        union U = User
+        "#;
+
+        let schema2: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+            query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User @test
+          itf: I
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID! @test
+          name: String
+        }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID! @test
+            name :String
+        }
+        "#;
+        let query = "query { me { name } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { itf { name } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+    }
+
+    #[test]
+    fn join_field_requires() {
+        let schema1: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+          query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User
+          itf: I
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID!
+          name: String
+          username: String @join__field(graph:ACCOUNTS, requires: "name")
+          a: String @join__field(graph:ACCOUNTS, requires: "itf { ... on A { name } }")
+          itf: I
+        }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name: String
+        }
+
+        type A implements I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+            query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        scalar join__FieldSet
+
+        scalar link__Import
+
+        enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+        }
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+            INVENTORY @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev")
+            PRODUCTS @join__graph(name: "products", url: "https://products.demo.starstuff.dev")
+            REVIEWS @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev")
+        }
+
+        type Query {
+          me: User
+          customer: User @test
+          itf: I
+        }
+
+        type User @join__type(graph: ACCOUNTS, key: "id") {
+          id: ID!
+          name: String @test
+          username: String @join__field(graph:ACCOUNTS, requires: "name")
+          a: String @join__field(graph:ACCOUNTS, requires: "itf { ... on A { name } }")
+          itf: I
+        }
+
+        interface I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name: String @test
+        }
+
+        type A implements I @join__type(graph: ACCOUNTS, key: "id") {
+            id: ID!
+            name: String @test
+        }
+        "#;
+        let query = "query { me { username } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { me { a } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
     }
 }
