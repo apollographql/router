@@ -33,7 +33,7 @@ pub(crate) struct BridgeQueryPlannerPool {
         oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
     )>,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
 }
 
 impl BridgeQueryPlannerPool {
@@ -134,7 +134,7 @@ impl BridgeQueryPlannerPool {
             planners,
             sender,
             schema,
-            subgraph_schemas
+            subgraph_schemas,
         })
     }
 
@@ -165,7 +165,9 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
         if self.sender.is_full() {
-            std::task::Poll::Ready(QueryPlannerError::PoolError("query plan queue is full"))
+            std::task::Poll::Ready(QueryPlannerError::PoolError(
+                "query plan queue is full".into(),
+            ))
         } else {
             std::task::Poll::Ready(Ok(()))
         }
