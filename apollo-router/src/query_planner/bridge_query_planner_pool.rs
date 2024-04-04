@@ -11,6 +11,7 @@ use opentelemetry::KeyValue;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
+use tower::Service;
 use tower::ServiceExt;
 
 use super::bridge_query_planner::BridgeQueryPlanner;
@@ -26,12 +27,13 @@ static CHANNEL_SIZE: usize = 10_000;
 
 #[derive(Clone)]
 pub(crate) struct BridgeQueryPlannerPool {
-    planners: Vec<BridgeQueryPlanner>,
+    planners: Vec<Arc<Planner<QueryPlanResult>>>,
     sender: Sender<(
         QueryPlannerRequest,
         oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
     )>,
     schema: Arc<Schema>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>
 }
 
 impl BridgeQueryPlannerPool {
@@ -71,21 +73,48 @@ impl BridgeQueryPlannerPool {
             }
         });
 
-        let mut planners = Vec::new();
+        let mut bridge_query_planners = Vec::new();
 
         while let Some(task_result) = join_set.join_next().await {
-            let planner =
+            let bridge_query_planner =
                 task_result.map_err(|e| ServiceBuildError::ServiceError(Box::new(e)))??;
+            bridge_query_planners.push(bridge_query_planner);
+        }
 
+        let schema = bridge_query_planners
+            .first()
+            .expect("There should be at least 1 service in pool")
+            .schema();
+
+        let subgraph_schemas = bridge_query_planners
+            .first()
+            .expect("There should be at least 1 service in pool")
+            .subgraph_schemas();
+
+        let planners = bridge_query_planners
+            .iter()
+            .map(|p| p.planner().clone())
+            .collect();
+
+        for (worker_id, mut planner) in bridge_query_planners.into_iter().enumerate() {
             let receiver = receiver.clone();
-            let inner = planner.clone();
-            let worker_id = planners.len();
 
             tokio::spawn(async move {
                 while let Ok((request, res_sender)) = receiver.recv().await {
                     let start = Instant::now();
 
-                    let res = inner.clone().oneshot(request).await;
+                    let svc = match planner.ready().await {
+                        Ok(svc) => svc,
+                        Err(e) => {
+                            if res_sender.send(Err(e)).is_err() {
+                                failfast_error!("receiver channel for query plan response was closed, this should never happen");
+                            }
+
+                            continue;
+                        }
+                    };
+
+                    let res = svc.call(request).await;
 
                     f64_histogram!(
                         "apollo.router.query_planner.duration",
@@ -99,24 +128,18 @@ impl BridgeQueryPlannerPool {
                     }
                 }
             });
-
-            planners.push(planner);
         }
-
-        let schema = planners
-            .first()
-            .expect("There should be at least 1 service in pool")
-            .schema();
 
         Ok(Self {
             planners,
             sender,
             schema,
+            subgraph_schemas
         })
     }
 
     pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.planners.iter().map(|b| b.planner().clone()).collect()
+        self.planners.clone()
     }
 
     pub(crate) fn schema(&self) -> Arc<Schema> {
@@ -126,10 +149,7 @@ impl BridgeQueryPlannerPool {
     pub(crate) fn subgraph_schemas(
         &self,
     ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
-        self.planners
-            .first()
-            .expect("There should be at least 1 service in pool")
-            .subgraph_schemas()
+        self.subgraph_schemas.clone()
     }
 }
 
