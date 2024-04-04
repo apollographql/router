@@ -107,8 +107,7 @@ impl MockSubgraphBuilder {
         self
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+    pub fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
@@ -180,7 +179,6 @@ impl Service<SubgraphRequest> for MockSubgraph {
             if let Some(headers) = http_response_builder.headers_mut() {
                 headers.extend(self.headers.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
-
             let http_response = http_response_builder
                 .body(response.clone())
                 .expect("Response is serializable; qed");
