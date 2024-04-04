@@ -532,6 +532,7 @@ mod test {
         .await
         .unwrap();
         let schema = planner.schema();
+        let subgraph_schemas = planner.subgraph_schemas();
 
         let mut builder =
             PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
@@ -540,6 +541,7 @@ mod test {
             create_plugins(
                 &config,
                 &schema,
+                subgraph_schemas,
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
             )
