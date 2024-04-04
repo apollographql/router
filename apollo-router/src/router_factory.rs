@@ -286,6 +286,7 @@ impl YamlRouterFactory {
                         configuration.clone(),
                         configuration
                             .supergraph
+                            .query_planner
                             .experimental_query_planner_parallelism()?,
                     )
                     .instrument(query_planner_span)
@@ -298,6 +299,7 @@ impl YamlRouterFactory {
                         configuration.clone(),
                         configuration
                             .supergraph
+                            .query_planner
                             .experimental_query_planner_parallelism()?,
                     )
                     .instrument(query_planner_span)

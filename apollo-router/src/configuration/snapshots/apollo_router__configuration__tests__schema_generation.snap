@@ -2360,6 +2360,32 @@ expression: "&schema"
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
+    "query_planner": {
+      "description": "Configuration for the query planner",
+      "default": {
+        "experimental_available_parallelism": 1
+      },
+      "type": "object",
+      "required": [
+        "experimental_available_parallelism"
+      ],
+      "properties": {
+        "experimental_available_parallelism": {
+          "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 1.0
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
       "type": "object",
@@ -2634,7 +2660,9 @@ expression: "&schema"
         },
         "early_cancel": false,
         "experimental_log_on_broken_pipe": false,
-        "experimental_available_parallelism": 1
+        "query_planner": {
+          "experimental_available_parallelism": 1
+        }
       },
       "type": "object",
       "properties": {
@@ -2647,20 +2675,6 @@ expression: "&schema"
           "description": "abort request handling when the client drops the connection. Default: false. When set to true, some parts of the request pipeline like telemetry will not work properly, but request handling will stop immediately when the client connection is closed.",
           "default": false,
           "type": "boolean"
-        },
-        "experimental_available_parallelism": {
-          "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
-          "default": 1,
-          "anyOf": [
-            {
-              "type": "integer",
-              "format": "uint",
-              "minimum": 1.0
-            },
-            {
-              "type": "string"
-            }
-          ]
         },
         "experimental_log_on_broken_pipe": {
           "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
@@ -2696,6 +2710,32 @@ expression: "&schema"
           "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
           "default": "/",
           "type": "string"
+        },
+        "query_planner": {
+          "description": "Configuration options pertaining to the query planner component.",
+          "default": {
+            "experimental_available_parallelism": 1
+          },
+          "type": "object",
+          "required": [
+            "experimental_available_parallelism"
+          ],
+          "properties": {
+            "experimental_available_parallelism": {
+              "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 1.0
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
         },
         "query_planning": {
           "description": "Query planning options",

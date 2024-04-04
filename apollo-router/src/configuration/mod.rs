@@ -191,6 +191,10 @@ pub struct Configuration {
     /// Batching configuration.
     #[serde(default)]
     pub(crate) experimental_batching: Batching,
+
+    /// Configuration for the query planner
+    #[serde(default)]
+    pub(crate) query_planner: QueryPlanner,
 }
 
 impl PartialEq for Configuration {
@@ -256,6 +260,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_batching: Batching,
+            query_planner: QueryPlanner,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -274,6 +279,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
+            .query_planner(ad_hoc.query_planner)
             .experimental_batching(ad_hoc.experimental_batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -313,6 +319,7 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_batching: Option<Batching>,
+        query_planner: Option<QueryPlanner>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -349,6 +356,7 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             uplink,
             experimental_batching: experimental_batching.unwrap_or_default(),
+            query_planner: query_planner.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -389,6 +397,7 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        query_planner: Option<QueryPlanner>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -413,6 +422,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            query_planner: query_planner.unwrap_or_default(),
             experimental_batching: experimental_batching.unwrap_or_default(),
         };
 
@@ -626,6 +636,14 @@ pub(crate) struct Supergraph {
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
 
+    /// Configuration options pertaining to the query planner component.
+    pub(crate) query_planner: QueryPlanner,
+}
+
+/// Configuration options pertaining to the query planner component.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct QueryPlanner {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
     pub(crate) experimental_available_parallelism: AvailableParallelism,
@@ -692,7 +710,7 @@ impl Default for AvailableParallelism {
     }
 }
 
-impl Supergraph {
+impl QueryPlanner {
     pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
         match self.experimental_available_parallelism {
             AvailableParallelism::Automatic(_) => std::thread::available_parallelism(),
@@ -717,7 +735,7 @@ impl Supergraph {
         reuse_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        experimental_available_parallelism: Option<AvailableParallelism>,
+        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -728,8 +746,7 @@ impl Supergraph {
             reuse_query_fragments,
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            experimental_available_parallelism: experimental_available_parallelism
-                .unwrap_or_default(),
+            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -747,7 +764,7 @@ impl Supergraph {
         reuse_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        experimental_available_parallelism: Option<AvailableParallelism>,
+        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -758,8 +775,7 @@ impl Supergraph {
             reuse_query_fragments,
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            experimental_available_parallelism: experimental_available_parallelism
-                .unwrap_or_default(),
+            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
