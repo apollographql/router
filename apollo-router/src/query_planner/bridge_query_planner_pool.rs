@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use async_channel::bounded;
 use async_channel::Sender;
 use futures::future::BoxFuture;
@@ -106,6 +108,15 @@ impl BridgeQueryPlannerPool {
 
     pub(crate) fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
+    }
+
+    pub(crate) fn subgraph_schemas(
+        &self,
+    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+        self.planners
+            .first()
+            .expect("There should be at least 1 service in pool")
+            .subgraph_schemas()
     }
 }
 
