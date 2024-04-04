@@ -88,19 +88,14 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
-fn as_object<E: Error>(value: Value, null_is_default: bool) -> Result<Object, E> {
+fn as_optional_object<E: Error>(value: Value) -> Result<Object, E> {
     use serde::de::Unexpected;
 
-    let exp = if null_is_default {
-        "a map or null"
-    } else {
-        "a map"
-    };
+    let exp = "a map or null";
     match value {
         Value::Object(object) => Ok(object),
         // Similar to `deserialize_null_default`:
-        Value::Null if null_is_default => Ok(Object::default()),
-        Value::Null => Err(E::invalid_type(Unexpected::Unit, &exp)),
+        Value::Null => Ok(Object::default()),
         Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
         Value::Number(_) => Err(E::invalid_type(Unexpected::Other("a number"), &exp)),
         Value::String(value) => Err(E::invalid_type(Unexpected::Str(value.as_str()), &exp)),
@@ -365,8 +360,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
                             }
                             let seed = serde_json_bytes::value::BytesSeed::new(self.0);
                             let value = map.next_value_seed(seed)?;
-                            let null_is_default = true;
-                            variables = Some(as_object(value, null_is_default)?);
+                            variables = Some(as_optional_object(value)?);
                         }
                         Field::Extensions => {
                             if extensions.is_some() {
@@ -374,8 +368,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
                             }
                             let seed = serde_json_bytes::value::BytesSeed::new(self.0);
                             let value = map.next_value_seed(seed)?;
-                            let null_is_default = false;
-                            extensions = Some(as_object(value, null_is_default)?);
+                            extensions = Some(as_optional_object(value)?);
                         }
                         Field::Other => {
                             let _: serde::de::IgnoredAny = map.next_value()?;
