@@ -4,6 +4,23 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.43.2] - 2024-04-03
+
+## 🐛 Fixes
+
+### Security fix: update h2 dependency
+
+References:
+- https://rustsec.org/advisories/RUSTSEC-2024-0332
+- https://seanmonstar.com/blog/hyper-http2-continuation-flood/
+- https://www.kb.cert.org/vuls/id/421644
+
+The router's performance could be degraded when receiving a flood of HTTP/2 CONTINUATION frames, when the Router is set up to terminate TLS for client connections.
+
+By [@geal](https://github.com/geal)
+
+
+
 # [1.43.1] - 2024-03-29
 
 ## 🚀 Features
