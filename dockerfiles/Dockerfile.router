@@ -39,7 +39,8 @@ RUN \
 RUN \
   if [ "${DEBUG_IMAGE}" = "true" ]; then \
     apt-get install -y heaptrack && \
-    mkdir data; \
+    mkdir data && \
+    chown router data; \
   fi
 
 # Clean up apt lists

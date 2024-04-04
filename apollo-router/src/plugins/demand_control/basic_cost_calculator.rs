@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
@@ -14,8 +17,14 @@ use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::CostCalculator;
 use super::DemandControlError;
+use crate::query_planner::DeferredNode;
+use crate::query_planner::PlanNode;
+use crate::query_planner::Primary;
+use crate::query_planner::QueryPlan;
 
-pub(crate) struct BasicCostCalculator {}
+pub(crate) struct BasicCostCalculator {
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+}
 
 impl BasicCostCalculator {
     /// Scores a field within a GraphQL operation, handling some expected cases where
@@ -81,7 +90,17 @@ impl BasicCostCalculator {
             None => 0.0,
         };
 
-        Ok(instance_count * type_cost + requirements_cost)
+        let cost = instance_count * type_cost + requirements_cost;
+        tracing::debug!(
+            "Field {} cost breakdown: (count) {} * (type cost) {} + (requirements) {} = {}",
+            field.name,
+            instance_count,
+            type_cost,
+            requirements_cost,
+            cost
+        );
+
+        Ok(cost)
     }
 
     fn score_fragment_spread(_fragment_spread: &FragmentSpread) -> Result<f64, DemandControlError> {
@@ -153,6 +172,89 @@ impl BasicCostCalculator {
 
         false
     }
+
+    fn score_plan_node(&self, plan_node: &PlanNode) -> Result<f64, DemandControlError> {
+        match plan_node {
+            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes),
+            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes),
+            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node),
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => self.max_score_of_nodes(if_clause, else_clause),
+            PlanNode::Defer { primary, deferred } => {
+                self.summed_score_of_deferred_nodes(primary, deferred)
+            }
+            PlanNode::Fetch(fetch_node) => {
+                self.estimated_cost_of_operation(&fetch_node.service_name, &fetch_node.operation)
+            }
+            PlanNode::Subscription { primary, rest: _ } => {
+                self.estimated_cost_of_operation(&primary.service_name, &primary.operation)
+            }
+        }
+    }
+
+    fn estimated_cost_of_operation(
+        &self,
+        subgraph: &String,
+        operation: &String,
+    ) -> Result<f64, DemandControlError> {
+        tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
+
+        let schema =
+            self.subgraph_schemas
+                .get(subgraph)
+                .ok_or(DemandControlError::QueryParseFailure(format!(
+                    "Query planner did not provide a schema for service {}",
+                    subgraph
+                )))?;
+        let query = ExecutableDocument::parse(schema, operation, "")?;
+
+        Self::estimated(&query, schema)
+    }
+
+    fn max_score_of_nodes(
+        &self,
+        left: &Option<Box<PlanNode>>,
+        right: &Option<Box<PlanNode>>,
+    ) -> Result<f64, DemandControlError> {
+        match (left, right) {
+            (None, None) => Ok(0.0),
+            (None, Some(right)) => self.score_plan_node(right),
+            (Some(left), None) => self.score_plan_node(left),
+            (Some(left), Some(right)) => {
+                let left_score = self.score_plan_node(left)?;
+                let right_score = self.score_plan_node(right)?;
+                Ok(left_score.max(right_score))
+            }
+        }
+    }
+
+    fn summed_score_of_deferred_nodes(
+        &self,
+        primary: &Primary,
+        deferred: &Vec<DeferredNode>,
+    ) -> Result<f64, DemandControlError> {
+        let mut score = 0.0;
+        if let Some(node) = &primary.node {
+            score += self.score_plan_node(node)?;
+        }
+        for d in deferred {
+            if let Some(node) = &d.node {
+                score += self.score_plan_node(node)?;
+            }
+        }
+        Ok(score)
+    }
+
+    fn summed_score_of_nodes(&self, nodes: &Vec<PlanNode>) -> Result<f64, DemandControlError> {
+        let mut sum = 0.0;
+        for node in nodes {
+            sum += self.score_plan_node(node)?;
+        }
+        Ok(sum)
+    }
 }
 
 impl CostCalculator for BasicCostCalculator {
@@ -169,16 +271,61 @@ impl CostCalculator for BasicCostCalculator {
         }
         Ok(cost)
     }
+
+    fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
+        self.score_plan_node(&query_plan.root)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
 
-    fn cost(schema_str: &str, query_str: &str) -> f64 {
+    use test_log::test;
+    use tower::Service;
+
+    use super::*;
+    use crate::query_planner::BridgeQueryPlanner;
+    use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::QueryPlannerContent;
+    use crate::services::QueryPlannerRequest;
+    use crate::spec;
+    use crate::spec::Query;
+    use crate::Configuration;
+    use crate::Context;
+
+    fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         BasicCostCalculator::estimated(&query, &schema).unwrap()
+    }
+
+    async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
+        let config: Arc<Configuration> = Arc::new(Default::default());
+        let mut planner = BridgeQueryPlanner::new(schema_str.to_string(), config.clone())
+            .await
+            .unwrap();
+
+        let schema = spec::Schema::parse(schema_str, &config).unwrap();
+        let query = Query::parse_document(query_str, &schema, &config);
+
+        let ctx = Context::new();
+        ctx.extensions().lock().insert::<ParsedDocument>(query);
+
+        let planner_res = planner
+            .call(QueryPlannerRequest::new(query_str.to_string(), None, ctx))
+            .await
+            .unwrap();
+        let query_plan = match planner_res.content.unwrap() {
+            QueryPlannerContent::Plan { plan } => plan,
+            _ => panic!("Query planner returned unexpected non-plan content"),
+        };
+
+        let calculator = BasicCostCalculator {
+            subgraph_schemas: planner.subgraph_schemas(),
+        };
+
+        calculator.planned(&query_plan).unwrap()
     }
 
     #[test]
@@ -186,7 +333,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -194,7 +341,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_mutation.graphql");
 
-        assert_eq!(cost(schema, query), 10.0)
+        assert_eq!(estimated_cost(schema, query), 10.0)
     }
 
     #[test]
@@ -202,7 +349,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_query.graphql");
 
-        assert_eq!(cost(schema, query), 1.0)
+        assert_eq!(estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -210,7 +357,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_interface_query.graphql");
 
-        assert_eq!(cost(schema, query), 1.0)
+        assert_eq!(estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -218,7 +365,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_union_query.graphql");
 
-        assert_eq!(cost(schema, query), 1.0)
+        assert_eq!(estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -226,7 +373,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_list_query.graphql");
 
-        assert_eq!(cost(schema, query), 100.0)
+        assert_eq!(estimated_cost(schema, query), 100.0)
     }
 
     #[test]
@@ -234,7 +381,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_scalar_list_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -242,7 +389,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_nested_list_query.graphql");
 
-        assert_eq!(cost(schema, query), 10100.0)
+        assert_eq!(estimated_cost(schema, query), 10100.0)
     }
 
     #[test]
@@ -250,7 +397,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_skipped_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -258,14 +405,33 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_excluded_query.graphql");
 
-        assert_eq!(cost(schema, query), 0.0)
+        assert_eq!(estimated_cost(schema, query), 0.0)
     }
 
-    #[test]
-    fn requires_adds_required_field_cost() {
+    #[test(tokio::test)]
+    async fn federated_query_with_requires() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
 
-        assert_eq!(cost(schema, query), 10200.0);
+        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(planned_cost(schema, query).await, 10400.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_fragments() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
+
+        assert_eq!(estimated_cost(schema, query), 300.0);
+        assert_eq!(planned_cost(schema, query).await, 400.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_defer() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+
+        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(planned_cost(schema, query).await, 10400.0);
     }
 }

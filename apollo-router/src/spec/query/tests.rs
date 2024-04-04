@@ -127,7 +127,7 @@ impl FormatTest {
 
         let api_schema = schema.api_schema();
         let query =
-            Query::parse(query, &schema, &Default::default()).expect("could not parse query");
+            Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
         let mut response = Response::builder().data(response).build();
 
         query.format_response(
@@ -1405,6 +1405,7 @@ macro_rules! run_validation {
                 .query
                 .as_ref()
                 .expect("query has been added right above; qed"),
+            None,
             &schema,
             &Default::default(),
         )
@@ -3501,6 +3502,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3523,6 +3525,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3553,6 +3556,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3588,6 +3592,7 @@ fn it_statically_includes() {
                 ...ProductName @include(if: false)
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3646,6 +3651,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3668,6 +3674,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3698,6 +3705,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3733,6 +3741,7 @@ fn it_statically_skips() {
                 ...ProductName @skip(if: true)
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3778,6 +3787,7 @@ fn it_should_fail_with_empty_selection_set() {
             product {
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -5120,7 +5130,8 @@ fn fragment_on_interface_on_query() {
 
     let schema = Schema::parse_test(schema, &Default::default()).expect("could not parse schema");
     let api_schema = schema.api_schema();
-    let query = Query::parse(query, &schema, &Default::default()).expect("could not parse query");
+    let query =
+        Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
     let mut response = Response::builder()
         .data(json! {{
             "object": {
@@ -5324,7 +5335,7 @@ fn parse_introspection_query() {
           }
         }
       }";
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5339,7 +5350,7 @@ fn parse_introspection_query() {
         }
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5350,7 +5361,7 @@ fn parse_introspection_query() {
         __typename
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5723,6 +5734,7 @@ fn test_error_path_works_across_inline_fragments() {
                   }
                 }
               }"#,
+        Some("MyQueryThatContainsFragments"),
         &schema,
         &Default::default(),
     )
@@ -5760,7 +5772,7 @@ fn test_query_not_named_query() {
         &config,
     )
     .unwrap();
-    let query = Query::parse("{ example }", &schema, &config).unwrap();
+    let query = Query::parse("{ example }", None, &schema, &config).unwrap();
     let selection = &query.operations[0].selection_set[0];
     assert!(
         matches!(
@@ -5826,7 +5838,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(&schema.definitions).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, &ast).unwrap();
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5853,7 +5865,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(&schema.definitions).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, &ast).unwrap();
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
