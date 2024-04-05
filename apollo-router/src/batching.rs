@@ -184,7 +184,6 @@ pub(crate) struct Batch {
     ///
     /// Note: We keep this as a failsafe. If the task doesn't terminate _before_ the batch is
     /// dropped, then we will abort() the task on drop.
-    // spawn_handle: JoinHandle<()>,
     spawn_handle: JoinHandle<Result<(), BoxError>>,
 
     /// What is the size (number of input operations) of the batch?
@@ -379,7 +378,7 @@ impl Batch {
 
 impl Drop for Batch {
     fn drop(&mut self) {
-        // Failsafe: nake sure that we kill the background task if the batch itself is dropped
+        // Failsafe: make sure that we kill the background task if the batch itself is dropped
         self.spawn_handle.abort();
     }
 }

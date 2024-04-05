@@ -888,9 +888,7 @@ pub(crate) async fn notify_batch_query(
         // If we had an error processing the batch, then pipe that error to all of the listeners
         Err(e) => {
             for tx in senders {
-                // TODO: What should we do if a single send fails? If we error out then none of the other
-                // potentially valid senders will receive their results.
-                // Try to notify all waiters. If we can't notify a single sender, then log an error
+                // Try to notify all waiters. If we can't notify an individual sender, then log an error
                 if let Err(log_error) = tx.send(Err(Box::new(e.clone()))).map_err(|error| {
                     FetchError::SubrequestBatchingError {
                         service: service.clone(),
@@ -951,7 +949,6 @@ pub(crate) async fn process_batches(
     // We need to strip out the senders so that we can work with them separately.
     let mut errors = vec![];
     let (info, txs): (Vec<_>, Vec<_>) =
-    // let (info, txs) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
             let (_op_name, context, request, txs) = assemble_batch(requests).await?;
 
