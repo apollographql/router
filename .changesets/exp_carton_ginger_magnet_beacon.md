@@ -1,11 +1,8 @@
 ### Experimental: Introduce a pool of query planners ([PR #4897](https://github.com/apollographql/router/pull/4897))
 
-This changeset introduces an experimental pool of query planners to parallelize query planning.
+The router supports a new experimental feature: a pool of query planners to parallelize query planning.
 
-This feature is experimental, you can discuss it by following this link: https://github.com/apollographql/router/discussions/4917
-
-
-Configuration:
+You can configure query planner pools with the `supergraph.query_planner.experimental_available_parallelism` option:
 
 ```yaml
 supergraph:
@@ -13,7 +10,8 @@ supergraph:
     experimental_available_parallelism: auto # number of available cpus
 ```
 
-Note you can also set `experimental_available_parallelism` to a number representing how many planners you want to use in a pool.
-The default is `1`.
+Its value is the number of query planners that run in parallel, and its default value is `1`. You can set it to the special value `auto` to automatically set it equal to the number of available CPUs.
+
+You can discuss and comment about query planner pools in this [GitHub discussion](https://github.com/apollographql/router/discussions/4917).
 
 By [@xuorig](https://github.com/xuorig) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/4897
