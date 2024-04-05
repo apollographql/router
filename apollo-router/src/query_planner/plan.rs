@@ -197,7 +197,7 @@ impl PlanNode {
     ///
     /// Do not include any operations which contain "requires" elements.
     ///
-    /// TODO: Think about the impact of Defer/Subscription/Condition on this function. In
+    /// Think about the impact of Defer/Subscription/Condition on this function. In
     /// particular, Condition processing might be causing us to mis-report the number of fetches
     /// and that would be a big problem. Perhaps we should Abort Batches which contain
     /// Defer/Subscription/Condition....?
@@ -232,7 +232,10 @@ impl PlanNode {
                     n.query_hashes(query_hashes);
                 }
             }
-            // TODO: Think about impact of this processing
+            // In order to do anything meaningful, we would need the query, operation and
+            // variables. Right now, Condition is only used with @defer and thus not compatible
+            // with batching (which is where this function is used), so this "broken" code won't be
+            // exercised. In future, we'll need a better approach.
             PlanNode::Condition {
                 if_clause,
                 else_clause,

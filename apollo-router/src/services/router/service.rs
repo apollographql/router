@@ -709,10 +709,8 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of extensions and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        // Also: We rely on the fact that there aren't more elements in ok_results_it to avoid
-        // treating non-batch requests as batch requests. I think that is lazy, because really we
-        // should do this processing if shared_batch_details.is_some(). TODO: think about this some
-        // more before end of project.
+        // Note: We rely on the fact that if we enter this loop, then we must be processing a batch
+        // (i.e. number of results in ok_results > 1).
         for (index, graphql_request) in ok_results_it.enumerate() {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
@@ -735,10 +733,16 @@ impl RouterService {
                 new_context_guard.insert(self.batching.clone());
                 // We are only going to insert a BatchQuery if Subgraph processing is enabled
                 if let Some(shared_batch_details) = &shared_batch_details {
-                    new_context_guard.insert(Batch::query_for_index(
-                        shared_batch_details.clone(),
-                        index + 1,
-                    ));
+                    new_context_guard.insert(
+                        Batch::query_for_index(shared_batch_details.clone(), index + 1).map_err(
+                            |err| TranslateError {
+                                status: StatusCode::INTERNAL_SERVER_ERROR,
+                                error: "failed to create batch",
+                                extension_code: "BATCHING_ERROR",
+                                extension_details: format!("failed to create batch entry: {err}"),
+                            },
+                        )?,
+                    );
                 }
             }
             results.push(SupergraphRequest {
@@ -754,10 +758,14 @@ impl RouterService {
                 .extensions()
                 .lock()
                 .insert(shared_batch_details.clone());
-            context
-                .extensions()
-                .lock()
-                .insert(Batch::query_for_index(shared_batch_details, 0));
+            context.extensions().lock().insert(
+                Batch::query_for_index(shared_batch_details, 0).map_err(|err| TranslateError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    error: "failed to create batch",
+                    extension_code: "BATCHING_ERROR",
+                    extension_details: format!("failed to create batch entry: {err}"),
+                })?,
+            );
         }
 
         results.insert(

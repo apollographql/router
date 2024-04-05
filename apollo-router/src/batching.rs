@@ -175,6 +175,8 @@ pub(crate) struct BatchQueryInfo {
     sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
 }
 
+// TODO: Do we want to generate a UUID for a batch for observability reasons?
+// TODO: Do we want to track the size of a batch?
 #[derive(Debug)]
 pub(crate) struct Batch {
     /// A sender channel to communicate with the batching handler
@@ -318,7 +320,6 @@ impl Batch {
                 return Err(SubgraphBatchingError::ProcessingFailed("batch senders not ready when required".to_string()).into());
             }
 
-            // TODO: Do we want to generate a UUID for a batch for observability reasons?
             tracing::debug!("Assembling {size} requests into batches");
 
             // We now have a bunch of requests which are organised by index and we would like to
@@ -362,17 +363,32 @@ impl Batch {
     }
 
     /// Create a batch query for a specific index in this batch
-    // TODO: Do we want to panic / error if the index is out of range?
-    pub(crate) fn query_for_index(batch: Arc<Batch>, index: usize) -> BatchQuery {
+    ///
+    /// This function may fail if the index doesn't exist or has already been taken
+    pub(crate) fn query_for_index(
+        batch: Arc<Batch>,
+        index: usize,
+    ) -> Result<BatchQuery, SubgraphBatchingError> {
         let mut guard = batch.senders.lock();
+        // It's a serious error if we try to get a query at an index which doesn't exist or which has already been taken
+        if index >= guard.len() {
+            return Err(SubgraphBatchingError::ProcessingFailed(format!(
+                "tried to retriever sender for index: {index} which does not exist"
+            )));
+        }
         let opt_sender = std::mem::take(&mut guard[index]);
+        if opt_sender.is_none() {
+            return Err(SubgraphBatchingError::ProcessingFailed(format!(
+                "tried to retriever sender for index: {index} which has already been taken"
+            )));
+        }
         drop(guard);
-        BatchQuery {
+        Ok(BatchQuery {
             index,
             sender: opt_sender,
             remaining: 0,
             batch,
-        }
+        })
     }
 }
 
@@ -430,12 +446,14 @@ pub(crate) async fn assemble_batch(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::Duration;
 
     use hyper::body::to_bytes;
     use tokio::sync::oneshot;
 
     use super::assemble_batch;
+    use super::Batch;
     use super::BatchQueryInfo;
     use crate::graphql;
     use crate::services::SubgraphRequest;
@@ -520,5 +538,20 @@ mod tests {
 
             assert_eq!(received.response.into_body().data, Some(data));
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_rejects_index_out_of_bounds() {
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        assert!(Batch::query_for_index(batch.clone(), 2).is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_rejects_duplicated_index_get() {
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        assert!(Batch::query_for_index(batch.clone(), 0).is_ok());
+        assert!(Batch::query_for_index(batch.clone(), 0).is_err());
     }
 }
