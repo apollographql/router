@@ -58,6 +58,9 @@ impl Plugin for DoNotExecute {
 
 register_plugin!("apollo-test", "do_not_execute", DoNotExecute);
 
+// Run this benchmark with cargo run --release --example planner -- --hot-reload -s <path/to/your/schema.graphql> -c ./apollo-router/benches/router.yaml
+// You can then send operations to it with `ab` or `hey` or any tool you like:
+// hey -n 1000 -c 10 -m POST -H 'Content-Type: application/json' -D 'path/to/an/anonymous/operation' http://localhost:4100
 fn main() -> Result<()> {
     apollo_router::main()
 }

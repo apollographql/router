@@ -352,10 +352,6 @@ harness = false
 name = "deeply_nested"
 harness = false
 
-[[bench]]
-name = "planner"
-harness = false
-
 [[example]]
 name = "planner"
 path = "benches/planner.rs"
