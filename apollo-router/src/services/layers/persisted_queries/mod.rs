@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
+use http::StatusCode;
 use id_extractor::PersistedQueryIdExtractor;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
@@ -182,6 +183,7 @@ impl PersistedQueryLayer {
                         ),
                         request,
                         ErrorCacheStrategy::DontCache,
+                        StatusCode::INTERNAL_SERVER_ERROR,
                     ));
                 }
                 Some(d) => d.clone(),
@@ -263,9 +265,11 @@ impl ErrorCacheStrategy {
         &self,
         graphql_error: GraphQLError,
         request: SupergraphRequest,
+        status_code: StatusCode,
     ) -> SupergraphResponse {
         let mut error_builder = SupergraphResponse::error_builder()
             .error(graphql_error)
+            .status_code(status_code)
             .context(request.context);
 
         if matches!(self, Self::DontCache) {
@@ -298,6 +302,7 @@ fn supergraph_err_operation_not_found(
         graphql_err_operation_not_found(persisted_query_id),
         request,
         ErrorCacheStrategy::DontCache,
+        StatusCode::NOT_FOUND,
     )
 }
 
@@ -315,6 +320,7 @@ fn supergraph_err_cannot_send_id_and_body_with_apq_disabled(
         graphql_err_cannot_send_id_and_body(),
         request,
         ErrorCacheStrategy::DontCache,
+        StatusCode::BAD_REQUEST,
     )
 }
 
@@ -330,6 +336,7 @@ fn supergraph_err_operation_not_in_safelist(request: SupergraphRequest) -> Super
         graphql_err_operation_not_in_safelist(),
         request,
         ErrorCacheStrategy::DontCache,
+        StatusCode::FORBIDDEN,
     )
 }
 
@@ -344,6 +351,7 @@ fn supergraph_err_pq_id_required(request: SupergraphRequest) -> SupergraphRespon
         graphql_err_pq_id_required(),
         request,
         ErrorCacheStrategy::Cache,
+        StatusCode::BAD_REQUEST,
     )
 }
 
@@ -358,8 +366,9 @@ fn supergraph_err(
     graphql_error: GraphQLError,
     request: SupergraphRequest,
     cache_strategy: ErrorCacheStrategy,
+    status_code: StatusCode,
 ) -> SupergraphResponse {
-    cache_strategy.get_supergraph_response(graphql_error, request)
+    cache_strategy.get_supergraph_response(graphql_error, request, status_code)
 }
 
 #[cfg(test)]
@@ -517,9 +526,11 @@ mod tests {
 
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
-        let response = pq_layer
+        let mut supergraph_response = pq_layer
             .supergraph_request(incoming_request)
-            .expect_err("pq layer returned request instead of returning an error response")
+            .expect_err("pq layer returned request instead of returning an error response");
+        assert_eq!(supergraph_response.response.status(), 404);
+        let response = supergraph_response
             .next_response()
             .await
             .expect("could not get response from pq layer");
@@ -631,12 +642,14 @@ mod tests {
         let request_with_analyzed_query =
             run_first_two_layers(pq_layer, query_analysis_layer, body).await;
 
-        let response = pq_layer
+        let mut supergraph_response = pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
             .await
             .expect_err(
                 "pq layer second hook returned request instead of returning an error response",
-            )
+            );
+        assert_eq!(supergraph_response.response.status(), 403);
+        let response = supergraph_response
             .next_response()
             .await
             .expect("could not get response from pq layer");
@@ -911,9 +924,11 @@ mod tests {
 
         assert!(incoming_request.supergraph_request.body().query.is_some());
 
-        let result = pq_layer.supergraph_request(incoming_request);
-        let response = result
-            .expect_err("pq layer returned request instead of returning an error response")
+        let mut supergraph_response = pq_layer
+            .supergraph_request(incoming_request)
+            .expect_err("pq layer returned request instead of returning an error response");
+        assert_eq!(supergraph_response.response.status(), 400);
+        let response = supergraph_response
             .next_response()
             .await
             .expect("could not get response from pq layer");
@@ -1023,9 +1038,11 @@ mod tests {
 
         assert!(incoming_request.supergraph_request.body().query.is_some());
 
-        let result = pq_layer.supergraph_request(incoming_request);
-        let response = result
-            .expect_err("pq layer returned request instead of returning an error response")
+        let mut supergraph_response = pq_layer
+            .supergraph_request(incoming_request)
+            .expect_err("pq layer returned request instead of returning an error response");
+        assert_eq!(supergraph_response.response.status(), 400);
+        let response = supergraph_response
             .next_response()
             .await
             .expect("could not get response from pq layer");
@@ -1054,9 +1071,11 @@ mod tests {
 
         assert!(incoming_request.supergraph_request.body().query.is_some());
 
-        let response = pq_layer
+        let mut supergraph_response = pq_layer
             .supergraph_request(incoming_request)
-            .expect_err("pq layer returned request instead of returning an error response")
+            .expect_err("pq layer returned request instead of returning an error response");
+        assert_eq!(supergraph_response.response.status(), 400);
+        let response = supergraph_response
             .next_response()
             .await
             .expect("could not get response from pq layer");
