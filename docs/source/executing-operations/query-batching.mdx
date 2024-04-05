@@ -14,7 +14,7 @@ The router's batching support is provided by two sets of functionality:
  - client batching
  - subgraph batching
 
-With client batching, the router will accept batched requests from a client and then process each batch item separately. This means that requests to subgraphs are still processed individually. i.e.: they are not presented to subgraphs in batch form.
+With client batching, the router accepts batched requests from a client and processes each request of a batch separately. Consequently, the router doesn't present requests to subgraphs in batch form, so subgraphs must process the requests of a batch individually. 
 
 With subgraph batching, the router analyzes input client batch requests and issues batch requests to subgraphs. Subgraph batching is an extension to client batching and requires participating subgraphs to support batching requests. See the examples below to see illustrations of how this works in practice.
 
