@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -16,7 +15,8 @@ expression: "&schema"
         "router": {
           "cache": {
             "in_memory": {
-              "limit": 512
+              "limit": 512,
+              "transient_limit": 50
             },
             "redis": null
           }
@@ -40,7 +40,8 @@ expression: "&schema"
           "default": {
             "cache": {
               "in_memory": {
-                "limit": 512
+                "limit": 512,
+                "transient_limit": 50
               },
               "redis": null
             }
@@ -51,7 +52,8 @@ expression: "&schema"
               "description": "Cache configuration",
               "default": {
                 "in_memory": {
-                  "limit": 512
+                  "limit": 512,
+                  "transient_limit": 50
                 },
                 "redis": null
               },
@@ -60,15 +62,23 @@ expression: "&schema"
                 "in_memory": {
                   "description": "Configures the in memory cache (always active)",
                   "default": {
-                    "limit": 512
+                    "limit": 512,
+                    "transient_limit": 50
                   },
                   "type": "object",
                   "required": [
-                    "limit"
+                    "limit",
+                    "transient_limit"
                   ],
                   "properties": {
                     "limit": {
                       "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 1.0
+                    },
+                    "transient_limit": {
+                      "description": "Number of entries in the Least Recently Used transient cache",
                       "type": "integer",
                       "format": "uint",
                       "minimum": 1.0
@@ -2625,7 +2635,8 @@ expression: "&schema"
         "query_planning": {
           "cache": {
             "in_memory": {
-              "limit": 512
+              "limit": 512,
+              "transient_limit": 50
             },
             "redis": null
           },
@@ -2694,7 +2705,8 @@ expression: "&schema"
           "default": {
             "cache": {
               "in_memory": {
-                "limit": 512
+                "limit": 512,
+                "transient_limit": 50
               },
               "redis": null
             },
@@ -2709,7 +2721,8 @@ expression: "&schema"
               "description": "Cache configuration",
               "default": {
                 "in_memory": {
-                  "limit": 512
+                  "limit": 512,
+                  "transient_limit": 50
                 },
                 "redis": null
               },
@@ -2718,15 +2731,23 @@ expression: "&schema"
                 "in_memory": {
                   "description": "Configures the in memory cache (always active)",
                   "default": {
-                    "limit": 512
+                    "limit": 512,
+                    "transient_limit": 50
                   },
                   "type": "object",
                   "required": [
-                    "limit"
+                    "limit",
+                    "transient_limit"
                   ],
                   "properties": {
                     "limit": {
                       "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 1.0
+                    },
+                    "transient_limit": {
+                      "description": "Number of entries in the Least Recently Used transient cache",
                       "type": "integer",
                       "format": "uint",
                       "minimum": 1.0
