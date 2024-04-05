@@ -60,6 +60,9 @@ use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
 use self::config::TraceIdFormat;
+use self::config_new::events::RouterEvents;
+use self::config_new::events::SubgraphEvents;
+use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
 use self::config_new::instruments::RouterInstruments;
 use self::config_new::instruments::SubgraphInstruments;
@@ -126,7 +129,7 @@ use crate::ListenAddr;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
-mod config_new;
+pub(crate) mod config_new;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod fmt_layer;
@@ -373,15 +376,21 @@ impl Plugin for Telemetry {
                         .new_router_instruments();
                     custom_instruments.on_request(request);
 
+                    let custom_events: RouterEvents =
+                        config_request.instrumentation.events.new_router_events();
+                    custom_events.on_request(request);
+
                     (
                         custom_attributes,
                         custom_instruments,
+                        custom_events,
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, ctx): (
+                move |(custom_attributes, custom_instruments, custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
+                    RouterEvents,
                     Context,
                 ),
                       fut| {
@@ -411,6 +420,7 @@ impl Plugin for Telemetry {
                                     .on_response(response),
                             );
                             custom_instruments.on_response(response);
+                            custom_events.on_response(response);
 
                             if expose_trace_id.enabled {
                                 let header_name = expose_trace_id
@@ -444,6 +454,7 @@ impl Plugin for Telemetry {
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
                             custom_instruments.on_error(err, &ctx);
+                            custom_events.on_error(err, &ctx);
                         }
 
                         response
@@ -529,9 +540,12 @@ impl Plugin for Telemetry {
                     );
                     custom_instruments.on_request(req);
 
-                    (req.context.clone(), custom_instruments, custom_attributes)
+                    let supergraph_events = config.instrumentation.events.new_supergraph_events();
+                    supergraph_events.on_request(req);
+
+                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events)
                 },
-                move |(ctx, custom_instruments, custom_attributes): (Context, SupergraphCustomInstruments, Vec<KeyValue>), fut| {
+                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphCustomInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -544,10 +558,12 @@ impl Plugin for Telemetry {
                             Ok(resp) => {
                                 span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
                                 custom_instruments.on_response(resp);
+                                supergraph_events.on_response(resp);
                             },
                             Err(err) => {
                                 span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
                                 custom_instruments.on_error(err, &ctx);
+                                supergraph_events.on_error(err, &ctx);
                             },
                         }
                         result = Self::update_otel_metrics(
@@ -624,17 +640,21 @@ impl Plugin for Telemetry {
                         .instruments
                         .new_subgraph_instruments();
                     custom_instruments.on_request(sub_request);
+                    let custom_events = config.instrumentation.events.new_subgraph_events();
+                    custom_events.on_request(sub_request);
 
                     (
                         sub_request.context.clone(),
                         custom_instruments,
                         custom_attributes,
+                        custom_events,
                     )
                 },
-                move |(context, custom_instruments, custom_attributes): (
+                move |(context, custom_instruments, custom_attributes, custom_events): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
+                    SubgraphEvents,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
@@ -662,6 +682,7 @@ impl Plugin for Telemetry {
                                         .on_response(resp),
                                 );
                                 custom_instruments.on_response(resp);
+                                custom_events.on_response(resp);
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -670,6 +691,7 @@ impl Plugin for Telemetry {
                                     conf.instrumentation.spans.subgraph.attributes.on_error(err),
                                 );
                                 custom_instruments.on_error(err, &context);
+                                custom_events.on_error(err, &context);
                             }
                         }
 

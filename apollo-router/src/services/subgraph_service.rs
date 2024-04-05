@@ -50,6 +50,9 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
+use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::events::SubgraphEventRequestLevel;
+use crate::plugins::telemetry::config_new::events::SubgraphEventResponseLevel;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::protocols::websocket::convert_websocket_stream;
@@ -508,6 +511,38 @@ async fn call_websocket(
         request
     };
 
+    let subgraph_request_event = context
+        .extensions()
+        .lock()
+        .get::<SubgraphEventRequestLevel>()
+        .cloned();
+    if let Some(level) = subgraph_request_event {
+        let mut attrs = HashMap::with_capacity(5);
+        attrs.insert(
+            "http.request.headers".to_string(),
+            format!("{:?}", request.headers()),
+        );
+        attrs.insert(
+            "http.request.method".to_string(),
+            format!("{}", request.method()),
+        );
+        attrs.insert(
+            "http.request.version".to_string(),
+            format!("{:?}", request.version()),
+        );
+        attrs.insert(
+            "http.request.body".to_string(),
+            serde_json::to_string(request.body()).unwrap_or_default(),
+        );
+        attrs.insert("subgraph.name".to_string(), service_name.to_string());
+        log_event(
+            level.0,
+            "subgraph.request",
+            &attrs,
+            &format!("Websocket request body to subgraph {service_name:?}"),
+        );
+    }
+
     if display_headers {
         tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Websocket request headers to subgraph {service_name:?}");
     }
@@ -627,6 +662,37 @@ async fn call_http(
 
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+
+    let subgraph_request_event = context
+        .extensions()
+        .lock()
+        .get::<SubgraphEventRequestLevel>()
+        .cloned();
+    if let Some(level) = subgraph_request_event {
+        let mut attrs = HashMap::with_capacity(5);
+        attrs.insert(
+            "http.request.headers".to_string(),
+            format!("{:?}", parts.headers),
+        );
+        attrs.insert(
+            "http.request.method".to_string(),
+            format!("{}", parts.method),
+        );
+        attrs.insert(
+            "http.request.version".to_string(),
+            format!("{:?}", parts.version),
+        );
+        attrs.insert("http.request.body".to_string(), body.clone());
+        attrs.insert("subgraph.name".to_string(), service_name.to_string());
+
+        log_event(
+            level.0,
+            "subgraph.request",
+            &attrs,
+            &format!("Request to subgraph {service_name:?}"),
+        );
+    }
+
     let mut request = http::Request::from_parts(parts, Body::from(body));
 
     request
@@ -686,6 +752,40 @@ async fn call_http(
         do_fetch(client, &context, service_name, request, display_body)
             .instrument(subgraph_req_span)
             .await?;
+
+    let subgraph_response_event = context
+        .extensions()
+        .lock()
+        .get::<SubgraphEventResponseLevel>()
+        .cloned();
+    if let Some(level) = subgraph_response_event {
+        let mut attrs = HashMap::with_capacity(5);
+        attrs.insert(
+            "http.response.headers".to_string(),
+            format!("{:?}", parts.headers),
+        );
+        attrs.insert(
+            "http.response.status".to_string(),
+            format!("{}", parts.status),
+        );
+        attrs.insert(
+            "http.response.version".to_string(),
+            format!("{:?}", parts.version),
+        );
+        if let Some(Ok(b)) = &body {
+            attrs.insert(
+                "http.response.body".to_string(),
+                String::from_utf8_lossy(b).to_string(),
+            );
+        }
+        attrs.insert("subgraph.name".to_string(), service_name.to_string());
+        log_event(
+            level.0,
+            "subgraph.response",
+            &attrs,
+            &format!("Raw response from subgraph {service_name:?} received"),
+        );
+    }
 
     if display_body {
         if let Some(Ok(b)) = &body {

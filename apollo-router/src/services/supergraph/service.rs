@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
@@ -32,6 +33,8 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::events::SupergraphEventResponseLevel;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -323,10 +326,44 @@ async fn service_call(
 
                 let (parts, response_stream) = response.into_parts();
 
-                Ok(SupergraphResponse {
-                    context,
-                    response: http::Response::from_parts(parts, response_stream.boxed()),
-                })
+                let supergraph_response_event = context
+                    .extensions()
+                    .lock()
+                    .get::<SupergraphEventResponseLevel>()
+                    .cloned();
+                match supergraph_response_event {
+                    Some(level) => {
+                        let mut attrs = HashMap::with_capacity(4);
+                        attrs.insert(
+                            "http.response.headers".to_string(),
+                            format!("{:?}", parts.headers),
+                        );
+                        attrs.insert(
+                            "http.response.status".to_string(),
+                            format!("{}", parts.status),
+                        );
+                        attrs.insert(
+                            "http.response.version".to_string(),
+                            format!("{:?}", parts.version),
+                        );
+                        let response_stream = Box::pin(response_stream.inspect(move |resp| {
+                            attrs.insert(
+                                "http.response.body".to_string(),
+                                serde_json::to_string(resp).unwrap_or_default(),
+                            );
+                            log_event(level.0, "supergraph.response", &attrs, "");
+                        }));
+
+                        Ok(SupergraphResponse {
+                            context,
+                            response: http::Response::from_parts(parts, response_stream.boxed()),
+                        })
+                    }
+                    None => Ok(SupergraphResponse {
+                        context,
+                        response: http::Response::from_parts(parts, response_stream.boxed()),
+                    }),
+                }
             }
         }
         // This should never happen because if we have an empty query plan we should have error in errors vec
