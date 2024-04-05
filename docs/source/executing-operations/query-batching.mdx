@@ -16,7 +16,7 @@ The router's batching support is provided by two sets of functionality:
 
 With client batching, the router will accept batched requests from a client and then process each batch item separately. This means that requests to subgraphs are still processed individually. i.e.: they are not presented to subgraphs in batch form.
 
-With subgraph batching, which is an extension to client batching and requires participating subgraphs to support batching request, the router analyses input client batch requests and issues batch requests to subgraphs. The analysis may result in multiple batches or requests being issued if data is required to be present in the router execution engine before further requests can be made. See the examples below to see illustrations of how this works in practice.
+With subgraph batching, the router analyzes input client batch requests and issues batch requests to subgraphs. Subgraph batching is an extension to client batching and requires participating subgraphs to support batching requests. See the examples below to see illustrations of how this works in practice.
 
 The Apollo Router supports client and subgraph query batching.
 
@@ -77,12 +77,20 @@ batching:
 ```
 
 <Note>
-The router can be configured to either support batching for all subgraphs or configured per each subgraph, but not both.
 
-<Note>
-There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Bearing this constraint in mind, the router will only be able to generate batches from queries which are processed which don't contain such constraints.
+- The router can be configured to support batching for either all subgraphs or each subgraph, but not both.
 
-##### Example 1 Federated Subgraph Batching
+- There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Consequently, the router will only be able to generate batches from queries which are processed which don't contain such constraints. This may result in the router issuing multiple batches or requests. 
+
+</Note>
+
+##### Example: federated subgraph batching
+
+This example shows how the router might batch subgraph requests for a federated graph, where the client batch contains a query for an entity.
+
+Assume the federated graph contains three subgraphs: `accounts`, `products`, and `reviews`.
+
+The input client query to the federated graph:
 
 ```json title="federated-batch.json"
 [
@@ -94,7 +102,7 @@ There are limitations on the ability of the router to preserve batches from the 
 ]
 ```
 
-For that input and with the knowledge that our federated graph has 3 subgraphs, accounts, products and reviews, the router will generate a set of queries which look like this:
+From the input query, the router generates a set of subgraph queries:
 ```
 "query MeQuery1__accounts__0{me{id}}",
 "query MeQuery2__accounts__0{me{__typename id}}",
@@ -106,7 +114,9 @@ For that input and with the knowledge that our federated graph has 3 subgraphs, 
 "query MeQuery3__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{author{__typename id}}}}}",
 "query MeQuery3__accounts__2($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
 ```
-The first 6 queries may be batched and must be fetched before the final 3 queries can be executed. So, in this case, without subgraph batching you would make 9 fetches in total across the 3 subgraphs. With batching, that would reduce to 5 fetches.
+The first six queries can be combined into two batches—one for `accounts` and one for `products`. They must be fetched before the final three queries can be executed individually. 
+
+Overall, without subgraph batching, the router would make nine fetches in total across the three subgraphs, but with subgraph batching, that total is reduced to five fetches.
 
 | Subgraph | Fetch Count (without)| Fetch Count (with) |
 |----------|----------------------|--------------------|
@@ -114,9 +124,13 @@ The first 6 queries may be batched and must be fetched before the final 3 querie
 | products | 1                    | 1                  |
 | reviews  | 2                    | 2                  |
 
-##### Example 2 Simple Subgraph Batching
+##### Example: simple subgraph batching
 
-For queries which don't have required fetch constraints, subgraph batching is extremely efficient:
+This example shows how the router can batch subgraph requests in the most efficient scenario, where the queries of a batch don't have required fetch constraints.
+
+Assume the federated graph contains three subgraphs: `accounts`, `products`, and `reviews`.
+
+The input client query to the federated graph:
 
 ```json title="simple-batch.json"
 [
@@ -138,7 +152,7 @@ For queries which don't have required fetch constraints, subgraph batching is ex
 ]
 ```
 
-For that input and with the knowledge that our federated graph has 3 subgraphs, accounts, products and reviews, the router will generate a set of queries which look like this:
+From the input query, the router generates a set of subgraph queries:
 ```
 "query MeQuery1__accounts__0{me{id}}",
 "query MeQuery2__accounts__0{me{name}}",
@@ -156,7 +170,7 @@ For that input and with the knowledge that our federated graph has 3 subgraphs, 
 "query MeQuery14__accounts__0{me{name}}",
 "query MeQuery15__accounts__0{me{id}}",
 ```
-All of the queries may be batched. So, in this case, 15 fetches would be reduced to 1.
+All of the queries can be combined into a single batch. So instead of 15 (non-batch) subgraph fetches, the router only has to make one fetch.
 
 | Subgraph | Fetch Count (without)| Fetch Count (with) |
 |----------|----------------------|--------------------|
@@ -226,7 +240,7 @@ Histogram for the size of received batches.
 </tbody>
 </table>
 
-The `subgraph` attribute is optional and if not present indicates that the metric is identifying batches received from clients. If a `subgraph` attribute is present, then the metric will be identifying batches sent to a particular subgraph.
+The `subgraph` attribute is optional. If the attribute isn't present, the metric identifies batches received from clients. If the attribute is present, the metric identifies batches sent to a particular subgraph.
 
 ## Query batch formats
 
