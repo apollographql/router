@@ -51,22 +51,25 @@ pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     caller: String,
     inner: Arc<Mutex<LruCache<K, V>>>,
+    transient: Arc<Mutex<LruCache<K, V>>>,
     redis: Option<RedisCacheStorage>,
 }
 
 impl<K, V> CacheStorage<K, V>
 where
-    K: KeyType,
-    V: ValueType,
+    K: KeyType + 'static,
+    V: ValueType + 'static,
 {
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
+        transient_capacity: NonZeroUsize,
         config: Option<RedisCache>,
         caller: &str,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
+            transient: Arc::new(Mutex::new(LruCache::new(transient_capacity))),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
                 match RedisCacheStorage::new(config).await {
@@ -91,6 +94,33 @@ where
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
         let instant_memory = Instant::now();
+
+        let transient_res = self.transient.lock().await.get(key).cloned();
+
+        if let Some(v) = transient_res {
+            let cache = self.clone();
+            let key = key.clone();
+            let value = v.clone();
+
+            tokio::task::spawn(async move {
+                cache.insert_inner(key.clone(), value).await;
+                let _ = cache.transient.lock().await.pop_entry(&key);
+            });
+
+            tracing::info!(
+                monotonic_counter.apollo_router_cache_hit_count = 1u64,
+                kind = %self.caller,
+                storage = &tracing::field::display(CacheStorageName::Memory),
+            );
+            let duration = instant_memory.elapsed().as_secs_f64();
+            tracing::info!(
+                histogram.apollo_router_cache_hit_time = duration,
+                kind = %self.caller,
+                storage = &tracing::field::display(CacheStorageName::Memory),
+            );
+            return Some(v);
+        }
+
         let res = self.inner.lock().await.get(key).cloned();
 
         match res {
@@ -163,7 +193,19 @@ where
         }
     }
 
+    // only insert in the transient cache. We will insert in the long term in memory cache on the next access
     pub(crate) async fn insert(&self, key: K, value: V) {
+        let mut in_memory = self.transient.lock().await;
+        in_memory.put(key, value);
+        let size = in_memory.len() as u64;
+        tracing::info!(
+            value.apollo_router_cache_size = size,
+            kind = %self.caller,
+            storage = &tracing::field::display(CacheStorageName::Memory),
+        );
+    }
+
+    async fn insert_inner(&self, key: K, value: V) {
         if let Some(redis) = self.redis.as_ref() {
             redis
                 .insert(RedisKey(key.clone()), RedisValue(value.clone()), None)
