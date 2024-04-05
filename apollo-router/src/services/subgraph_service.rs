@@ -48,6 +48,7 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
+use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
@@ -750,9 +751,8 @@ pub(crate) async fn process_batch(
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
 
-    // TODO: We have multiple operation names but we are just using the first operation
-    // name in the span. Should we report all operation names?
-    // CURRENT DECISION: hard code to "batch"
+    // We can't provide a single operation name in the span (since we may be processing multiple
+    // operations). Product decision, use the hard coded value "batch".
     let subgraph_req_span = tracing::info_span!("subgraph_request",
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
@@ -888,14 +888,15 @@ pub(crate) async fn notify_batch_query(
         // If we had an error processing the batch, then pipe that error to all of the listeners
         Err(e) => {
             for tx in senders {
-                // TODO: What should we do if a single send fails? If we error out then none of the other
-                // potentially valid senders will receive their results.
-                tx.send(Err(Box::new(e.clone()))).map_err(|error| {
+                // Try to notify all waiters. If we can't notify an individual sender, then log an error
+                if let Err(log_error) = tx.send(Err(Box::new(e.clone()))).map_err(|error| {
                     FetchError::SubrequestBatchingError {
                         service: service.clone(),
                         reason: format!("tx send failed: {error:?}"),
                     }
-                })?;
+                }) {
+                    tracing::error!(service, error=%log_error, "failed to notify sender that batch processing failed");
+                }
             }
         }
 
@@ -917,18 +918,27 @@ pub(crate) async fn notify_batch_query(
             // graphql_response, so zip_eq shouldn't panic.
             // Use the tx to send a graphql_response message to each waiter.
             for (response, sender) in rs.into_iter().zip_eq(senders) {
-                sender
-                    .send(Ok(response))
-                    .map_err(|error| FetchError::SubrequestBatchingError {
-                        service: service.to_string(),
-                        reason: format!("tx send failed: {error:?}"),
-                    })?;
+                if let Err(log_error) =
+                    sender
+                        .send(Ok(response))
+                        .map_err(|error| FetchError::SubrequestBatchingError {
+                            service: service.to_string(),
+                            reason: format!("tx send failed: {error:?}"),
+                        })
+                {
+                    tracing::error!(service, error=%log_error, "failed to notify sender that batch processing succeeded");
+                }
             }
         }
     }
 
     Ok(())
 }
+
+type BatchInfo = (
+    (String, http::Request<Body>, Context, usize),
+    Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
+);
 
 /// Collect all batch requests and process them concurrently
 #[instrument(skip_all)]
@@ -937,19 +947,39 @@ pub(crate) async fn process_batches(
     svc_map: HashMap<String, Vec<BatchQueryInfo>>,
 ) -> Result<(), BoxError> {
     // We need to strip out the senders so that we can work with them separately.
+    let mut errors = vec![];
     let (info, txs): (Vec<_>, Vec<_>) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
-            let (_op_name, context, request, txs) = assemble_batch(requests).await;
+            let (_op_name, context, request, txs) = assemble_batch(requests).await?;
 
-            ((service, request, context, txs.len()), txs)
+            Ok(((service, request, context, txs.len()), txs))
         }))
         .await
         .into_iter()
+        .filter_map(|x: Result<BatchInfo, BoxError>| x.map_err(|e| errors.push(e)).ok())
         .unzip();
 
+    // If errors isn't empty, then process_batches cannot proceed. Let's log out the errors and
+    // return
+    if !errors.is_empty() {
+        for error in errors {
+            tracing::error!("assembling batch failed: {error}");
+        }
+        return Err(SubgraphBatchingError::ProcessingFailed(
+            "assembling batches failed".to_string(),
+        )
+        .into());
+    }
     // Collect all of the processing logic and run them concurrently, collecting all errors
-    // TODO: Is it ok to panic if the length of the txs and responses does not match? It seems like that is literally impossible
     let cf = &client_factory;
+    // It is not ok to panic if the length of the txs and info do not match. Let's make sure they
+    // do
+    if txs.len() != info.len() {
+        return Err(SubgraphBatchingError::ProcessingFailed(
+            "length of txs and info are not equal".to_string(),
+        )
+        .into());
+    }
     let batch_futures = info.into_iter().zip_eq(txs).map(
         |((service, request, context, listener_count), senders)| async move {
             let batch_result = process_batch(
@@ -967,7 +997,6 @@ pub(crate) async fn process_batches(
 
     futures::future::try_join_all(batch_futures).await?;
 
-    // For all requests which contain any batching detail in their context, just delete it.
     Ok(())
 }
 
@@ -1001,14 +1030,12 @@ async fn call_batched_http(
     let result = if let Some(mut query) = opt_batch_query {
         // Let the owning batch know that this query is ready to process, getting back the channel
         // from which we'll eventually receive our response.
-        let response_rx = query.signal_progress(client_factory, request, body).await;
+        let response_rx = query.signal_progress(client_factory, request, body).await?;
 
         //Re-insert our BatchQuery
         context.extensions().lock().insert::<BatchQuery>(query);
 
         // Park this query until we have our response and pass it back up
-        // TODO: Should we panic or create a special error type if this can't receive?
-        // response_rx.await.unwrap()
         response_rx
             .await
             .map_err(|err| FetchError::SubrequestBatchingError {
@@ -1043,7 +1070,7 @@ pub(crate) async fn call_http(
         .unwrap_or_default();
 
     let (parts, _) = subgraph_request.into_parts();
-    let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+    let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
     let mut request = http::Request::from_parts(parts, Body::from(body));
 

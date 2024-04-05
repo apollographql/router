@@ -58,7 +58,8 @@ RUN \
     heaptrack-gui \
     x11-apps \
     iputils-ping && \
-    mkdir data; \
+    mkdir data && \
+    chown router data; \
   fi
 
 # Clean up apt lists

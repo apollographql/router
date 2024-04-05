@@ -29,7 +29,7 @@ pub(crate) struct CacheControl {
     #[serde(skip_serializing_if = "is_false", default)]
     proxy_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    no_store: bool,
+    pub(super) no_store: bool,
     #[serde(skip_serializing_if = "is_false", default)]
     private: bool,
     #[serde(skip_serializing_if = "is_false", default)]
