@@ -492,7 +492,7 @@ where
         })
     }
 
-    fn add(
+    pub(crate) fn add(
         &self,
         trigger: TTrigger,
         edge: TEdge,
