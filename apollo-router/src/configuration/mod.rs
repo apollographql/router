@@ -1003,7 +1003,7 @@ impl From<QueryPlanCache> for Cache {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 /// In memory cache configuration
 pub(crate) struct InMemoryCache {
     /// Number of entries in the Least Recently Used cache

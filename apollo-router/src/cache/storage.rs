@@ -239,7 +239,7 @@ where
 
     #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
-        self.inner.lock().await.len()
+        self.inner.lock().await.len() + self.transient.lock().await.len()
     }
 }
 

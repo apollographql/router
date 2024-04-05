@@ -258,6 +258,8 @@ mod tests {
         for i in 0..14 {
             let entry = cache.get(&i).await;
             entry.insert(i).await;
+            let _ = cache.get(&i).await.get().await;
+            tokio::task::yield_now().await;
         }
 
         assert_eq!(cache.storage.len().await, 13);
@@ -303,5 +305,31 @@ mod tests {
 
         // To be really sure, check there is only one value in the cache
         assert_eq!(cache.storage.len().await, 1);
+    }
+
+    #[test(tokio::test)]
+    async fn transient_cache() {
+        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(5).unwrap(),
+            None,
+            "test",
+        )
+        .await
+        .unwrap();
+
+        let entry = cache.get(&0).await;
+        entry.insert(0).await;
+        let _ = cache.get(&0).await.get().await;
+        tokio::task::yield_now().await;
+
+
+        for i in 1..14 {
+            let entry = cache.get(&i).await;
+            entry.insert(i).await;
+        }
+
+        assert_eq!(cache.get(&0).await.get().await.unwrap(), 0);
+        assert_eq!(cache.storage.len().await, 6);
     }
 }
