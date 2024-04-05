@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -2675,6 +2676,7 @@ expression: "&schema"
         "path": "/",
         "introspection": false,
         "experimental_reuse_query_fragments": null,
+        "generate_query_fragments": false,
         "defer_support": true,
         "query_planning": {
           "cache": {
@@ -2713,6 +2715,11 @@ expression: "&schema"
           "default": null,
           "type": "boolean",
           "nullable": true
+        },
+        "generate_query_fragments": {
+          "description": "Enable QP generation of fragments for subgraph requests Default: false",
+          "default": false,
+          "type": "boolean"
         },
         "introspection": {
           "description": "Enable introspection Default: false",
