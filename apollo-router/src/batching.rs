@@ -456,8 +456,12 @@ mod tests {
     use super::Batch;
     use super::BatchQueryInfo;
     use crate::graphql;
+    use crate::plugins::traffic_shaping::Http2Config;
+    use crate::query_planner::fetch::QueryHash;
+    use crate::services::http::HttpClientServiceFactory;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::Configuration;
     use crate::Context;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -553,5 +557,136 @@ mod tests {
 
         assert!(Batch::query_for_index(batch.clone(), 0).is_ok());
         assert!(Batch::query_for_index(batch.clone(), 0).is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_limits_the_number_of_cancelled_sends() {
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+
+        assert!(bq
+            .set_query_hashes(vec![Arc::new(QueryHash::default())])
+            .await
+            .is_ok());
+        assert!(!bq.finished());
+        assert!(bq.signal_cancelled("why not?".to_string()).await.is_ok());
+        assert!(bq.finished());
+        assert!(bq
+            .signal_cancelled("only once though".to_string())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_limits_the_number_of_progressed_sends() {
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+
+        let factory = HttpClientServiceFactory::from_config(
+            "testbatch",
+            &Configuration::default(),
+            Http2Config::Disable,
+        );
+        let request = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .subgraph_name("whatever".to_string())
+            .build();
+        assert!(bq
+            .set_query_hashes(vec![Arc::new(QueryHash::default())])
+            .await
+            .is_ok());
+        assert!(!bq.finished());
+        assert!(bq
+            .signal_progress(
+                factory.clone(),
+                request.clone(),
+                graphql::Request::default()
+            )
+            .await
+            .is_ok());
+        assert!(bq.finished());
+        assert!(bq
+            .signal_progress(factory, request, graphql::Request::default())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_limits_the_number_of_mixed_sends() {
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+
+        let factory = HttpClientServiceFactory::from_config(
+            "testbatch",
+            &Configuration::default(),
+            Http2Config::Disable,
+        );
+        let request = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .subgraph_name("whatever".to_string())
+            .build();
+        assert!(bq
+            .set_query_hashes(vec![Arc::new(QueryHash::default())])
+            .await
+            .is_ok());
+        assert!(!bq.finished());
+        assert!(bq
+            .signal_progress(factory, request, graphql::Request::default())
+            .await
+            .is_ok());
+        assert!(bq.finished());
+        assert!(bq
+            .signal_cancelled("only once though".to_string())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_limits_the_number_of_mixed_sends_two_query_hashes() {
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+
+        let factory = HttpClientServiceFactory::from_config(
+            "testbatch",
+            &Configuration::default(),
+            Http2Config::Disable,
+        );
+        let request = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .subgraph_name("whatever".to_string())
+            .build();
+        let qh = Arc::new(QueryHash::default());
+        assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
+        assert!(!bq.finished());
+        assert!(bq
+            .signal_progress(factory, request, graphql::Request::default())
+            .await
+            .is_ok());
+        assert!(!bq.finished());
+        assert!(bq
+            .signal_cancelled("only twice though".to_string())
+            .await
+            .is_ok());
+        assert!(bq.finished());
+        assert!(bq
+            .signal_cancelled("only twice though".to_string())
+            .await
+            .is_err());
     }
 }
