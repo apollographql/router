@@ -1009,6 +1009,7 @@ pub(crate) struct InMemoryCache {
     /// Number of entries in the Least Recently Used cache
     pub(crate) limit: NonZeroUsize,
     /// Number of entries in the Least Recently Used transient cache
+    #[serde(default = "transient_limit_default")]
     pub(crate) transient_limit: NonZeroUsize,
 }
 
@@ -1019,6 +1020,10 @@ impl Default for InMemoryCache {
             transient_limit: DEFAULT_TRANSIENT_CACHE_CAPACITY,
         }
     }
+}
+
+fn transient_limit_default() -> NonZeroUsize {
+    DEFAULT_TRANSIENT_CACHE_CAPACITY
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

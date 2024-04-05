@@ -67,8 +67,7 @@ expression: "&schema"
                   },
                   "type": "object",
                   "required": [
-                    "limit",
-                    "transient_limit"
+                    "limit"
                   ],
                   "properties": {
                     "limit": {
@@ -79,6 +78,7 @@ expression: "&schema"
                     },
                     "transient_limit": {
                       "description": "Number of entries in the Least Recently Used transient cache",
+                      "default": 50,
                       "type": "integer",
                       "format": "uint",
                       "minimum": 1.0
@@ -2736,8 +2736,7 @@ expression: "&schema"
                   },
                   "type": "object",
                   "required": [
-                    "limit",
-                    "transient_limit"
+                    "limit"
                   ],
                   "properties": {
                     "limit": {
@@ -2748,6 +2747,7 @@ expression: "&schema"
                     },
                     "transient_limit": {
                       "description": "Number of entries in the Least Recently Used transient cache",
+                      "default": 50,
                       "type": "integer",
                       "format": "uint",
                       "minimum": 1.0
