@@ -4,7 +4,7 @@ As an extension to the ongoing work to support [client-side query batching in th
 
 Also, batching in the router is now a generally available feature: the `experimental_batching` router configuration option has been deprecated and is replaced by the `batching` option.
 
-Previously, the router preserved the concept of a batch until a `RouterRequest` finished processing. From that point, the router converted each batch request item into a separate `SupergraphRequest`, and the router planned and executed those requests concurrently within the router, then reassembled them into a batch after they all completed. Now with the implementation in this release, the concept of a "batch" from the perspective of an executing router disappears, and instead each batch request is planned and executed separately.
+Previously, the router preserved the concept of a batch until a `RouterRequest` finished processing. From that point, the router converted each batch request item into a separate `SupergraphRequest`, and the router planned and executed those requests concurrently within the router, then reassembled them into a batch of `RouterResponse` to return to the client. Now with the implementation in this release, the concept of a batch is extended so that batches are issued to configured subgraphs (all or named). Each batch request item is planned and executed separately, but the queries issued to subgraphs are optimally assembled into batches which observe the query constraints of the various batch items.
 
 To configure subgraph batching, you can enable `batching.subgraph.all` for all subgraphs. You can also enable batching per subgraph with `batching.subgraph.subgraphs.*`. For example:
 

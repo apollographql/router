@@ -752,12 +752,6 @@ impl RouterService {
         }
 
         if let Some(shared_batch_details) = shared_batch_details {
-            // We need to keep our shared details somewhere or they will drop, let's
-            // insert them into our various contexts
-            context
-                .extensions()
-                .lock()
-                .insert(shared_batch_details.clone());
             context.extensions().lock().insert(
                 Batch::query_for_index(shared_batch_details, 0).map_err(|err| TranslateError {
                     status: StatusCode::INTERNAL_SERVER_ERROR,

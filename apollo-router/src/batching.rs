@@ -1,9 +1,5 @@
-//! An assembly of utility functions and core structures used to implement batching support within
+//! Various utility functions and core structures used to implement batching support within
 //! the router.
-//!
-//! In addition to the core batching functionality, as expressed in `BatchQuery` and
-//! `Batch`, there are a series of utility functions for efficiently converting
-//! graphql Requests to/from batch representation in a variety of formats: JSON, bytes
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -140,7 +136,7 @@ impl BatchQuery {
 
 // #[derive(Debug)]
 enum BatchHandlerMessage {
-    /// Cancel one of the sub requests
+    /// Cancel one of the batch items
     Cancel { index: usize, reason: String },
 
     /// A query has reached the subgraph service and we should update its state
@@ -153,7 +149,7 @@ enum BatchHandlerMessage {
         span_context: otelContext,
     },
 
-    /// A query has passed query planning and now knows how many fetches are needed
+    /// A query has passed query planning and knows how many fetches are needed
     /// to complete.
     Begin {
         index: usize,
@@ -238,7 +234,7 @@ impl Batch {
             let mut master_client_factory = None;
             tracing::debug!("Batch about to await messages...");
             // Start handling messages from various portions of the request lifecycle
-            // When recv() returns None, we want to stop processing message
+            // When recv() returns None, we want to stop processing messages
             while let Some(msg) = rx.recv().await {
                 match msg {
                     BatchHandlerMessage::Cancel { index, reason } => {

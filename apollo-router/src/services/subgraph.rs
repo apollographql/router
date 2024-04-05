@@ -37,7 +37,6 @@ pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Se
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
-#[derive(Debug)]
 pub struct Request {
     /// Original request to the Router.
     pub supergraph_request: Arc<http::Request<graphql::Request>>,
