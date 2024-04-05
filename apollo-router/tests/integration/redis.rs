@@ -8,6 +8,8 @@ mod test {
     use apollo_router::MockedSubgraphs;
     use fred::cmd;
     use fred::prelude::*;
+    use fred::types::ScanType;
+    use fred::types::Scanner;
     use futures::StreamExt;
     use http::header::CACHE_CONTROL;
     use http::HeaderValue;
@@ -63,7 +65,18 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s: String = client.get(known_cache_key).await.unwrap();
+        let s: String = match client.get(known_cache_key).await {
+            Ok(s) => s,
+            Err(e) => {
+                println!("keys in Redis server:");
+                let mut scan = client.scan("plan:*", None, Some(ScanType::String));
+                while let Some(key) = scan.next().await {
+                    let key = key.as_ref().unwrap().results();
+                    println!("\t{key:?}");
+                }
+                panic!("key {known_cache_key} not found: {e}");
+            }
+        };
         let exp: i64 = client
             .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
             .await
