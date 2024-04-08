@@ -83,12 +83,20 @@ impl BridgeQueryPlannerPool {
 
         let schema = bridge_query_planners
             .first()
-            .expect("There should be at least 1 service in pool")
+            .ok_or_else(|| {
+                ServiceBuildError::QueryPlannerError(QueryPlannerError::PoolProcessing(
+                    "There should be at least 1 Query Planner service in pool".to_string(),
+                ))
+            })?
             .schema();
 
         let subgraph_schemas = bridge_query_planners
             .first()
-            .expect("There should be at least 1 service in pool")
+            .ok_or_else(|| {
+                ServiceBuildError::QueryPlannerError(QueryPlannerError::PoolProcessing(
+                    "There should be at least 1 Query Planner service in pool".to_string(),
+                ))
+            })?
             .subgraph_schemas();
 
         let planners = bridge_query_planners
@@ -104,9 +112,7 @@ impl BridgeQueryPlannerPool {
                     let svc = match planner.ready().await {
                         Ok(svc) => svc,
                         Err(e) => {
-                            if res_sender.send(Err(e)).is_err() {
-                                failfast_error!("receiver channel for query plan response was closed, this should never happen");
-                            }
+                            let _ = res_sender.send(Err(e));
 
                             continue;
                         }
