@@ -653,59 +653,17 @@ pub(crate) struct QueryPlanner {
     pub(crate) experimental_available_parallelism: AvailableParallelism,
 }
 
-#[derive(Debug, Clone, JsonSchema)]
-#[serde(untagged)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
 pub(crate) enum AvailableParallelism {
+    Auto(Auto),
     Fixed(NonZeroUsize),
-    Automatic(String),
 }
 
-impl Serialize for AvailableParallelism {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::Fixed(n) => {
-                let as_u64 = u64::try_from(n.get()).map_err(|_| {
-                    serde::ser::Error::custom(format!("{} is out of range", n).as_str())
-                })?;
-                serializer.serialize_u64(as_u64)
-            }
-            Self::Automatic(_) => serializer.serialize_str("auto"),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for AvailableParallelism {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        #[serde(deny_unknown_fields)]
-        enum AdHoc {
-            Fixed(NonZeroUsize),
-            Automatic(String),
-        }
-
-        let ad_hoc: AdHoc = serde::Deserialize::deserialize(deserializer)?;
-
-        match ad_hoc {
-            AdHoc::Fixed(n) => Ok(Self::Fixed(n)),
-            AdHoc::Automatic(s) => {
-                if s.as_str() == "auto" {
-                    Ok(Self::Automatic(s))
-                } else {
-                    Err(serde::de::Error::custom(format!(
-                        "expected a non zero number, or 'auto', found {}",
-                        s
-                    )))
-                }
-            }
-        }
-    }
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Auto {
+    Auto,
 }
 
 impl Default for AvailableParallelism {
@@ -717,7 +675,7 @@ impl Default for AvailableParallelism {
 impl QueryPlanner {
     pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
         match self.experimental_available_parallelism {
-            AvailableParallelism::Automatic(_) => std::thread::available_parallelism(),
+            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
             AvailableParallelism::Fixed(n) => Ok(n),
         }
     }
