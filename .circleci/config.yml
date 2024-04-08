@@ -364,7 +364,7 @@ commands:
             - run:
                 name: Install nightly Rust to build the fuzzers
                 command: |
-                  rustup install toolchain nightly
+                  rustup install nightly
 
   install_extra_tools:
     steps:
