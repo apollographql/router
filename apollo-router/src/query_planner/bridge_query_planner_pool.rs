@@ -23,7 +23,7 @@ use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
 use crate::Configuration;
 
-static CHANNEL_SIZE: usize = 10_000;
+static CHANNEL_SIZE: usize = 1_000;
 
 #[derive(Clone)]
 pub(crate) struct BridgeQueryPlannerPool {
@@ -101,7 +101,6 @@ impl BridgeQueryPlannerPool {
 
             tokio::spawn(async move {
                 while let Ok((request, res_sender)) = receiver.recv().await {
-                    let start = Instant::now();
 
                     let svc = match planner.ready().await {
                         Ok(svc) => svc,
@@ -113,6 +112,7 @@ impl BridgeQueryPlannerPool {
                             continue;
                         }
                     };
+                    let start = Instant::now();
 
                     let res = svc.call(request).await;
 
@@ -123,9 +123,7 @@ impl BridgeQueryPlannerPool {
                         [KeyValue::new("workerId", worker_id.to_string())]
                     );
 
-                    if res_sender.send(res).is_err() {
-                        failfast_error!("receiver channel for query plan response was closed, this should never happen");
-                    }
+                    let _ = res_sender.send(res);
                 }
             });
         }
@@ -165,7 +163,7 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
         if self.sender.is_full() {
-            std::task::Poll::Ready(Err(QueryPlannerError::PoolError(
+            std::task::Poll::Ready(Err(QueryPlannerError::PoolProcessing(
                 "query plan queue is full".into(),
             )))
         } else {
