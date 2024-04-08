@@ -108,8 +108,11 @@ impl BatchQuery {
             })
             .await?;
 
-        self.remaining -= 1;
-        if self.remaining == 0 {
+        if !self.finished() {
+            self.remaining -= 1;
+        }
+        // May now be finished...
+        if self.finished() {
             self.sender = None;
         }
         Ok(rx)
@@ -126,8 +129,11 @@ impl BatchQuery {
             })
             .await?;
 
-        self.remaining -= 1;
-        if self.remaining == 0 {
+        if !self.finished() {
+            self.remaining -= 1;
+        }
+        // May now be finished...
+        if self.finished() {
             self.sender = None;
         }
         Ok(())

@@ -739,8 +739,7 @@ pub(crate) async fn process_batch(
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
     // Now we need to "batch up" our data and send it to our subgraphs
     // We need our own batch aware version of call_http which only makes one call to each
-    // subgraph, but is able to decode the responses. I'll probably need to break call_http
-    // down into sub-functions, and I've started this, but it's not finished.
+    // subgraph, but is able to decode the responses.
     request
         .headers_mut()
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
