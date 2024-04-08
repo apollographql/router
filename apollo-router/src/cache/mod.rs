@@ -323,7 +323,6 @@ mod tests {
         let _ = cache.get(&0).await.get().await;
         tokio::task::yield_now().await;
 
-
         for i in 1..14 {
             let entry = cache.get(&i).await;
             entry.insert(i).await;
