@@ -13,6 +13,7 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 
 type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;
+
 pub(crate) struct Metrics {
     _instruments: Vec<opentelemetry::metrics::ObservableGauge<u64>>,
 }
@@ -44,7 +45,7 @@ impl Metrics {
                 .unwrap_or(&serde_json::Value::Null),
         );
         data.populate_license_instrument(license_state);
-
+        data.populate_user_plugins_instrument(configuration);
         data.into()
     }
 }
@@ -406,7 +407,37 @@ impl InstrumentData {
             ),
         );
     }
+
+    pub(crate) fn populate_user_plugins_instrument(&mut self, configuration: &Configuration) {
+        println!(
+            "custom plugins: {}",
+            configuration
+                .plugins
+                .plugins
+                .as_ref()
+                .map(|configuration| configuration.len())
+                .unwrap_or_default() as u64
+        );
+        self.data.insert(
+            "apollo.router.config.custom_plugins".to_string(),
+            (
+                configuration
+                    .plugins
+                    .plugins
+                    .as_ref()
+                    .map(|configuration| {
+                        configuration
+                            .keys()
+                            .filter(|k| !k.starts_with("cloud_router."))
+                            .count()
+                    })
+                    .unwrap_or_default() as u64,
+                [].into(),
+            ),
+        );
+    }
 }
+
 impl From<InstrumentData> for Metrics {
     fn from(data: InstrumentData) -> Self {
         Metrics {
@@ -433,6 +464,7 @@ impl From<InstrumentData> for Metrics {
 #[cfg(test)]
 mod test {
     use rust_embed::RustEmbed;
+    use serde_json::json;
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
@@ -479,6 +511,31 @@ mod test {
     fn test_license_halt() {
         let mut data = InstrumentData::default();
         data.populate_license_instrument(&LicenseState::LicensedHalt);
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_custom_plugin() {
+        let mut configuration = crate::Configuration::default();
+        let mut custom_plugins = serde_json::Map::new();
+        custom_plugins.insert("name".to_string(), json!("test"));
+        configuration.plugins.plugins = Some(custom_plugins);
+        let mut data = InstrumentData::default();
+        data.populate_user_plugins_instrument(&configuration);
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_ignore_cloud_router_plugins() {
+        let mut configuration = crate::Configuration::default();
+        let mut custom_plugins = serde_json::Map::new();
+        custom_plugins.insert("name".to_string(), json!("test"));
+        custom_plugins.insert("cloud_router.".to_string(), json!("test"));
+        configuration.plugins.plugins = Some(custom_plugins);
+        let mut data = InstrumentData::default();
+        data.populate_user_plugins_instrument(&configuration);
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

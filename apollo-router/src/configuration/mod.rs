@@ -944,7 +944,7 @@ impl Default for Apq {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
-    pub(crate) cache: Cache,
+    pub(crate) cache: QueryPlanCache,
     /// Warms up the cache on reloads by running the query plan over
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
@@ -983,11 +983,76 @@ pub(crate) struct QueryPlanning {
 /// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+pub(crate) struct QueryPlanCache {
+    /// Configures the in memory cache (always active)
+    pub(crate) in_memory: InMemoryCache,
+    /// Configures and activates the Redis cache
+    pub(crate) redis: Option<QueryPlanRedisCache>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Redis cache configuration
+pub(crate) struct QueryPlanRedisCache {
+    /// List of URLs to the Redis cluster
+    pub(crate) urls: Vec<url::Url>,
+
+    /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
+    pub(crate) username: Option<String>,
+    /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
+    pub(crate) password: Option<String>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// Redis request timeout (default: 2ms)
+    pub(crate) timeout: Option<Duration>,
+
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_query_plan_cache_ttl"
+    )]
+    #[schemars(with = "Option<String>", default = "default_query_plan_cache_ttl")]
+    /// TTL for entries
+    pub(crate) ttl: Duration,
+
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
+
+    #[serde(default)]
+    /// TLS client configuration
+    pub(crate) tls: Option<TlsClient>,
+
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
+
+    #[serde(default = "default_reset_ttl")]
+    /// When a TTL is set on a key, reset it when reading the data from that key
+    pub(crate) reset_ttl: bool,
+}
+
+fn default_query_plan_cache_ttl() -> Duration {
+    // Default TTL set to 30 days
+    Duration::from_secs(86400 * 30)
+}
+
+/// Cache configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
     /// Configures and activates the Redis cache
     pub(crate) redis: Option<RedisCache>,
+}
+
+impl From<QueryPlanCache> for Cache {
+    fn from(value: QueryPlanCache) -> Self {
+        Cache {
+            in_memory: value.in_memory,
+            redis: value.redis.map(Into::into),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -1046,6 +1111,22 @@ pub(crate) struct RedisCache {
 
 fn default_required_to_start() -> bool {
     false
+}
+
+impl From<QueryPlanRedisCache> for RedisCache {
+    fn from(value: QueryPlanRedisCache) -> Self {
+        RedisCache {
+            urls: value.urls,
+            username: value.username,
+            password: value.password,
+            timeout: value.timeout,
+            ttl: Some(value.ttl),
+            namespace: value.namespace,
+            tls: value.tls,
+            required_to_start: value.required_to_start,
+            reset_ttl: value.reset_ttl,
+        }
+    }
 }
 
 fn default_reset_ttl() -> bool {
