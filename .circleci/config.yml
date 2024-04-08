@@ -357,13 +357,22 @@ commands:
                 command: |
                   printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
 
+      - when:
+        condition:
+          equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+        steps:
+          - run:
+              name: Install nightly Rust to build the fuzzers
+              command: |
+                ./rustup.sh -y --profile minimal --component clippy --component rustfmt
+
   install_extra_tools:
     steps:
       - run:
           name: Install cargo deny, about, edit
           command: |
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked cargo-deny cargo-about cargo-edit
+              cargo install --locked cargo-deny cargo-about cargo-edit cargo-fuzz
             fi
 
   fetch_dependencies:
@@ -502,6 +511,11 @@ commands:
               key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
               paths:
                 - target
+
+  fuzz_build:
+    steps:
+      - run: cargo +nightly fuzz build
+
 jobs:
   lint:
     environment:
@@ -556,6 +570,14 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      - when:
+        condition:
+          equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+        steps:
+          - run:
+              name: Build fuzzers
+              command: |
+                cargo +nightly fuzz build
 
   test_updated:
     environment:
