@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -2375,12 +2374,15 @@ expression: "&schema"
           "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
           "anyOf": [
             {
+              "type": "string",
+              "enum": [
+                "auto"
+              ]
+            },
+            {
               "type": "integer",
               "format": "uint",
               "minimum": 1.0
-            },
-            {
-              "type": "string"
             }
           ]
         }
@@ -2732,12 +2734,15 @@ expression: "&schema"
               "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
               "anyOf": [
                 {
+                  "type": "string",
+                  "enum": [
+                    "auto"
+                  ]
+                },
+                {
                   "type": "integer",
                   "format": "uint",
                   "minimum": 1.0
-                },
-                {
-                  "type": "string"
                 }
               ]
             }
