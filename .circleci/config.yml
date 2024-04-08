@@ -358,13 +358,13 @@ commands:
                   printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
 
       - when:
-        condition:
-          equal: [ *arm_linux_test_executor, << parameters.platform >> ]
-        steps:
-          - run:
-              name: Install nightly Rust to build the fuzzers
-              command: |
-                ./rustup.sh -y --profile minimal --component clippy --component rustfmt --toolchain nightly
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install nightly Rust to build the fuzzers
+                command: |
+                  ./rustup.sh -y --profile minimal --component clippy --component rustfmt --toolchain nightly
 
   install_extra_tools:
     steps:
@@ -570,10 +570,10 @@ jobs:
           platform: << parameters.platform >>
       - xtask_test
       - when:
-        condition:
-          equal: [ *arm_linux_test_executor, << parameters.platform >> ]
-        steps:
-          - fuzz_build
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - fuzz_build
 
   test_updated:
     environment:
