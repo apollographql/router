@@ -1,6 +1,4 @@
 #![no_main]
-mod invariant_router;
-
 use std::fs::OpenOptions;
 use std::io::Write;
 
