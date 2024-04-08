@@ -409,15 +409,6 @@ impl InstrumentData {
     }
 
     pub(crate) fn populate_user_plugins_instrument(&mut self, configuration: &Configuration) {
-        println!(
-            "custom plugins: {}",
-            configuration
-                .plugins
-                .plugins
-                .as_ref()
-                .map(|configuration| configuration.len())
-                .unwrap_or_default() as u64
-        );
         self.data.insert(
             "apollo.router.config.custom_plugins".to_string(),
             (
