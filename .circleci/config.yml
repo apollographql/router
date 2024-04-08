@@ -573,10 +573,7 @@ jobs:
         condition:
           equal: [ *arm_linux_test_executor, << parameters.platform >> ]
         steps:
-          - run:
-              name: Build fuzzers
-              command: |
-                cargo +nightly fuzz build
+          - fuzz_build
 
   test_updated:
     environment:
