@@ -101,7 +101,6 @@ impl BridgeQueryPlannerPool {
 
             tokio::spawn(async move {
                 while let Ok((request, res_sender)) = receiver.recv().await {
-
                     let svc = match planner.ready().await {
                         Ok(svc) => svc,
                         Err(e) => {
