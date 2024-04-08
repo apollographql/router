@@ -650,7 +650,7 @@ pub(crate) struct Supergraph {
 pub(crate) struct QueryPlanner {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
-    pub(crate) experimental_available_parallelism: AvailableParallelism,
+    pub(crate) experimental_parallelism: AvailableParallelism,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -674,7 +674,7 @@ impl Default for AvailableParallelism {
 
 impl QueryPlanner {
     pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
-        match self.experimental_available_parallelism {
+        match self.experimental_parallelism {
             AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
             AvailableParallelism::Fixed(n) => Ok(n),
         }

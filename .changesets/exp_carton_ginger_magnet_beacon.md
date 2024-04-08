@@ -2,12 +2,12 @@
 
 The router supports a new experimental feature: a pool of query planners to parallelize query planning.
 
-You can configure query planner pools with the `supergraph.query_planner.experimental_available_parallelism` option:
+You can configure query planner pools with the `supergraph.query_planner.experimental_parallelism` option:
 
 ```yaml
 supergraph:
   query_planner:
-    experimental_available_parallelism: auto # number of available cpus
+    experimental_parallelism: auto # number of available cpus
 ```
 
 Its value is the number of query planners that run in parallel, and its default value is `1`. You can set it to the special value `auto` to automatically set it equal to the number of available CPUs.

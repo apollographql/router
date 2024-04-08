@@ -2363,14 +2363,14 @@ expression: "&schema"
     "query_planner": {
       "description": "Configuration for the query planner",
       "default": {
-        "experimental_available_parallelism": 1
+        "experimental_parallelism": 1
       },
       "type": "object",
       "required": [
-        "experimental_available_parallelism"
+        "experimental_parallelism"
       ],
       "properties": {
-        "experimental_available_parallelism": {
+        "experimental_parallelism": {
           "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
           "anyOf": [
             {
@@ -2665,7 +2665,7 @@ expression: "&schema"
         "early_cancel": false,
         "experimental_log_on_broken_pipe": false,
         "query_planner": {
-          "experimental_available_parallelism": 1
+          "experimental_parallelism": 1
         }
       },
       "type": "object",
@@ -2723,14 +2723,14 @@ expression: "&schema"
         "query_planner": {
           "description": "Configuration options pertaining to the query planner component.",
           "default": {
-            "experimental_available_parallelism": 1
+            "experimental_parallelism": 1
           },
           "type": "object",
           "required": [
-            "experimental_available_parallelism"
+            "experimental_parallelism"
           ],
           "properties": {
-            "experimental_available_parallelism": {
+            "experimental_parallelism": {
               "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
               "anyOf": [
                 {
