@@ -364,7 +364,7 @@ commands:
           - run:
               name: Install nightly Rust to build the fuzzers
               command: |
-                ./rustup.sh -y --profile minimal --component clippy --component rustfmt
+                ./rustup.sh -y --profile minimal --component clippy --component rustfmt --toolchain nightly
 
   install_extra_tools:
     steps:
@@ -511,7 +511,6 @@ commands:
               key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
               paths:
                 - target
-
   fuzz_build:
     steps:
       - run: cargo +nightly fuzz build
