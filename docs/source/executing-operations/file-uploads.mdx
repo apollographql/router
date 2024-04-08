@@ -394,4 +394,4 @@ While in private preview, Apollo recommends using file uploads only in developme
 
 ### Unsupported query modes
 
-When file uploads are enabled in the router, any operations using the [`@defer`](/graphos/operations/defer/) are unsupported.
+The router rejects operations that use file upload variables on or inside fields using [`@defer`](/graphos/operations/defer/).
