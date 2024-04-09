@@ -247,6 +247,9 @@ pub(super) struct RouterResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// Blocks the response handling in the router
+    #[serde(default = "default_blocking")]
+    pub(super) blocking: bool,
 }
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -804,6 +807,82 @@ where
         .and_status_code(status_to_send)
         .and_sdl(sdl_to_send.clone())
         .build();
+
+    if !response_config.blocking {
+        let context = response.context.clone();
+
+        let http_client2 = http_client.clone();
+        let coprocessor_url2 = coprocessor_url.clone();
+        // Second, call our co-processor and get a reply.
+        tracing::debug!(?payload, "externalized output");
+        let guard = context.enter_active_request();
+        let start = Instant::now();
+        let _ = payload.call(http_client.clone(), &coprocessor_url).await;
+        let duration = start.elapsed().as_secs_f64();
+        drop(guard);
+        tracing::info!(
+            histogram.apollo.router.operations.coprocessor.duration = duration,
+            coprocessor.stage = %PipelineStep::RouterResponse,
+        );
+
+        let map_context = response.context.clone();
+        // Map the rest of our body to process subsequent chunks of response
+        let mapped_stream = rest.map(move |deferred_response| {
+            let generator_client = http_client2.clone();
+            let generator_coprocessor_url = coprocessor_url2.clone();
+            let generator_map_context = map_context.clone();
+            let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
+
+            if let Ok(deferred_response) = &deferred_response {
+                let bytes = deferred_response.to_vec();
+                let body_to_send = response_config
+                    .body
+                    .then(|| String::from_utf8(bytes.clone()))
+                    .transpose()
+                    .unwrap();
+                let context_to_send = response_config
+                    .context
+                    .then(|| generator_map_context.clone());
+
+                // Note: We deliberately DO NOT send headers or status_code even if the user has
+                // requested them. That's because they are meaningless on a deferred response and
+                // providing them will be a source of confusion.
+                let payload = Externalizable::router_builder()
+                    .stage(PipelineStep::RouterResponse)
+                    .id(generator_id)
+                    .and_body(body_to_send)
+                    .and_context(context_to_send)
+                    .and_sdl(generator_sdl_to_send)
+                    .build();
+                tokio::task::spawn(async move {
+                    // Second, call our co-processor and get a reply.
+                    tracing::debug!(?payload, "externalized output");
+                    let guard = generator_map_context.enter_active_request();
+                    let start = Instant::now();
+                    let _ = payload
+                        .call(generator_client, &generator_coprocessor_url)
+                        .await;
+                    let duration = start.elapsed().as_secs_f64();
+                    drop(guard);
+                    tracing::info!(
+                        histogram.apollo.router.operations.coprocessor.duration = duration,
+                        coprocessor.stage = %PipelineStep::RouterResponse,
+                    );
+                });
+            }
+
+            deferred_response
+        });
+
+        // Create our response stream which consists of the bytes from our first body chained with the
+        // rest of the responses in our mapped stream.
+        //let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
+        let final_stream = once(ready(Ok(bytes))).chain(mapped_stream).boxed();
+
+        response.response = http::Response::from_parts(parts, Body::wrap_stream(final_stream));
+        return Ok(response);
+    }
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
