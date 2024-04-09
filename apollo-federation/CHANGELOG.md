@@ -17,6 +17,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Maintenance
 ## Documentation-->
 
+# [0.0.10](https://crates.io/crates/apollo-federation/0.0.10) - 2024-04-09
+
+## Features
+- Query plan changes for initial router integration, by [SimonSapin] in [pull/240]
+- Mark join/v0.4 spec as supported for non-query planning purpose, by [SimonSapin] in [pull/233], [pull/237]
+- Continued work on core query planning implementation, by [duckki], [SimonSapin], [TylerBloom]
+
+## Maintenance
+- Update `apollo-compiler`, by [goto-bus-stop] in [pull/253]
+
+[duckki]: https://github.com/duckki
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[SimonSapin]: https://github.com/SimonSapin
+[TylerBloom]: https://github.com/TylerBloom
+[pull/233]: https://github.com/apollographql/federation-next/pull/233
+[pull/237]: https://github.com/apollographql/federation-next/pull/237
+[pull/240]: https://github.com/apollographql/federation-next/pull/240
+[pull/253]: https://github.com/apollographql/federation-next/pull/253
+
 # [0.0.9](https://crates.io/crates/apollo-federation/0.0.9) - 2024-03-20
 
 ## Features
