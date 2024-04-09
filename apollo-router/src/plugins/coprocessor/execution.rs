@@ -57,7 +57,6 @@ pub(super) struct ExecutionResponseConf {
     /// Blocks the response handling in the router
     #[serde(default = "super::default_blocking")]
     pub(super) blocking: bool,
-    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -352,7 +351,7 @@ async fn process_execution_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
     sdl: Arc<String>,
-    response: execution::Response,
+    mut response: execution::Response,
     response_config: ExecutionResponseConf,
 ) -> Result<execution::Response, BoxError>
 where
@@ -400,27 +399,76 @@ where
         .and_has_next(first.has_next)
         .build();
 
-        if !response_config.blocking {
-            let context = response.context.clone();
+    if !response_config.blocking {
+        let context = response.context.clone();
+        let http_client2 = http_client.clone();
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let guard = context.enter_active_request();
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            drop(guard);
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::ExecutionResponse,
+            );
+        });
+
+        let map_context = response.context.clone();
+        // Map the rest of our body to process subsequent chunks of response
+        let mapped_stream = rest.map(move |deferred_response| {
+            let generator_client = http_client2.clone();
+            let generator_coprocessor_url = coprocessor_url.clone();
+            let generator_map_context = map_context.clone();
+            let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
+
+            let body_to_send = response_config.body.then(|| {
+                serde_json::to_value(&deferred_response).expect("serialization will not fail")
+            });
+            let context_to_send = response_config
+                .context
+                .then(|| generator_map_context.clone());
+
+            // Note: We deliberately DO NOT send headers or status_code even if the user has
+            // requested them. That's because they are meaningless on a deferred response and
+            // providing them will be a source of confusion.
+            let payload = Externalizable::execution_builder()
+                .stage(PipelineStep::ExecutionResponse)
+                .id(generator_id)
+                .and_body(body_to_send)
+                .and_context(context_to_send)
+                .and_sdl(generator_sdl_to_send)
+                .and_has_next(deferred_response.has_next)
+                .build();
             tokio::task::spawn(async move {
+                // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let guard = context.enter_active_request();
+                let guard = generator_map_context.enter_active_request();
                 let start = Instant::now();
-                let _ = payload.call(http_client, &coprocessor_url).await;
+                let _ = payload
+                    .call(generator_client, &generator_coprocessor_url)
+                    .await;
                 let duration = start.elapsed().as_secs_f64();
                 drop(guard);
                 tracing::info!(
                     histogram.apollo.router.operations.coprocessor.duration = duration,
-                    coprocessor.stage = %PipelineStep::ExecutionRequest,
+                    coprocessor.stage = %PipelineStep::ExecutionResponse,
                 );
             });
-    
-            //FIXME: how to handle a stream
-            response.response = http::Response::from_parts(parts, body);
-            return Ok(ControlFlow::Continue(request));
-        }
 
-        
+            deferred_response
+        });
+
+        // Create our response stream which consists of our first body chained with the
+        // rest of the responses in our mapped stream.
+        let stream = once(ready(first)).chain(mapped_stream).boxed();
+
+        response.response = http::Response::from_parts(parts, stream);
+        return Ok(response);
+    }
+
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();
@@ -498,12 +546,17 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
+                let start = Instant::now();
                 let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
+                let duration = start.elapsed().as_secs_f64();
                 drop(guard);
-                tracing::debug!(?co_processor_result, "co-processor returned");
+                tracing::info!(
+                    histogram.apollo.router.operations.coprocessor.duration = duration,
+                    coprocessor.stage = %PipelineStep::ExecutionResponse,
+                );
                 let co_processor_output = co_processor_result?;
 
                 validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
@@ -833,6 +886,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                blocking: true,
             },
             request: Default::default(),
         };
@@ -964,6 +1018,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                blocking: true,
             },
             request: Default::default(),
         };
