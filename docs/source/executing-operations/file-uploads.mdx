@@ -395,3 +395,27 @@ While in private preview, Apollo recommends using file uploads only in developme
 ### Unsupported query modes
 
 The router rejects operations that use file upload variables on or inside fields using [`@defer`](/graphos/operations/defer/).
+
+<CodeColumns>
+
+```graphql title="❌ Unsupported usage" disableCopy=true showLineNumbers=false
+query ($file: Upload) {
+  someField {
+    ... @defer {
+      anotherField(file: $file)
+    }
+  }
+}
+```
+
+```graphql title="✅ Supported usage" disableCopy=true showLineNumbers=false
+query ($file: Upload) {
+  someField(file: $file) {
+    ... @defer {
+      anotherField
+    }
+  }
+}
+```
+
+</CodeColumns>
