@@ -41,7 +41,7 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlanResult;
@@ -82,7 +82,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
     execution_service_factory: ExecutionServiceFactory,
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+    query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
     schema: Arc<Schema>,
     notify: Notify<String, graphql::Response>,
 }
@@ -91,7 +91,7 @@ pub(crate) struct SupergraphService {
 impl SupergraphService {
     #[builder]
     pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+        query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
@@ -156,7 +156,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 }
 
 async fn service_call(
-    planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    planning: CachingQueryPlanner<BridgeQueryPlannerPool>,
     execution_service_factory: ExecutionServiceFactory,
     schema: Arc<Schema>,
     req: SupergraphRequest,
@@ -227,7 +227,11 @@ async fn service_call(
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
 
-            if let Some(batching) = context.extensions().lock().get::<Batching>() {
+            if let Some(batching) = {
+                let lock = context.extensions().lock();
+                let batching = lock.get::<Batching>();
+                batching.cloned()
+            } {
                 if batching.enabled && (is_deferred || is_subscription) {
                     let message = if is_deferred {
                         "BATCHING_DEFER_UNSUPPORTED"
@@ -586,7 +590,7 @@ async fn dispatch_event(
 }
 
 async fn plan_query(
-    mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    mut planning: CachingQueryPlanner<BridgeQueryPlannerPool>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
@@ -599,7 +603,10 @@ async fn plan_query(
     // tests will pass.
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
-    if !context.extensions().lock().contains_key::<ParsedDocument>() {
+    if !{
+        let lock = context.extensions().lock();
+        lock.contains_key::<ParsedDocument>()
+    } {
         let doc = Query::parse_document(
             &query_str,
             operation_name.as_deref(),
@@ -661,11 +668,11 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
-    planner: BridgeQueryPlanner,
+    planner: BridgeQueryPlannerPool,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(planner: BridgeQueryPlanner) -> Self {
+    pub(crate) fn new(planner: BridgeQueryPlannerPool) -> Self {
         Self {
             plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
@@ -752,7 +759,7 @@ impl PluggableSupergraphServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+    query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
     config: Arc<Configuration>,
@@ -843,8 +850,8 @@ impl SupergraphCreator {
         self.query_planner_service.previous_cache()
     }
 
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.query_planner_service.planner()
+    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.query_planner_service.planners()
     }
 
     pub(crate) async fn warm_up_query_planner(
