@@ -39,7 +39,17 @@ pub(crate) enum CostCalculationAlgorithm {
     /// - Union: 1
     /// - Scalar: 0
     /// - Enum: 0
-    Basic,
+    Basic {
+        /// The maximum cost of a query
+        max: f64,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+enum Mode {
+    Measure,
+    Reject,
 }
 
 trait CostCalculator {
@@ -62,6 +72,10 @@ trait CostCalculator {
 pub(crate) struct DemandControlConfig {
     /// Enable demand control
     enabled: bool,
+    /// The mode that the demand control plugin should operate in.
+    /// - Measure: The plugin will measure the cost of incoming requests but not reject them.
+    /// - Reject: The plugin will measure the cost of incoming requests and reject them if the algorithm indicates that they should be rejected.
+    mode: Mode,
     /// The algorithm used to calculate the cost of an incoming request
     #[allow(dead_code)]
     algorithm: CostCalculationAlgorithm,
