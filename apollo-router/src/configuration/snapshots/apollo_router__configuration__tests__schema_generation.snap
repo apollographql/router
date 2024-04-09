@@ -2864,7 +2864,10 @@ expression: "&schema"
                     },
                     "ttl": {
                       "description": "TTL for entries",
-                      "default": null,
+                      "default": {
+                        "secs": 2592000,
+                        "nanos": 0
+                      },
                       "type": "string",
                       "nullable": true
                     },
