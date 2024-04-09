@@ -143,12 +143,11 @@ where
                     json: accepts_json,
                     multipart_defer: accepts_multipart_defer,
                     multipart_subscription: accepts_multipart_subscription,
-                } = context
-                    .extensions()
-                    .lock()
-                    .get()
-                    .cloned()
-                    .unwrap_or_default();
+                } = {
+                    let lock = context.extensions().lock();
+                    let cra = lock.get::<ClientRequestAccepts>();
+                    cra.cloned().unwrap_or_default()
+                };
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
                     parts
