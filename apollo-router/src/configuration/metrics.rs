@@ -467,6 +467,15 @@ impl InstrumentData {
                         .query_planner
                         .experimental_query_planner_parallelism()
                         .map(|n| {
+                            #[cfg(test)]
+                            {
+                                // Set to a fixed number for snapshot tests
+                                if let AvailableParallelism::Auto(_) =
+                                    query_planner_parallelism_config
+                                {
+                                    return 8;
+                                }
+                            }
                             let as_usize: usize = n.into();
                             let as_u64: u64 = as_usize.try_into().unwrap_or_default();
                             as_u64
