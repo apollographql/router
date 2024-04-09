@@ -354,4 +354,3 @@ harness = false
 
 [[example]]
 name = "planner"
-path = "benches/planner.rs"
