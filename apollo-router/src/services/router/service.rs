@@ -401,7 +401,7 @@ impl RouterService {
     async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context.clone();
 
-        let supergraph_requests = match self.translate_request(req).await {
+        let (supergraph_requests, is_batch) = match self.translate_request(req).await {
             Ok(requests) => requests,
             Err(err) => {
                 u64_counter!(
@@ -465,11 +465,9 @@ impl RouterService {
             .into_iter()
             .collect::<Result<Vec<router::Response>, BoxError>>()?;
 
-        // If we only have one result, go ahead and return it. Otherwise, create a new result
-        // which is an array of all results.
-        if results.len() == 1 {
-            Ok(results.pop().expect("we should have at least one response"))
-        } else {
+        // If we detected we are processing a batch, return an array of results even if there is only
+        // one result
+        if is_batch {
             let mut results_it = results.into_iter();
             let first = results_it
                 .next()
@@ -489,6 +487,8 @@ impl RouterService {
                 response: http::Response::from_parts(parts, Body::from(bytes.freeze())),
                 context,
             })
+        } else {
+            Ok(results.pop().expect("we should have at least one response"))
         }
     }
 
@@ -613,7 +613,7 @@ impl RouterService {
     async fn translate_request(
         &self,
         req: RouterRequest,
-    ) -> Result<Vec<SupergraphRequest>, TranslateError> {
+    ) -> Result<(Vec<SupergraphRequest>, bool), TranslateError> {
         let RouterRequest {
             router_request,
             context,
@@ -774,7 +774,7 @@ impl RouterService {
             },
         );
 
-        Ok(results)
+        Ok((results, is_batch))
     }
 
     fn count_errors(errors: &[graphql::Error]) {
