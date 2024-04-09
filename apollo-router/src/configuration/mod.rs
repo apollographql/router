@@ -629,6 +629,46 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+
+    /// Configuration options pertaining to the query planner component.
+    pub(crate) query_planner: QueryPlanner,
+}
+
+/// Configuration options pertaining to the query planner component.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct QueryPlanner {
+    /// Set the size of a pool of workers to enable query planning parallelism.
+    /// Default: 1.
+    pub(crate) experimental_parallelism: AvailableParallelism,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub(crate) enum AvailableParallelism {
+    Auto(Auto),
+    Fixed(NonZeroUsize),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Auto {
+    Auto,
+}
+
+impl Default for AvailableParallelism {
+    fn default() -> Self {
+        Self::Fixed(NonZeroUsize::new(1).expect("cannot fail"))
+    }
+}
+
+impl QueryPlanner {
+    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
+        match self.experimental_parallelism {
+            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
+            AvailableParallelism::Fixed(n) => Ok(n),
+        }
+    }
 }
 
 fn default_defer_support() -> bool {
@@ -648,6 +688,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -667,6 +708,7 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -685,6 +727,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -704,6 +747,7 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
