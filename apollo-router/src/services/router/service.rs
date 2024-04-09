@@ -495,7 +495,8 @@ impl RouterService {
     async fn translate_query_request(
         &self,
         parts: &Parts,
-    ) -> Result<Vec<graphql::Request>, TranslateError> {
+    ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
+        let mut is_batch = false;
         parts.uri.query().map(|q| {
             let mut result = vec![];
 
@@ -518,6 +519,7 @@ impl RouterService {
                                     "failed to decode a valid GraphQL request from path {e}"
                                 ),
                             })?;
+                        is_batch = true;
                     } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
                         let extension_details = if self.batching.enabled
                             && !matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
@@ -543,7 +545,7 @@ impl RouterService {
                     }
                 }
             };
-            Ok(result)
+            Ok((result, is_batch))
         }).unwrap_or_else(|| {
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
@@ -557,8 +559,9 @@ impl RouterService {
     fn translate_bytes_request(
         &self,
         bytes: &Bytes,
-    ) -> Result<Vec<graphql::Request>, TranslateError> {
+    ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
         let mut result = vec![];
+        let mut is_batch = false;
 
         match graphql::Request::deserialize_from_bytes(bytes) {
             Ok(request) => {
@@ -577,6 +580,7 @@ impl RouterService {
                                 "failed to deserialize the request body into JSON: {e}"
                             ),
                         })?;
+                    is_batch = true;
                 } else if !bytes.is_empty() && bytes[0] == b'[' {
                     let extension_details = if self.batching.enabled
                         && !matches!(self.batching.mode, BatchingMode::BatchHttpLink)
@@ -603,7 +607,7 @@ impl RouterService {
                 }
             }
         };
-        Ok(result)
+        Ok((result, is_batch))
     }
 
     async fn translate_request(
@@ -617,7 +621,8 @@ impl RouterService {
 
         let (parts, body) = router_request.into_parts();
 
-        let graphql_requests: Result<Vec<graphql::Request>, TranslateError> = if parts.method
+        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> = if parts
+            .method
             == Method::GET
         {
             self.translate_query_request(&parts).await
@@ -667,14 +672,14 @@ impl RouterService {
             }
         };
 
-        let ok_results = graphql_requests?;
+        let (ok_results, is_batch) = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());
         let batch_size = ok_results.len();
 
-        // Insert our batch configuration into Context extensions.
-        // If the results len > 1, we always insert our batching configuration
+        // Modifying our Context extensions.
+        // If we are processing a batch (is_batch == true), insert our batching configuration.
         // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
-        let shared_batch_details = (ok_results.len() > 1)
+        let shared_batch_details = (is_batch)
             .then(|| {
                 context.extensions().lock().insert(self.batching.clone());
 
@@ -709,8 +714,7 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of extensions and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        // Note: We rely on the fact that if we enter this loop, then we must be processing a batch
-        // (i.e. number of results in ok_results > 1).
+        // Note: If we enter this loop, then we must be processing a batch.
         for (index, graphql_request) in ok_results_it.enumerate() {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
