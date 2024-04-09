@@ -7,6 +7,9 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future;
+use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
 use http::StatusCode;
 use tower::BoxError;
 use tower::Service;
@@ -29,6 +32,7 @@ pub struct MockSubgraph {
     subscription_stream: Option<Handle<String, graphql::Response>>,
     map_request_fn:
         Option<Arc<dyn (Fn(SubgraphRequest) -> SubgraphRequest) + Send + Sync + 'static>>,
+    headers: HeaderMap,
 }
 
 impl MockSubgraph {
@@ -38,6 +42,7 @@ impl MockSubgraph {
             extensions: None,
             subscription_stream: None,
             map_request_fn: None,
+            headers: HeaderMap::new(),
         }
     }
 
@@ -74,6 +79,7 @@ pub struct MockSubgraphBuilder {
     mocks: MockResponses,
     extensions: Option<Object>,
     subscription_stream: Option<Handle<String, graphql::Response>>,
+    headers: HeaderMap,
 }
 impl MockSubgraphBuilder {
     pub fn with_extensions(mut self, extensions: Object) -> Self {
@@ -101,12 +107,18 @@ impl MockSubgraphBuilder {
         self
     }
 
+    pub fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        self.headers.insert(name, value);
+        self
+    }
+
     pub fn build(self) -> MockSubgraph {
         MockSubgraph {
             mocks: Arc::new(self.mocks),
             extensions: self.extensions,
             subscription_stream: self.subscription_stream,
             map_request_fn: None,
+            headers: self.headers,
         }
     }
 }
@@ -163,8 +175,11 @@ impl Service<SubgraphRequest> for MockSubgraph {
 
         let response = if let Some(response) = self.mocks.get(body) {
             // Build an http Response
-            let http_response = http::Response::builder()
-                .status(StatusCode::OK)
+            let mut http_response_builder = http::Response::builder().status(StatusCode::OK);
+            if let Some(headers) = http_response_builder.headers_mut() {
+                headers.extend(self.headers.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+            let http_response = http_response_builder
                 .body(response.clone())
                 .expect("Response is serializable; qed");
             SubgraphResponse::new_from_response(http_response, req.context)

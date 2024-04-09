@@ -1,4 +1,3 @@
-use std::collections::LinkedList;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 
@@ -45,6 +44,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
@@ -102,9 +102,13 @@ pub(crate) struct RouterAttributes {
 }
 
 impl DefaultForLevel for RouterAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.common.defaults_for_level(requirement_level);
-        self.server.defaults_for_level(requirement_level);
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.common.defaults_for_level(requirement_level, kind);
+        self.server.defaults_for_level(requirement_level, kind);
     }
 }
 
@@ -135,7 +139,11 @@ pub(crate) struct SupergraphAttributes {
 }
 
 impl DefaultForLevel for SupergraphAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {}
             DefaultAttributeRequirementLevel::Recommended => {
@@ -186,7 +194,11 @@ pub(crate) struct SubgraphAttributes {
 }
 
 impl DefaultForLevel for SubgraphAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {
                 if self.subgraph_name.is_none() {
@@ -301,7 +313,11 @@ pub(crate) struct HttpCommonAttributes {
 }
 
 impl DefaultForLevel for HttpCommonAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {
                 if self.error_type.is_none() {
@@ -316,17 +332,26 @@ impl DefaultForLevel for HttpCommonAttributes {
             }
             DefaultAttributeRequirementLevel::Recommended => {
                 // Recommended
-                if self.http_request_body_size.is_none() {
-                    self.http_request_body_size = Some(true);
-                }
-                if self.http_response_body_size.is_none() {
-                    self.http_response_body_size = Some(true);
-                }
-                if self.network_protocol_version.is_none() {
-                    self.network_protocol_version = Some(true);
-                }
-                if self.network_type.is_none() {
-                    self.network_type = Some(true);
+                match kind {
+                    TelemetryDataKind::Traces => {
+                        if self.http_request_body_size.is_none() {
+                            self.http_request_body_size = Some(true);
+                        }
+                        if self.http_response_body_size.is_none() {
+                            self.http_response_body_size = Some(true);
+                        }
+                        if self.network_protocol_version.is_none() {
+                            self.network_protocol_version = Some(true);
+                        }
+                        if self.network_type.is_none() {
+                            self.network_type = Some(true);
+                        }
+                    }
+                    TelemetryDataKind::Metrics => {
+                        if self.network_protocol_version.is_none() {
+                            self.network_protocol_version = Some(true);
+                        }
+                    }
                 }
             }
             DefaultAttributeRequirementLevel::None => {}
@@ -430,114 +455,69 @@ pub(crate) struct HttpServerAttributes {
 }
 
 impl DefaultForLevel for HttpServerAttributes {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
         match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {
-                if self.url_scheme.is_none() {
-                    self.url_scheme = Some(true);
-                }
-                if self.url_path.is_none() {
-                    self.url_path = Some(true);
-                }
-                if self.url_query.is_none() {
-                    self.url_query = Some(true);
-                }
+            DefaultAttributeRequirementLevel::Required => match kind {
+                TelemetryDataKind::Traces => {
+                    if self.url_scheme.is_none() {
+                        self.url_scheme = Some(true);
+                    }
+                    if self.url_path.is_none() {
+                        self.url_path = Some(true);
+                    }
+                    if self.url_query.is_none() {
+                        self.url_query = Some(true);
+                    }
 
-                if self.http_route.is_none() {
-                    self.http_route = Some(true);
+                    if self.http_route.is_none() {
+                        self.http_route = Some(true);
+                    }
                 }
-            }
-            DefaultAttributeRequirementLevel::Recommended => {
-                if self.client_address.is_none() {
-                    self.client_address = Some(true);
+                TelemetryDataKind::Metrics => {
+                    if self.server_address.is_none() {
+                        self.server_address = Some(true);
+                    }
+                    if self.server_port.is_none() && self.server_address.is_some() {
+                        self.server_port = Some(true);
+                    }
                 }
-                if self.server_address.is_none() {
-                    self.server_address = Some(true);
+            },
+            DefaultAttributeRequirementLevel::Recommended => match kind {
+                TelemetryDataKind::Traces => {
+                    if self.client_address.is_none() {
+                        self.client_address = Some(true);
+                    }
+                    if self.server_address.is_none() {
+                        self.server_address = Some(true);
+                    }
+                    if self.server_port.is_none() && self.server_address.is_some() {
+                        self.server_port = Some(true);
+                    }
+                    if self.user_agent_original.is_none() {
+                        self.user_agent_original = Some(true);
+                    }
                 }
-                if self.server_port.is_none() && self.server_address.is_some() {
-                    self.server_port = Some(true);
-                }
-                if self.user_agent_original.is_none() {
-                    self.user_agent_original = Some(true);
-                }
-            }
+                TelemetryDataKind::Metrics => {}
+            },
             DefaultAttributeRequirementLevel::None => {}
         }
     }
-}
-
-/// Attributes for HTTP clients
-/// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct HttpClientAttributes {
-    /// The ordinal number of request resending attempt.
-    /// Examples:
-    /// *
-    /// Requirement level: Recommended: if and only if request was retried.
-    #[serde(rename = "http.resend_count")]
-    http_resend_count: Option<bool>,
-
-    /// Peer address of the network connection - IP address or Unix domain socket name.
-    /// Examples:
-    /// * 10.1.2.80
-    /// * /tmp/my.sock
-    /// Requirement level: Recommended: If different than server.address.
-    #[serde(rename = "network.peer.address")]
-    network_peer_address: Option<bool>,
-
-    /// Peer port number of the network connection.
-    /// Examples:
-    /// * 65123
-    /// Requirement level: Recommended: If network.peer.address is set.
-    #[serde(rename = "network.peer.port")]
-    network_peer_port: Option<bool>,
-
-    /// Host identifier of the “URI origin” HTTP request is sent to.
-    /// Examples:
-    /// * example.com
-    /// * 10.1.2.80
-    /// * /tmp/my.sock
-    /// Requirement level: Required
-    #[serde(rename = "server.address")]
-    server_address: Option<bool>,
-
-    /// Port identifier of the “URI origin” HTTP request is sent to.
-    /// Examples:
-    /// * 80
-    /// * 8080
-    /// * 433
-    /// Requirement level: Conditionally Required
-    #[serde(rename = "server.port")]
-    server_port: Option<bool>,
-
-    /// Absolute URL describing a network resource according to RFC3986
-    /// Examples:
-    /// * https://www.foo.bar/search?q=OpenTelemetry#SemConv;
-    /// * localhost
-    /// Requirement level: Required
-    #[serde(rename = "url.full")]
-    url_full: Option<bool>,
-
-    /// Value of the HTTP User-Agent header sent by the client.
-    /// Examples:
-    /// * CERN-LineMode/2.15
-    /// * libwww/2.17b3
-    /// Requirement level: Opt-In
-    #[serde(rename = "user_agent.original")]
-    user_agent_original: Option<bool>,
 }
 
 impl Selectors for RouterAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
+    fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = self.common.on_request(request);
         attrs.extend(self.server.on_request(request));
         if let Some(true) = &self.trace_id {
             if let Some(trace_id) = trace_id() {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     Key::from_static_str("trace_id"),
                     trace_id.to_string(),
                 ));
@@ -545,7 +525,7 @@ impl Selectors for RouterAttributes {
         }
         if let Some(true) = &self.datadog_trace_id {
             if let Some(trace_id) = trace_id() {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     Key::from_static_str("dd.trace_id"),
                     trace_id.to_datadog(),
                 ));
@@ -555,20 +535,20 @@ impl Selectors for RouterAttributes {
             let context = Span::current().context();
             let baggage = context.baggage();
             for (key, (value, _)) in baggage {
-                attrs.push_back(KeyValue::new(key.clone(), value.clone()));
+                attrs.push(KeyValue::new(key.clone(), value.clone()));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, response: &router::Response) -> LinkedList<KeyValue> {
+    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
         let mut attrs = self.common.on_response(response);
         attrs.extend(self.server.on_response(response));
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue> {
+    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
         let mut attrs = self.common.on_error(error);
         attrs.extend(self.server.on_error(error));
         attrs
@@ -579,10 +559,10 @@ impl Selectors for HttpCommonAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
-        let mut attrs = LinkedList::new();
+    fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
         if let Some(true) = &self.http_request_method {
-            attrs.push_back(KeyValue::new(
+            attrs.push(KeyValue::new(
                 HTTP_REQUEST_METHOD,
                 request.router_request.method().as_str().to_string(),
             ));
@@ -595,7 +575,7 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     HTTP_REQUEST_BODY_SIZE,
                     content_length.to_string(),
                 ));
@@ -603,17 +583,17 @@ impl Selectors for HttpCommonAttributes {
         }
         if let Some(true) = &self.network_protocol_name {
             if let Some(scheme) = request.router_request.uri().scheme() {
-                attrs.push_back(KeyValue::new(NETWORK_PROTOCOL_NAME, scheme.to_string()));
+                attrs.push(KeyValue::new(NETWORK_PROTOCOL_NAME, scheme.to_string()));
             }
         }
         if let Some(true) = &self.network_protocol_version {
-            attrs.push_back(KeyValue::new(
+            attrs.push(KeyValue::new(
                 NETWORK_PROTOCOL_VERSION,
                 format!("{:?}", request.router_request.version()),
             ));
         }
         if let Some(true) = &self.network_transport {
-            attrs.push_back(KeyValue::new(NETWORK_TRANSPORT, "tcp".to_string()));
+            attrs.push(KeyValue::new(NETWORK_TRANSPORT, "tcp".to_string()));
         }
         if let Some(true) = &self.network_type {
             if let Some(connection_info) =
@@ -621,9 +601,9 @@ impl Selectors for HttpCommonAttributes {
             {
                 if let Some(socket) = connection_info.server_address {
                     if socket.is_ipv4() {
-                        attrs.push_back(KeyValue::new(NETWORK_TYPE, "ipv4".to_string()));
+                        attrs.push(KeyValue::new(NETWORK_TYPE, "ipv4".to_string()));
                     } else if socket.is_ipv6() {
-                        attrs.push_back(KeyValue::new(NETWORK_TYPE, "ipv6".to_string()));
+                        attrs.push(KeyValue::new(NETWORK_TYPE, "ipv6".to_string()));
                     }
                 }
             }
@@ -632,8 +612,8 @@ impl Selectors for HttpCommonAttributes {
         attrs
     }
 
-    fn on_response(&self, response: &router::Response) -> LinkedList<KeyValue> {
-        let mut attrs = LinkedList::new();
+    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
         if let Some(true) = &self.http_response_body_size {
             if let Some(content_length) = response
                 .response
@@ -641,14 +621,15 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     HTTP_RESPONSE_BODY_SIZE,
                     content_length.to_string(),
                 ));
             }
         }
+
         if let Some(true) = &self.http_response_status_code {
-            attrs.push_back(KeyValue::new(
+            attrs.push(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
                 response.response.status().as_u16() as i64,
             ));
@@ -656,7 +637,7 @@ impl Selectors for HttpCommonAttributes {
 
         if let Some(true) = &self.error_type {
             if !response.response.status().is_success() {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     ERROR_TYPE,
                     response
                         .response
@@ -670,10 +651,10 @@ impl Selectors for HttpCommonAttributes {
         attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
-        let mut attrs = LinkedList::new();
+    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
         if let Some(true) = &self.error_type {
-            attrs.push_back(KeyValue::new(
+            attrs.push(KeyValue::new(
                 ERROR_TYPE,
                 StatusCode::INTERNAL_SERVER_ERROR
                     .canonical_reason()
@@ -681,7 +662,7 @@ impl Selectors for HttpCommonAttributes {
             ));
         }
         if let Some(true) = &self.http_response_status_code {
-            attrs.push_back(KeyValue::new(
+            attrs.push(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
                 StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
             ));
@@ -695,33 +676,33 @@ impl Selectors for HttpServerAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
-        let mut attrs = LinkedList::new();
+    fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
         if let Some(true) = &self.http_route {
-            attrs.push_back(KeyValue::new(
+            attrs.push(KeyValue::new(
                 HTTP_ROUTE,
                 request.router_request.uri().path().to_string(),
             ));
         }
         if let Some(true) = &self.client_address {
             if let Some(forwarded) = Self::forwarded_for(request) {
-                attrs.push_back(KeyValue::new(CLIENT_ADDRESS, forwarded.ip().to_string()));
+                attrs.push(KeyValue::new(CLIENT_ADDRESS, forwarded.ip().to_string()));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push_back(KeyValue::new(CLIENT_ADDRESS, socket.ip().to_string()));
+                    attrs.push(KeyValue::new(CLIENT_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
         if let Some(true) = &self.client_port {
             if let Some(forwarded) = Self::forwarded_for(request) {
-                attrs.push_back(KeyValue::new(CLIENT_PORT, forwarded.port() as i64));
+                attrs.push(KeyValue::new(CLIENT_PORT, forwarded.port() as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push_back(KeyValue::new(CLIENT_PORT, socket.port() as i64));
+                    attrs.push(KeyValue::new(CLIENT_PORT, socket.port() as i64));
                 }
             }
         }
@@ -730,23 +711,23 @@ impl Selectors for HttpServerAttributes {
             if let Some(forwarded) =
                 Self::forwarded_host(request).and_then(|h| h.host().map(|h| h.to_string()))
             {
-                attrs.push_back(KeyValue::new(SERVER_ADDRESS, forwarded));
+                attrs.push(KeyValue::new(SERVER_ADDRESS, forwarded));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push_back(KeyValue::new(SERVER_ADDRESS, socket.ip().to_string()));
+                    attrs.push(KeyValue::new(SERVER_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
         if let Some(true) = &self.server_port {
             if let Some(forwarded) = Self::forwarded_host(request).and_then(|h| h.port_u16()) {
-                attrs.push_back(KeyValue::new(SERVER_PORT, forwarded as i64));
+                attrs.push(KeyValue::new(SERVER_PORT, forwarded as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push_back(KeyValue::new(SERVER_PORT, socket.port() as i64));
+                    attrs.push(KeyValue::new(SERVER_PORT, socket.port() as i64));
                 }
             }
         }
@@ -756,7 +737,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push_back(KeyValue::new(
+                    attrs.push(KeyValue::new(
                         NETWORK_LOCAL_ADDRESS,
                         socket.ip().to_string(),
                     ));
@@ -768,7 +749,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push_back(KeyValue::new(NETWORK_LOCAL_PORT, socket.port() as i64));
+                    attrs.push(KeyValue::new(NETWORK_LOCAL_PORT, socket.port() as i64));
                 }
             }
         }
@@ -778,7 +759,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push_back(KeyValue::new(NETWORK_PEER_ADDRESS, socket.ip().to_string()));
+                    attrs.push(KeyValue::new(NETWORK_PEER_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
@@ -787,23 +768,23 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push_back(KeyValue::new(NETWORK_PEER_PORT, socket.port() as i64));
+                    attrs.push(KeyValue::new(NETWORK_PEER_PORT, socket.port() as i64));
                 }
             }
         }
 
         let router_uri = request.router_request.uri();
         if let Some(true) = &self.url_path {
-            attrs.push_back(KeyValue::new(URL_PATH, router_uri.path().to_string()));
+            attrs.push(KeyValue::new(URL_PATH, router_uri.path().to_string()));
         }
         if let Some(true) = &self.url_query {
             if let Some(query) = router_uri.query() {
-                attrs.push_back(KeyValue::new(URL_QUERY, query.to_string()));
+                attrs.push(KeyValue::new(URL_QUERY, query.to_string()));
             }
         }
         if let Some(true) = &self.url_scheme {
             if let Some(scheme) = router_uri.scheme_str() {
-                attrs.push_back(KeyValue::new(URL_SCHEME, scheme.to_string()));
+                attrs.push(KeyValue::new(URL_SCHEME, scheme.to_string()));
             }
         }
         if let Some(true) = &self.user_agent_original {
@@ -813,19 +794,19 @@ impl Selectors for HttpServerAttributes {
                 .get(&USER_AGENT)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push_back(KeyValue::new(USER_AGENT_ORIGINAL, user_agent.to_string()));
+                attrs.push(KeyValue::new(USER_AGENT_ORIGINAL, user_agent.to_string()));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &router::Response) -> LinkedList<KeyValue> {
-        LinkedList::default()
+    fn on_response(&self, _response: &router::Response) -> Vec<KeyValue> {
+        Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
-        LinkedList::default()
+    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+        Vec::default()
     }
 }
 
@@ -848,7 +829,7 @@ impl HttpServerAttributes {
             .next()
     }
 
-    fn forwarded_host(request: &Request) -> Option<Uri> {
+    pub(crate) fn forwarded_host(request: &Request) -> Option<Uri> {
         request
             .router_request
             .headers()
@@ -871,11 +852,11 @@ impl Selectors for SupergraphAttributes {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
 
-    fn on_request(&self, request: &supergraph::Request) -> LinkedList<KeyValue> {
-        let mut attrs = LinkedList::new();
+    fn on_request(&self, request: &supergraph::Request) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.supergraph_request.body().query {
-                attrs.push_back(KeyValue::new(GRAPHQL_DOCUMENT, query.clone()));
+                attrs.push(KeyValue::new(GRAPHQL_DOCUMENT, query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
@@ -884,7 +865,7 @@ impl Selectors for SupergraphAttributes {
                 .get::<_, String>(OPERATION_NAME)
                 .unwrap_or_default()
             {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     GRAPHQL_OPERATION_NAME,
                     operation_name.clone(),
                 ));
@@ -896,7 +877,7 @@ impl Selectors for SupergraphAttributes {
                 .get::<_, String>(OPERATION_KIND)
                 .unwrap_or_default()
             {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     GRAPHQL_OPERATION_TYPE,
                     operation_type.clone(),
                 ));
@@ -906,12 +887,12 @@ impl Selectors for SupergraphAttributes {
         attrs
     }
 
-    fn on_response(&self, _response: &supergraph::Response) -> LinkedList<KeyValue> {
-        LinkedList::default()
+    fn on_response(&self, _response: &supergraph::Response) -> Vec<KeyValue> {
+        Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
-        LinkedList::default()
+    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+        Vec::default()
     }
 }
 
@@ -919,16 +900,16 @@ impl Selectors for SubgraphAttributes {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
 
-    fn on_request(&self, request: &subgraph::Request) -> LinkedList<KeyValue> {
-        let mut attrs = LinkedList::new();
+    fn on_request(&self, request: &subgraph::Request) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.subgraph_request.body().query {
-                attrs.push_back(KeyValue::new(SUBGRAPH_GRAPHQL_DOCUMENT, query.clone()));
+                attrs.push(KeyValue::new(SUBGRAPH_GRAPHQL_DOCUMENT, query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
             if let Some(op_name) = &request.subgraph_request.body().operation_name {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     SUBGRAPH_GRAPHQL_OPERATION_NAME,
                     op_name.clone(),
                 ));
@@ -941,7 +922,7 @@ impl Selectors for SubgraphAttributes {
                 .get::<_, String>(OPERATION_KIND)
                 .unwrap_or_default()
             {
-                attrs.push_back(KeyValue::new(
+                attrs.push(KeyValue::new(
                     SUBGRAPH_GRAPHQL_OPERATION_TYPE,
                     operation_type.clone(),
                 ));
@@ -949,19 +930,19 @@ impl Selectors for SubgraphAttributes {
         }
         if let Some(true) = &self.subgraph_name {
             if let Some(subgraph_name) = &request.subgraph_name {
-                attrs.push_back(KeyValue::new(SUBGRAPH_NAME, subgraph_name.clone()));
+                attrs.push(KeyValue::new(SUBGRAPH_NAME, subgraph_name.clone()));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &subgraph::Response) -> LinkedList<KeyValue> {
-        LinkedList::default()
+    fn on_response(&self, _response: &subgraph::Response) -> Vec<KeyValue> {
+        Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
-        LinkedList::default()
+    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+        Vec::default()
     }
 }
 
