@@ -43,20 +43,13 @@ executors:
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
-  arm_macos_build: &arm_macos_build_executor
+  macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: 14.2
     resource_class: macos.m1.medium.gen1
-  intel_macos_build: &intel_macos_build_executor
-    macos:
-      # See https://circleci.com/docs/xcode-policy along with the support matrix
-      # at https://circleci.com/docs/using-macos#supported-xcode-versions.
-      # We use the major.minor notation to bring in compatible patches.
-      xcode: 14.2
-    resource_class: macos.x86.medium.gen2
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -167,7 +160,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -178,20 +171,7 @@ commands:
             - run:
                 name: Write arch
                 command: |
-                  echo 'osx-aarch64' >> ~/.arch
-      - when:
-          condition:
-            equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Make link to md5
-                command: |
-                  mkdir -p ~/.local/aliases
-                  ln -s /sbin/md5 ~/.local/aliases/md5sum
-            - run:
-                name: Write arch
-                command: |
-                  echo 'osx-x86' >> ~/.arch
+                  echo 'osx' >> ~/.arch
       - when:
           condition:
             or:
@@ -264,8 +244,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -306,8 +285,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -356,6 +334,15 @@ commands:
                 name: Special case for Windows because of ssh-agent
                 command: |
                   printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for OSX x86_64 builds
+                command: |
+                  rustup target add x86_64-apple-darwin
 
   install_extra_tools:
     steps:
@@ -608,8 +595,7 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
 
           steps:
             - when:
@@ -619,13 +605,28 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --target aarch64-apple-darwin
+            - run:
+                command: >
+                  cargo xtask dist --target x86_64-apple-darwin
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
                   cargo xtask package
+                  --target aarch64-apple-darwin
+                  --apple-team-id ${APPLE_TEAM_ID}
+                  --apple-username ${APPLE_USERNAME}
+                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
+                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
+                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
+                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
+                  --output artifacts/
+            - run:
+                command: >
+                  cargo xtask package
+                  --target x86_64-apple-darwin
                   --apple-team-id ${APPLE_TEAM_ID}
                   --apple-username ${APPLE_USERNAME}
                   --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
@@ -958,7 +959,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ intel_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -1055,7 +1056,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ intel_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
             branches:
               ignore: /.*/
