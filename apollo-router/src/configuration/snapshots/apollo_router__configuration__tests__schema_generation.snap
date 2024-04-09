@@ -2360,35 +2360,6 @@ expression: "&schema"
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "query_planner": {
-      "description": "Configuration for the query planner",
-      "default": {
-        "experimental_parallelism": 1
-      },
-      "type": "object",
-      "required": [
-        "experimental_parallelism"
-      ],
-      "properties": {
-        "experimental_parallelism": {
-          "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
-          "anyOf": [
-            {
-              "type": "string",
-              "enum": [
-                "auto"
-              ]
-            },
-            {
-              "type": "integer",
-              "format": "uint",
-              "minimum": 1.0
-            }
-          ]
-        }
-      },
-      "additionalProperties": false
-    },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
       "type": "object",
