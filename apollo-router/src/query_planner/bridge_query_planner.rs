@@ -565,7 +565,13 @@ impl BridgeQueryPlanner {
                     // If the query is filtered, we want to generate the signature using the original query and generate the
                     // reference using the filtered query. To do this, we need to re-parse the original query here.
                     let signature_doc = if original_query != filtered_query {
-                        Query::parse_document(&original_query, &self.schema, &self.configuration)
+                        Query::parse_document(
+                            &original_query,
+                            operation.clone().as_deref(),
+                            &self.schema,
+                            &self.configuration,
+                        )
+                        .unwrap_or(doc.clone())
                     } else {
                         doc.clone()
                     };

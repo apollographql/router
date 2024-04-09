@@ -11,19 +11,18 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-apollo-compiler = "=1.0.0-beta.13"
+apollo-compiler = "=1.0.0-beta.14"
 apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
 apollo-parser = "0.7.6"
 apollo-router = { path = "../apollo-router" }
 env_logger = "0.10.2"
 log = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["json", "blocking"] }
-router-bridge = "=0.5.16+v2.7.1"
+router-bridge = "=0.5.17+v2.7.2"
 serde_json = "1"
 tokio = { version = "1.36.0", features = ["full"] }
 
 [dev-dependencies]
-apollo-router = { path = "../apollo-router" }
 anyhow = "1"
 async-trait = "0.1"
 schemars = { version = "0.8", features = ["url"] }
