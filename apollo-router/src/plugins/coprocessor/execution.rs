@@ -402,6 +402,7 @@ where
     if !response_config.blocking {
         let context = response.context.clone();
         let http_client2 = http_client.clone();
+        let coprocessor_url2 = coprocessor_url.clone();
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
             let guard = context.enter_active_request();
@@ -419,7 +420,7 @@ where
         // Map the rest of our body to process subsequent chunks of response
         let mapped_stream = rest.map(move |deferred_response| {
             let generator_client = http_client2.clone();
-            let generator_coprocessor_url = coprocessor_url.clone();
+            let generator_coprocessor_url = coprocessor_url2.clone();
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
