@@ -12,9 +12,14 @@ repository = "https://github.com/apollographql/federation-next"
 license = "Elastic-2.0"
 autotests = false                                               # Integration tests are modules of tests/main.rs
 
-[dependencies]
+[workspace.dependencies]
 apollo-compiler = "=1.0.0-beta.15"
-time = { version = "0.3.34", default-features = false, features = ["local-offset"] }
+
+[dependencies]
+apollo-compiler.workspace = true
+time = { version = "0.3.34", default-features = false, features = [
+    "local-offset",
+] }
 derive_more = "0.99.17"
 indexmap = "2.1.0"
 lazy_static = "1.4.0"

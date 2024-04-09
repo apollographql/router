@@ -6,6 +6,7 @@ use apollo_compiler::{ExecutableDocument, NodeStr};
 use std::sync::Arc;
 
 pub(crate) mod conditions;
+mod display;
 pub(crate) mod fetch_dependency_graph;
 pub(crate) mod fetch_dependency_graph_processor;
 pub mod generate;
