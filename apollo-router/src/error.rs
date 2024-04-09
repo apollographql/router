@@ -309,6 +309,9 @@ pub(crate) enum QueryPlannerError {
 
     /// Unauthorized field or type
     Unauthorized(Vec<Path>),
+
+    /// Query planner pool error: {0}
+    PoolProcessing(String),
 }
 
 impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {

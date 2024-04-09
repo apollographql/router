@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::sync::Arc;
-use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
@@ -605,11 +604,9 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             .unwrap_or_default();
         let this = self.clone();
         let fut = async move {
-            let start = Instant::now();
-
-            let mut doc = match context.extensions().lock().get::<ParsedDocument>() {
+            let mut doc = match context.extensions().lock().get::<ParsedDocument>().cloned() {
                 None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
-                Some(d) => d.clone(),
+                Some(d) => d,
             };
 
             let schema = &this.schema.api_schema().definitions;
@@ -666,8 +663,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     doc,
                 )
                 .await;
-            let duration = start.elapsed().as_secs_f64();
-            tracing::info!(histogram.apollo_router_query_planning_time = duration);
 
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
