@@ -4,7 +4,7 @@ expression: response.errors
 ---
 [
   {
-  "message": "the argument `notAnArg` is not supported by `Product.name`",
+    "message": "the argument `notAnArg` is not supported by `Product.name`",
     "locations": [
       {
         "line": 1,
