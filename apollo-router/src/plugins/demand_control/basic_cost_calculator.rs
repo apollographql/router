@@ -50,7 +50,7 @@ impl BasicCostCalculator {
     /// bound for cost anyway.
     fn score_field(
         field: &Field,
-        parent_type_name: Option<&NamedType>,
+        parent_type_name: &NamedType,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         if BasicCostCalculator::skipped_by_directives(field) {
@@ -77,7 +77,7 @@ impl BasicCostCalculator {
         };
         type_cost += BasicCostCalculator::score_selection_set(
             &field.selection_set,
-            Some(field.ty().inner_named_type()),
+            field.ty().inner_named_type(),
             schema,
         )?;
 
@@ -112,7 +112,7 @@ impl BasicCostCalculator {
 
     fn score_inline_fragment(
         inline_fragment: &InlineFragment,
-        parent_type: Option<&NamedType>,
+        parent_type: &NamedType,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         BasicCostCalculator::score_selection_set(
@@ -127,9 +127,17 @@ impl BasicCostCalculator {
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
+
+        let Some(root_type_name) = schema.root_operation(operation.operation_type) else {
+            return Err(DemandControlError::QueryParseFailure(format!(
+                "Cannot cost {} operation because the schema does not support this root type",
+                operation.operation_type
+            )));
+        };
+
         cost += BasicCostCalculator::score_selection_set(
             &operation.selection_set,
-            operation.name.as_ref(),
+            root_type_name,
             schema,
         )?;
 
@@ -138,21 +146,23 @@ impl BasicCostCalculator {
 
     fn score_selection(
         selection: &Selection,
-        parent_type: Option<&NamedType>,
+        parent_type: &NamedType,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         match selection {
             Selection::Field(f) => BasicCostCalculator::score_field(f, parent_type, schema),
             Selection::FragmentSpread(s) => BasicCostCalculator::score_fragment_spread(s),
-            Selection::InlineFragment(i) => {
-                BasicCostCalculator::score_inline_fragment(i, parent_type, schema)
-            }
+            Selection::InlineFragment(i) => BasicCostCalculator::score_inline_fragment(
+                i,
+                i.type_condition.as_ref().unwrap_or(parent_type),
+                schema,
+            ),
         }
     }
 
     fn score_selection_set(
         selection_set: &SelectionSet,
-        parent_type_name: Option<&NamedType>,
+        parent_type_name: &NamedType,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
