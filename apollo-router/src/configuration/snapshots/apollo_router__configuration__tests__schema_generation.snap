@@ -1350,7 +1350,7 @@ expression: "&schema"
     },
     "experimental_apollo_metrics_generation_mode": {
       "description": "Set the Apollo usage report signature and referenced field generation implementation to use.",
-      "default": "legacy",
+      "default": "both",
       "oneOf": [
         {
           "description": "Use the new Rust-based implementation.",
