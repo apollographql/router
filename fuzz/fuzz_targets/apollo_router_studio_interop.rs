@@ -9,8 +9,10 @@ use std::sync::OnceLock;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
-use apollo_router::_private::generate_usage_reporting;
-use apollo_router::_private::UsageReportingComparisonResult;
+#[path = "../../apollo-router/src/apollo_studio_interop/mod.rs"]
+mod apollo_router_usage_reporting;
+use apollo_router_usage_reporting::generate_usage_reporting;
+use apollo_router_usage_reporting::UsageReportingComparisonResult;
 use libfuzzer_sys::fuzz_target;
 use router_bridge::planner::UsageReporting;
 use router_fuzz::generate_valid_operation;
@@ -144,7 +146,7 @@ fuzz_target!(|data: &[u8]| {
     .unwrap();
 
     if !matches!(
-        rust_generated.compare_usage_reporting(&bridge_generated),
+        rust_generated.compare(&bridge_generated),
         UsageReportingComparisonResult::Equal
     ) {
         unsafe { ROUTER_PROCESS.get_mut() }

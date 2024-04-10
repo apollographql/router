@@ -592,8 +592,7 @@ impl BridgeQueryPlanner {
                         ApolloMetricsGenerationMode::Both
                     );
                     if !is_empty_operation_name && is_in_both_metrics_mode {
-                        let comparison_result =
-                            generated_usage_reporting.compare_usage_reporting(&usage_reporting);
+                        let comparison_result = generated_usage_reporting.compare(&usage_reporting);
 
                         if matches!(
                             comparison_result,

@@ -26,13 +26,13 @@ use router_bridge::planner::UsageReporting;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
-pub struct ComparableUsageReporting {
+pub(crate) struct ComparableUsageReporting {
     /// The UsageReporting fields
-    pub result: UsageReporting,
+    pub(crate) result: UsageReporting,
 }
 
 /// Enum specifying the result of a comparison.
-pub enum UsageReportingComparisonResult {
+pub(crate) enum UsageReportingComparisonResult {
     /// The UsageReporting instances are the same
     Equal,
     /// The stats_report_key in the UsageReporting instances are different
@@ -45,16 +45,8 @@ pub enum UsageReportingComparisonResult {
 }
 
 impl ComparableUsageReporting {
-    /// Compare this to another ComparableUsageReporting.
-    pub fn compare(&self, other: &Self) -> UsageReportingComparisonResult {
-        self.compare_usage_reporting(&other.result)
-    }
-
     /// Compare this to another UsageReporting.
-    pub fn compare_usage_reporting(
-        &self,
-        other: &UsageReporting,
-    ) -> UsageReportingComparisonResult {
+    pub(crate) fn compare(&self, other: &UsageReporting) -> UsageReportingComparisonResult {
         let sig_equal = self.result.stats_report_key == other.stats_report_key;
         let refs_equal = self.compare_referenced_fields(&other.referenced_fields_by_type);
         match (sig_equal, refs_equal) {
@@ -101,7 +93,7 @@ impl ComparableUsageReporting {
 /// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
 /// and referenced fields of an operation. The document used to generate the signature and for the references can be
 /// different to handle cases where the operation has been filtered, but we want to keep the same signature.
-pub fn generate_usage_reporting(
+pub(crate) fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
@@ -564,11 +556,9 @@ mod tests {
         let bridge_result = ComparableUsageReporting {
             result: plan.usage_reporting,
         };
-        let expected_result = ComparableUsageReporting {
-            result: UsageReporting {
-                stats_report_key: expected_sig.to_string(),
-                referenced_fields_by_type: expected_refs.clone(),
-            },
+        let expected_result = UsageReporting {
+            stats_report_key: expected_sig.to_string(),
+            referenced_fields_by_type: expected_refs.clone(),
         };
         assert!(matches!(
             bridge_result.compare(&expected_result),
@@ -581,11 +571,9 @@ mod tests {
         expected_sig: &str,
         expected_refs: &HashMap<String, ReferencedFieldsForType>,
     ) {
-        let expected_result = ComparableUsageReporting {
-            result: UsageReporting {
-                stats_report_key: expected_sig.to_string(),
-                referenced_fields_by_type: expected_refs.clone(),
-            },
+        let expected_result = UsageReporting {
+            stats_report_key: expected_sig.to_string(),
+            referenced_fields_by_type: expected_refs.clone(),
         };
         assert!(matches!(
             actual.compare(&expected_result),
@@ -1772,209 +1760,185 @@ mod tests {
 
         // Same signature and ref fields should match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: source.result.stats_report_key.clone(),
-                    referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: source.result.stats_report_key.clone(),
+                referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
             }),
             UsageReportingComparisonResult::Equal
         ));
 
         // Reordered signature should not match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: "# -\n{basicResponseQuery{field2 field1}}".into(),
-                    referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: "# -\n{basicResponseQuery{field2 field1}}".into(),
+                referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
             }),
             UsageReportingComparisonResult::StatsReportKeyNotEqual
         ));
 
         // Different signature should not match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key:
-                        "# NamedQuery\nquery NamedQuery {basicResponseQuery{field1 field2}}".into(),
-                    referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
-                }
+            source.compare(&UsageReporting {
+                stats_report_key:
+                    "# NamedQuery\nquery NamedQuery {basicResponseQuery{field1 field2}}".into(),
+                referenced_fields_by_type: source.result.referenced_fields_by_type.clone(),
             }),
             UsageReportingComparisonResult::StatsReportKeyNotEqual
         ));
 
         // Reordered parent type should match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: source.result.stats_report_key.clone(),
-                    referenced_fields_by_type: HashMap::from([
-                        (
-                            "Query".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["basicResponseQuery".into()],
-                                is_interface: false,
-                            },
-                        ),
-                        (
-                            "SomeResponse".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["field1".into(), "field2".into()],
-                                is_interface: false,
-                            },
-                        ),
-                    ])
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: source.result.stats_report_key.clone(),
+                referenced_fields_by_type: HashMap::from([
+                    (
+                        "Query".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["basicResponseQuery".into()],
+                            is_interface: false,
+                        },
+                    ),
+                    (
+                        "SomeResponse".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["field1".into(), "field2".into()],
+                            is_interface: false,
+                        },
+                    ),
+                ])
             }),
             UsageReportingComparisonResult::Equal
         ));
 
         // Reordered fields should match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: source.result.stats_report_key.clone(),
-                    referenced_fields_by_type: HashMap::from([
-                        (
-                            "Query".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["basicResponseQuery".into()],
-                                is_interface: false,
-                            },
-                        ),
-                        (
-                            "SomeResponse".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["field2".into(), "field1".into()],
-                                is_interface: false,
-                            },
-                        ),
-                    ])
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: source.result.stats_report_key.clone(),
+                referenced_fields_by_type: HashMap::from([
+                    (
+                        "Query".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["basicResponseQuery".into()],
+                            is_interface: false,
+                        },
+                    ),
+                    (
+                        "SomeResponse".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["field2".into(), "field1".into()],
+                            is_interface: false,
+                        },
+                    ),
+                ])
             }),
             UsageReportingComparisonResult::Equal
         ));
 
         // Added parent type should not match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: source.result.stats_report_key.clone(),
-                    referenced_fields_by_type: HashMap::from([
-                        (
-                            "Query".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["basicResponseQuery".into()],
-                                is_interface: false,
-                            },
-                        ),
-                        (
-                            "SomeResponse".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["field1".into(), "field2".into()],
-                                is_interface: false,
-                            },
-                        ),
-                        (
-                            "OtherType".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["otherField".into()],
-                                is_interface: false,
-                            },
-                        ),
-                    ])
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: source.result.stats_report_key.clone(),
+                referenced_fields_by_type: HashMap::from([
+                    (
+                        "Query".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["basicResponseQuery".into()],
+                            is_interface: false,
+                        },
+                    ),
+                    (
+                        "SomeResponse".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["field1".into(), "field2".into()],
+                            is_interface: false,
+                        },
+                    ),
+                    (
+                        "OtherType".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["otherField".into()],
+                            is_interface: false,
+                        },
+                    ),
+                ])
             }),
             UsageReportingComparisonResult::ReferencedFieldsNotEqual
         ));
 
         // Added field should not match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: source.result.stats_report_key.clone(),
-                    referenced_fields_by_type: HashMap::from([
-                        (
-                            "Query".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["basicResponseQuery".into()],
-                                is_interface: false,
-                            },
-                        ),
-                        (
-                            "SomeResponse".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec![
-                                    "field1".into(),
-                                    "field2".into(),
-                                    "field3".into()
-                                ],
-                                is_interface: false,
-                            },
-                        ),
-                    ])
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: source.result.stats_report_key.clone(),
+                referenced_fields_by_type: HashMap::from([
+                    (
+                        "Query".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["basicResponseQuery".into()],
+                            is_interface: false,
+                        },
+                    ),
+                    (
+                        "SomeResponse".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["field1".into(), "field2".into(), "field3".into()],
+                            is_interface: false,
+                        },
+                    ),
+                ])
             }),
             UsageReportingComparisonResult::ReferencedFieldsNotEqual
         ));
 
         // Missing parent type should not match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: source.result.stats_report_key.clone(),
-                    referenced_fields_by_type: HashMap::from([(
-                        "Query".into(),
-                        ReferencedFieldsForType {
-                            field_names: vec!["basicResponseQuery".into()],
-                            is_interface: false,
-                        },
-                    ),])
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: source.result.stats_report_key.clone(),
+                referenced_fields_by_type: HashMap::from([(
+                    "Query".into(),
+                    ReferencedFieldsForType {
+                        field_names: vec!["basicResponseQuery".into()],
+                        is_interface: false,
+                    },
+                ),])
             }),
             UsageReportingComparisonResult::ReferencedFieldsNotEqual
         ));
 
         // Missing field should not match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: source.result.stats_report_key.clone(),
-                    referenced_fields_by_type: HashMap::from([
-                        (
-                            "Query".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["basicResponseQuery".into()],
-                                is_interface: false,
-                            },
-                        ),
-                        (
-                            "SomeResponse".into(),
-                            ReferencedFieldsForType {
-                                field_names: vec!["field1".into()],
-                                is_interface: false,
-                            },
-                        ),
-                    ])
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: source.result.stats_report_key.clone(),
+                referenced_fields_by_type: HashMap::from([
+                    (
+                        "Query".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["basicResponseQuery".into()],
+                            is_interface: false,
+                        },
+                    ),
+                    (
+                        "SomeResponse".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["field1".into()],
+                            is_interface: false,
+                        },
+                    ),
+                ])
             }),
             UsageReportingComparisonResult::ReferencedFieldsNotEqual
         ));
 
         // Both different should not match
         assert!(matches!(
-            source.compare(&ComparableUsageReporting {
-                result: UsageReporting {
-                    stats_report_key: "# -\n{basicResponseQuery{field2 field1}}".into(),
-                    referenced_fields_by_type: HashMap::from([(
-                        "Query".into(),
-                        ReferencedFieldsForType {
-                            field_names: vec!["basicResponseQuery".into()],
-                            is_interface: false,
-                        },
-                    ),])
-                }
+            source.compare(&UsageReporting {
+                stats_report_key: "# -\n{basicResponseQuery{field2 field1}}".into(),
+                referenced_fields_by_type: HashMap::from([(
+                    "Query".into(),
+                    ReferencedFieldsForType {
+                        field_names: vec!["basicResponseQuery".into()],
+                        is_interface: false,
+                    },
+                ),])
             }),
             UsageReportingComparisonResult::BothNotEqual
         ));
