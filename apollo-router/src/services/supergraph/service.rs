@@ -641,8 +641,7 @@ async fn plan_query(
     let batching = context.extensions().lock().remove::<BatchQuery>();
     if let Some(mut batch_query) = batching {
         if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
-            let mut query_hashes = vec![];
-            plan.root.query_hashes(&mut query_hashes);
+            let query_hashes = plan.root.query_hashes()?;
             batch_query
                 .set_query_hashes(query_hashes)
                 .await
