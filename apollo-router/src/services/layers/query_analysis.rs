@@ -132,11 +132,16 @@ impl QueryAnalysisLayer {
                             },
                             Err(errors.clone()),
                         );
-                        return Err(SupergraphResponse::builder()
-                            .errors(vec![Error::builder()
+                        let errors = match errors.into_graphql_errors() {
+                            Ok(v) => v,
+                            Err(errors) => vec![Error::builder()
                                 .message(errors.to_string())
                                 .extension_code(errors.extension_code())
-                                .build()])
+                                .build()],
+                        };
+
+                        return Err(SupergraphResponse::builder()
+                            .errors(errors)
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(request.context)
                             .build()
