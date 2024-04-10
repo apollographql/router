@@ -331,20 +331,43 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
 
+    fn parse_schema_and_operation(
+        schema_str: &str,
+        query_str: &str,
+        config: &Configuration,
+    ) -> (spec::Schema, ParsedDocument) {
+        let schema = spec::Schema::parse_test(schema_str, config).unwrap();
+        let query = Query::parse_document(query_str, None, &schema, config).unwrap();
+        (schema, query)
+    }
+
+    /// Estimate cost of an operation executed on a supergraph.
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
-        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
-        let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let (schema, query) =
+            parse_schema_and_operation(schema_str, query_str, &Default::default());
+        BasicCostCalculator::estimated(&query.executable, &schema.definitions).unwrap()
+    }
+
+    /// Estimate cost of an operation on a plain, non-federated schema.
+    fn basic_estimated_cost(schema_str: &str, query_str: &str) -> f64 {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
+        let query = apollo_compiler::ExecutableDocument::parse_and_validate(
+            &schema,
+            query_str,
+            "query.graphql",
+        )
+        .unwrap();
         BasicCostCalculator::estimated(&query, &schema).unwrap()
     }
 
     async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
+        let (_schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+
         let mut planner = BridgeQueryPlanner::new(schema_str.to_string(), config.clone())
             .await
             .unwrap();
-
-        let schema = spec::Schema::parse(schema_str).unwrap();
-        let query = Query::parse_document(query_str, None, &schema, &config).unwrap();
 
         let ctx = Context::new();
         ctx.extensions().lock().insert::<ParsedDocument>(query);
@@ -366,10 +389,10 @@ mod tests {
     }
 
     fn actual_cost(schema_str: &str, query_str: &str, response_bytes: &'static [u8]) -> f64 {
-        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
-        let query = ExecutableDocument::parse(&schema, query_str, "").unwrap();
+        let (_schema, query) =
+            parse_schema_and_operation(schema_str, query_str, &Default::default());
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
-        BasicCostCalculator::actual(&query, &response).unwrap()
+        BasicCostCalculator::actual(&query.executable, &response).unwrap()
     }
 
     #[test]
@@ -377,7 +400,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -385,7 +408,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_mutation.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 10.0)
+        assert_eq!(basic_estimated_cost(schema, query), 10.0)
     }
 
     #[test]
@@ -393,7 +416,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 1.0)
+        assert_eq!(basic_estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -401,7 +424,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_interface_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 1.0)
+        assert_eq!(basic_estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -409,7 +432,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_union_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 1.0)
+        assert_eq!(basic_estimated_cost(schema, query), 1.0)
     }
 
     #[test]
@@ -417,7 +440,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_list_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 100.0)
+        assert_eq!(basic_estimated_cost(schema, query), 100.0)
     }
 
     #[test]
@@ -425,7 +448,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_scalar_list_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -433,7 +456,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_nested_list_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 10100.0)
+        assert_eq!(basic_estimated_cost(schema, query), 10100.0)
     }
 
     #[test]
@@ -441,7 +464,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_skipped_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query), 0.0)
     }
 
     #[test]
@@ -449,7 +472,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_excluded_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query), 0.0)
     }
 
     #[test(tokio::test)]
