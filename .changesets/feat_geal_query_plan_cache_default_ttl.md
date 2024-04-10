@@ -1,5 +1,5 @@
-### set a default TTL for query plans ([Issue #4473](https://github.com/apollographql/router/issues/4473))
+### Set a default TTL for query plans ([Issue #4473](https://github.com/apollographql/router/issues/4473))
 
-This sets a default TTL of 30 days for query plan caches, because the previous default was to store query plans indefinitely, which does not make sense because they change with schema updates.
+The router has updated the default TTL for query plan caches. The new default TTL is 30 days. With the previous default being an infinite duration, the new finite default better supports the fact that the router updates caches with schema updates.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4588

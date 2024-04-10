@@ -1,8 +1,8 @@
-### reuse cached query plans across schema updates if possible ([Issue #4834](https://github.com/apollographql/router/issues/4834))
+### Reuse cached query plans across schema updates ([Issue #4834](https://github.com/apollographql/router/issues/4834))
 
-This extends the schema aware query hashing introduced in entity caching, to reduce the amount of work when reloading the router. That hash is designed to stay the same for a same query across schema updates if the update does not affect that query. If query planner cache warm up is configured, then it can reuse previous cache entries for which the hash does not change, which will reduce CPU usage and make reloads faster.
+The router now supports an experimental feature to reuse schema aware query hashing—introduced with the [entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching/) feature—to cache query plans. It reduces the amount of work when reloading the router. The hash of the cache stays the same for a query across schema updates if the schema updates don't change the query. If query planner [cache warm-up](https://www.apollographql.com/docs/router/configuration/in-memory-caching/#cache-warm-up) is configured, the router can reuse previous cache entries for which the hash does not change, consequently reducing both CPU usage and reload duration.
 
-This can be activated with the following option:
+You can enable reuse of cached query plans by setting the `supergraph.query_planning.experimental_reuse_query_plans` option:
 
 ```yaml title="router.yaml"
 supergraph:

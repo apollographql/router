@@ -1,6 +1,6 @@
-### Persisted Query errors are now 4xx errors ([PR #4887](https://github.com/apollographql/router/pull/4887)
+### Persisted queries return 4xx errors ([PR #4887](https://github.com/apollographql/router/pull/4887)
 
-Previously, sending various kinds of invalid Persisted Query requests returned a 200 status code to the client. Now, these errors return 4xx status codes:
+Previously, sending an invalid persisted query request could return a 200 status code to the client when they should have returned errors. These requests now return errors as 4xx status codes:
 
 - Sending a PQ ID that is unknown returns 404 (Not Found).
 - Sending freeform GraphQL when no freeform GraphQL is allowed returns

@@ -1,8 +1,8 @@
-### Add OTLP http metrics export ([Issue #4559](https://github.com/apollographql/router/issues/4559))
+### Support exporting metrics via OTLP HTTP ([Issue #4559](https://github.com/apollographql/router/issues/4559))
 
-Users can now export metrics via OTLP Http in addition to the existing OTLP Grpc
+In addition to exporting metrics via OTLP/gRPC, the router now supports exporting metrics via OTLP/HTTP. 
 
-Activate this by setting the `protocol` to `http` in your  your `router.yaml`:
+You can enable exporting via OTLP/HTTP by setting the `protocol` key to `http` in your `router.yaml`:
 
 ```
 telemetry:
