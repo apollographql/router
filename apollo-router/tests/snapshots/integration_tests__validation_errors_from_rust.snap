@@ -4,25 +4,7 @@ expression: response.errors
 ---
 [
   {
-    "message": "the argument `notAnArg` is not supported by `Product.name`",
-    "locations": [
-      {
-        "line": 1,
-        "column": 22
-      }
-    ],
-    "extensions": {
-      "code": "GRAPHQL_VALIDATION_FAILED"
-    }
-  },
-  {
-    "message": "fragment `Unused` must be used in an operation",
-    "locations": [
-      {
-        "line": 1,
-        "column": 42
-      }
-    ],
+    "message": "validation error: [1:22] the argument `notAnArg` is not supported by `Product.name`\n[1:42] fragment `Unused` must be used in an operation",
     "extensions": {
       "code": "GRAPHQL_VALIDATION_FAILED"
     }
