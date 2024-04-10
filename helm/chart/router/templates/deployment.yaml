@@ -59,7 +59,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if or .Values.router.args .Values.router.configuration }}
+          {{- if and .Values.router (or .Values.router.args .Values.router.configuration) }}
           args:
             {{- if .Values.router.args }}
             {{- toYaml .Values.router.args | nindent 12 }}
@@ -115,18 +115,18 @@ spec:
           livenessProbe:
             httpGet:
               path: "/health?live"
-              port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
+              port: {{ .Values.containerPorts.health }}
             initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
           readinessProbe:
             httpGet:
               path: "/health?ready"
-              port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
+              port: {{ .Values.containerPorts.health }}
             initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
+          {{- if or (and .Values.router .Values.router.configuration) .Values.extraVolumeMounts }}
           volumeMounts:
-            {{- if .Values.router.configuration }}
+            {{- if and .Values.router .Values.router.configuration }}
             - name: router-configuration
               mountPath: /app/
               readOnly: true
@@ -139,9 +139,9 @@ spec:
       initContainers:
         {{- include "apollographql.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
       {{- end }}
-      {{- if or .Values.router.configuration .Values.extraVolumes }}
+      {{- if or (and .Values.router .Values.router.configuration) .Values.extraVolumes }}
       volumes:
-        {{- if .Values.router.configuration }}
+        {{- if and .Values.router .Values.router.configuration }}
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}

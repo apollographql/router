@@ -1,4 +1,4 @@
-{{- if .Values.router.configuration }}
+{{- if and .Values.router .Values.router.configuration }}
 {{- $routerFullName := include "router.fullname" .  -}}
 {{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
 {{- $configuration := dict }}

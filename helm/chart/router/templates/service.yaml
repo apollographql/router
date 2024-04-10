@@ -18,7 +18,7 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
-    - port: {{ (splitList ":" (index .Values.router.configuration "health_check").listen | last ) | default "8088" }}
+    - port: {{ .Values.containerPorts.health }}
       targetPort: health
       protocol: TCP
       name: health

@@ -6,14 +6,6 @@ replicaCount: 1
 
 # -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
 router:
-  configuration:
-    supergraph:
-      listen: 0.0.0.0:4000
-    health_check:
-      listen: 0.0.0.0:8088
-
-  args:
-    - --hot-reload
 
 managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
