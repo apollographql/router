@@ -823,6 +823,32 @@ mod tests {
     }
 
     #[test]
+    fn fragment_becomes_unused() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                reviews {
+                    ...F
+                }
+            }
+        }
+
+        fragment F on Review {
+            body
+        }
+        "#;
+
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
     fn defer() {
         static QUERY: &str = r#"
         query {
