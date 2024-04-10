@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -2662,7 +2661,10 @@ expression: "&schema"
           "experimental_reuse_query_plans": false
         },
         "early_cancel": false,
-        "experimental_log_on_broken_pipe": false
+        "experimental_log_on_broken_pipe": false,
+        "query_planner": {
+          "experimental_parallelism": 1
+        }
       },
       "type": "object",
       "properties": {
@@ -2715,6 +2717,35 @@ expression: "&schema"
           "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
           "default": "/",
           "type": "string"
+        },
+        "query_planner": {
+          "description": "Configuration options pertaining to the query planner component.",
+          "default": {
+            "experimental_parallelism": 1
+          },
+          "type": "object",
+          "required": [
+            "experimental_parallelism"
+          ],
+          "properties": {
+            "experimental_parallelism": {
+              "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "auto"
+                  ]
+                },
+                {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 1.0
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
         },
         "query_planning": {
           "description": "Query planning options",
