@@ -586,7 +586,6 @@ async fn dispatch_event(
     res
 }
 
-#[allow(unused_variables)]
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlannerPool>,
     operation_name: Option<String>,
@@ -601,7 +600,6 @@ async fn plan_query(
     // tests will pass.
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
-    #[cfg(test)]
     if !{
         let lock = context.extensions().lock();
         lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
