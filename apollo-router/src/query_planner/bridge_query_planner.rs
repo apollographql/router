@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::sync::Arc;
-use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -27,6 +27,7 @@ use super::PlanNode;
 use super::QueryKey;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
+use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
@@ -38,12 +39,14 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -56,6 +59,7 @@ use crate::Configuration;
 pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlanResult>>,
     schema: Arc<Schema>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
@@ -89,6 +93,7 @@ impl BridgeQueryPlanner {
             sdl,
             QueryPlannerConfig {
                 reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                generate_query_fragments: Some(configuration.supergraph.generate_query_fragments),
                 incremental_delivery: Some(IncrementalDeliverySupport {
                     enable_defer: Some(configuration.supergraph.defer_support),
                 }),
@@ -186,6 +191,16 @@ impl BridgeQueryPlanner {
         let api_schema = Schema::parse(&api_schema_string)?;
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
+
+        let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
+            HashMap::new();
+        for (name, schema_str) in planner.subgraphs().await? {
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            subgraph_schemas.insert(name, Arc::new(schema));
+        }
+        let subgraph_schemas = Arc::new(subgraph_schemas);
+
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
@@ -198,6 +213,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
+            subgraph_schemas,
             introspection,
             enable_authorization_directives,
             configuration,
@@ -220,6 +236,9 @@ impl BridgeQueryPlanner {
                         }),
                         graphql_validation: false,
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                        generate_query_fragments: Some(
+                            configuration.supergraph.generate_query_fragments,
+                        ),
                         debug: Some(QueryPlannerDebugConfig {
                             bypass_planner_for_single_subgraph: None,
                             max_evaluated_plans: configuration
@@ -241,6 +260,15 @@ impl BridgeQueryPlanner {
         let api_schema = Schema::parse(&api_schema.schema)?;
         let schema = Arc::new(Schema::parse(&schema)?.with_api_schema(api_schema));
 
+        let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
+            HashMap::new();
+        for (name, schema_str) in planner.subgraphs().await? {
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            subgraph_schemas.insert(name, Arc::new(schema));
+        }
+        let subgraph_schemas = Arc::new(subgraph_schemas);
+
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
         } else {
@@ -253,6 +281,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
+            subgraph_schemas,
             introspection,
             enable_authorization_directives,
             configuration,
@@ -266,6 +295,12 @@ impl BridgeQueryPlanner {
 
     pub(crate) fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
+    }
+
+    pub(crate) fn subgraph_schemas(
+        &self,
+    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+        self.subgraph_schemas.clone()
     }
 
     async fn parse_selections(
@@ -283,7 +318,7 @@ impl BridgeQueryPlanner {
         )?;
 
         let (fragments, operations, defer_stats, schema_aware_hash) =
-            Query::extract_query_information(&self.schema, executable, &doc.ast)?;
+            Query::extract_query_information(&self.schema, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -340,9 +375,7 @@ impl BridgeQueryPlanner {
             .into_result()
         {
             Ok(mut plan) => {
-                plan.data
-                    .query_plan
-                    .hash_subqueries(&self.schema.definitions);
+                plan.data.query_plan.hash_subqueries(&self.subgraph_schemas);
                 plan.data
                     .query_plan
                     .extract_authorization_metadata(&self.schema.definitions, &key);
@@ -437,11 +470,9 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             .unwrap_or_default();
         let this = self.clone();
         let fut = async move {
-            let start = Instant::now();
-
-            let mut doc = match context.extensions().lock().get::<ParsedDocument>() {
+            let mut doc = match context.extensions().lock().get::<ParsedDocument>().cloned() {
                 None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
-                Some(d) => d.clone(),
+                Some(d) => d,
             };
 
             let schema = &this.schema.api_schema().definitions;
@@ -458,9 +489,16 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                                 errors: e.errors.iter().map(|e| e.to_json()).collect(),
                             })
                         })?;
+                    let hash = QueryHashVisitor::hash_query(
+                        schema,
+                        &executable_document,
+                        operation_name.as_deref(),
+                    )
+                    .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
                     doc = Arc::new(ParsedDocumentInner {
                         executable: Arc::new(executable_document),
                         ast: modified_query,
+                        hash: Arc::new(QueryHash(hash)),
                     });
                     context
                         .extensions()
@@ -488,8 +526,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     doc,
                 )
                 .await;
-            let duration = start.elapsed().as_secs_f64();
-            tracing::info!(histogram.apollo_router_query_planning_time = duration);
 
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
@@ -576,9 +612,16 @@ impl BridgeQueryPlanner {
                         errors: e.errors.iter().map(|e| e.to_json()).collect(),
                     })
                 })?;
+            let hash = QueryHashVisitor::hash_query(
+                &self.schema.definitions,
+                &executable_document,
+                key.operation_name.as_deref(),
+            )
+            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
             doc = Arc::new(ParsedDocumentInner {
                 executable: Arc::new(executable_document),
                 ast: new_doc,
+                hash: Arc::new(QueryHash(hash)),
             });
             selections.unauthorized.paths = unauthorized_paths;
         }
@@ -662,9 +705,9 @@ struct QueryPlan {
 }
 
 impl QueryPlan {
-    fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+    fn hash_subqueries(&mut self, schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>) {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(schema);
+            node.hash_subqueries(schemas);
         }
     }
 
@@ -927,7 +970,7 @@ mod tests {
             .await
             .unwrap();
 
-        let doc = Query::parse_document(query, &schema, &Configuration::default()).unwrap();
+        let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
         let selections = planner
             .parse_selections(query.to_string(), None, &doc)
@@ -1309,6 +1352,7 @@ mod tests {
 
         let doc = Query::parse_document(
             original_query,
+            operation_name.as_deref(),
             planner.schema().api_schema(),
             &configuration,
         )

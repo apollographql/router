@@ -1,9 +1,11 @@
 //! Demand control plugin.
 mod basic_cost_calculator;
 mod directives;
+mod schema_aware_response;
 
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use apollo_compiler::Schema;
 use displaydoc::Display;
 use schemars::JsonSchema;
@@ -13,8 +15,10 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::graphql;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::query_planner::QueryPlan;
 use crate::register_plugin;
 use crate::services::execution::BoxService;
 
@@ -43,6 +47,13 @@ trait CostCalculator {
         query: &ExecutableDocument,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError>;
+
+    fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError>;
+
+    fn actual(
+        request: &ExecutableDocument,
+        response: &graphql::Response,
+    ) -> Result<f64, DemandControlError>;
 }
 
 /// Demand control configuration
@@ -60,6 +71,14 @@ pub(crate) struct DemandControlConfig {
 pub(crate) enum DemandControlError {
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
+    /// The response body could not be properly matched with its query's structure: {0}
+    ResponseTypingFailure(String),
+}
+
+impl<T> From<WithErrors<T>> for DemandControlError {
+    fn from(value: WithErrors<T>) -> Self {
+        DemandControlError::QueryParseFailure(format!("{}", value))
+    }
 }
 
 #[derive(Clone, Debug)]

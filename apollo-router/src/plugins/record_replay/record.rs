@@ -100,7 +100,7 @@ impl Plugin for Record {
                     let context = res.context.clone();
 
                     let after_complete = once(async move {
-                        let recording = context.extensions().lock().get_mut::<Recording>().cloned();
+                        let recording = context.extensions().lock().remove::<Recording>();
 
                         if let Some(mut recording) = recording {
                             let res_headers = externalize_header_map(&headers)?;
@@ -158,6 +158,7 @@ impl Plugin for Record {
                         .query
                         .clone()
                         .unwrap_or_default(),
+                    req.supergraph_request.body().operation_name.as_deref(),
                     schema.clone(),
                 ) {
                     return req;
@@ -305,8 +306,8 @@ async fn write_file(dir: Arc<Path>, path: &PathBuf, contents: &[u8]) -> Result<(
     Ok(())
 }
 
-fn is_introspection(query: String, schema: Arc<Schema>) -> bool {
-    Query::parse(query, &schema, &Configuration::default())
+fn is_introspection(query: String, operation_name: Option<&str>, schema: Arc<Schema>) -> bool {
+    Query::parse(query, operation_name, &schema, &Configuration::default())
         .map(|q| q.contains_introspection())
         .unwrap_or_default()
 }

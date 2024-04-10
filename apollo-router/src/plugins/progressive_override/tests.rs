@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use apollo_compiler::ast::Document;
+use apollo_compiler::Schema;
 use tower::ServiceExt;
 
 use crate::metrics::FutureMetricsExt;

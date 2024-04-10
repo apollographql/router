@@ -2248,7 +2248,7 @@ expression: "&schema"
                 "nullable": true
               },
               "ttl": {
-                "description": "expiration for all keys",
+                "description": "expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses",
                 "type": "string",
                 "nullable": true
               }
@@ -2592,6 +2592,7 @@ expression: "&schema"
         "path": "/",
         "introspection": false,
         "experimental_reuse_query_fragments": null,
+        "generate_query_fragments": false,
         "defer_support": true,
         "query_planning": {
           "cache": {
@@ -2602,10 +2603,14 @@ expression: "&schema"
           },
           "warmed_up_queries": null,
           "experimental_plans_limit": null,
-          "experimental_paths_limit": null
+          "experimental_paths_limit": null,
+          "experimental_reuse_query_plans": false
         },
         "early_cancel": false,
-        "experimental_log_on_broken_pipe": false
+        "experimental_log_on_broken_pipe": false,
+        "query_planner": {
+          "experimental_parallelism": 1
+        }
       },
       "type": "object",
       "properties": {
@@ -2629,6 +2634,11 @@ expression: "&schema"
           "default": null,
           "type": "boolean",
           "nullable": true
+        },
+        "generate_query_fragments": {
+          "description": "Enable QP generation of fragments for subgraph requests Default: false",
+          "default": false,
+          "type": "boolean"
         },
         "introspection": {
           "description": "Enable introspection Default: false",
@@ -2654,6 +2664,35 @@ expression: "&schema"
           "default": "/",
           "type": "string"
         },
+        "query_planner": {
+          "description": "Configuration options pertaining to the query planner component.",
+          "default": {
+            "experimental_parallelism": 1
+          },
+          "type": "object",
+          "required": [
+            "experimental_parallelism"
+          ],
+          "properties": {
+            "experimental_parallelism": {
+              "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "auto"
+                  ]
+                },
+                {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 1.0
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
         "query_planning": {
           "description": "Query planning options",
           "default": {
@@ -2665,7 +2704,8 @@ expression: "&schema"
             },
             "warmed_up_queries": null,
             "experimental_plans_limit": null,
-            "experimental_paths_limit": null
+            "experimental_paths_limit": null,
+            "experimental_reuse_query_plans": false
           },
           "type": "object",
           "properties": {
@@ -2772,7 +2812,10 @@ expression: "&schema"
                     },
                     "ttl": {
                       "description": "TTL for entries",
-                      "default": null,
+                      "default": {
+                        "secs": 2592000,
+                        "nanos": 0
+                      },
                       "type": "string",
                       "nullable": true
                     },
@@ -2811,6 +2854,11 @@ expression: "&schema"
               "format": "uint32",
               "minimum": 0.0,
               "nullable": true
+            },
+            "experimental_reuse_query_plans": {
+              "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
+              "default": false,
+              "type": "boolean"
             },
             "warmed_up_queries": {
               "description": "Warms up the cache on reloads by running the query plan over a list of the most used queries (from the in memory cache) Configures the number of queries warmed up. Defaults to 1/3 of the in memory cache",

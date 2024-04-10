@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Document;
+use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -174,12 +174,17 @@ impl AuthorizationPlugin {
             .unwrap_or_default()
     }
 
-    pub(crate) fn query_analysis(doc: &ParsedDocumentInner, schema: &Schema, context: &Context) {
+    pub(crate) fn query_analysis(doc: &ParsedDocumentInner, operation_name: Option<&str>, schema: &Schema, context: &Context) {
         let CacheKeyMetadata {
             is_authenticated,
             scopes,
             policies,
-        } = Self::generate_cache_metadata(&doc.ast, &schema.definitions, false);
+        } = Self::generate_cache_metadata(
+            &doc.executable,
+            operation_name,
+            &schema.definitions,
+            false,
+        );
         if is_authenticated {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
@@ -193,39 +198,42 @@ impl AuthorizationPlugin {
                 policies.into_iter().map(|policy| (policy, None)).collect();
             context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
         }
+
+        Ok(())
     }
 
     pub(crate) fn generate_cache_metadata(
-        ast: &Document,
+        document: &ExecutableDocument,
+        operation_name: Option<&str>,
         schema: &apollo_compiler::Schema,
         entity_query: bool,
     ) -> CacheKeyMetadata {
         let mut is_authenticated = false;
-        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, ast, entity_query) {
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, document, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, ast).is_ok() && visitor.found {
+            if traverse::document(&mut visitor, document, operation_name).is_ok() && visitor.found {
                 is_authenticated = true;
             }
         }
 
         let mut scopes = Vec::new();
-        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, ast, entity_query) {
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, document, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, ast).is_ok() {
+            if traverse::document(&mut visitor, document, operation_name).is_ok() {
                 scopes = visitor.extracted_scopes.into_iter().collect();
             }
         }
 
         let mut policies: Vec<String> = Vec::new();
-        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, ast, entity_query) {
+        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, document, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, ast).is_ok() {
+            if traverse::document(&mut visitor, document, operation_name).is_ok() {
                 policies = visitor.extracted_policies.into_iter().collect();
             }
         }
