@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::Document;
-use apollo_compiler::Schema;
 use tower::ServiceExt;
 
 use crate::metrics::FutureMetricsExt;
@@ -137,7 +135,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
 
     let schema = crate::spec::Schema::parse(include_str!("./testdata/supergraph.graphql")).unwrap();
     let parsed_doc =
-        crate::spec::Query::parse_document(query, &schema, &crate::Configuration::default())
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
             .unwrap();
 
     let context = Context::new();
@@ -206,7 +204,7 @@ async fn plugin_supergraph_service_trims_0pc_label() {
 async fn get_json_query_plan(query: &str) -> serde_json::Value {
     let schema = crate::spec::Schema::parse(include_str!("./testdata/supergraph.graphql")).unwrap();
     let parsed_doc =
-        crate::spec::Query::parse_document(query, &schema, &crate::Configuration::default())
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
             .unwrap();
 
     let context: Context = Context::new();
@@ -277,7 +275,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
 
     let schema = crate::spec::Schema::parse(include_str!("./testdata/supergraph.graphql")).unwrap();
     let parsed_doc =
-        crate::spec::Query::parse_document(query, &schema, &crate::Configuration::default())
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
             .unwrap();
 
     let context = Context::new();

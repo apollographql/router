@@ -343,7 +343,7 @@ mod tests {
             .await
             .unwrap();
 
-        let schema = spec::Schema::parse(schema_str, &config).unwrap();
+        let schema = spec::Schema::parse(schema_str).unwrap();
         let query = Query::parse_document(query_str, None, &schema, &config).unwrap();
 
         let ctx = Context::new();

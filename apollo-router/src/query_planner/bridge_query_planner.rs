@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -195,8 +196,13 @@ impl BridgeQueryPlanner {
         let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
             HashMap::new();
         for (name, schema_str) in planner.subgraphs().await? {
-            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
-                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").map_err(
+                |WithErrors { errors, .. }| {
+                    SchemaError::Validate(ValidationErrors {
+                        errors: errors.iter().map(|e| e.to_json()).collect(),
+                    })
+                },
+            )?;
             subgraph_schemas.insert(name, Arc::new(schema));
         }
         let subgraph_schemas = Arc::new(subgraph_schemas);
@@ -263,8 +269,13 @@ impl BridgeQueryPlanner {
         let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
             HashMap::new();
         for (name, schema_str) in planner.subgraphs().await? {
-            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
-                .map_err(|e| SchemaError::Validate(ValidationErrors { errors: e.errors }))?;
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").map_err(
+                |WithErrors { errors, .. }| {
+                    SchemaError::Validate(ValidationErrors {
+                        errors: errors.iter().map(|e| e.to_json()).collect(),
+                    })
+                },
+            )?;
             subgraph_schemas.insert(name, Arc::new(schema));
         }
         let subgraph_schemas = Arc::new(subgraph_schemas);

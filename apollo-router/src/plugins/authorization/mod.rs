@@ -174,7 +174,12 @@ impl AuthorizationPlugin {
             .unwrap_or_default()
     }
 
-    pub(crate) fn query_analysis(doc: &ParsedDocumentInner, operation_name: Option<&str>, schema: &Schema, context: &Context) {
+    pub(crate) fn query_analysis(
+        doc: &ParsedDocumentInner,
+        operation_name: Option<&str>,
+        schema: &Schema,
+        context: &Context,
+    ) {
         let CacheKeyMetadata {
             is_authenticated,
             scopes,
@@ -198,8 +203,6 @@ impl AuthorizationPlugin {
                 policies.into_iter().map(|policy| (policy, None)).collect();
             context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
         }
-
-        Ok(())
     }
 
     pub(crate) fn generate_cache_metadata(

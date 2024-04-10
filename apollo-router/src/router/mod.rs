@@ -492,7 +492,8 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "type `User` does not have a field `name`", response.errors[0].message,
+            "validation error: [1:17] type `User` does not have a field `name`",
+            response.errors[0].message,
             "{response:?}"
         );
         assert_eq!(

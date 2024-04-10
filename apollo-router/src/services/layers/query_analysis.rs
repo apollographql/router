@@ -141,7 +141,6 @@ impl QueryAnalysisLayer {
                             .context(request.context)
                             .build()
                             .expect("response is valid"));
-                        Err(errors)
                     }
                     Ok(doc) => {
                         let context = Context::new();
@@ -151,6 +150,15 @@ impl QueryAnalysisLayer {
                             operation.name.as_ref().map(|s| s.as_str().to_owned())
                         });
 
+                        if self.enable_authorization_directives {
+                            AuthorizationPlugin::query_analysis(
+                                &doc,
+                                operation_name.as_deref(),
+                                &self.schema,
+                                &context,
+                            );
+                        }
+
                         context
                             .insert(OPERATION_NAME, operation_name)
                             .expect("cannot insert operation name into context; this is a bug");
@@ -159,25 +167,6 @@ impl QueryAnalysisLayer {
                         context
                             .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
                             .expect("cannot insert operation kind in the context; this is a bug");
-
-                        if self.enable_authorization_directives {
-                            if let Err(err) = AuthorizationPlugin::query_analysis(
-                                &doc,
-                                operation_name.as_deref(),
-                                &self.schema,
-                                &context,
-                            ) {
-                                return Err(SupergraphResponse::builder()
-                                    .errors(vec![Error::builder()
-                                        .message(err.to_string())
-                                        .extension_code(err.extension_code())
-                                        .build()])
-                                    .status_code(StatusCode::BAD_REQUEST)
-                                    .context(request.context)
-                                    .build()
-                                    .expect("response is valid"));
-                            }
-                        }
 
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {
