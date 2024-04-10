@@ -11,6 +11,7 @@ use http::StatusCode;
 use rhai::Engine;
 use rhai::EvalAltResult;
 use serde_json::Value;
+use sha2::Digest;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
@@ -582,6 +583,16 @@ fn it_can_generate_uuid() {
     let uuid_parsed = Uuid::parse_str(uuid_v4_rhai.as_str()).expect("can parse uuid from string");
     // finally validate that parsed string equals the returned value
     assert_eq!(uuid_v4_rhai, uuid_parsed.to_string());
+}
+
+#[test]
+fn it_can_sha256_string() {
+    let engine = new_rhai_test_engine();
+    let hash = sha2::Sha256::digest("hello world".as_bytes());
+    let hash_rhai: String = engine
+        .eval(r#"sha256::digest("hello world")"#)
+        .expect("can decode string");
+    assert_eq!(hash_rhai, hex::encode(hash));
 }
 
 async fn base_globals_function(fn_name: &str) -> Result<bool, Box<rhai::EvalAltResult>> {
