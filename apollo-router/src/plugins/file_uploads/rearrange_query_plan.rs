@@ -278,6 +278,20 @@ mod tests {
     use crate::query_planner::Primary;
     use crate::services::execution::QueryPlan;
 
+    // Custom `assert_matches` due to its current nightly-only status, see
+    // https://github.com/rust-lang/rust/issues/82775
+    macro_rules! assert_matches {
+        ($actual:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
+            let result = $actual;
+            assert!(
+                matches!(result, $( $pattern )|+ $( if $guard )?),
+                "got {:?} but expected {:?}",
+                result,
+                "", // stringify!($pattern)
+            );
+        };
+    }
+
     fn fake_query_plan(root_json: serde_json::Value) -> QueryPlan {
         QueryPlan::fake_new(Some(serde_json::from_value(root_json).unwrap()), None)
     }
@@ -363,7 +377,7 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(result, Err(FileUploadError::MisorderedVariables)));
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
     }
 
     #[test]
@@ -387,10 +401,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(FileUploadError::DuplicateVariableUsages(variables)) if variables == "$file",
-        ));
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file",
+        );
     }
 
     #[test]
@@ -434,10 +448,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(FileUploadError::VariablesForbiddenInsideSubscription(variables)) if variables == "$file2, $file1",
-        ));
+            Err(FileUploadError::VariablesForbiddenInsideSubscription(ref variables)) if variables == "$file2, $file1",
+        );
     }
 
     #[test]
@@ -483,10 +497,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(FileUploadError::VariablesForbiddenInsideDefer(variables)) if variables == "$file2, $file1",
-        ));
+            Err(FileUploadError::VariablesForbiddenInsideDefer(ref variables)) if variables == "$file2, $file1",
+        );
     }
 
     #[test]
@@ -510,7 +524,7 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(result, Err(FileUploadError::MisorderedVariables)));
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
     }
 
     #[test]
@@ -533,10 +547,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(FileUploadError::DuplicateVariableUsages(variables)) if variables == "$file",
-        ));
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file",
+        );
     }
 
     #[test]
@@ -578,7 +592,7 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(result, Err(FileUploadError::MisorderedVariables)));
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
     }
 
     #[test]
@@ -601,10 +615,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(FileUploadError::DuplicateVariableUsages(variables)) if variables == "$file",
-        ));
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file",
+        );
     }
 
     #[test]
@@ -645,7 +659,7 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(result, Err(FileUploadError::MisorderedVariables)));
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
     }
 
     #[test]
@@ -666,7 +680,7 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(result, Err(FileUploadError::MisorderedVariables)));
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
     }
 
     #[test]
@@ -690,10 +704,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(FileUploadError::DuplicateVariableUsages(variables)) if variables == "$file1, $file2",
-        ));
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file1, $file2",
+        );
     }
 
     #[test]
@@ -838,7 +852,7 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(result, Err(FileUploadError::MisorderedVariables)));
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
     }
 
     #[test]
@@ -859,7 +873,7 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(result, Err(FileUploadError::MisorderedVariables)));
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
     }
 
     #[test]
@@ -883,9 +897,9 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert!(matches!(
+        assert_matches!(
             result,
-            Err(FileUploadError::DuplicateVariableUsages(variables)) if variables == "$file1, $file2",
-        ));
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file1, $file2",
+        );
     }
 }
