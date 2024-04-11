@@ -68,7 +68,10 @@ batching:
   enabled: true
   mode: batch_http_link
   subgraph:
-    # Configure batching support per subgraph
+    # Disable batching on all subgraphs
+    all:
+      enabled: false
+    # Configure(over-ride) batching support per subgraph
     subgraphs:
       subgraph_1:
         enabled: true
@@ -78,7 +81,7 @@ batching:
 
 <Note>
 
-- The router can be configured to support batching for either all subgraphs or each subgraph, but not both.
+- The router can be configured to support batching for either all subgraphs or individually enabled per subgraph.
 
 - There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Consequently, the router will only be able to generate batches from queries which are processed which don't contain such constraints. This may result in the router issuing multiple batches or requests. 
 

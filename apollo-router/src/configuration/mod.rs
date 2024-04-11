@@ -11,7 +11,6 @@ mod tests;
 mod upgrade;
 mod yaml;
 
-use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::io::BufReader;
@@ -1573,21 +1572,7 @@ pub(crate) struct Batching {
     pub(crate) mode: BatchingMode,
 
     /// Subgraph options for batching
-    ///
-    /// Note: Batching from the router to subgraphs can either be enabled for
-    /// all subgraphs or configured per subgraph, but not both.
-    pub(crate) subgraph: Option<SubgraphBatchingConfig>,
-}
-
-/// Batching configuration for subgraphs
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
-pub(crate) enum SubgraphBatchingConfig {
-    /// Batching options for all known subgraphs
-    All(CommonBatchingConfig),
-
-    /// Per-subgraph batching options
-    Subgraphs(HashMap<String, CommonBatchingConfig>),
+    pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
 }
 
 /// Common options for configuring subgraph batching
@@ -1601,12 +1586,25 @@ impl Batching {
     // Check if we should enable batching for a particular subgraph (service_name)
     pub(crate) fn batch_include(&self, service_name: &str) -> bool {
         match &self.subgraph {
-            Some(subgraph_batching_config) => match subgraph_batching_config {
-                SubgraphBatchingConfig::All(all_config) => all_config.enabled,
-                SubgraphBatchingConfig::Subgraphs(subgraphs) => subgraphs
-                    .iter()
-                    .any(|(k, v)| k == service_name && v.enabled),
-            },
+            Some(subgraph_batching_config) => {
+                // Override by checking if all is enabled
+                if subgraph_batching_config.all.enabled {
+                    // If it is, require:
+                    // - no subgraph entry OR
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .map_or(true, |x| x.enabled)
+                } else {
+                    // If it isn't, require:
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .is_some_and(|x| x.enabled)
+                }
+            }
             None => false,
         }
     }

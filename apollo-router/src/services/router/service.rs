@@ -41,7 +41,7 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-use crate::configuration::SubgraphBatchingConfig;
+// use crate::configuration::SubgraphBatchingConfig;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -686,11 +686,12 @@ impl RouterService {
                 self.batching.subgraph.as_ref()
             })
             .flatten()
-            .map(|subgraph_batching_config| match subgraph_batching_config {
-                SubgraphBatchingConfig::All(all_config) => all_config.enabled,
-                SubgraphBatchingConfig::Subgraphs(subgraphs) => {
-                    subgraphs.values().any(|v| v.enabled)
-                }
+            .map(|subgraph_batching_config| {
+                subgraph_batching_config.all.enabled
+                    || subgraph_batching_config
+                        .subgraphs
+                        .values()
+                        .any(|v| v.enabled)
             })
             .and_then(|a| a.then_some(Arc::new(Batch::spawn_handler(batch_size))));
 

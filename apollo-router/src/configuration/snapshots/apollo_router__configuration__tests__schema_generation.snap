@@ -772,58 +772,44 @@ expression: "&schema"
           ]
         },
         "subgraph": {
-          "description": "Subgraph options for batching\n\nNote: Batching from the router to subgraphs can either be enabled for all subgraphs or configured per subgraph, but not both.",
-          "oneOf": [
-            {
-              "description": "Batching options for all known subgraphs",
+          "description": "Subgraph options for batching",
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "enabled": false
+              },
               "type": "object",
               "required": [
-                "all"
+                "enabled"
               ],
               "properties": {
-                "all": {
-                  "description": "Common options for configuring subgraph batching",
-                  "type": "object",
-                  "required": [
-                    "enabled"
-                  ],
-                  "properties": {
-                    "enabled": {
-                      "description": "Whether this batching config should be enabled",
-                      "type": "boolean"
-                    }
-                  }
+                "enabled": {
+                  "description": "Whether this batching config should be enabled",
+                  "type": "boolean"
                 }
-              },
-              "additionalProperties": false
+              }
             },
-            {
-              "description": "Per-subgraph batching options",
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
               "type": "object",
-              "required": [
-                "subgraphs"
-              ],
-              "properties": {
-                "subgraphs": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "description": "Common options for configuring subgraph batching",
-                    "type": "object",
-                    "required": [
-                      "enabled"
-                    ],
-                    "properties": {
-                      "enabled": {
-                        "description": "Whether this batching config should be enabled",
-                        "type": "boolean"
-                      }
-                    }
+              "additionalProperties": {
+                "description": "Common options for configuring subgraph batching",
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "description": "Whether this batching config should be enabled",
+                    "type": "boolean"
                   }
                 }
-              },
-              "additionalProperties": false
+              }
             }
-          ],
+          },
           "nullable": true
         }
       },

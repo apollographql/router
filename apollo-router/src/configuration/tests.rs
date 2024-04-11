@@ -1008,6 +1008,9 @@ fn it_processes_batching_subgraph_accounts_enabled_correctly() {
         "enabled": true,
         "mode": "batch_http_link",
         "subgraph": {
+            "all": {
+                "enabled": false
+            },
             "subgraphs": {
                 "accounts": {
                     "enabled": true
@@ -1028,6 +1031,9 @@ fn it_processes_batching_subgraph_accounts_disabled_correctly() {
         "enabled": true,
         "mode": "batch_http_link",
         "subgraph": {
+            "all": {
+                "enabled": false
+            },
             "subgraphs": {
                 "accounts": {
                     "enabled": false
@@ -1040,6 +1046,52 @@ fn it_processes_batching_subgraph_accounts_disabled_correctly() {
 
     assert!(!config.batch_include("anything"));
     assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": true
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": false
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(config.batch_include("anything"));
+    assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": true
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(config.batch_include("accounts"));
 }
 
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {

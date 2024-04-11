@@ -369,7 +369,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
             if !apq_enabled.load(Relaxed) {
-                return call_batched_http(
+                return call_http(
                     request,
                     body,
                     context,
@@ -406,7 +406,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 extensions: extensions_with_apq,
             };
 
-            let response = call_batched_http(
+            let response = call_http(
                 request.clone(),
                 apq_body.clone(),
                 context.clone(),
@@ -423,7 +423,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    call_batched_http(
+                    call_http(
                         request,
                         body,
                         context,
@@ -434,7 +434,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 }
                 APQError::PersistedQueryNotFound => {
                     apq_body.query = query;
-                    call_batched_http(
+                    call_http(
                         request,
                         apq_body,
                         context,
@@ -738,8 +738,6 @@ pub(crate) async fn process_batch(
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
     // Now we need to "batch up" our data and send it to our subgraphs
-    // We need our own batch aware version of call_http which only makes one call to each
-    // subgraph, but is able to decode the responses.
     request
         .headers_mut()
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
@@ -999,7 +997,7 @@ pub(crate) async fn process_batches(
     Ok(())
 }
 
-async fn call_batched_http(
+async fn call_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
@@ -1045,14 +1043,14 @@ async fn call_batched_http(
     } else {
         tracing::debug!("we called http");
         let client = client_factory.create(service_name);
-        call_http(request, body, context, client, service_name).await
+        call_single_http(request, body, context, client, service_name).await
     };
 
     result
 }
 
-/// call_http makes http calls with modified graphql::Request (body)
-pub(crate) async fn call_http(
+/// call_single_http makes http calls with modified graphql::Request (body)
+pub(crate) async fn call_single_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
