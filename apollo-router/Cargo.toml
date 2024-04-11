@@ -64,8 +64,8 @@ features = ["docs_rs"]
 askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.80"
-apollo-compiler = "=1.0.0-beta.14"
-apollo-federation = "=0.0.9"
+apollo-compiler = "=1.0.0-beta.15"
+apollo-federation = "=0.0.10"
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
