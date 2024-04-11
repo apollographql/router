@@ -93,7 +93,7 @@ async fn test_type_conditions_enabled_generate_query_fragments() {
             ),
             (
                 "artworkSubgraph",
-                include_str!("fixtures/type_conditions/artwork_query_fragments_enabled .json"),
+                include_str!("fixtures/type_conditions/artwork_query_fragments_enabled.json"),
             ),
         ],
     );

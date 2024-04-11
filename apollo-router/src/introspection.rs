@@ -114,6 +114,7 @@ mod introspection_tests {
                     reuse_query_fragments: Some(false),
                     debug: None,
                     generate_query_fragments: None,
+                    type_conditioned_fetching: false,
                 },
             )
             .await

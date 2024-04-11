@@ -3117,9 +3117,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.24"
+version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb2c4422095b67ee78da96fbb51a4cc413b3b25883c7717ff7ca1ab31022c9c9"
+checksum = "81fe527a889e1532da5c525686d96d4c2e74cdd345badf8dfef9f6b39dd5f5e8"
 dependencies = [
  "bytes",
  "fnv",
@@ -3415,7 +3415,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.5",
+ "socket2 0.4.9",
  "tokio",
  "tower-service",
  "tracing",
@@ -5656,9 +5656,8 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.18-alpha.0+v2.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7ae1c006b7e8bdf37ed80848c719aea8a19dc32cbaa914ad928db8e4a4fe77a"
+version = "0.5.18+v2.7.2"
+source = "git+https://github.com/apollographql/federation-rs?branch=igni/type_conditioned_fetching#8805368d0b163f26de49ad4c9352c5a9b368cf12"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
