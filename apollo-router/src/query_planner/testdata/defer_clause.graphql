@@ -30,8 +30,6 @@ directive @link(
   import: [link__Import]
 ) repeatable on SCHEMA
 
-directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
 scalar join__FieldSet
 
 enum join__Graph {
