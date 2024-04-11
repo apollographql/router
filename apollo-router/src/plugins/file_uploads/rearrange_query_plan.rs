@@ -244,6 +244,7 @@ fn rearrange_plan_node<'a>(
             }
 
             if sequence.len() <= 1 {
+                // if there are no node competing for files, keep nodes nodes in Parallel
                 parallel.extend(sequence.into_values().map(|(node, _)| node));
                 PlanNode::Parallel { nodes: parallel }
             } else {
@@ -258,8 +259,10 @@ fn rearrange_plan_node<'a>(
                 }
 
                 if parallel.is_empty() {
+                    // if all nodes competing for files replace Parallel with Sequence
                     PlanNode::Sequence { nodes }
                 } else {
+                    // if some of the nodes competing for files wrap them with Sequence within Parallel
                     parallel.push(PlanNode::Sequence { nodes });
                     PlanNode::Parallel { nodes: parallel }
                 }
