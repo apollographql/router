@@ -451,7 +451,7 @@ impl InstrumentData {
                 .into(),
             );
             self.data.insert(
-                "apollo.router.config.query_panner.parallelism".to_string(),
+                "apollo.router.config.query_planner.parallelism".to_string(),
                 (
                     configuration
                         .supergraph
