@@ -188,7 +188,7 @@ mod router_sha256 {
 mod router_expansion {
     pub(crate) type Expansion = expansion::Expansion;
 
-    #[rhai_fn(name = "digest", return_raw)]
+    #[rhai_fn(name = "get", return_raw)]
     pub(crate) fn expansion_env(key: &str) -> Result<String, Box<EvalAltResult>> {
         let expander = Expansion::default_rhai().map_err(|e| e.to_string())?;
         expander
