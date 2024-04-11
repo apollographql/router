@@ -48,7 +48,13 @@ where
                         return Ok(ControlFlow::Continue(req));
                     }
 
-                    let doc = match req.context.extensions().lock().get::<ParsedDocument>() {
+                    let doc = match req
+                        .context
+                        .extensions()
+                        .lock()
+                        .get::<ParsedDocument>()
+                        .cloned()
+                    {
                         None => {
                             let errors = vec![Error::builder()
                                 .message("Cannot find executable document".to_string())
@@ -63,7 +69,7 @@ where
 
                             return Ok(ControlFlow::Break(res));
                         }
-                        Some(c) => c.clone(),
+                        Some(c) => c,
                     };
 
                     let op = doc

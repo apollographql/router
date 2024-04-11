@@ -31,7 +31,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -83,7 +83,7 @@ where
     ) -> Result<CachingQueryPlanner<T>, BoxError> {
         let cache = Arc::new(
             DeduplicatingCache::from_configuration(
-                &configuration.supergraph.query_planning.cache,
+                &configuration.supergraph.query_planning.cache.clone().into(),
                 "query planner",
             )
             .await?,
@@ -281,9 +281,9 @@ where
     }
 }
 
-impl CachingQueryPlanner<BridgeQueryPlanner> {
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.delegate.planner()
+impl CachingQueryPlanner<BridgeQueryPlannerPool> {
+    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.delegate.planners()
     }
 
     pub(crate) fn subgraph_schemas(
@@ -317,11 +317,9 @@ where
             let context = request.context.clone();
             qp.plan(request).await.map(|response| {
                 if let Some(usage_reporting) = {
-                    context
-                        .extensions()
-                        .lock()
-                        .get::<Arc<UsageReporting>>()
-                        .cloned()
+                    let lock = context.extensions().lock();
+                    let urp = lock.get::<Arc<UsageReporting>>();
+                    urp.cloned()
                 } {
                     let _ = response.context.insert(
                         "apollo_operation_id",
@@ -376,17 +374,17 @@ where
             Some(d) => d.clone(),
         };
 
+        let metadata = {
+            let lock = request.context.extensions().lock();
+            let ckm = lock.get::<CacheKeyMetadata>().cloned();
+            ckm.unwrap_or_default()
+        };
+
         let caching_key = CachingQueryKey {
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
             hash: doc.hash.clone(),
-            metadata: request
-                .context
-                .extensions()
-                .lock()
-                .get::<CacheKeyMetadata>()
-                .cloned()
-                .unwrap_or_default(),
+            metadata,
             plan_options,
         };
 
