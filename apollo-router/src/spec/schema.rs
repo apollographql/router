@@ -8,7 +8,6 @@ use std::time::Instant;
 use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::validation::WithErrors;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
@@ -17,7 +16,6 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -69,10 +67,8 @@ impl Schema {
         let ast = Self::parse_ast(sdl)?;
         let definitions = match ast.to_schema_validate() {
             Ok(schema) => schema,
-            Err(WithErrors { errors, .. }) => {
-                return Err(SchemaError::Validate(ValidationErrors {
-                    errors: errors.iter().map(|e| e.to_json()).collect(),
-                }));
+            Err(errors) => {
+                return Err(SchemaError::Validate(errors.into()));
             }
         };
 

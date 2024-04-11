@@ -1,6 +1,8 @@
 //! Router errors.
 use std::sync::Arc;
 
+use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::WithErrors;
 use apollo_federation::error::FederationError;
 use displaydoc::Display;
 use lazy_static::__Deref;
@@ -611,6 +613,20 @@ impl IntoGraphQLErrors for ValidationErrors {
                     .build()
             })
             .collect())
+    }
+}
+
+impl From<DiagnosticList> for ValidationErrors {
+    fn from(errors: DiagnosticList) -> Self {
+        Self {
+            errors: errors.iter().map(|e| e.to_json()).collect(),
+        }
+    }
+}
+
+impl<T> From<WithErrors<T>> for ValidationErrors {
+    fn from(WithErrors { errors, .. }: WithErrors<T>) -> Self {
+        errors.into()
     }
 }
 

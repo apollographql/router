@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::validation::WithErrors;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -30,7 +29,6 @@ use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
-use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
@@ -196,13 +194,8 @@ impl BridgeQueryPlanner {
         let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
             HashMap::new();
         for (name, schema_str) in planner.subgraphs().await? {
-            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").map_err(
-                |WithErrors { errors, .. }| {
-                    SchemaError::Validate(ValidationErrors {
-                        errors: errors.iter().map(|e| e.to_json()).collect(),
-                    })
-                },
-            )?;
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|errors| SchemaError::Validate(errors.into()))?;
             subgraph_schemas.insert(name, Arc::new(schema));
         }
         let subgraph_schemas = Arc::new(subgraph_schemas);
@@ -269,13 +262,8 @@ impl BridgeQueryPlanner {
         let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
             HashMap::new();
         for (name, schema_str) in planner.subgraphs().await? {
-            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "").map_err(
-                |WithErrors { errors, .. }| {
-                    SchemaError::Validate(ValidationErrors {
-                        errors: errors.iter().map(|e| e.to_json()).collect(),
-                    })
-                },
-            )?;
+            let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                .map_err(|errors| SchemaError::Validate(errors.into()))?;
             subgraph_schemas.insert(name, Arc::new(schema));
         }
         let subgraph_schemas = Arc::new(subgraph_schemas);
@@ -494,12 +482,9 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok(modified_query) => {
-                    let executable_document =
-                        modified_query.to_executable_validate(schema).map_err(|e| {
-                            SpecError::ValidationError(ValidationErrors {
-                                errors: e.errors.iter().map(|e| e.to_json()).collect(),
-                            })
-                        })?;
+                    let executable_document = modified_query
+                        .to_executable_validate(schema)
+                        .map_err(|e| SpecError::ValidationError(e.into()))?;
                     let hash = QueryHashVisitor::hash_query(
                         schema,
                         &executable_document,
@@ -618,11 +603,7 @@ impl BridgeQueryPlanner {
             key.filtered_query = new_doc.to_string();
             let executable_document = new_doc
                 .to_executable_validate(&self.schema.api_schema().definitions)
-                .map_err(|e| {
-                    SpecError::ValidationError(ValidationErrors {
-                        errors: e.errors.iter().map(|e| e.to_json()).collect(),
-                    })
-                })?;
+                .map_err(|e| SpecError::ValidationError(e.into()))?;
             let hash = QueryHashVisitor::hash_query(
                 &self.schema.definitions,
                 &executable_document,

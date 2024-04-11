@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use derivative::Derivative;
 use indexmap::IndexSet;
@@ -24,7 +23,6 @@ use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
 use crate::error::FetchError;
-use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -278,17 +276,15 @@ impl Query {
             .token_limit(configuration.limits.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
-            Err(WithErrors { errors, .. }) => {
-                return Err(SpecError::ParsingError(errors.to_string()));
+            Err(errors) => {
+                return Err(SpecError::ValidationError(errors.into()));
             }
         };
         let schema = &schema.api_schema().definitions;
         let executable_document = match ast.to_executable_validate(schema) {
             Ok(doc) => doc,
-            Err(WithErrors { errors, .. }) => {
-                return Err(SpecError::ValidationError(ValidationErrors {
-                    errors: errors.iter().map(|e| e.to_json()).collect(),
-                }));
+            Err(errors) => {
+                return Err(SpecError::ValidationError(errors.into()));
             }
         };
 
