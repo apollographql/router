@@ -3,9 +3,11 @@
 use std::collections::HashMap;
 
 use apollo_compiler::ast;
+use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -21,7 +23,7 @@ pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     pub(crate) found: bool,
     authenticated_directive_name: String,
     entity_query: bool,
@@ -30,13 +32,13 @@ pub(crate) struct AuthenticatedCheckVisitor<'a> {
 impl<'a> AuthenticatedCheckVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
-        executable: &'a ast::Document,
+        executable: &'a executable::ExecutableDocument,
         entity_query: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             entity_query,
-            fragments: transform::collect_fragments(executable),
+            fragments: executable.fragments.iter().collect(),
             found: false,
             authenticated_directive_name: Schema::directive_name(
                 schema,
@@ -60,22 +62,22 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
         t.directives().has(&self.authenticated_directive_name)
     }
 
-    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+    fn entities_operation(&mut self, node: &executable::Operation) -> Result<(), BoxError> {
         use crate::spec::query::traverse::Visitor;
 
-        if node.selection_set.len() != 1 {
+        if node.selection_set.selections.len() != 1 {
             return Err("invalid number of selections for _entities query".into());
         }
 
-        match node.selection_set.first() {
-            Some(ast::Selection::Field(field)) => {
+        match node.selection_set.selections.first() {
+            Some(executable::Selection::Field(field)) => {
                 if field.name.as_str() != "_entities" {
                     return Err("expected _entities field".into());
                 }
 
-                for selection in &field.selection_set {
+                for selection in &field.selection_set.selections {
                     match selection {
-                        ast::Selection::InlineFragment(f) => {
+                        executable::Selection::InlineFragment(f) => {
                             match f.type_condition.as_ref() {
                                 None => {
                                     return Err("expected type condition".into());
@@ -94,11 +96,7 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
 }
 
 impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
-    fn operation(
-        &mut self,
-        root_type: &str,
-        node: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+    fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if !self.entity_query {
             traverse::operation(self, root_type, node)
         } else {
@@ -109,7 +107,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
-        node: &ast::Field,
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
         if self.is_field_authenticated(field_def) {
             self.found = true;
@@ -118,25 +116,25 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
         traverse::field(self, field_def, node)
     }
 
-    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
+    fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
         if self
             .schema
             .types
-            .get(&node.type_condition)
+            .get(node.type_condition())
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
         {
             self.found = true;
             return Ok(());
         }
-        traverse::fragment_definition(self, node)
+        traverse::fragment(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
-        let condition = &self
+    fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
+        let condition = self
             .fragments
             .get(&node.fragment_name)
             .ok_or("MissingFragment")?
-            .type_condition;
+            .type_condition();
 
         if self
             .schema
@@ -153,7 +151,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        node: &ast::InlineFragment,
+        node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
         if let Some(name) = &node.type_condition {
             if self

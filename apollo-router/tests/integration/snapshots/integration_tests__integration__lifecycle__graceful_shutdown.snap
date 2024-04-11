@@ -1,0 +1,19 @@
+---
+source: apollo-router/tests/integration/lifecycle.rs
+expression: data
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "name": "Table"
+      },
+      {
+        "name": "Couch"
+      },
+      {
+        "name": "Chair"
+      }
+    ]
+  }
+}

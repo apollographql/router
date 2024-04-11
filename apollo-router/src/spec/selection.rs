@@ -204,7 +204,7 @@ impl Selection {
     }
 
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
-        match (path.get(0), self) {
+        match (path.first(), self) {
             (None, _) => true,
             (
                 Some(PathElement::Key(key, _)),

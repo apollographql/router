@@ -214,7 +214,7 @@ pub(crate) enum ServiceBuildError {
     /// couldn't build Query Planner Service: {0}
     QueryPlannerError(QueryPlannerError),
 
-    /// API schema generation failed: {0}
+    /// The supergraph schema failed to produce a valid API schema: {0}
     ApiSchemaError(FederationError),
 
     /// schema error: {0}
@@ -292,6 +292,9 @@ pub(crate) enum QueryPlannerError {
 
     /// Unauthorized field or type
     Unauthorized(Vec<Path>),
+
+    /// Query planner pool error: {0}
+    PoolProcessing(String),
 }
 
 impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {

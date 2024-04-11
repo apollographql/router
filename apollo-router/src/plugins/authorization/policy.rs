@@ -10,9 +10,11 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::ast;
+use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -24,7 +26,7 @@ use crate::spec::TYPENAME;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     pub(crate) extracted_policies: HashSet<String>,
     policy_directive_name: String,
     entity_query: bool,
@@ -38,13 +40,13 @@ impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
     pub(crate) fn new(
         schema: &'a schema::Schema,
-        executable: &'a ast::Document,
+        executable: &'a executable::ExecutableDocument,
         entity_query: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             entity_query,
-            fragments: transform::collect_fragments(executable),
+            fragments: executable.fragments.iter().collect(),
             extracted_policies: HashSet::new(),
             policy_directive_name: Schema::directive_name(
                 schema,
@@ -71,22 +73,22 @@ impl<'a> PolicyExtractionVisitor<'a> {
         ));
     }
 
-    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+    fn entities_operation(&mut self, node: &executable::Operation) -> Result<(), BoxError> {
         use crate::spec::query::traverse::Visitor;
 
-        if node.selection_set.len() != 1 {
+        if node.selection_set.selections.len() != 1 {
             return Err("invalid number of selections for _entities query".into());
         }
 
-        match node.selection_set.first() {
-            Some(ast::Selection::Field(field)) => {
+        match node.selection_set.selections.first() {
+            Some(executable::Selection::Field(field)) => {
                 if field.name.as_str() != "_entities" {
                     return Err("expected _entities field".into());
                 }
 
-                for selection in &field.selection_set {
+                for selection in &field.selection_set.selections {
                     match selection {
-                        ast::Selection::InlineFragment(f) => {
+                        executable::Selection::InlineFragment(f) => {
                             match f.type_condition.as_ref() {
                                 None => {
                                     return Err("expected type condition".into());
@@ -120,11 +122,7 @@ fn policy_argument(
 }
 
 impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
-    fn operation(
-        &mut self,
-        root_type: &str,
-        node: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+    fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_policies.extend(policy_argument(
                 ty.directives().get(&self.policy_directive_name),
@@ -142,26 +140,26 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
-        node: &ast::Field,
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
         self.get_policies_from_field(field_def);
 
         traverse::field(self, field_def, node)
     }
 
-    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
-        if let Some(ty) = self.schema.types.get(&node.type_condition) {
+    fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
+        if let Some(ty) = self.schema.types.get(node.type_condition()) {
             self.get_policies_from_type(ty);
         }
-        traverse::fragment_definition(self, node)
+        traverse::fragment(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
-        let type_condition = &self
+    fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
+        let type_condition = self
             .fragments
             .get(&node.fragment_name)
             .ok_or("MissingFragment")?
-            .type_condition;
+            .type_condition();
 
         if let Some(ty) = self.schema.types.get(type_condition) {
             self.get_policies_from_type(ty);
@@ -172,7 +170,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        node: &ast::InlineFragment,
+        node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
         if let Some(type_condition) = &node.type_condition {
             if let Some(ty) = self.schema.types.get(type_condition) {
@@ -644,6 +642,7 @@ mod tests {
 
     use apollo_compiler::ast;
     use apollo_compiler::ast::Document;
+    use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
 
     use crate::json_ext::Path;
@@ -715,10 +714,9 @@ mod tests {
 
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
-        let doc = ast::Document::parse(query, "query.graphql").unwrap();
-        doc.to_executable_validate(&schema).unwrap();
+        let doc = ExecutableDocument::parse(&schema, query, "query.graphql").unwrap();
         let mut visitor = PolicyExtractionVisitor::new(&schema, &doc, false).unwrap();
-        traverse::document(&mut visitor, &doc).unwrap();
+        traverse::document(&mut visitor, &doc, None).unwrap();
 
         visitor.extracted_policies.into_iter().collect()
     }

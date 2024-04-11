@@ -1,0 +1,15 @@
+fragment nameAndLicense on User {
+    licenseNumber
+    name
+}
+
+{
+    ships {
+        owner {
+            ...nameAndLicense
+        }
+    }
+    users {
+        ...nameAndLicense
+    }
+}

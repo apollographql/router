@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
@@ -64,7 +65,7 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::plugin::test::MockSubgraph;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -1683,19 +1684,19 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql\r\n"
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql"
         );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&second).unwrap(),
-        "content-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql\r\n"
+        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql"
         );
 
     let third = response.chunk().await.unwrap().unwrap();
     assert_eq!(
         std::str::from_utf8(&third).unwrap(),
-        "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
+        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
     );
 
     server.shutdown().await
@@ -2303,14 +2304,20 @@ async fn test_supergraph_timeout() {
     let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
 
     let schema = include_str!("..//testdata/minimal_supergraph.graphql");
-    let planner = BridgeQueryPlanner::new(schema.to_string(), conf.clone())
-        .await
-        .unwrap();
+    let planner = BridgeQueryPlannerPool::new(
+        schema.to_string(),
+        conf.clone(),
+        NonZeroUsize::new(1).unwrap(),
+    )
+    .await
+    .unwrap();
     let schema = planner.schema();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
-    let plugins = create_plugins(&conf, &schema, None, None).await.unwrap();
+    let plugins = create_plugins(&conf, &schema, planner.subgraph_schemas(), None, None)
+        .await
+        .unwrap();
 
     let builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())

@@ -77,7 +77,9 @@ async fn test_type_conditions_enabled_generate_query_fragments() {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
-            "experimental_generate_query_fragments": true,
+            "supergraph": {
+                "generate_query_fragments": true
+            },
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true

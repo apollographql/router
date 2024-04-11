@@ -24,6 +24,7 @@ executors:
       - image: cimg/base:stable
       - image: cimg/redis:7.2.4
       - image: jaegertracing/all-in-one:1.54.0
+      - image: openzipkin/zipkin:2.23.2
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -257,7 +258,7 @@ commands:
             - run:
                 name: Install CMake
                 command: |
-                  choco install cmake -y
+                  choco install cmake.install -y
                   echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
                   exit $LASTEXITCODE
       - when:

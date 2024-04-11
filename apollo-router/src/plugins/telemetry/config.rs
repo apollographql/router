@@ -88,9 +88,8 @@ pub(crate) struct Instrumentation {
     pub(crate) events: config_new::events::Events,
     /// Span configuration
     pub(crate) spans: config_new::spans::Spans,
-    #[serde(skip)]
     /// Instrument configuration
-    pub(crate) instruments: config_new::instruments::Instruments,
+    pub(crate) instruments: config_new::instruments::InstrumentsConfig,
 }
 
 /// Metrics configuration
@@ -168,14 +167,14 @@ impl TryInto<Box<dyn View>> for MetricView {
                     record_min_max: true,
                 },
             );
-        let mut instrument = Instrument::new().name(self.name);
+        let instrument = Instrument::new().name(self.name);
+        let mut mask = Stream::new();
         if let Some(desc) = self.description {
-            instrument = instrument.description(desc);
+            mask = mask.description(desc);
         }
         if let Some(unit) = self.unit {
-            instrument = instrument.unit(Unit::new(unit));
+            mask = mask.unit(Unit::new(unit));
         }
-        let mut mask = Stream::new();
         if let Some(aggregation) = aggregation {
             mask = mask.aggregation(aggregation);
         }

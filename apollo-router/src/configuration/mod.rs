@@ -196,9 +196,6 @@ pub struct Configuration {
     /// If you don't know what this is about, you probably don't need it.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
-
-    /// Enable generation of query fragments
-    pub(crate) experimental_generate_query_fragments: Option<bool>,
 }
 
 impl PartialEq for Configuration {
@@ -230,10 +227,10 @@ pub(crate) enum ApiSchemaMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
+    #[default]
     Both,
 }
 
@@ -265,7 +262,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_batching: Batching,
             experimental_type_conditioned_fetching: bool,
-            experimental_generate_query_fragments: bool,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -286,7 +282,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .experimental_batching(ad_hoc.experimental_batching)
             .experimental_type_conditioned_fetching(ad_hoc.experimental_type_conditioned_fetching)
-            .experimental_generate_query_fragments(ad_hoc.experimental_generate_query_fragments)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -326,7 +321,6 @@ impl Configuration {
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
-        experimental_generate_query_fragments: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -369,7 +363,6 @@ impl Configuration {
             notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
                 .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching.unwrap_or_default(),
-            experimental_generate_query_fragments
         };
 
         conf.validate()
@@ -406,7 +399,6 @@ impl Configuration {
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
-        experimental_generate_query_fragments: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -434,7 +426,6 @@ impl Configuration {
             experimental_batching: experimental_batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
-            experimental_generate_query_fragments,
         };
 
         configuration.validate()
@@ -631,11 +622,65 @@ pub(crate) struct Supergraph {
     #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: Option<bool>,
 
+    /// Enable QP generation of fragments for subgraph requests
+    /// Default: false
+    pub(crate) generate_query_fragments: bool,
+
     /// Set to false to disable defer support
     pub(crate) defer_support: bool,
 
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
+
+    /// abort request handling when the client drops the connection.
+    /// Default: false.
+    /// When set to true, some parts of the request pipeline like telemetry will not work properly,
+    /// but request handling will stop immediately when the client connection is closed.
+    pub(crate) early_cancel: bool,
+
+    /// Log a message if the client closes the connection before the response is sent.
+    /// Default: false.
+    pub(crate) experimental_log_on_broken_pipe: bool,
+
+    /// Configuration options pertaining to the query planner component.
+    pub(crate) query_planner: QueryPlanner,
+}
+
+/// Configuration options pertaining to the query planner component.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct QueryPlanner {
+    /// Set the size of a pool of workers to enable query planning parallelism.
+    /// Default: 1.
+    pub(crate) experimental_parallelism: AvailableParallelism,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub(crate) enum AvailableParallelism {
+    Auto(Auto),
+    Fixed(NonZeroUsize),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Auto {
+    Auto,
+}
+
+impl Default for AvailableParallelism {
+    fn default() -> Self {
+        Self::Fixed(NonZeroUsize::new(1).expect("cannot fail"))
+    }
+}
+
+impl QueryPlanner {
+    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
+        match self.experimental_parallelism {
+            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
+            AvailableParallelism::Fixed(n) => Ok(n),
+        }
+    }
 }
 
 fn default_defer_support() -> bool {
@@ -652,6 +697,10 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        generate_query_fragments: Option<bool>,
+        early_cancel: Option<bool>,
+        experimental_log_on_broken_pipe: Option<bool>,
+        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -659,7 +708,19 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments,
+            reuse_query_fragments: generate_query_fragments.and_then(|v|
+                if v {
+                    if reuse_query_fragments.is_some_and(|v| v) {
+                        // warn the user that both are enabled and it's overridden
+                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
+                    }
+                    Some(false)
+                } else { reuse_query_fragments }
+            ),
+            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or_default(),
+            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -675,6 +736,10 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        generate_query_fragments: Option<bool>,
+        early_cancel: Option<bool>,
+        experimental_log_on_broken_pipe: Option<bool>,
+        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -682,7 +747,19 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments,
+            reuse_query_fragments: generate_query_fragments.and_then(|v|
+                if v {
+                    if reuse_query_fragments.is_some_and(|v| v) {
+                        // warn the user that both are enabled and it's overridden
+                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
+                    }
+                    Some(false)
+                } else { reuse_query_fragments }
+            ),
+            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or_default(),
+            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -869,7 +946,7 @@ impl Default for Apq {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
-    pub(crate) cache: Cache,
+    pub(crate) cache: QueryPlanCache,
     /// Warms up the cache on reloads by running the query plan over
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
@@ -899,6 +976,66 @@ pub(crate) struct QueryPlanning {
     ///
     /// The default value is None, which specifies no limit.
     pub(crate) experimental_paths_limit: Option<u32>,
+
+    /// If cache warm up is configured, this will allow the router to keep a query plan created with
+    /// the old schema, if it determines that the schema update does not affect the corresponding query
+    pub(crate) experimental_reuse_query_plans: bool,
+}
+
+/// Cache configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct QueryPlanCache {
+    /// Configures the in memory cache (always active)
+    pub(crate) in_memory: InMemoryCache,
+    /// Configures and activates the Redis cache
+    pub(crate) redis: Option<QueryPlanRedisCache>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Redis cache configuration
+pub(crate) struct QueryPlanRedisCache {
+    /// List of URLs to the Redis cluster
+    pub(crate) urls: Vec<url::Url>,
+
+    /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
+    pub(crate) username: Option<String>,
+    /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
+    pub(crate) password: Option<String>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// Redis request timeout (default: 2ms)
+    pub(crate) timeout: Option<Duration>,
+
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_query_plan_cache_ttl"
+    )]
+    #[schemars(with = "Option<String>", default = "default_query_plan_cache_ttl")]
+    /// TTL for entries
+    pub(crate) ttl: Duration,
+
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
+
+    #[serde(default)]
+    /// TLS client configuration
+    pub(crate) tls: Option<TlsClient>,
+
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
+
+    #[serde(default = "default_reset_ttl")]
+    /// When a TTL is set on a key, reset it when reading the data from that key
+    pub(crate) reset_ttl: bool,
+}
+
+fn default_query_plan_cache_ttl() -> Duration {
+    // Default TTL set to 30 days
+    Duration::from_secs(86400 * 30)
 }
 
 /// Cache configuration
@@ -909,6 +1046,15 @@ pub(crate) struct Cache {
     pub(crate) in_memory: InMemoryCache,
     /// Configures and activates the Redis cache
     pub(crate) redis: Option<RedisCache>,
+}
+
+impl From<QueryPlanCache> for Cache {
+    fn from(value: QueryPlanCache) -> Self {
+        Cache {
+            in_memory: value.in_memory,
+            redis: value.redis.map(Into::into),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -959,10 +1105,34 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_required_to_start")]
     /// Prevents the router from starting if it cannot connect to Redis
     pub(crate) required_to_start: bool,
+
+    #[serde(default = "default_reset_ttl")]
+    /// When a TTL is set on a key, reset it when reading the data from that key
+    pub(crate) reset_ttl: bool,
 }
 
 fn default_required_to_start() -> bool {
     false
+}
+
+impl From<QueryPlanRedisCache> for RedisCache {
+    fn from(value: QueryPlanRedisCache) -> Self {
+        RedisCache {
+            urls: value.urls,
+            username: value.username,
+            password: value.password,
+            timeout: value.timeout,
+            ttl: Some(value.ttl),
+            namespace: value.namespace,
+            tls: value.tls,
+            required_to_start: value.required_to_start,
+            reset_ttl: value.reset_ttl,
+        }
+    }
+}
+
+fn default_reset_ttl() -> bool {
+    true
 }
 
 /// TLS related configuration options.

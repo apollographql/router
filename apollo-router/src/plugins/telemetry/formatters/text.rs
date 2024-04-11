@@ -1,7 +1,6 @@
 #[cfg(test)]
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::collections::LinkedList;
 use std::fmt;
 
 use nu_ansi_term::Color;
@@ -23,6 +22,7 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
+use super::get_trace_and_span_id;
 use super::EventFormatter;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
@@ -33,7 +33,7 @@ use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 pub(crate) struct Text {
     #[allow(dead_code)]
     timer: SystemTime,
-    resource: LinkedList<(String, Value)>,
+    resource: Vec<(String, Value)>,
     config: TextFormat,
     excluded_attributes: HashSet<&'static str>,
 }
@@ -261,7 +261,7 @@ impl Text {
     pub(crate) fn format_resource(
         &self,
         writer: &mut Writer,
-        resource: &LinkedList<(String, Value)>,
+        resource: &Vec<(String, Value)>,
     ) -> fmt::Result {
         if !resource.is_empty() {
             let style = Style::new().dimmed();
@@ -304,6 +304,7 @@ where
     ) -> fmt::Result
     where
         W: std::fmt::Write,
+        S: Subscriber + for<'lookup> LookupSpan<'lookup>,
     {
         let meta = event.metadata();
         let mut writer = Writer::new(writer);
@@ -313,6 +314,22 @@ where
         if self.config.display_level {
             self.format_level(meta.level(), &mut writer)?;
         }
+        let current_span = event
+            .parent()
+            .and_then(|id| ctx.span(id))
+            .or_else(|| ctx.lookup_current());
+
+        if let Some(ref span) = current_span {
+            if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
+                if self.config.display_trace_id {
+                    write!(writer, "trace_id: {} ", trace_id)?;
+                }
+                if self.config.display_span_id {
+                    write!(writer, "span_id: {} ", span_id)?;
+                }
+            }
+        }
+
         if self.config.display_resource {
             self.format_resource(&mut writer, &self.resource)?;
         }
