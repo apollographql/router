@@ -2,6 +2,7 @@ use crate::subgraph::spec::FederationSpecError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::{ast::InvalidNameError, validation::WithErrors};
 use lazy_static::lazy_static;
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Write};
 
 // What we really needed here was the string representations in enum form, this isn't meant to
@@ -427,6 +428,14 @@ impl From<DiagnosticList> for MultipleFederationErrors {
     }
 }
 
+impl FromIterator<SingleFederationError> for MultipleFederationErrors {
+    fn from_iter<T: IntoIterator<Item = SingleFederationError>>(iter: T) -> Self {
+        Self {
+            errors: iter.into_iter().collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub struct AggregateFederationError {
     pub code: String,
@@ -484,6 +493,19 @@ impl FederationError {
             message: message.into(),
         }
         .into()
+    }
+}
+
+impl MultipleFederationErrors {
+    /// Converts into `Result<(), FederationError>`.
+    /// - The return value can be either Ok, Err with a SingleFederationError or MultipleFederationErrors,
+    ///   depending on the number of errors in the input.
+    pub fn into_result(self) -> Result<(), FederationError> {
+        match self.errors.len().cmp(&1) {
+            Ordering::Less => Ok(()),
+            Ordering::Equal => Err(self.errors[0].clone().into()),
+            Ordering::Greater => Err(self.into()),
+        }
     }
 }
 
