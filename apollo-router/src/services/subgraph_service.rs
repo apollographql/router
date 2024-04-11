@@ -1012,26 +1012,26 @@ async fn call_http(
     // we have the context extensions lock held. That would be very bad...
     // We grab the (potential) BatchQuery and then operate on it later
     let opt_batch_query = {
-        let mut extensions_guard = context.extensions().lock();
+        let extensions_guard = context.extensions().lock();
 
         // We need to make sure to remove the BatchQuery from the context as it holds a sender to
         // the owning batch
         extensions_guard
             .get::<Batching>()
             .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
-            .and_then(|_| extensions_guard.remove::<BatchQuery>())
+            .and_then(|_| extensions_guard.get::<BatchQuery>().cloned())
             .and_then(|bq| (!bq.finished()).then_some(bq))
         //TODO: I'm not sure that we need to check if bq is finished.
     };
 
     // If we have a batch query, then it's time for batching
-    let result = if let Some(mut query) = opt_batch_query {
+    let result = if let Some(query) = opt_batch_query {
         // Let the owning batch know that this query is ready to process, getting back the channel
         // from which we'll eventually receive our response.
         let response_rx = query.signal_progress(client_factory, request, body).await?;
 
         //Re-insert our BatchQuery
-        context.extensions().lock().insert::<BatchQuery>(query);
+        // context.extensions().lock().insert::<BatchQuery>(query);
 
         // Park this query until we have our response and pass it back up
         response_rx
