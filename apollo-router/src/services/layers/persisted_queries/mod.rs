@@ -196,7 +196,6 @@ impl PersistedQueryLayer {
         // __type/__schema/__typename.) We do want to make sure the document
         // parsed properly before poking around at it, though.
         if self.introspection_enabled
-            && doc.parse_errors.is_none()
             && doc
                 .executable
                 .all_operations()
@@ -205,12 +204,7 @@ impl PersistedQueryLayer {
             return Ok(request);
         }
 
-        let ast_result = if doc.parse_errors.is_none() {
-            Ok(&doc.ast)
-        } else {
-            Err(operation_body.as_str())
-        };
-        match manifest_poller.action_for_freeform_graphql(ast_result) {
+        match manifest_poller.action_for_freeform_graphql(Ok(&doc.ast)) {
             FreeformGraphQLAction::Allow => {
                 tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64,);
                 Ok(request)
@@ -705,7 +699,7 @@ mod tests {
         let schema = Arc::new(
             Schema::parse_test(
                 include_str!("../../../testdata/supergraph.graphql"),
-                &config,
+                &Default::default(),
             )
             .unwrap(),
         );
@@ -741,12 +735,6 @@ mod tests {
                 &query_analysis_layer,
                 "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{username,name}  } # yeah"
             ).await;
-
-        // Documents with invalid syntax don't match...
-        denied_by_safelist(&pq_layer, &query_analysis_layer, "}}}}").await;
-
-        // ... unless they precisely match a safelisted document that also has invalid syntax.
-        allowed_by_safelist(&pq_layer, &query_analysis_layer, "}}}").await;
 
         // Introspection queries are allowed (even using fragments and aliases), because
         // introspection is enabled.

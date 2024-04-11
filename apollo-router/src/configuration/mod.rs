@@ -164,10 +164,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the GraphQL validation implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
-
     /// Set the API schema generation implementation to use.
     #[serde(default)]
     pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
@@ -202,21 +198,6 @@ impl PartialEq for Configuration {
     fn eq(&self, other: &Self) -> bool {
         self.validated_yaml == other.validated_yaml
     }
-}
-
-/// GraphQL validation modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum GraphQLValidationMode {
-    /// Use the new Rust-based implementation.
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
-    #[default]
-    Both,
 }
 
 /// API schema generation modes.
@@ -259,7 +240,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
-            experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_batching: Batching,
             experimental_type_conditioned_fetching: bool,
         }
@@ -279,7 +259,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
-            .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .experimental_batching(ad_hoc.experimental_batching)
             .experimental_type_conditioned_fetching(ad_hoc.experimental_type_conditioned_fetching)
             .build()
@@ -317,7 +296,6 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
@@ -346,7 +324,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -395,7 +372,6 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
@@ -409,7 +385,6 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
                 .unwrap_or_default(),
             plugins: UserPlugins {
