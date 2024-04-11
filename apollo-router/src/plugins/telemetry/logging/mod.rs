@@ -1,6 +1,6 @@
 //TODO move telemetry logging functionality to this file
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::any::TypeId;
 
     use tower::BoxError;
@@ -149,13 +149,13 @@ mod test {
     // In particular the `TestHarness` isn't good for testing things with logging.
     // For now let's try and increase the coverage of the telemetry plugin using this and see how it goes.
 
-    struct PluginTestHarness<T: Plugin> {
+    pub(crate) struct PluginTestHarness<T: Plugin> {
         plugin: Box<dyn DynPlugin>,
         phantom: std::marker::PhantomData<T>,
     }
     #[buildstructor::buildstructor]
     impl<T: Plugin> PluginTestHarness<T> {
-        #[builder]
+        #[builder(visibility = "pub(crate)")]
         async fn new(yaml: Option<&'static str>) -> Self {
             let factory = crate::plugin::plugins()
                 .find(|factory| factory.type_id == TypeId::of::<T>())
@@ -184,7 +184,7 @@ mod test {
         }
 
         #[allow(dead_code)]
-        async fn call_router(
+        pub(crate) async fn call_router(
             &self,
             request: router::Request,
             response_fn: fn(router::Request) -> router::Response,
@@ -197,7 +197,7 @@ mod test {
             self.plugin.router_service(service).call(request).await
         }
 
-        async fn call_supergraph(
+        pub(crate) async fn call_supergraph(
             &self,
             request: supergraph::Request,
             response_fn: fn(supergraph::Request) -> supergraph::Response,
@@ -210,7 +210,7 @@ mod test {
             self.plugin.supergraph_service(service).call(request).await
         }
 
-        async fn call_subgraph(
+        pub(crate) async fn call_subgraph(
             &self,
             request: subgraph::Request,
             response_fn: fn(subgraph::Request) -> subgraph::Response,

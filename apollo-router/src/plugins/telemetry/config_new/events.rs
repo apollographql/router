@@ -128,85 +128,6 @@ pub(crate) type SupergraphEvents = CustomEvents<
 pub(crate) type SubgraphEvents =
     CustomEvents<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
 
-// pub(crate) struct RouterEvents {
-//     request: EventLevel,
-//     response: EventLevel,
-//     error: EventLevel,
-//     custom: Vec<CustomEvent<router::Request, router::Response, RouterAttributes, RouterSelector>>,
-// }
-
-// impl Instrumented for RouterEvents {
-//     type Request = router::Request;
-//     type Response = router::Response;
-
-//     fn on_request(&self, request: &Self::Request) {
-//         if self.request != EventLevel::Off {
-//             let mut attrs = HashMap::new();
-//             attrs.insert(
-//                 "headers".to_string(),
-//                 format!("{:?}", request.router_request.headers()),
-//             );
-//             attrs.insert(
-//                 "method".to_string(),
-//                 format!("{}", request.router_request.method()),
-//             );
-//             attrs.insert(
-//                 "uri".to_string(),
-//                 format!("{}", request.router_request.uri()),
-//             );
-//             attrs.insert(
-//                 "version".to_string(),
-//                 format!("{:?}", request.router_request.version()),
-//             );
-//             attrs.insert(
-//                 "body".to_string(),
-//                 format!("{:?}", request.router_request.body()),
-//             );
-//             log_level(self.request, "router.request", &attrs, "");
-//         }
-//         for custom_event in &self.custom {
-//             custom_event.on_request(request);
-//         }
-//     }
-
-//     fn on_response(&self, response: &Self::Response) {
-//         if self.response != EventLevel::Off {
-//             let mut attrs = HashMap::new();
-//             attrs.insert(
-//                 "headers".to_string(),
-//                 format!("{:?}", response.response.headers()),
-//             );
-//             attrs.insert(
-//                 "status".to_string(),
-//                 format!("{}", response.response.status()),
-//             );
-//             attrs.insert(
-//                 "version".to_string(),
-//                 format!("{:?}", response.response.version()),
-//             );
-//             attrs.insert(
-//                 "body".to_string(),
-//                 format!("{:?}", response.response.body()),
-//             );
-//             log_level(self.response, "router.response", &attrs, "");
-//         }
-//         for custom_event in &self.custom {
-//             custom_event.on_response(response);
-//         }
-//     }
-
-//     fn on_error(&self, error: &BoxError, ctx: &Context) {
-//         if self.error != EventLevel::Off {
-//             let mut attrs = HashMap::new();
-//             attrs.insert("error".to_string(), error.to_string());
-//             log_level(self.error, "router.error", &attrs, "");
-//         }
-//         for custom_event in &self.custom {
-//             custom_event.on_error(error, ctx);
-//         }
-//     }
-// }
-
 pub(crate) struct CustomEvents<Request, Response, Attributes, Sel>
 where
     Attributes: Selectors<Request = Request, Response = Response> + Default,
@@ -600,5 +521,137 @@ pub(crate) fn log_event(
         EventLevel::Warn => ::tracing::warn!(%kind, attributes = ?attributes, "{}", message),
         EventLevel::Error => ::tracing::error!(%kind, attributes = ?attributes, "{}", message),
         EventLevel::Off => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::header::CONTENT_LENGTH;
+    use http::HeaderValue;
+    use tracing::instrument::WithSubscriber;
+
+    use super::*;
+    use crate::assert_snapshot_subscriber;
+    use crate::graphql;
+    use crate::plugins::telemetry::logging::test::PluginTestHarness;
+    use crate::plugins::telemetry::Telemetry;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_router_events() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .yaml(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            test_harness
+                .call_router(
+                    router::Request::fake_builder()
+                        .header(CONTENT_LENGTH, "0")
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        router::Response::fake_builder()
+                            .header("custom-header", "val1")
+                            .header(CONTENT_LENGTH, "25")
+                            .header("x-log-request", HeaderValue::from_static("log"))
+                            .data(serde_json_bytes::json!({"data": "res"}))
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+            // Without the header to enable custom event
+            test_harness
+                .call_router(
+                    router::Request::fake_builder()
+                        .header("custom-header", "val1")
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        router::Response::fake_builder()
+                            .header("custom-header", "val1")
+                            .data(serde_json_bytes::json!({"data": "res"}))
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_supergraph_events() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .yaml(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            test_harness
+                .call_supergraph(
+                    supergraph::Request::fake_builder()
+                        .query("query { foo }")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        supergraph::Response::fake_builder()
+                            .header("custom-header", "val1")
+                            .header("x-log-request", HeaderValue::from_static("log"))
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_events() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .yaml(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let mut subgraph_req = http::Request::new(
+                graphql::Request::fake_builder()
+                    .query("query { foo }")
+                    .build(),
+            );
+            subgraph_req
+                .headers_mut()
+                .insert("x-log-request", HeaderValue::from_static("log"));
+            test_harness
+                .call_subgraph(
+                    subgraph::Request::fake_builder()
+                        .subgraph_name("subgraph")
+                        .subgraph_request(subgraph_req)
+                        .build(),
+                    |_r| {
+                        subgraph::Response::fake2_builder()
+                            .header("custom-header", "val1")
+                            .header("x-log-request", HeaderValue::from_static("log"))
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
     }
 }
