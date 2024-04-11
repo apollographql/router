@@ -32,10 +32,9 @@ use crate::services::SubgraphResponse;
 use crate::Context;
 
 /// A query that is part of a batch.
-///
-/// Note: We do NOT want this to implement `Clone` because it holds a sender
-/// to the batch, which is waiting for all batch queries to drop their senders
-/// in order to finish processing the batch.
+/// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart
+/// from the single copy in the extensions. The batching co-ordinator relies on the fact that all
+/// senders are dropped to know when to finish processing.
 #[derive(Clone, Debug)]
 pub(crate) struct BatchQuery {
     /// The index of this query relative to the entire batch
@@ -584,7 +583,7 @@ mod tests {
     async fn it_limits_the_number_of_cancelled_sends() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         assert!(bq
             .set_query_hashes(vec![Arc::new(QueryHash::default())])
@@ -603,7 +602,7 @@ mod tests {
     async fn it_limits_the_number_of_progressed_sends() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",
@@ -642,7 +641,7 @@ mod tests {
     async fn it_limits_the_number_of_mixed_sends() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",
@@ -677,7 +676,7 @@ mod tests {
     async fn it_limits_the_number_of_mixed_sends_two_query_hashes() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",

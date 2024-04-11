@@ -1025,13 +1025,10 @@ async fn call_http(
     };
 
     // If we have a batch query, then it's time for batching
-    let result = if let Some(query) = opt_batch_query {
+    if let Some(query) = opt_batch_query {
         // Let the owning batch know that this query is ready to process, getting back the channel
         // from which we'll eventually receive our response.
         let response_rx = query.signal_progress(client_factory, request, body).await?;
-
-        //Re-insert our BatchQuery
-        // context.extensions().lock().insert::<BatchQuery>(query);
 
         // Park this query until we have our response and pass it back up
         response_rx
@@ -1044,9 +1041,7 @@ async fn call_http(
         tracing::debug!("we called http");
         let client = client_factory.create(service_name);
         call_single_http(request, body, context, client, service_name).await
-    };
-
-    result
+    }
 }
 
 /// call_single_http makes http calls with modified graphql::Request (body)
