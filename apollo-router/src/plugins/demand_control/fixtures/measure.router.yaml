@@ -1,0 +1,7 @@
+experimental_demand_control:
+  enabled: true
+  mode: measure
+  algorithm:
+    basic:
+      max: 100
+

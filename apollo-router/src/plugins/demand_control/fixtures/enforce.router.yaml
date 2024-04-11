@@ -1,0 +1,6 @@
+experimental_demand_control:
+  enabled: true
+  mode: enforce
+  algorithm:
+    basic:
+      max: 100

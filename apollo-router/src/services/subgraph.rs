@@ -3,6 +3,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
 use multimap::MultiMap;
@@ -58,6 +59,8 @@ pub struct Request {
 
     // authorization metadata for this request
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    pub(crate) subgraph_request_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
 }
 
 #[buildstructor::buildstructor]
@@ -74,6 +77,7 @@ impl Request {
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         subgraph_name: Option<String>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
+        subgraph_request_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
     ) -> Request {
         Self {
             supergraph_request,
@@ -85,6 +89,7 @@ impl Request {
             connection_closed_signal,
             query_hash: Default::default(),
             authorization: Default::default(),
+            subgraph_request_document,
         }
     }
 
@@ -102,6 +107,7 @@ impl Request {
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         subgraph_name: Option<String>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
+        subgraph_request_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
     ) -> Request {
         Request::new(
             supergraph_request.unwrap_or_default(),
@@ -111,6 +117,7 @@ impl Request {
             subscription_stream,
             subgraph_name,
             connection_closed_signal,
+            subgraph_request_document,
         )
     }
 }
@@ -148,6 +155,7 @@ impl Clone for Request {
                 .map(|s| s.resubscribe()),
             query_hash: self.query_hash.clone(),
             authorization: self.authorization.clone(),
+            subgraph_request_document: self.subgraph_request_document.clone(),
         }
     }
 }

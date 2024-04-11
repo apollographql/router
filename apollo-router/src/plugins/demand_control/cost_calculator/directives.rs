@@ -8,12 +8,14 @@ use tower::BoxError;
 
 use super::DemandControlError;
 
-pub(super) struct IncludeDirective {
-    pub(super) is_included: bool,
+pub(in crate::plugins::demand_control) struct IncludeDirective {
+    pub(in crate::plugins::demand_control) is_included: bool,
 }
 
 impl IncludeDirective {
-    pub(super) fn from_field(field: &Field) -> Result<Option<Self>, BoxError> {
+    pub(in crate::plugins::demand_control) fn from_field(
+        field: &Field,
+    ) -> Result<Option<Self>, BoxError> {
         let directive = field
             .directives
             .get("include")
@@ -25,12 +27,12 @@ impl IncludeDirective {
     }
 }
 
-pub(super) struct RequiresDirective {
-    pub(super) fields: SelectionSet,
+pub(in crate::plugins::demand_control) struct RequiresDirective {
+    pub(in crate::plugins::demand_control) fields: SelectionSet,
 }
 
 impl RequiresDirective {
-    pub(super) fn from_field(
+    pub(in crate::plugins::demand_control) fn from_field(
         field: &Field,
         parent_type_name: Option<&NamedType>,
         schema: &Valid<Schema>,
@@ -59,12 +61,14 @@ impl RequiresDirective {
     }
 }
 
-pub(super) struct SkipDirective {
-    pub(super) is_skipped: bool,
+pub(in crate::plugins::demand_control) struct SkipDirective {
+    pub(in crate::plugins::demand_control) is_skipped: bool,
 }
 
 impl SkipDirective {
-    pub(super) fn from_field(field: &Field) -> Result<Option<Self>, BoxError> {
+    pub(in crate::plugins::demand_control) fn from_field(
+        field: &Field,
+    ) -> Result<Option<Self>, BoxError> {
         let directive = field
             .directives
             .get("skip")
