@@ -288,6 +288,8 @@ impl Plugin for Telemetry {
         let span_mode = config.instrumentation.spans.mode;
         let use_legacy_request_span =
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let metrics_sender = self.apollo_metrics_sender.clone();
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -335,18 +337,24 @@ impl Plugin for Telemetry {
                         );
                     }
 
-                    let client_name: &str = request
+                    let client_name = request
                         .router_request
                         .headers()
                         .get(&config_request.apollo.client_name_header)
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
+                        .and_then(|h| h.to_str().ok());
                     let client_version = request
                         .router_request
                         .headers()
                         .get(&config_request.apollo.client_version_header)
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
+                        .and_then(|h| h.to_str().ok());
+
+                    if let Some(name) = client_name {
+                        let _ = request.context.insert(CLIENT_NAME, name.to_owned());
+                    }
+
+                    if let Some(version) = client_version {
+                        let _ = request.context.insert(CLIENT_VERSION, version.to_owned());
+                    }
 
                     let mut custom_attributes = config_request
                         .instrumentation
@@ -356,8 +364,8 @@ impl Plugin for Telemetry {
                         .on_request(request);
 
                     custom_attributes.extend([
-                        KeyValue::new(CLIENT_NAME_KEY, client_name.to_string()),
-                        KeyValue::new(CLIENT_VERSION_KEY, client_version.to_string()),
+                        KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or("").to_string()),
+                        KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or("").to_string()),
                         KeyValue::new(
                             Key::from_static_str("apollo_private.http.request_headers"),
                             filter_headers(
@@ -387,6 +395,7 @@ impl Plugin for Telemetry {
                       fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
+                    let sender = metrics_sender.clone();
 
                     Self::plugin_metrics(&config);
 
@@ -433,6 +442,29 @@ impl Plugin for Telemetry {
                                 }
                             }
 
+                            if response
+                                .context
+                                .extensions()
+                                .lock()
+                                .get::<Arc<UsageReporting>>()
+                                .map(|u| {
+                                    u.stats_report_key == "## GraphQLValidationFailure\n"
+                                        || u.stats_report_key == "## GraphQLParseFailure\n"
+                                })
+                                .unwrap_or(false)
+                            {
+                                Self::update_apollo_metrics(
+                                    &response.context,
+                                    field_level_instrumentation_ratio,
+                                    sender,
+                                    true,
+                                    start.elapsed(),
+                                    // the query is invalid, we did not parse the operation kind
+                                    OperationKind::Query,
+                                    None,
+                                );
+                            }
+
                             if response.response.status() >= StatusCode::BAD_REQUEST {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             } else {
@@ -470,8 +502,11 @@ impl Plugin for Telemetry {
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) =
-                    resp.context.extensions().lock().get::<Arc<UsageReporting>>()
+                if let Some(usage_reporting) = {
+                    let extensions = resp.context.extensions().lock();
+                    let urp = extensions.get::<Arc<UsageReporting>>();
+                    urp.cloned()
+                }
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -937,27 +972,9 @@ impl Telemetry {
         field_level_instrumentation_ratio: f64,
         req: &SupergraphRequest,
     ) {
-        let apollo_config = &config.apollo;
         let context = &req.context;
         let http_request = &req.supergraph_request;
         let headers = http_request.headers();
-        let client_name_header = &apollo_config.client_name_header;
-        let client_version_header = &apollo_config.client_version_header;
-        if let Some(name) = headers
-            .get(client_name_header)
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_owned())
-        {
-            let _ = context.insert(CLIENT_NAME, name);
-        }
-
-        if let Some(version) = headers
-            .get(client_version_header)
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_owned())
-        {
-            let _ = context.insert(CLIENT_VERSION, version);
-        }
 
         let (should_log_headers, should_log_body) = config.exporters.logging.should_log(req);
         if should_log_headers {
@@ -1282,9 +1299,11 @@ impl Telemetry {
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
     ) {
-        let metrics = if let Some(usage_reporting) =
-            context.extensions().lock().get::<Arc<UsageReporting>>()
-        {
+        let metrics = if let Some(usage_reporting) = {
+            let lock = context.extensions().lock();
+            let urp = lock.get::<Arc<UsageReporting>>();
+            urp.cloned()
+        } {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
