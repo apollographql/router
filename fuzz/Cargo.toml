@@ -11,25 +11,25 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-apollo-compiler = "=1.0.0-beta.15"
-apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
-apollo-parser = "0.7.6"
+apollo-compiler.workspace = true
+apollo-smith.workspace = true
+apollo-parser.workspace = true
 env_logger = "0.10.2"
 log = "0.4"
-reqwest = { version = "0.11", default-features = false, features = ["json", "blocking"] }
-router-bridge = "=0.5.17+v2.7.2"
-serde_json = "1"
-tokio = { version = "1.36.0", features = ["full"] }
+reqwest = { workspace = true, features = ["json", "blocking"] }
+router-bridge.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 anyhow = "1"
 apollo-router = { path = "../apollo-router" }
-async-trait = "0.1"
-schemars = { version = "0.8", features = ["url"] }
-serde = "1"
-serde_json_bytes = "0.2"
-tower = { version = "0.4", features = ["full"] }
-http = "0.2"
+async-trait.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json_bytes.workspace = true
+tower.workspace = true
+http.workspace = true
 
 [[example]]
 name = "usage_reporting_router"
