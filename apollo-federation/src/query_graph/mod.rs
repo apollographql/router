@@ -231,7 +231,7 @@ pub struct QueryGraph {
     /// The sources on which the query graph was built, which is a set (potentially of size 1) of
     /// GraphQL schema keyed by the name identifying them. Note that the `source` strings in the
     /// nodes/edges of a query graph are guaranteed to be valid key in this map.
-    sources: IndexMap<NodeStr, ValidFederationSchema>,
+    pub(crate) sources: IndexMap<NodeStr, ValidFederationSchema>,
     /// A map (keyed by source) that associates type names of the underlying schema on which this
     /// query graph was built to each of the nodes that points to a type of that name. Note that for
     /// a "federated" query graph source, each type name will only map to a single node.

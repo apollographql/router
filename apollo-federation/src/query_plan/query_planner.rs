@@ -254,6 +254,10 @@ impl QueryPlanner {
         })
     }
 
+    pub fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
+        &self.federated_query_graph.sources
+    }
+
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
     pub fn build_query_plan(
         &self,
