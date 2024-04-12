@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use tower::BoxError;
 
 use self::storage::CacheStorage;
+use self::storage::InMemoryCache;
 use self::storage::KeyType;
 use self::storage::ValueType;
 use crate::configuration::RedisCache;
@@ -113,6 +114,10 @@ where
         self.storage.insert(key, value).await;
     }
 
+    pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
+        self.storage.insert_in_memory(key, value).await;
+    }
+
     async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
         // Lock the wait map to prevent more subscribers racing with our send
         // notification
@@ -121,8 +126,8 @@ where
         let _ = sender.send(value);
     }
 
-    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
-        self.storage.in_memory_keys().await
+    pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
+        self.storage.in_memory_cache()
     }
 }
 

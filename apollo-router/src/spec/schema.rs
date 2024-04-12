@@ -7,19 +7,15 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::validation::WithErrors;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -28,39 +24,27 @@ use crate::Configuration;
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) definitions: Valid<apollo_compiler::Schema>,
-    /// Stored for comparison with the validation errors from query planning.
-    diagnostics: Option<DiagnosticList>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<Box<Schema>>,
-    pub(crate) schema_id: Option<String>,
-}
-
-#[cfg(test)]
-fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String, SchemaError> {
-    use itertools::Itertools;
-    use router_bridge::api_schema::api_schema;
-    use router_bridge::api_schema::ApiSchemaOptions;
-    let s = api_schema(
-        schema,
-        ApiSchemaOptions {
-            graphql_validation: matches!(
-                configuration.experimental_graphql_validation_mode,
-                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-            ),
-        },
-    )
-    .map_err(|e| SchemaError::Api(e.to_string()))?
-    .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
-    Ok(format!("{s}\n"))
 }
 
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let api_schema = Self::parse(&make_api_schema(s, configuration)?, configuration)?;
-        let schema = Self::parse(s, configuration)?.with_api_schema(api_schema);
-        Ok(schema)
+        let schema = Self::parse(s)?;
+        let api_schema = Self::parse(
+            &schema
+                .create_api_schema(configuration)
+                // Avoid adding an error branch that's only used in tests--stick the error
+                // string in an existing generic one
+                .map_err(|err| {
+                    SchemaError::Api(format!(
+                        "The supergraph schema failed to produce a valid API schema: {err}"
+                    ))
+                })?,
+        )?;
+        Ok(schema.with_api_schema(api_schema))
     }
 
     pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
@@ -78,31 +62,15 @@ impl Schema {
         })
     }
 
-    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+    pub(crate) fn parse(sdl: &str) -> Result<Self, SchemaError> {
         let start = Instant::now();
         let ast = Self::parse_ast(sdl)?;
-        let validate =
-            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
-        // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
-        let (definitions, diagnostics) = if validate {
-            match ast.to_schema_validate() {
-                Ok(schema) => (schema, None),
-                Err(WithErrors { partial, errors }) => (Valid::assume_valid(partial), Some(errors)),
-            }
-        } else {
-            match ast.to_schema() {
-                Ok(schema) => (Valid::assume_valid(schema), None),
-                Err(WithErrors { partial, .. }) => (Valid::assume_valid(partial), None),
+        let definitions = match ast.to_schema_validate() {
+            Ok(schema) => schema,
+            Err(errors) => {
+                return Err(SchemaError::Validate(errors.into()));
             }
         };
-
-        // Only error out if new validation is used: with `Both`, we take the legacy
-        // validation as authoritative and only use the new result for comparison
-        if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
-            if let Some(errors) = diagnostics {
-                return Err(SchemaError::Validate(ValidationErrors { errors }));
-            }
-        }
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
@@ -116,8 +84,23 @@ impl Schema {
                 if url.is_empty() {
                     return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                 }
+                #[cfg(unix)]
+                // there is no standard for unix socket URLs apparently
+                let url = if let Some(path) = url.strip_prefix("unix://") {
+                    // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
+                    // so a unix:// URL will not be parsed by http::Uri
+                    // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
+                    // It hides the socket path in a hex encoded authority that the unix socket connector will
+                    // know how to decode
+                    hyperlocal::Uri::new(path, "/").into()
+                } else {
+                    Uri::from_str(url)
+                        .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
+                };
+                #[cfg(not(unix))]
                 let url = Uri::from_str(url)
                     .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+
                 if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
                         "must not have several subgraphs with same name '{name}'"
@@ -126,7 +109,6 @@ impl Schema {
             }
         }
 
-        let schema_id = Some(Self::schema_id(sdl));
         tracing::info!(
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
@@ -136,11 +118,9 @@ impl Schema {
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
             definitions,
-            diagnostics,
             subgraphs,
             implementers_map,
             api_schema: None,
-            schema_id,
         })
     }
 
@@ -157,12 +137,12 @@ impl Schema {
         use apollo_federation::ApiSchemaOptions;
         use apollo_federation::Supergraph;
 
-        let schema = Supergraph::from(self.definitions.clone());
+        let schema = Supergraph::from_schema(self.definitions.clone())?;
         let api_schema = schema.to_api_schema(ApiSchemaOptions {
             include_defer: configuration.supergraph.defer_support,
             ..Default::default()
         })?;
-        Ok(api_schema.to_string())
+        Ok(api_schema.schema().to_string())
     }
 
     pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
@@ -242,10 +222,6 @@ impl Schema {
         } else {
             kind.as_str()
         }
-    }
-
-    pub(crate) fn has_errors(&self) -> bool {
-        self.diagnostics.is_some()
     }
 
     /// Return the federation major version based on the @link or @core directives in the schema,
@@ -578,17 +554,13 @@ mod tests {
             let schema = Schema::parse_test(schema, &Default::default()).unwrap();
 
             assert_eq!(
-                schema.schema_id,
-                Some(
-                    "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
-                )
+                Schema::schema_id(&schema.raw_sdl),
+                "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
             );
 
             assert_eq!(
-                schema.api_schema().schema_id,
-                Some(
-                    "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909".to_string()
-                )
+                Schema::schema_id(&schema.api_schema().raw_sdl),
+                "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
             );
         }
     }
@@ -601,14 +573,9 @@ mod tests {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
-                    r#"The supergraph schema failed to produce a valid API schema. Caused by:
-Input field "InputObject.privateField" is @inaccessible but is used in the default value of "@foo(someArg:)", which is in the API schema.
+                    r#"The supergraph schema failed to produce a valid API schema: The following errors occurred:
 
-GraphQL request:42:1
-41 |
-42 | input InputObject {
-   | ^
-43 |   someField: String"#
+  - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `@foo(someArg:)`, which is in the API schema."#
                 );
             }
             other => panic!("unexpected schema result: {other:?}"),

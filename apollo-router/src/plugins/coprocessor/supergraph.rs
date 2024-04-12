@@ -140,7 +140,7 @@ impl SupergraphStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: router response stage error: {error}"
+                            "external extensibility: supergraph response stage error: {error}"
                         );
                         error
                     });

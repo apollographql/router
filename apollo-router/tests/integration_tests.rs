@@ -115,12 +115,12 @@ async fn api_schema_hides_field() {
 
     let message = &actual.errors[0].message;
     assert!(
-        message.contains("no field `inStock` in type `Product`"),
+        message.contains("type `Product` does not have a field `inStock`"),
         "{message}"
     );
     assert_eq!(
         actual.errors[0].extensions["code"].as_str(),
-        Some("PARSING_ERROR"),
+        Some("GRAPHQL_VALIDATION_FAILED"),
     );
 }
 
@@ -138,8 +138,7 @@ async fn validation_errors_from_rust() {
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            },
-            "experimental_graphql_validation_mode": "new",
+            }
         }),
     )
     .await;
@@ -827,8 +826,7 @@ async fn defer_path_with_disabled_config() {
             "apollo.include_subgraph_errors": {
                 "all": true
             }
-        },
-        "experimental_graphql_validation_mode": "both",
+        }
     });
     let request = supergraph::Request::fake_builder()
         .query(
@@ -1252,8 +1250,7 @@ async fn query_rust(
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            },
-            "experimental_graphql_validation_mode": "both",
+            }
         }),
     )
     .await
@@ -1282,12 +1279,8 @@ async fn query_rust_with_config(
 }
 
 async fn fallible_setup_router_and_registry(
-    mut config: serde_json::Value,
+    config: serde_json::Value,
 ) -> Result<(router::BoxCloneService, CountingServiceRegistry), BoxError> {
-    if config["experimental_api_schema_generation_mode"].is_null() {
-        config["experimental_api_schema_generation_mode"] = "both".into();
-    }
-
     let counting_registry = CountingServiceRegistry::new();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()

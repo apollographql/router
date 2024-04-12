@@ -127,7 +127,7 @@ impl FormatTest {
 
         let api_schema = schema.api_schema();
         let query =
-            Query::parse(query, &schema, &Default::default()).expect("could not parse query");
+            Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
         let mut response = Response::builder().data(response).build();
 
         query.format_response(
@@ -1405,6 +1405,7 @@ macro_rules! run_validation {
                 .query
                 .as_ref()
                 .expect("query has been added right above; qed"),
+            None,
             &schema,
             &Default::default(),
         )
@@ -1691,55 +1692,56 @@ fn variable_validation() {
 
     // https://spec.graphql.org/June2018/#sec-Input-Objects
     assert_validation!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({})
     );
     assert_validation!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation_error!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":1})
     );
     assert_validation_error!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":"str"})
     );
     assert_validation_error!(
-        "input Foo{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation!(
-        "input Foo{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{"x":1}})
     );
     assert_validation!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({"foo":1})
     );
     assert_validation_error!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({})
     );
     assert_validation!(
-        "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{"bar":{"x":1}}})
     );
+
     assert_validation!(
         "enum Availability{AVAILABLE} type Product{availability:Availability! name:String} type Query{products(availability: Availability!): [Product]!}",
         "query GetProductsByAvailability($availability: Availability!){products(availability: $availability) {name}}",
@@ -3501,6 +3503,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3508,7 +3511,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3523,6 +3526,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3531,7 +3535,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3553,6 +3557,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3561,7 +3566,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3588,6 +3593,7 @@ fn it_statically_includes() {
                 ...ProductName @include(if: false)
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3596,7 +3602,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3646,6 +3652,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3653,7 +3660,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3668,6 +3675,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3676,7 +3684,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3698,6 +3706,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3706,7 +3715,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3733,6 +3742,7 @@ fn it_statically_skips() {
                 ...ProductName @skip(if: true)
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3741,7 +3751,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3778,6 +3788,7 @@ fn it_should_fail_with_empty_selection_set() {
             product {
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -4029,7 +4040,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4056,7 +4067,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4085,7 +4096,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4113,7 +4124,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean = true) {
+            "query Example($shouldSkip: Boolean! = true) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4141,7 +4152,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean = true) {
+            "query Example($shouldSkip: Boolean! = true) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4541,7 +4552,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4568,7 +4579,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4597,7 +4608,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean = false) {
+            "query Example($shouldInclude: Boolean! = false) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4622,7 +4633,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean = false) {
+            "query Example($shouldInclude: Boolean! = false) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4650,7 +4661,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4682,7 +4693,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4709,7 +4720,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4739,7 +4750,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -5120,7 +5131,8 @@ fn fragment_on_interface_on_query() {
 
     let schema = Schema::parse_test(schema, &Default::default()).expect("could not parse schema");
     let api_schema = schema.api_schema();
-    let query = Query::parse(query, &schema, &Default::default()).expect("could not parse query");
+    let query =
+        Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
     let mut response = Response::builder()
         .data(json! {{
             "object": {
@@ -5324,10 +5336,10 @@ fn parse_introspection_query() {
           }
         }
       }";
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 
@@ -5339,10 +5351,10 @@ fn parse_introspection_query() {
         }
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 
@@ -5350,10 +5362,10 @@ fn parse_introspection_query() {
         __typename
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 }
@@ -5693,8 +5705,7 @@ fn test_error_path_works_across_inline_fragments() {
         id: ID!
         myField: String!
     }
-"#,
-        &Default::default(),
+"#, &Default::default()
     )
     .unwrap();
 
@@ -5723,6 +5734,7 @@ fn test_error_path_works_across_inline_fragments() {
                   }
                 }
               }"#,
+        Some("MyQueryThatContainsFragments"),
         &schema,
         &Default::default(),
     )
@@ -5757,10 +5769,10 @@ fn test_query_not_named_query() {
 
         type TheOneAndOnlyQuery { example: Boolean }
         "#,
-        &config,
+        &Default::default(),
     )
     .unwrap();
-    let query = Query::parse("{ example }", &schema, &config).unwrap();
+    let query = Query::parse("{ example }", None, &schema, &config).unwrap();
     let selection = &query.operations[0].selection_set[0];
     assert!(
         matches!(
@@ -5803,7 +5815,7 @@ fn filtered_defer_fragment() {
             c: String!
         }
         "#,
-        &config,
+        &Default::default(),
     )
     .unwrap();
     let query = r#"{
@@ -5826,7 +5838,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(&schema.definitions).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, &ast).unwrap();
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5844,7 +5856,6 @@ fn filtered_defer_fragment() {
         defer_stats,
         is_original: true,
         unauthorized: UnauthorizedPaths::default(),
-        validation_error: None,
         schema_aware_hash,
     };
 
@@ -5853,7 +5864,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(&schema.definitions).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, &ast).unwrap();
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5872,7 +5883,6 @@ fn filtered_defer_fragment() {
         defer_stats,
         is_original: false,
         unauthorized: UnauthorizedPaths::default(),
-        validation_error: None,
         schema_aware_hash,
     };
 

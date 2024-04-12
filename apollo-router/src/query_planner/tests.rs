@@ -23,6 +23,7 @@ use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::BridgeQueryPlanner;
 use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
@@ -82,7 +83,8 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
@@ -133,7 +135,8 @@ async fn fetch_includes_operation_name() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(Query::empty()),
     };
 
@@ -190,7 +193,8 @@ async fn fetch_makes_post_requests() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(Query::empty()),
     };
 
@@ -314,7 +318,7 @@ async fn defer() {
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
-            },
+            }.into(),
             query: Arc::new(Query::empty()),
         };
 
@@ -417,7 +421,12 @@ async fn defer_if_condition() {
           }"#;
 
     let schema = include_str!("testdata/defer_clause.graphql");
-    let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    // we need to use the planner here instead of Schema::parse_test because that one uses the router bridge's api_schema function
+    // does not keep the defer directive definition
+    let planner = BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()))
+        .await
+        .unwrap();
+    let schema = planner.schema();
 
     let root: PlanNode =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -427,10 +436,12 @@ async fn defer_if_condition() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(
             Query::parse(
                 query,
+                Some("Me"),
                 &schema,
                 &Configuration::fake_builder().build().unwrap(),
             )
@@ -612,7 +623,8 @@ async fn dependent_mutations() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(Query::empty()),
     };
 

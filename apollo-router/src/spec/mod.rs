@@ -20,7 +20,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::error::ValidationErrors;
 use crate::graphql::ErrorExtension;
+use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 
 pub(crate) const LINK_DIRECTIVE_NAME: &str = "link";
@@ -41,12 +43,14 @@ pub(crate) enum SpecError {
     InvalidField(String, String),
     /// parsing error: {0}
     ParsingError(String),
-    /// validation error
-    ValidationError(Vec<apollo_compiler::execution::GraphQLError>),
+    /// validation error: {0}
+    ValidationError(ValidationErrors),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
     /// subscription operation is not supported
     SubscriptionNotSupported,
+    /// query hashing failed: {0}
+    QueryHashing(String),
 }
 
 pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "## GraphQLValidationFailure\n";
@@ -75,6 +79,7 @@ impl ErrorExtension for SpecError {
             SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
+            SpecError::QueryHashing(_) => "QUERY_HASHING",
         }
         .to_string()
     }
@@ -93,5 +98,30 @@ impl ErrorExtension for SpecError {
         }
 
         (!obj.is_empty()).then_some(obj)
+    }
+}
+
+impl IntoGraphQLErrors for SpecError {
+    fn into_graphql_errors(self) -> Result<Vec<crate::graphql::Error>, Self> {
+        match self {
+            SpecError::ValidationError(e) => {
+                e.into_graphql_errors().map_err(SpecError::ValidationError)
+            }
+            _ => {
+                let gql_err = match self.custom_extension_details() {
+                    Some(extension_details) => crate::graphql::Error::builder()
+                        .message(self.to_string())
+                        .extension_code(self.extension_code())
+                        .extensions(extension_details)
+                        .build(),
+                    None => crate::graphql::Error::builder()
+                        .message(self.to_string())
+                        .extension_code(self.extension_code())
+                        .build(),
+                };
+
+                Ok(vec![gql_err])
+            }
+        }
     }
 }

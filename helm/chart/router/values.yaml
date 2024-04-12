@@ -210,6 +210,13 @@ autoscaling:
   maxReplicas: 100
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
+  #
+  # Specify container-specific HPA scaling targets
+  # Only available in 1.27+ (https://kubernetes.io/blog/2023/05/02/hpa-container-resource-metric/)
+  # containerBased:
+  #   - name: <container name>
+  #     type: cpu
+  #     targetUtilizationPercentage: 75
 
 nodeSelector: {}
 

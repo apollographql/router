@@ -516,7 +516,7 @@ The Apollo Router can serve any of the following landing pages to browsers that 
 
 ### Subgraph routing URLs
 
-By default, the Apollo Router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required.
+By default, the Apollo Router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
 
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
@@ -804,18 +804,6 @@ In versions of the Apollo Router prior to 1.17, this limit was defined via the c
 
 </Note>
 
-### GraphQL Validation Mode
-
-We are experimenting with a new GraphQL validation implementation written in Rust. The legacy implementation is part of the JavaScript query planner. This is part of a project to remove JavaScript from the Router to improve performance and memory behavior.
-
-To opt in to the new validation implementation, set:
-
-```yaml {4,8} title="router.yaml"
-experimental_graphql_validation_mode: new
-```
-
-This is an experimental option while we are still finding edge cases in the new implementation, but it will become the default in the future.
-
 ### Plugins
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
@@ -848,6 +836,22 @@ supergraph:
   listen: "${env.MY_LISTEN_ADDRESS}" #highlight-line
 example:
   password: "${env.MY_PASSWORD}" #highlight-line
+```
+
+### Fragment reuse and generation
+
+By default, the Apollo Router will attempt to reuse fragments from the original query while forming subgraph requests. This behavior can be disabled by setting the option to `false`:
+
+```yaml
+supergraph:
+  experimental_reuse_query_fragments: false
+```
+
+Alternatively, the Apollo Router can be configured to _generate_ fragments for subgraph requests. When set to `true`, the Apollo Router will extract _inline fragments only_ into fragment definitions before sending queries to subgraphs. This can significantly reduce the size of the query sent to subgraphs, but may increase the time it takes for planning. Note that this option and `experimental_reuse_query_fragments` are mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments` will take precedence.
+
+```yaml
+supergraph:
+  generate_query_fragments: true
 ```
 
 ### Reusing configuration

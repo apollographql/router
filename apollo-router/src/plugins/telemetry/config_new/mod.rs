@@ -1,5 +1,3 @@
-use std::collections::LinkedList;
-
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
@@ -9,6 +7,7 @@ use tower::BoxError;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use super::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 
@@ -27,9 +26,9 @@ pub(crate) mod spans;
 pub(crate) trait Selectors {
     type Request;
     type Response;
-    fn on_request(&self, request: &Self::Request) -> LinkedList<KeyValue>;
-    fn on_response(&self, response: &Self::Response) -> LinkedList<KeyValue>;
-    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue>;
+    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
+    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
+    fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
 }
 
 pub(crate) trait Selector {
@@ -42,16 +41,24 @@ pub(crate) trait Selector {
 
 pub(crate) trait DefaultForLevel {
     /// Don't call this directly, use `defaults_for_levels` instead.
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel);
-    fn defaults_for_levels(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    );
+    fn defaults_for_levels(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::None => {}
             DefaultAttributeRequirementLevel::Required => {
-                self.defaults_for_level(DefaultAttributeRequirementLevel::Required)
+                self.defaults_for_level(DefaultAttributeRequirementLevel::Required, kind)
             }
             DefaultAttributeRequirementLevel::Recommended => {
-                self.defaults_for_level(DefaultAttributeRequirementLevel::Required);
-                self.defaults_for_level(DefaultAttributeRequirementLevel::Recommended);
+                self.defaults_for_level(DefaultAttributeRequirementLevel::Required, kind);
+                self.defaults_for_level(DefaultAttributeRequirementLevel::Recommended, kind);
             }
         }
     }

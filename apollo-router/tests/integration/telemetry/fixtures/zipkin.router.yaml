@@ -1,0 +1,13 @@
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+      common:
+        service_name: router
+      zipkin:
+        enabled: true
+        endpoint: default
+        batch_processor:
+          scheduled_delay: 10ms
