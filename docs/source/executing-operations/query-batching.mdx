@@ -85,47 +85,9 @@ batching:
 
 - There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Consequently, the router will only be able to generate batches from queries which are processed which don't contain such constraints. This may result in the router issuing multiple batches or requests. 
 
+- If [query deduplication](/graphos/configuration/traffic-shaping/#query-deduplication) is enabled, it will not apply to batched queries. Batching will take precedence over query deduplication. Query deduplication will still be performed for non-batched queries.
+
 </Note>
-
-##### Example: federated subgraph batching
-
-This example shows how the router might batch subgraph requests for a federated graph, where the client batch contains a query for an entity.
-
-Assume the federated graph contains three subgraphs: `accounts`, `products`, and `reviews`.
-
-The input client query to the federated graph:
-
-```json title="federated-batch.json"
-[
-    {"query":"query MeQuery1 {\n  me {\n    id\n }\n}"},
-    {"query":"query MeQuery2 {\n  me {\n    reviews {\n      body\n    }\n  }\n}"},
-    {"query":"query MeQuery3 {\n  topProducts {\n    upc\n    reviews {\n      author {\n        name\n      }\n    }\n  }\n  me {\n    name\n  }\n}"},
-    {"query":"query MeQuery4 {\n  me {\n    name\n }\n}"},
-    {"query":"query MeQuery5 {\n  me {\n    id\n }\n}"}
-]
-```
-
-From the input query, the router generates a set of subgraph queries:
-```
-"query MeQuery1__accounts__0{me{id}}",
-"query MeQuery2__accounts__0{me{__typename id}}",
-"query MeQuery3__products__0{topProducts{__typename upc}}",
-"query MeQuery3__accounts__3{me{name}}",
-"query MeQuery4__accounts__0{me{name}}",
-"query MeQuery5__accounts__0{me{id}}",
-"query MeQuery2__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
-"query MeQuery3__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{author{__typename id}}}}}",
-"query MeQuery3__accounts__2($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
-```
-The first six queries can be combined into two batches—one for `accounts` and one for `products`. They must be fetched before the final three queries can be executed individually. 
-
-Overall, without subgraph batching, the router would make nine fetches in total across the three subgraphs, but with subgraph batching, that total is reduced to five fetches.
-
-| Subgraph | Fetch Count (without)| Fetch Count (with) |
-|----------|----------------------|--------------------|
-| accounts | 6                    | 2                  |
-| products | 1                    | 1                  |
-| reviews  | 2                    | 2                  |
 
 ##### Example: simple subgraph batching
 
@@ -179,7 +141,45 @@ All of the queries can be combined into a single batch. So instead of 15 (non-ba
 |----------|----------------------|--------------------|
 | accounts | 15                   | 1                  |
 
-</Note>
+##### Example: complex subgraph batching
+
+This example shows how the router might batch subgraph requests for a graph, where the client batch contains a query for an entity.
+
+Assume the federated graph contains three subgraphs: `accounts`, `products`, and `reviews`.
+
+The input client query to the federated graph:
+
+```json title="federated-batch.json"
+[
+    {"query":"query MeQuery1 {\n  me {\n    id\n }\n}"},
+    {"query":"query MeQuery2 {\n  me {\n    reviews {\n      body\n    }\n  }\n}"},
+    {"query":"query MeQuery3 {\n  topProducts {\n    upc\n    reviews {\n      author {\n        name\n      }\n    }\n  }\n  me {\n    name\n  }\n}"},
+    {"query":"query MeQuery4 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery5 {\n  me {\n    id\n }\n}"}
+]
+```
+
+From the input query, the router generates a set of subgraph queries:
+```
+"query MeQuery1__accounts__0{me{id}}",
+"query MeQuery2__accounts__0{me{__typename id}}",
+"query MeQuery3__products__0{topProducts{__typename upc}}",
+"query MeQuery3__accounts__3{me{name}}",
+"query MeQuery4__accounts__0{me{name}}",
+"query MeQuery5__accounts__0{me{id}}",
+"query MeQuery2__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+"query MeQuery3__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{author{__typename id}}}}}",
+"query MeQuery3__accounts__2($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+```
+The first six queries can be combined into two batches—one for `accounts` and one for `products`. They must be fetched before the final three queries can be executed individually. 
+
+Overall, without subgraph batching, the router would make nine fetches in total across the three subgraphs, but with subgraph batching, that total is reduced to five fetches.
+
+| Subgraph | Fetch Count (without)| Fetch Count (with) |
+|----------|----------------------|--------------------|
+| accounts | 6                    | 2                  |
+| products | 1                    | 1                  |
+| reviews  | 2                    | 2                  |
 
 ### Configure client
 
