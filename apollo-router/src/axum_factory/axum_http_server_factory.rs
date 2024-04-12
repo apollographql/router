@@ -644,12 +644,9 @@ async fn handle_graphql(
             .in_current_span();
         let res = match tokio::task::spawn(task).await {
             Ok(res) => res,
-            Err(_e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "router service call failed",
-                )
-                    .into_response();
+            Err(err) => {
+                let msg = format!("router service call failed: {err}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response();
             }
         };
         cancel_handler.on_response();
@@ -662,8 +659,8 @@ async fn handle_graphql(
     tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
 
     match res {
-        Err(e) => {
-            if let Some(source_err) = e.source() {
+        Err(err) => {
+            if let Some(source_err) = err.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
                 }
@@ -671,18 +668,15 @@ async fn handle_graphql(
                     return Elapsed::new().into_response();
                 }
             }
-            if e.is::<RateLimited>() {
+            if err.is::<RateLimited>() {
                 return RateLimited::new().into_response();
             }
-            if e.is::<Elapsed>() {
+            if err.is::<Elapsed>() {
                 return Elapsed::new().into_response();
             }
 
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "router service call failed",
-            )
-                .into_response()
+            let msg = format!("router service call failed: {err}");
+            (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()
         }
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();

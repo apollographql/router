@@ -18,6 +18,7 @@ pub mod serde;
 pub mod test;
 
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,6 +27,8 @@ use std::task::Poll;
 
 use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Schema;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
@@ -48,12 +51,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::ListenAddr;
 
-type InstanceFactory = fn(
-    &serde_json::Value,
-    Arc<String>,
-    Arc<apollo_compiler::validation::Valid<apollo_compiler::Schema>>,
-    Notify<String, graphql::Response>,
-) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+type InstanceFactory =
+    fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
@@ -69,8 +68,10 @@ pub struct PluginInit<T> {
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
     /// The supergraph schema (parsed)
-    pub(crate) supergraph_schema:
-        Arc<apollo_compiler::validation::Valid<apollo_compiler::schema::Schema>>,
+    pub(crate) supergraph_schema: Arc<Valid<Schema>>,
+
+    /// The parsed subgraph schemas from the query planner, keyed by subgraph name
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
 }
@@ -85,11 +86,8 @@ where
         Self::builder()
             .config(config)
             .supergraph_schema(Arc::new(
-                apollo_compiler::schema::Schema::parse_and_validate(
-                    supergraph_sdl.to_string(),
-                    PathBuf::from("synthetic"),
-                )
-                .expect("failed to parse supergraph schema"),
+                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
+                    .expect("failed to parse supergraph schema"),
             ))
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
@@ -108,14 +106,11 @@ where
         Self::try_builder()
             .config(config)
             .supergraph_schema(Arc::new(
-                apollo_compiler::Schema::parse_and_validate(
-                    supergraph_sdl.to_string(),
-                    PathBuf::from("synthetic"),
-                )
-                .map_err(|e| {
-                    // This method is deprecated so we're not going to do anything fancy with the error
-                    BoxError::from(e.errors.to_string())
-                })?,
+                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
+                    .map_err(|e| {
+                        // This method is deprecated so we're not going to do anything fancy with the error
+                        BoxError::from(e.errors.to_string())
+                    })?,
             ))
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
@@ -125,29 +120,33 @@ where
     #[cfg(test)]
     pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
         let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
-            apollo_compiler::Schema::parse_and_validate(
-                supergraph_sdl.to_string(),
-                PathBuf::from("synthetic"),
-            )
-            .expect("failed to parse supergraph schema")
+            Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
+                .expect("failed to parse supergraph schema")
         } else {
-            apollo_compiler::validation::Valid::assume_valid(apollo_compiler::Schema::new())
+            Valid::assume_valid(Schema::new())
         });
-        PluginInit {
-            config,
-            supergraph_schema,
-            supergraph_sdl,
-            notify: Notify::for_tests(),
-        }
+
+        PluginInit::fake_builder()
+            .config(config)
+            .supergraph_sdl(supergraph_sdl)
+            .supergraph_schema(supergraph_schema)
+            .notify(Notify::for_tests())
+            .build()
     }
 
     /// Returns the parsed Schema. This is unstable and may be changed or removed in future router releases.
     /// In addition, Schema is not stable, and may be changed or removed in future apollo-rs releases.
     #[doc(hidden)]
-    pub fn unsupported_supergraph_schema(
-        &self,
-    ) -> Arc<apollo_compiler::validation::Valid<apollo_compiler::Schema>> {
+    pub fn unsupported_supergraph_schema(&self) -> Arc<Valid<Schema>> {
         self.supergraph_schema.clone()
+    }
+
+    /// Returns a mapping of subgraph to parsed schema. This is unstable and may be changed or removed in
+    /// future router releases. In addition, Schema is not stable, and may be changed or removed in future
+    /// apollo-rs releases.
+    #[doc(hidden)]
+    pub fn unsupported_subgraph_schemas(&self) -> Arc<HashMap<String, Arc<Valid<Schema>>>> {
+        self.subgraph_schemas.clone()
     }
 }
 
@@ -164,13 +163,15 @@ where
     pub(crate) fn new_builder(
         config: T,
         supergraph_sdl: Arc<String>,
-        supergraph_schema: Arc<apollo_compiler::validation::Valid<apollo_compiler::schema::Schema>>,
+        supergraph_schema: Arc<Valid<Schema>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
             config,
             supergraph_sdl,
             supergraph_schema,
+            subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify,
         }
     }
@@ -183,7 +184,8 @@ where
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
-        supergraph_schema: Arc<apollo_compiler::validation::Valid<apollo_compiler::schema::Schema>>,
+        supergraph_schema: Arc<Valid<Schema>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -191,6 +193,7 @@ where
             config,
             supergraph_sdl,
             supergraph_schema,
+            subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify,
         })
     }
@@ -200,21 +203,34 @@ where
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,
-        supergraph_schema: Option<
-            Arc<apollo_compiler::validation::Valid<apollo_compiler::schema::Schema>>,
-        >,
+        supergraph_schema: Option<Arc<Valid<Schema>>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
         PluginInit {
             config,
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
-            supergraph_schema: supergraph_schema.unwrap_or_else(|| {
-                Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                    apollo_compiler::Schema::new(),
-                ))
-            }),
+            supergraph_schema: supergraph_schema
+                .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
+            subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify: notify.unwrap_or_else(Notify::for_tests),
         }
+    }
+}
+
+impl PluginInit<serde_json::Value> {
+    /// Attempts to convert the plugin configuration from `serde_json::Value` to the desired type `T`
+    pub fn with_deserialized_config<T>(self) -> Result<PluginInit<T>, BoxError>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        PluginInit::try_builder()
+            .config(self.config)
+            .supergraph_schema(self.supergraph_schema)
+            .supergraph_sdl(self.supergraph_sdl)
+            .subgraph_schemas(self.subgraph_schemas)
+            .notify(self.notify.clone())
+            .build()
     }
 }
 
@@ -251,14 +267,9 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |configuration, schema, supergraph_schema, notify| {
+            instance_factory: |init| {
                 Box::pin(async move {
-                    let init = PluginInit::try_builder()
-                        .config(configuration.clone())
-                        .supergraph_sdl(schema)
-                        .supergraph_schema(supergraph_schema)
-                        .notify(notify)
-                        .build()?;
+                    let init = init.with_deserialized_config()?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
@@ -279,14 +290,9 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |configuration, schema, supergraph_schema, notify| {
+            instance_factory: |init| {
                 Box::pin(async move {
-                    let init = PluginInit::try_builder()
-                        .config(configuration.clone())
-                        .supergraph_sdl(schema)
-                        .supergraph_schema(supergraph_schema)
-                        .notify(notify)
-                        .build()?;
+                    let init = init.with_deserialized_config()?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
@@ -298,12 +304,9 @@ impl PluginFactory {
 
     pub(crate) async fn create_instance(
         &self,
-        configuration: &serde_json::Value,
-        supergraph_sdl: Arc<String>,
-        supergraph_schema: Arc<apollo_compiler::validation::Valid<apollo_compiler::Schema>>,
-        notify: Notify<String, graphql::Response>,
+        init: PluginInit<serde_json::Value>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, supergraph_sdl, supergraph_schema, notify).await
+        (self.instance_factory)(init).await
     }
 
     #[cfg(test)]
@@ -312,12 +315,9 @@ impl PluginFactory {
         configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
         (self.instance_factory)(
-            configuration,
-            Default::default(),
-            Arc::new(apollo_compiler::validation::Valid::assume_valid(
-                apollo_compiler::Schema::new(),
-            )),
-            Default::default(),
+            PluginInit::fake_builder()
+                .config(configuration.clone())
+                .build(),
         )
         .await
     }
