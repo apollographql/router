@@ -1050,17 +1050,18 @@ impl From<QueryPlanCache> for Cache {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields)]
 /// In memory cache configuration
 pub(crate) struct InMemoryCache {
     /// Number of entries in the Least Recently Used cache
+    #[serde(default = "in_memory_limit_default")]
     pub(crate) limit: NonZeroUsize,
     /// Number of entries in the Least Recently Used transient cache
-    #[serde(default = "transient_limit_default")]
+    #[serde(default = "transient_in_memory_limit_default")]
     pub(crate) transient_limit: NonZeroUsize,
 }
 
-impl Default for InMemoryCache {
+impl std::default::Default for InMemoryCache {
     fn default() -> Self {
         Self {
             limit: DEFAULT_CACHE_CAPACITY,
@@ -1069,7 +1070,11 @@ impl Default for InMemoryCache {
     }
 }
 
-fn transient_limit_default() -> NonZeroUsize {
+fn in_memory_limit_default() -> NonZeroUsize {
+    DEFAULT_CACHE_CAPACITY
+}
+
+fn transient_in_memory_limit_default() -> NonZeroUsize {
     DEFAULT_TRANSIENT_CACHE_CAPACITY
 }
 
