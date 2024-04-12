@@ -176,7 +176,7 @@ prost = "0.12.3"
 prost-types = "0.12.3"
 proteus = "0.5.0"
 rand = "0.8.5"
-rhai = { version = "1.17.1", features = ["sync", "serde", "internals"] }
+rhai = { version = "=1.17.1", features = ["sync", "serde", "internals"] }
 regex = "1.10.3"
 reqwest = { version = "0.11.24", default-features = false, features = [
     "rustls-tls",
