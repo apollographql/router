@@ -13,7 +13,7 @@ license = "Elastic-2.0"
 autotests = false                                               # Integration tests are modules of tests/main.rs
 
 [workspace.dependencies]
-apollo-compiler = "=1.0.0-beta.15"
+apollo-compiler = "=1.0.0-beta.16"
 
 [dependencies]
 apollo-compiler.workspace = true
