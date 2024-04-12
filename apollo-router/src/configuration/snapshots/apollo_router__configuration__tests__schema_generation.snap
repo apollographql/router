@@ -1377,6 +1377,33 @@ expression: "&schema"
         }
       ]
     },
+    "experimental_apollo_metrics_generation_mode": {
+      "description": "Set the Apollo usage report signature and referenced field generation implementation to use.",
+      "default": "both",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "type": "string",
+          "enum": [
+            "new"
+          ]
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "type": "string",
+          "enum": [
+            "legacy"
+          ]
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "type": "string",
+          "enum": [
+            "both"
+          ]
+        }
+      ]
+    },
     "experimental_batching": {
       "description": "Batching configuration.",
       "default": {

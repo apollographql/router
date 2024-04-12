@@ -429,6 +429,7 @@ where
                                 });
                             }
 
+                            // This will be overridden when running in ApolloMetricsGenerationMode::New mode
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                                 context
                                     .extensions()

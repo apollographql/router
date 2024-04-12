@@ -5,12 +5,21 @@ mod studio;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cargo_manifest: serde_json::Value = basic_toml::from_str(
-        &fs::read_to_string(PathBuf::from(&env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
-            .expect("could not read Cargo.toml"),
+        &fs::read_to_string(
+            PathBuf::from(&env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("Cargo.toml"),
+        )
+        .expect("could not read Cargo.toml"),
     )
     .expect("could not parse Cargo.toml");
 
     let router_bridge = cargo_manifest
+        .get("workspace")
+        .expect("Cargo.toml does not contain workspace")
+        .as_object()
+        .expect("Cargo.toml workspace key is not an object")
         .get("dependencies")
         .expect("Cargo.toml does not contain dependencies")
         .as_object()
