@@ -807,24 +807,27 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
     if test_is_enabled() {
         // Make sure that we got back what we wanted
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - data:
-        entryA:
-          index: 1
-    - data:
-        entryA:
-          index: 2
-    - errors:
-        - message: "parsing error: Error: syntax error: expected a Selection Set\n   ╭─[query.graphql:1:10]\n   │\n 1 │ query op3\n   │          │ \n   │          ╰─ expected a Selection Set\n───╯\n"
-          extensions:
-            code: PARSING_ERROR
-    - data:
-        entryA:
-          index: 4
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - data:
+            entryA:
+              index: 1
+        - data:
+            entryA:
+              index: 2
+        - errors:
+            - message: "syntax error: expected a Selection Set"
+              locations:
+                - line: 1
+                  column: 10
+              extensions:
+                code: GRAPHQL_VALIDATION_FAILED
+        - data:
+            entryA:
+              index: 4
+        "###);
     }
 
     Ok(())
