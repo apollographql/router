@@ -3,7 +3,7 @@ source: apollo-router/src/plugins/telemetry/config_new/events.rs
 expression: yaml
 ---
 - fields:
-    attributes: "{\"http.request.version\": \"HTTP/1.1\", \"http.request.method\": \"GET\", \"http.request.body\": \"Body(Empty)\", \"http.request.uri\": \"http://example.com/\", \"http.request.headers\": \"{\\\"custom-header\\\": \\\"val1\\\", \\\"content-length\\\": \\\"0\\\", \\\"x-log-request\\\": \\\"log\\\"}\"}"
+    attributes: "{\"http.request.method\": \"GET\", \"http.request.body\": \"Body(Empty)\", \"http.request.version\": \"HTTP/1.1\", \"http.request.uri\": \"http://example.com/\", \"http.request.headers\": \"{\\\"x-log-request\\\": \\\"log\\\", \\\"content-length\\\": \\\"0\\\", \\\"custom-header\\\": \\\"val1\\\"}\"}"
     kind: router.request
   level: INFO
   message: ""
@@ -45,12 +45,12 @@ expression: yaml
       otel.kind: INTERNAL
       trace_id: ""
 - fields:
-    attributes: "{\"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.headers\": \"{\\\"content-length\\\": \\\"25\\\", \\\"custom-header\\\": \\\"val1\\\", \\\"x-log-request\\\": \\\"log\\\"}\", \"http.response.status\": \"200 OK\", \"http.response.version\": \"HTTP/1.1\"}"
+    attributes: "{\"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.status\": \"200 OK\", \"http.response.headers\": \"{\\\"custom-header\\\": \\\"val1\\\", \\\"content-length\\\": \\\"25\\\", \\\"x-log-request\\\": \\\"log\\\"}\", \"http.response.version\": \"HTTP/1.1\"}"
     kind: router.response
   level: INFO
   message: ""
   span:
-    apollo_private.duration_ns: 136286
+    apollo_private.duration_ns: "[duration]"
     http.flavor: HTTP/1.1
     http.method: GET
     http.request.method: GET
@@ -59,7 +59,7 @@ expression: yaml
     otel.kind: INTERNAL
     trace_id: ""
   spans:
-    - apollo_private.duration_ns: 136286
+    - apollo_private.duration_ns: "[duration]"
       http.flavor: HTTP/1.1
       http.method: GET
       http.request.method: GET
@@ -73,7 +73,7 @@ expression: yaml
   level: INFO
   message: my response event message
   span:
-    apollo_private.duration_ns: 136286
+    apollo_private.duration_ns: "[duration]"
     http.flavor: HTTP/1.1
     http.method: GET
     http.request.method: GET
@@ -82,7 +82,7 @@ expression: yaml
     otel.kind: INTERNAL
     trace_id: ""
   spans:
-    - apollo_private.duration_ns: 136286
+    - apollo_private.duration_ns: "[duration]"
       http.flavor: HTTP/1.1
       http.method: GET
       http.request.method: GET
@@ -91,7 +91,7 @@ expression: yaml
       otel.kind: INTERNAL
       trace_id: ""
 - fields:
-    attributes: "{\"http.request.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.request.uri\": \"http://example.com/\", \"http.request.version\": \"HTTP/1.1\", \"http.request.body\": \"Body(Empty)\", \"http.request.method\": \"GET\"}"
+    attributes: "{\"http.request.method\": \"GET\", \"http.request.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.request.version\": \"HTTP/1.1\", \"http.request.body\": \"Body(Empty)\", \"http.request.uri\": \"http://example.com/\"}"
     kind: router.request
   level: INFO
   message: ""
@@ -112,12 +112,12 @@ expression: yaml
       otel.kind: INTERNAL
       trace_id: ""
 - fields:
-    attributes: "{\"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.version\": \"HTTP/1.1\", \"http.response.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.response.status\": \"200 OK\"}"
+    attributes: "{\"http.response.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.response.version\": \"HTTP/1.1\", \"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.status\": \"200 OK\"}"
     kind: router.response
   level: INFO
   message: ""
   span:
-    apollo_private.duration_ns: 168441
+    apollo_private.duration_ns: "[duration]"
     http.flavor: HTTP/1.1
     http.method: GET
     http.request.method: GET
@@ -126,7 +126,7 @@ expression: yaml
     otel.kind: INTERNAL
     trace_id: ""
   spans:
-    - apollo_private.duration_ns: 168441
+    - apollo_private.duration_ns: "[duration]"
       http.flavor: HTTP/1.1
       http.method: GET
       http.request.method: GET

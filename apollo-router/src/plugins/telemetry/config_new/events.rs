@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use http::HeaderName;
+use http::HeaderValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -148,10 +150,18 @@ impl Instrumented
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(5);
-            attrs.insert(
-                "http.request.headers".to_string(),
-                format!("{:?}", request.router_request.headers()),
-            );
+            // #[cfg(test)]
+            // let headers: indexmap::IndexMap<HeaderName, HeaderValue> = request
+            //     .router_request
+            //     .headers()
+            //     .clone()
+            //     .into_iter()
+            //     .filter_map(|(name, val)| Some((name?, val)))
+            //     .collect();
+            // #[cfg(not(test))]
+            let headers = request.router_request.headers();
+
+            attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
             attrs.insert(
                 "http.request.method".to_string(),
                 format!("{}", request.router_request.method()),
@@ -178,9 +188,20 @@ impl Instrumented
     fn on_response(&self, response: &Self::Response) {
         if self.response != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(4);
+
+            // #[cfg(test)]
+            // let headers: indexmap::IndexMap<HeaderName, HeaderValue> = response
+            //     .response
+            //     .headers()
+            //     .clone()
+            //     .into_iter()
+            //     .filter_map(|(name, val)| Some((name?, val)))
+            //     .collect();
+            // #[cfg(not(test))]
+            let headers = response.response.headers();
             attrs.insert(
                 "http.response.headers".to_string(),
-                format!("{:?}", response.response.headers()),
+                format!("{:?}", headers),
             );
             attrs.insert(
                 "http.response.status".to_string(),
@@ -226,11 +247,18 @@ impl Instrumented
 
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
-            let mut attrs = HashMap::new();
-            attrs.insert(
-                "http.request.headers".to_string(),
-                format!("{:?}", request.supergraph_request.headers()),
-            );
+            let mut attrs = HashMap::with_capacity(5);
+            // #[cfg(test)]
+            // let headers: indexmap::IndexMap<HeaderName, HeaderValue> = request
+            //     .supergraph_request
+            //     .headers()
+            //     .clone()
+            //     .into_iter()
+            //     .filter_map(|(name, val)| Some((name?, val)))
+            //     .collect();
+            // #[cfg(not(test))]
+            let headers = request.supergraph_request.headers();
+            attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
             attrs.insert(
                 "http.request.method".to_string(),
                 format!("{}", request.supergraph_request.method()),
@@ -269,7 +297,7 @@ impl Instrumented
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         if self.error != EventLevel::Off {
-            let mut attrs = HashMap::new();
+            let mut attrs = HashMap::with_capacity(1);
             attrs.insert("error".to_string(), error.to_string());
             log_event(self.error, "supergraph.error", &attrs, "");
         }
@@ -313,7 +341,8 @@ impl Instrumented
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         if self.error != EventLevel::Off {
-            let mut attrs = HashMap::new();
+            let mut attrs = HashMap::with_capacity(1);
+
             attrs.insert("error".to_string(), error.to_string());
             log_event(self.error, "subgraph.error", &attrs, "");
         }
@@ -503,6 +532,7 @@ where
             .iter()
             .map(|kv| (kv.key.to_string(), kv.value.to_string()))
             .collect();
+
         log_event(self.level, &self.name, &attributes, &self.message);
     }
 }
@@ -514,6 +544,9 @@ pub(crate) fn log_event(
     attributes: &HashMap<String, String>,
     message: &str,
 ) {
+    #[cfg(test)]
+    let attributes: indexmap::IndexMap<String, String> = attributes.clone().into_iter().collect();
+
     match level {
         EventLevel::Info => {
             ::tracing::info!(%kind, attributes = ?attributes, "{}", message);
@@ -582,8 +615,11 @@ mod tests {
                 .await
                 .expect("expecting successful response");
         }
-        .with_subscriber(assert_snapshot_subscriber!())
+        .with_subscriber(
+            assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
+        )
         .await
+        // TODO check attributes individually instead of a snapshot because it's not sorted
     }
 
     #[tokio::test(flavor = "multi_thread")]

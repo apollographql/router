@@ -3,7 +3,7 @@ source: apollo-router/src/plugins/telemetry/config_new/events.rs
 expression: yaml
 ---
 - fields:
-    attributes: "{\"http.request.method\": \"POST\", \"http.request.headers\": \"{\\\"x-log-request\\\": \\\"log\\\", \\\"content-type\\\": \\\"application/json\\\"}\", \"http.request.version\": \"HTTP/1.1\", \"http.request.body\": \"{\\\"query\\\":\\\"query { foo }\\\"}\", \"http.request.uri\": \"http://default/\"}"
+    attributes: "{\"http.request.version\": \"HTTP/1.1\", \"http.request.uri\": \"http://default/\", \"http.request.body\": \"{\\\"query\\\":\\\"query { foo }\\\"}\", \"http.request.headers\": \"{\\\"content-type\\\": \\\"application/json\\\", \\\"x-log-request\\\": \\\"log\\\"}\", \"http.request.method\": \"POST\"}"
     kind: supergraph.request
   level: INFO
   message: ""
