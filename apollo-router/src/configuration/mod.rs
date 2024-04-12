@@ -255,7 +255,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_batching: Batching,
-            experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -275,7 +274,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .experimental_batching(ad_hoc.experimental_batching)
-            .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .experimental_apollo_metrics_generation_mode(
                 ad_hoc.experimental_apollo_metrics_generation_mode,
             )

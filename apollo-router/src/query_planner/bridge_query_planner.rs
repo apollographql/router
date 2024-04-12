@@ -28,7 +28,6 @@ use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::apollo_studio_interop::UsageReportingComparisonResult;
 use crate::configuration::ApolloMetricsGenerationMode;
-use crate::configuration::GraphQLValidationMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
