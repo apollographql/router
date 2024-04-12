@@ -320,7 +320,13 @@ impl PlannerMode {
         let js = match self {
             PlannerMode::Js(js) => js,
             PlannerMode::Both { js, .. } => js,
-            PlannerMode::Rust { rust, .. } => return Ok(Self::rust_subgraphs(rust)),
+            PlannerMode::Rust { rust, .. } => {
+                return Ok(rust
+                    .subgraph_schemas()
+                    .iter()
+                    .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
+                    .collect())
+            }
         };
         js.subgraphs()
             .await?
@@ -331,12 +337,6 @@ impl PlannerMode {
                 Ok((name, Arc::new(schema)))
             })
             .collect()
-    }
-
-    fn rust_subgraphs(
-        _rust: &QueryPlanner,
-    ) -> HashMap<String, Arc<Valid<apollo_compiler::Schema>>> {
-        todo!() // TODO: expose QueryPlanner.federated_query_graph.sources
     }
 }
 
