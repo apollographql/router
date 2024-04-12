@@ -384,7 +384,7 @@ impl BridgeQueryPlanner {
                     .hash_subqueries(self.subgraph_schemas().as_ref());
                 plan.data
                     .query_plan
-                    .extract_authorization_metadata(self.schema.definitions(), &key);
+                    .extract_authorization_metadata(self.schema.supergraph_schema(), &key);
                 plan
             }
             Err(err) => {
@@ -446,7 +446,7 @@ impl BridgeQueryPlanner {
                         &signature_doc.executable,
                         &doc.executable,
                         &operation,
-                        self.schema.definitions(),
+                        self.schema.supergraph_schema(),
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where
@@ -722,7 +722,7 @@ impl BridgeQueryPlanner {
                 .to_executable_validate(self.schema.api_schema())
                 .map_err(|e| SpecError::ValidationError(e.into()))?;
             let hash = QueryHashVisitor::hash_query(
-                self.schema.definitions(),
+                self.schema.supergraph_schema(),
                 &executable_document,
                 key.operation_name.as_deref(),
             )

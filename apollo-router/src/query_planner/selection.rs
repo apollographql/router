@@ -76,15 +76,19 @@ pub(crate) fn execute_selection_set<'a>(
             }) => {
                 let selection_name = alias.as_deref().unwrap_or(name.as_str());
                 let field_type = current_type.and_then(|t| {
-                    schema.definitions().types.get(t).and_then(|ty| match ty {
-                        apollo_compiler::schema::ExtendedType::Object(o) => {
-                            o.fields.get(name.as_str()).map(|f| &f.ty)
-                        }
-                        apollo_compiler::schema::ExtendedType::Interface(i) => {
-                            i.fields.get(name.as_str()).map(|f| &f.ty)
-                        }
-                        _ => None,
-                    })
+                    schema
+                        .supergraph_schema()
+                        .types
+                        .get(t)
+                        .and_then(|ty| match ty {
+                            apollo_compiler::schema::ExtendedType::Object(o) => {
+                                o.fields.get(name.as_str()).map(|f| &f.ty)
+                            }
+                            apollo_compiler::schema::ExtendedType::Interface(i) => {
+                                i.fields.get(name.as_str()).map(|f| &f.ty)
+                            }
+                            _ => None,
+                        })
                 });
 
                 match content.get_key_value(selection_name) {
@@ -200,12 +204,12 @@ fn type_condition_matches(
         return true;
     }
 
-    let current_type = match schema.definitions().types.get(current_type) {
+    let current_type = match schema.supergraph_schema().types.get(current_type) {
         None => return false,
         Some(t) => t,
     };
 
-    let conditional_type = match schema.definitions().types.get(type_condition) {
+    let conditional_type = match schema.supergraph_schema().types.get(type_condition) {
         None => return false,
         Some(t) => t,
     };

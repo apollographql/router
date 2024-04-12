@@ -120,7 +120,7 @@ impl Schema {
         })
     }
 
-    pub(crate) fn definitions(&self) -> &Valid<apollo_compiler::Schema> {
+    pub(crate) fn supergraph_schema(&self) -> &Valid<apollo_compiler::Schema> {
         self.federation_supergraph.schema.schema()
     }
 
@@ -161,11 +161,12 @@ impl Schema {
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
-        self.definitions().is_subtype(abstract_type, maybe_subtype)
+        self.supergraph_schema()
+            .is_subtype(abstract_type, maybe_subtype)
     }
 
     pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
-        self.definitions()
+        self.supergraph_schema()
             .get_interface(interface)
             .map(|interface| {
                 // FIXME: this looks backwards
@@ -175,7 +176,9 @@ impl Schema {
     }
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
-        self.definitions().get_interface(abstract_type).is_some()
+        self.supergraph_schema()
+            .get_interface(abstract_type)
+            .is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
@@ -218,7 +221,7 @@ impl Schema {
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        if let Some(name) = self.definitions().root_operation(kind.into()) {
+        if let Some(name) = self.supergraph_schema().root_operation(kind.into()) {
             name.as_str()
         } else {
             kind.default_type_name()
@@ -228,7 +231,7 @@ impl Schema {
     /// Return the federation major version based on the @link or @core directives in the schema,
     /// or None if there are no federation directives.
     pub(crate) fn federation_version(&self) -> Option<i64> {
-        for directive in &self.definitions().schema_definition.directives {
+        for directive in &self.supergraph_schema().schema_definition.directives {
             let join_url = if directive.name == "core" {
                 let Some(feature) = directive
                     .argument_by_name("feature")
@@ -261,7 +264,7 @@ impl Schema {
     }
 
     pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
-        self.definitions()
+        self.supergraph_schema()
             .schema_definition
             .directives
             .iter()
@@ -548,7 +551,7 @@ mod tests {
                 .fields
                 .contains_key("inStock")
         };
-        assert!(has_in_stock_field(schema.definitions()));
+        assert!(has_in_stock_field(schema.supergraph_schema()));
         assert!(!has_in_stock_field(schema.api_schema()));
     }
 
