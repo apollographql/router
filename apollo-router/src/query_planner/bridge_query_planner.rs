@@ -25,6 +25,9 @@ use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
+use crate::apollo_studio_interop::generate_usage_reporting;
+use crate::apollo_studio_interop::UsageReportingComparisonResult;
+use crate::configuration::ApolloMetricsGenerationMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
@@ -357,6 +360,7 @@ impl BridgeQueryPlanner {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn plan(
         &self,
         original_query: String,
@@ -365,6 +369,7 @@ impl BridgeQueryPlanner {
         key: CacheKeyMetadata,
         selections: Query,
         plan_options: PlanOptions,
+        doc: &ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = match self
             .planner
@@ -387,10 +392,15 @@ impl BridgeQueryPlanner {
         };
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
-        let operation_signature = if original_query != filtered_query {
+        let operation_signature = if matches!(
+            self.configuration
+                .experimental_apollo_metrics_generation_mode,
+            ApolloMetricsGenerationMode::Legacy | ApolloMetricsGenerationMode::Both
+        ) && original_query != filtered_query
+        {
             Some(
                 self.planner
-                    .operation_signature(original_query, operation)
+                    .operation_signature(original_query.clone(), operation.clone())
                     .await
                     .map_err(QueryPlannerError::RouterBridgeError)?,
             )
@@ -409,6 +419,111 @@ impl BridgeQueryPlanner {
             } => {
                 if let Some(sig) = operation_signature {
                     usage_reporting.stats_report_key = sig;
+                }
+
+                if matches!(
+                    self.configuration
+                        .experimental_apollo_metrics_generation_mode,
+                    ApolloMetricsGenerationMode::New | ApolloMetricsGenerationMode::Both
+                ) {
+                    // If the query is filtered, we want to generate the signature using the original query and generate the
+                    // reference using the filtered query. To do this, we need to re-parse the original query here.
+                    let signature_doc = if original_query != filtered_query {
+                        Query::parse_document(
+                            &original_query,
+                            operation.clone().as_deref(),
+                            &self.schema,
+                            &self.configuration,
+                        )
+                        .unwrap_or(doc.clone())
+                    } else {
+                        doc.clone()
+                    };
+
+                    let generated_usage_reporting = generate_usage_reporting(
+                        &signature_doc.executable,
+                        &doc.executable,
+                        &operation,
+                        &self.schema.definitions,
+                    );
+
+                    // Ignore comparison if the operation name is an empty string since there is a known issue where
+                    // router behaviour is incorrect in that case, and it also generates incorrect usage reports.
+                    // https://github.com/apollographql/router/issues/4837
+                    let is_empty_operation_name = operation.map_or(false, |s| s.is_empty());
+                    let is_in_both_metrics_mode = matches!(
+                        self.configuration
+                            .experimental_apollo_metrics_generation_mode,
+                        ApolloMetricsGenerationMode::Both
+                    );
+                    if !is_empty_operation_name && is_in_both_metrics_mode {
+                        let comparison_result = generated_usage_reporting.compare(&usage_reporting);
+
+                        if matches!(
+                            comparison_result,
+                            UsageReportingComparisonResult::StatsReportKeyNotEqual
+                                | UsageReportingComparisonResult::BothNotEqual
+                        ) {
+                            tracing::warn!(
+                                monotonic_counter.apollo.router.operations.telemetry.studio.signature = 1u64,
+                                generation.is_matched = false,
+                                "Mismatch between the Apollo usage reporting signature generated in router and router-bridge"
+                            );
+                            tracing::debug!(
+                                "Different signatures generated between router and router-bridge:\n{}\n{}",
+                                generated_usage_reporting.result.stats_report_key,
+                                usage_reporting.stats_report_key,
+                            );
+                        } else {
+                            tracing::info!(
+                                monotonic_counter
+                                    .apollo
+                                    .router
+                                    .operations
+                                    .telemetry
+                                    .studio
+                                    .signature = 1u64,
+                                generation.is_matched = true,
+                            );
+                        }
+
+                        if matches!(
+                            comparison_result,
+                            UsageReportingComparisonResult::ReferencedFieldsNotEqual
+                                | UsageReportingComparisonResult::BothNotEqual
+                        ) {
+                            tracing::warn!(
+                                monotonic_counter.apollo.router.operations.telemetry.studio.references = 1u64,
+                                generation.is_matched = false,
+                                "Mismatch between the Apollo usage report referenced fields generated in router and router-bridge"
+                            );
+                            tracing::debug!(
+                                "Different referenced fields generated between router and router-bridge:\n{:?}\n{:?}",
+                                generated_usage_reporting.result.referenced_fields_by_type,
+                                usage_reporting.referenced_fields_by_type,
+                            );
+                        } else {
+                            tracing::info!(
+                                monotonic_counter
+                                    .apollo
+                                    .router
+                                    .operations
+                                    .telemetry
+                                    .studio
+                                    .references = 1u64,
+                                generation.is_matched = true,
+                            );
+                        }
+                    } else if matches!(
+                        self.configuration
+                            .experimental_apollo_metrics_generation_mode,
+                        ApolloMetricsGenerationMode::New
+                    ) {
+                        usage_reporting.stats_report_key =
+                            generated_usage_reporting.result.stats_report_key;
+                        usage_reporting.referenced_fields_by_type =
+                            generated_usage_reporting.result.referenced_fields_by_type;
+                    }
                 }
 
                 Ok(QueryPlannerContent::Plan {
@@ -675,6 +790,7 @@ impl BridgeQueryPlanner {
             key.metadata,
             selections,
             key.plan_options,
+            &doc,
         )
         .await
     }
@@ -980,6 +1096,7 @@ mod tests {
                 CacheKeyMetadata::default(),
                 selections,
                 PlanOptions::default(),
+                &doc,
             )
             .await
             .unwrap_err();
