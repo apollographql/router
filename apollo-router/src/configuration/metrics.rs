@@ -8,6 +8,7 @@ use opentelemetry_api::KeyValue;
 use paste::paste;
 use serde_json::Value;
 
+use super::AvailableParallelism;
 use crate::metrics::meter_provider;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
@@ -46,6 +47,7 @@ impl Metrics {
         );
         data.populate_license_instrument(license_state);
         data.populate_user_plugins_instrument(configuration);
+        data.populate_query_planner_experimental_parallelism(configuration);
         data.into()
     }
 }
@@ -427,6 +429,54 @@ impl InstrumentData {
             ),
         );
     }
+
+    pub(crate) fn populate_query_planner_experimental_parallelism(
+        &mut self,
+        configuration: &Configuration,
+    ) {
+        let query_planner_parallelism_config = configuration
+            .supergraph
+            .query_planner
+            .experimental_parallelism;
+
+        if query_planner_parallelism_config != Default::default() {
+            let mut attributes = HashMap::new();
+            attributes.insert(
+                "mode".to_string(),
+                if let AvailableParallelism::Auto(_) = query_planner_parallelism_config {
+                    "auto"
+                } else {
+                    "static"
+                }
+                .into(),
+            );
+            self.data.insert(
+                "apollo.router.config.query_planner.parallelism".to_string(),
+                (
+                    configuration
+                        .supergraph
+                        .query_planner
+                        .experimental_query_planner_parallelism()
+                        .map(|n| {
+                            #[cfg(test)]
+                            {
+                                // Set to a fixed number for snapshot tests
+                                if let AvailableParallelism::Auto(_) =
+                                    query_planner_parallelism_config
+                                {
+                                    return 8;
+                                }
+                            }
+                            let as_usize: usize = n.into();
+                            let as_u64: u64 = as_usize.try_into().unwrap_or_default();
+                            as_u64
+                        })
+                        .unwrap_or_default(),
+                    attributes,
+                ),
+            );
+        }
+    }
 }
 
 impl From<InstrumentData> for Metrics {
@@ -460,6 +510,7 @@ mod test {
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
     use crate::uplink::license_enforcement::LicenseState;
+    use crate::Configuration;
 
     #[derive(RustEmbed)]
     #[folder = "src/configuration/testdata/metrics"]
@@ -477,6 +528,8 @@ mod test {
 
             let mut data = InstrumentData::default();
             data.populate_config_instruments(yaml);
+            let configuration: Configuration = input.parse().unwrap();
+            data.populate_query_planner_experimental_parallelism(&configuration);
             let _metrics: Metrics = data.into();
             assert_non_zero_metrics_snapshot!(file_name);
         }
