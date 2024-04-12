@@ -37,4 +37,6 @@ mod record_replay;
 pub(crate) mod rhai;
 pub(crate) mod subscription;
 pub(crate) mod telemetry;
+#[cfg(test)]
+pub(crate) mod test;
 pub(crate) mod traffic_shaping;
