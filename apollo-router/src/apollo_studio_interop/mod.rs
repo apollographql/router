@@ -73,12 +73,11 @@ impl ComparableUsageReporting {
                     return false;
                 }
 
-                let mut sorted_self_field_names = self_refs.field_names.clone();
-                sorted_self_field_names.sort();
-                let mut sorted_other_field_names = other_refs.field_names.clone();
-                sorted_other_field_names.sort();
-
-                if sorted_self_field_names != sorted_other_field_names {
+                let self_field_names_set: HashSet<_> =
+                    self_refs.field_names.clone().into_iter().collect();
+                let other_field_names_set: HashSet<_> =
+                    other_refs.field_names.clone().into_iter().collect();
+                if self_field_names_set != other_field_names_set {
                     return false;
                 }
             } else {
