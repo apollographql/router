@@ -1132,6 +1132,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                blocking: true,
             },
             request: Default::default(),
         };
