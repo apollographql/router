@@ -45,3 +45,47 @@ async fn test_request_extensions_is_null() {
         r#"{"data":{"__typename":"Query"}}"#
     );
 }
+
+/// <https://github.com/apollographql/router/issues/3388>
+#[tokio::test]
+async fn test_syntax_error() {
+    let request = serde_json::json!({"query": "{__typename"});
+    let request = apollo_router::services::router::Request::fake_builder()
+        .body(request.to_string())
+        .method(hyper::Method::POST)
+        .header("content-type", "application/json")
+        .build()
+        .unwrap();
+    let response = apollo_router::TestHarness::builder()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_router()
+        .await
+        .unwrap()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let v: serde_json::Value = serde_json::from_slice(&response).unwrap();
+    insta::assert_json_snapshot!(v, @r###"
+    {
+      "errors": [
+        {
+          "message": "syntax error: expected R_CURLY, got EOF",
+          "locations": [
+            {
+              "line": 1,
+              "column": 12
+            }
+          ],
+          "extensions": {
+            "code": "PARSING_ERROR"
+          }
+        }
+      ]
+    }
+    "###);
+}
