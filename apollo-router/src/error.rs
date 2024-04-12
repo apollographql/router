@@ -619,7 +619,7 @@ impl IntoGraphQLErrors for ValidationErrors {
 impl From<DiagnosticList> for ValidationErrors {
     fn from(errors: DiagnosticList) -> Self {
         Self {
-            errors: errors.iter().map(|e| e.to_json()).collect(),
+            errors: errors.iter().map(|e| e.unstable_to_json_compat()).collect(),
         }
     }
 }

@@ -492,7 +492,7 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "type `User` does not have a field `name`", response.errors[0].message,
+            r#"Cannot query field "name" on type "User"."#, response.errors[0].message,
             "{response:?}"
         );
         assert_eq!(
@@ -554,8 +554,8 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "type `User` does not have a field `name`",
-            response.errors[0].message
+            r#"Cannot query field "name" on type "User"."#,
+            response.errors[0].message,
         );
         assert_eq!(
             "GRAPHQL_VALIDATION_FAILED",
