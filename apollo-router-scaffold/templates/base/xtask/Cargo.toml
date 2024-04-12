@@ -13,7 +13,7 @@ apollo-router-scaffold = { path ="{{integration_test}}apollo-router-scaffold" }
 {{#if branch}}
 apollo-router-scaffold = { git="https://github.com/apollographql/router.git", branch="{{branch}}" }
 {{else}}
-apollo-router-scaffold = { git = "https://github.com/apollographql/router.git", tag = "v1.43.2" }
+apollo-router-scaffold = { git = "https://github.com/apollographql/router.git", tag = "v1.44.0" }
 {{/if}}
 {{/if}}
 anyhow = "1.0.58"
