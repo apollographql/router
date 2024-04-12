@@ -8,6 +8,8 @@ mod test {
     use apollo_router::MockedSubgraphs;
     use fred::cmd;
     use fred::prelude::*;
+    use fred::types::ScanType;
+    use fred::types::Scanner;
     use futures::StreamExt;
     use http::header::CACHE_CONTROL;
     use http::HeaderValue;
@@ -26,7 +28,7 @@ mod test {
         // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
         // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
         // 4. Run this test and yank the updated cache key from the redis logs.
-        let known_cache_key = "plan:v2.7.2:af1ee357bc75cfbbcc6adda41089a56e7d1d52f6d44c049739dde2c259314f58:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
+        let known_cache_key = "plan:v2.7.2:af1ee357bc75cfbbcc6adda41089a56e7d1d52f6d44c049739dde2c259314f58:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
 
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
         let client = RedisClient::new(config, None, None, None);
@@ -63,7 +65,18 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s: String = client.get(known_cache_key).await.unwrap();
+        let s: String = match client.get(known_cache_key).await {
+            Ok(s) => s,
+            Err(e) => {
+                println!("keys in Redis server:");
+                let mut scan = client.scan("plan:*", None, Some(ScanType::String));
+                while let Some(key) = scan.next().await {
+                    let key = key.as_ref().unwrap().results();
+                    println!("\t{key:?}");
+                }
+                panic!("key {known_cache_key} not found: {e}");
+            }
+        };
         let exp: i64 = client
             .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
             .await
