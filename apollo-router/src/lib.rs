@@ -50,6 +50,7 @@ pub mod plugin;
 #[macro_use]
 pub(crate) mod metrics;
 
+mod apollo_studio_interop;
 pub(crate) mod axum_factory;
 mod batching;
 mod cache;
