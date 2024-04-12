@@ -17,6 +17,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Maintenance
 ## Documentation-->
 
+# [0.0.11](https://crates.io/crates/apollo-federation/0.0.11) - 2024-04-12
+
+## Fixes
+- Forbid aliases in `@requires(fields:)` / `@key(fields:)` argument, by [duckki] in [pull/251]
+
+## Features
+- Expose subgraphs schemas to crate consumers, by [SimonSapin] in [pull/257]
+
+## Maintenance
+- Update `apollo-compiler`, by [goto-bus-stop]
+
+[duckki]: https://github.com/duckki
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[SimonSapin]: https://github.com/SimonSapin
+[pull/251]: https://github.com/apollographql/federation-next/pull/251
+[pull/257]: https://github.com/apollographql/federation-next/pull/257
+
 # [0.0.10](https://crates.io/crates/apollo-federation/0.0.10) - 2024-04-09
 
 ## Features
