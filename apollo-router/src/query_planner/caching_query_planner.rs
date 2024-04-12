@@ -40,7 +40,6 @@ use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -228,14 +227,16 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let err_res = Query::check_errors(&doc);
-                if let Err(error) = err_res {
-                    let e = Arc::new(QueryPlannerError::SpecError(error));
-                    tokio::spawn(async move {
-                        entry.insert(Err(e)).await;
-                    });
-                    continue;
-                }
+                let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
+                    Ok(doc) => doc,
+                    Err(error) => {
+                        let e = Arc::new(QueryPlannerError::SpecError(error));
+                        tokio::spawn(async move {
+                            entry.insert(Err(e)).await;
+                        });
+                        continue;
+                    }
+                };
 
                 let schema = &self.schema.api_schema().definitions;
                 if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
@@ -414,25 +415,6 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    let err_res = Query::check_errors(&doc);
-
-                    if let Err(error) = err_res {
-                        request
-                            .context
-                            .extensions()
-                            .lock()
-                            .insert(Arc::new(UsageReporting {
-                                stats_report_key: error.get_error_key().to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            }));
-                        let e = Arc::new(QueryPlannerError::SpecError(error));
-                        let err = e.clone();
-                        tokio::spawn(async move {
-                            entry.insert(Err(err)).await;
-                        });
-                        return Err(CacheResolverError::RetrievalError(e));
-                    }
-
                     let res = self.delegate.ready().await?.call(request).await;
 
                     match res {
@@ -452,7 +434,7 @@ where
                                 context
                                     .extensions()
                                     .lock()
-                                    .insert(plan.usage_reporting.clone());
+                                    .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                             }
                             Ok(QueryPlannerResponse {
                                 content,
@@ -490,7 +472,7 @@ where
                         context
                             .extensions()
                             .lock()
-                            .insert(plan.usage_reporting.clone());
+                            .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                     }
 
                     Ok(QueryPlannerResponse::builder()
@@ -505,14 +487,16 @@ where
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(pe.usage_reporting.clone());
+                                .insert::<Arc<UsageReporting>>(Arc::new(
+                                    pe.usage_reporting.clone(),
+                                ));
                         }
                         QueryPlannerError::SpecError(e) => {
                             request
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(Arc::new(UsageReporting {
+                                .insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
                                     stats_report_key: e.get_error_key().to_string(),
                                     referenced_fields_by_type: HashMap::new(),
                                 }));
@@ -642,9 +626,7 @@ mod tests {
         });
 
         let configuration = Arc::new(crate::Configuration::default());
-        let schema = Arc::new(
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
-        );
+        let schema = Arc::new(Schema::parse(include_str!("testdata/schema.graphql")).unwrap());
 
         let mut planner =
             CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new())
@@ -653,8 +635,7 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc1 = Query::parse_document(
             "query Me { me { username } }",
@@ -734,8 +715,7 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc = Query::parse_document(
             "query Me { me { username } }",

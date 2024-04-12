@@ -164,10 +164,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the GraphQL validation implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
-
     /// Set the API schema generation implementation to use.
     #[serde(default)]
     pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
@@ -203,21 +199,6 @@ impl PartialEq for Configuration {
     }
 }
 
-/// GraphQL validation modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum GraphQLValidationMode {
-    /// Use the new Rust-based implementation.
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
-    #[default]
-    Both,
-}
-
 /// API schema generation modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
@@ -226,10 +207,10 @@ pub(crate) enum ApiSchemaMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
+    #[default]
     Both,
 }
 
@@ -273,9 +254,9 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
+            experimental_batching: Batching,
             experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
-            experimental_batching: Batching,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -293,11 +274,11 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
+            .experimental_batching(ad_hoc.experimental_batching)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .experimental_apollo_metrics_generation_mode(
                 ad_hoc.experimental_apollo_metrics_generation_mode,
             )
-            .experimental_batching(ad_hoc.experimental_batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -333,7 +314,6 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_batching: Option<Batching>,
@@ -362,7 +342,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:  experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             plugins: UserPlugins {
@@ -411,7 +390,6 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
@@ -425,7 +403,6 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
                 .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:

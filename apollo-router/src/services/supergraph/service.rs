@@ -27,7 +27,6 @@ use tracing_futures::Instrument;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
-use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
@@ -51,7 +50,6 @@ use crate::services::execution::QueryPlan;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
@@ -67,7 +65,6 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -605,18 +602,19 @@ async fn plan_query(
     // Some tests do populate the document, so we only do it if it's not already there.
     if !{
         let lock = context.extensions().lock();
-        lock.contains_key::<ParsedDocument>()
+        lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
     } {
-        let doc = Query::parse_document(
+        let doc = crate::spec::Query::parse_document(
             &query_str,
             operation_name.as_deref(),
             &schema,
             &Configuration::default(),
         )
-        .map_err(QueryPlannerError::SpecError)?;
-        Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
-        Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().lock().insert::<ParsedDocument>(doc);
+        .map_err(crate::error::QueryPlannerError::from)?;
+        context
+            .extensions()
+            .lock()
+            .insert::<crate::services::layers::query_analysis::ParsedDocument>(doc);
     }
 
     planning
