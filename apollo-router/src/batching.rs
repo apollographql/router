@@ -4,14 +4,17 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use hyper::Body;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::Context as otelContext;
-use parking_lot::Mutex;
+use parking_lot::Mutex as PMutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tower::BoxError;
 use tracing::Instrument;
@@ -29,20 +32,19 @@ use crate::services::SubgraphResponse;
 use crate::Context;
 
 /// A query that is part of a batch.
-///
-/// Note: We do NOT want this to implement `Clone` because it holds a sender
-/// to the batch, which is waiting for all batch queries to drop their senders
-/// in order to finish processing the batch.
-#[derive(Debug)]
+/// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart
+/// from the single copy in the extensions. The batching co-ordinator relies on the fact that all
+/// senders are dropped to know when to finish processing.
+#[derive(Clone, Debug)]
 pub(crate) struct BatchQuery {
     /// The index of this query relative to the entire batch
     index: usize,
 
     /// A channel sender for sending updates to the entire batch
-    sender: Option<mpsc::Sender<BatchHandlerMessage>>,
+    sender: Arc<Mutex<Option<mpsc::Sender<BatchHandlerMessage>>>>,
 
     /// How many more progress updates are we expecting to send?
-    remaining: usize,
+    remaining: Arc<AtomicUsize>,
 
     /// Batch to which this BatchQuery belongs
     batch: Arc<Batch>,
@@ -51,7 +53,7 @@ pub(crate) struct BatchQuery {
 impl fmt::Display for BatchQuery {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "index: {}, ", self.index)?;
-        write!(f, "remaining: {}, ", self.remaining)?;
+        write!(f, "remaining: {}, ", self.remaining.load(Ordering::Acquire))?;
         write!(f, "sender: {:?}, ", self.sender)?;
         write!(f, "batch: {:?}, ", self.batch)?;
         Ok(())
@@ -61,17 +63,19 @@ impl fmt::Display for BatchQuery {
 impl BatchQuery {
     /// Is this BatchQuery finished?
     pub(crate) fn finished(&self) -> bool {
-        self.remaining == 0
+        self.remaining.load(Ordering::Acquire) == 0
     }
 
     /// Inform the batch of query hashes representing fetches needed by this element of the batch query
     pub(crate) async fn set_query_hashes(
-        &mut self,
+        &self,
         query_hashes: Vec<Arc<QueryHash>>,
     ) -> Result<(), BoxError> {
-        self.remaining = query_hashes.len();
+        self.remaining.store(query_hashes.len(), Ordering::Release);
 
         self.sender
+            .lock()
+            .await
             .as_ref()
             .ok_or(SubgraphBatchingError::SenderUnavailable)?
             .send(BatchHandlerMessage::Begin {
@@ -86,7 +90,7 @@ impl BatchQuery {
     ///
     /// The returned channel can be awaited to receive the GraphQL response, when ready.
     pub(crate) async fn signal_progress(
-        &mut self,
+        &self,
         client_factory: HttpClientServiceFactory,
         request: SubgraphRequest,
         gql_request: graphql::Request,
@@ -94,8 +98,14 @@ impl BatchQuery {
         // Create a receiver for this query so that it can eventually get the request meant for it
         let (tx, rx) = oneshot::channel();
 
-        tracing::debug!("index: {}, REMAINING: {}", self.index, self.remaining);
+        tracing::debug!(
+            "index: {}, REMAINING: {}",
+            self.index,
+            self.remaining.load(Ordering::Acquire)
+        );
         self.sender
+            .lock()
+            .await
             .as_ref()
             .ok_or(SubgraphBatchingError::SenderUnavailable)?
             .send(BatchHandlerMessage::Progress {
@@ -109,18 +119,23 @@ impl BatchQuery {
             .await?;
 
         if !self.finished() {
-            self.remaining -= 1;
+            self.remaining.fetch_sub(1, Ordering::AcqRel);
         }
-        // May now be finished...
+
+        // May now be finished
         if self.finished() {
-            self.sender = None;
+            let mut sender = self.sender.lock().await;
+            *sender = None;
         }
+
         Ok(rx)
     }
 
     /// Signal to the batch handler that this specific batch query is cancelled
-    pub(crate) async fn signal_cancelled(&mut self, reason: String) -> Result<(), BoxError> {
+    pub(crate) async fn signal_cancelled(&self, reason: String) -> Result<(), BoxError> {
         self.sender
+            .lock()
+            .await
             .as_ref()
             .ok_or(SubgraphBatchingError::SenderUnavailable)?
             .send(BatchHandlerMessage::Cancel {
@@ -130,12 +145,15 @@ impl BatchQuery {
             .await?;
 
         if !self.finished() {
-            self.remaining -= 1;
+            self.remaining.fetch_sub(1, Ordering::AcqRel);
         }
-        // May now be finished...
+
+        // May now be finished
         if self.finished() {
-            self.sender = None;
+            let mut sender = self.sender.lock().await;
+            *sender = None;
         }
+
         Ok(())
     }
 }
@@ -182,7 +200,7 @@ pub(crate) struct BatchQueryInfo {
 #[derive(Debug)]
 pub(crate) struct Batch {
     /// A sender channel to communicate with the batching handler
-    senders: Mutex<Vec<Option<mpsc::Sender<BatchHandlerMessage>>>>,
+    senders: PMutex<Vec<Option<mpsc::Sender<BatchHandlerMessage>>>>,
 
     /// The spawned batching handler task handle
     ///
@@ -358,7 +376,7 @@ impl Batch {
         }.instrument(tracing::info_span!("batch_request", size)));
 
         Self {
-            senders: Mutex::new(senders),
+            senders: PMutex::new(senders),
             spawn_handle,
             size,
         }
@@ -387,8 +405,8 @@ impl Batch {
         drop(guard);
         Ok(BatchQuery {
             index,
-            sender: opt_sender,
-            remaining: 0,
+            sender: Arc::new(Mutex::new(opt_sender)),
+            remaining: Arc::new(AtomicUsize::new(0)),
             batch,
         })
     }
@@ -565,7 +583,7 @@ mod tests {
     async fn it_limits_the_number_of_cancelled_sends() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         assert!(bq
             .set_query_hashes(vec![Arc::new(QueryHash::default())])
@@ -584,7 +602,7 @@ mod tests {
     async fn it_limits_the_number_of_progressed_sends() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",
@@ -623,7 +641,7 @@ mod tests {
     async fn it_limits_the_number_of_mixed_sends() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",
@@ -658,7 +676,7 @@ mod tests {
     async fn it_limits_the_number_of_mixed_sends_two_query_hashes() {
         let batch = Arc::new(Batch::spawn_handler(2));
 
-        let mut bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
+        let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",

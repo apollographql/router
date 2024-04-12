@@ -634,12 +634,8 @@ async fn plan_query(
         ))
         .await?;
 
-    // We need to operate on the BatchQuery without holding on to the extension lock, but using the
-    // batched query requires awaiting it, which would hold the lock for too long.
-    //
-    // We remove the BatchQuery here and then reinsert it after we've done our call to fix that.
-    let batching = context.extensions().lock().remove::<BatchQuery>();
-    if let Some(mut batch_query) = batching {
+    let batching = context.extensions().lock().get::<BatchQuery>().cloned();
+    if let Some(batch_query) = batching {
         if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
             let query_hashes = plan.root.query_hashes()?;
             batch_query
@@ -648,8 +644,6 @@ async fn plan_query(
                 .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
             tracing::debug!("batch registered: {}", batch_query);
         }
-
-        context.extensions().lock().insert(batch_query);
     }
 
     Ok(qpr)

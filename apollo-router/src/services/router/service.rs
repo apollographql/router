@@ -443,7 +443,7 @@ impl RouterService {
                 // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
                 // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
                 let batch_query_opt = context.extensions().lock().remove::<BatchQuery>();
-                if let Some(mut batch_query) = batch_query_opt {
+                if let Some(batch_query) = batch_query_opt {
                     // Only proceed with signalling cancelled if the batch_query is not finished
                     if !batch_query.finished() {
                         tracing::debug!("cancelling batch query in supergraph response");
