@@ -1,3 +1,5 @@
 {
-    interfaceInstance1
+    interfaceInstance1 {
+        field2
+    }
 }

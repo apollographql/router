@@ -66,10 +66,7 @@ impl Plugin for Record {
             enabled: init.config.enabled,
             supergraph_sdl: init.supergraph_sdl.clone(),
             storage_path: storage_path.clone().into(),
-            schema: Arc::new(Schema::parse(
-                init.supergraph_sdl.clone().as_str(),
-                &Configuration::default(),
-            )?),
+            schema: Arc::new(Schema::parse(init.supergraph_sdl.clone().as_str())?),
         };
 
         if init.config.enabled {
@@ -103,7 +100,7 @@ impl Plugin for Record {
                     let context = res.context.clone();
 
                     let after_complete = once(async move {
-                        let recording = context.extensions().lock().get_mut::<Recording>().cloned();
+                        let recording = context.extensions().lock().remove::<Recording>();
 
                         if let Some(mut recording) = recording {
                             let res_headers = externalize_header_map(&headers)?;

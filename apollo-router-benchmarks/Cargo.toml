@@ -1,25 +1,23 @@
 [package]
 name = "apollo-router-benchmarks"
-version = "1.43.2"
+version = "1.44.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
 publish = false
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dev-dependencies]
 apollo-router = { path = "../apollo-router" }
 criterion = { version = "0.5", features = ["async_tokio", "async_futures"] }
 memory-stats = "1.1.0"
-once_cell = "1"
-serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
-tokio = { version = "1", features = ["full"] }
-tower = "0.4"
+once_cell.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower.workspace = true
 
 [build-dependencies]
-apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
-apollo-parser = "0.7.6"
+apollo-smith.workspace = true
+apollo-parser.workspace = true
 arbitrary = "1.3.2"
 
 [[bench]]
