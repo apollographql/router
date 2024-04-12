@@ -74,7 +74,7 @@ async fn test_syntax_error() {
     {
       "errors": [
         {
-          "message": "syntax error: expected R_CURLY, got EOF",
+          "message": "parsing error: syntax error: expected R_CURLY, got EOF",
           "locations": [
             {
               "line": 1,

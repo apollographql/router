@@ -539,7 +539,7 @@ pub(crate) enum SchemaError {
 /// Collection of schema validation errors.
 #[derive(Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
+    pub(crate) errors: DiagnosticList,
 }
 
 impl std::fmt::Display for ParseErrors {
