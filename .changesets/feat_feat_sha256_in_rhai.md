@@ -1,4 +1,4 @@
-### Brief but complete sentence that stands on its own ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/4939))
+### Add support for SHA256 hashing in Rhai ([Issue #4939](https://github.com/apollographql/router/issues/4939))
 
 This adds a new `sha256` module to create SHA256 hashes within Rhai scripts. An example looks like: 
 
