@@ -157,11 +157,13 @@ impl Plugin for DemandControl {
                         .clone();
                     resp.response = resp.response.map(move |resp| {
                         // Here we are going to abort the stream if the cost is too high
-                        // First we map based on cost, then we use take while
+                        // First we map based on cost, then we use take while to abort the stream if an error is emmitted.
+                        // When we terminate the stream we still want to emit a graphql error, so the error response is emitted first before a termination error.
                         resp.flat_map(move |resp| {
                             match strategy.on_execution_response(req.as_ref(), &resp) {
                                 Ok(_) => stream::iter(vec![Ok(resp)]),
                                 Err(err) => stream::iter(vec![
+                                    // This is the error we are returning to the user
                                     Ok(graphql::Response::builder()
                                         .errors(
                                             err.into_graphql_errors()
@@ -169,11 +171,14 @@ impl Plugin for DemandControl {
                                         )
                                         .extensions(crate::json_ext::Object::new())
                                         .build()),
+                                    // This will terminate the stream
                                     Err(()),
                                 ]),
                             }
                         })
+                        // Terminate the stream on error
                         .take_while(|resp| future::ready(resp.is_ok()))
+                        // Unwrap the result. This is safe because we are terminating the stream on error.
                         .map(|i| i.expect("error used to terminate stream"))
                         .boxed()
                     });
