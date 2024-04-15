@@ -46,7 +46,6 @@ async fn test_request_extensions_is_null() {
     );
 }
 
-/// <https://github.com/apollographql/router/issues/3388>
 #[tokio::test]
 async fn test_syntax_error() {
     let request = serde_json::json!({"query": "{__typename"});
