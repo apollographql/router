@@ -35,9 +35,8 @@ pub(super) struct ExecutionRequestConf {
     pub(super) method: bool,
     /// Send the query plan
     pub(super) query_plan: bool,
-    /// Blocks the request handling in the router
-    #[serde(default = "super::default_blocking")]
-    pub(super) blocking: bool,
+    /// Handles the request without waiting for the coprocessor to respond
+    pub(super) asynchronous: bool,
 }
 
 /// What information is passed to a router request/response stage
@@ -54,9 +53,8 @@ pub(super) struct ExecutionResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
-    /// Blocks the response handling in the router
-    #[serde(default = "super::default_blocking")]
-    pub(super) blocking: bool,
+    /// Handles the response without waiting for the coprocessor to respond
+    pub(super) asynchronous: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -235,7 +233,7 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    if !request_config.blocking {
+    if request_config.asynchronous {
         let context = request.context.clone();
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
@@ -399,7 +397,7 @@ where
         .and_has_next(first.has_next)
         .build();
 
-    if !response_config.blocking {
+    if response_config.asynchronous {
         let context = response.context.clone();
         let http_client2 = http_client.clone();
         let coprocessor_url2 = coprocessor_url.clone();
@@ -680,7 +678,7 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -815,7 +813,7 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -887,7 +885,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                blocking: true,
+                asynchronous: false,
             },
             request: Default::default(),
         };
@@ -1019,7 +1017,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                blocking: true,
+                asynchronous: false,
             },
             request: Default::default(),
         };

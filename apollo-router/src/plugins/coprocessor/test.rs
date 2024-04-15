@@ -99,7 +99,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -159,7 +159,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -219,7 +219,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -278,7 +278,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -341,7 +341,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -471,7 +471,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -540,7 +540,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -604,7 +604,7 @@ mod tests {
                 body: true,
                 service_name: false,
                 status_code: false,
-                blocking: true,
+                asynchronous: false,
             },
         };
 
@@ -716,7 +716,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -835,7 +835,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -964,7 +964,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -1053,7 +1053,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                blocking: true,
+                asynchronous: false,
             },
             response: Default::default(),
         };
@@ -1132,7 +1132,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                blocking: true,
+                asynchronous: false,
             },
             request: Default::default(),
         };

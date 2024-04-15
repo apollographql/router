@@ -209,6 +209,7 @@ where
         )
     }
 }
+
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -225,14 +226,10 @@ pub(super) struct RouterRequestConf {
     pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
-    /// Blocks the request handling in the router
-    #[serde(default = "default_blocking")]
-    pub(super) blocking: bool,
+    /// Handles the request without waiting for the coprocessor to respond
+    pub(super) asynchronous: bool,
 }
 
-fn default_blocking() -> bool {
-    true
-}
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -247,9 +244,8 @@ pub(super) struct RouterResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
-    /// Blocks the response handling in the router
-    #[serde(default = "default_blocking")]
-    pub(super) blocking: bool,
+    /// Handles the response without waiting for the coprocessor to respond
+    pub(super) asynchronous: bool,
 }
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -267,9 +263,8 @@ pub(super) struct SubgraphRequestConf {
     pub(super) method: bool,
     /// Send the service name
     pub(super) service_name: bool,
-    /// Blocks the request handling in the router
-    #[serde(default = "default_blocking")]
-    pub(super) blocking: bool,
+    /// Handles the request without waiting for the coprocessor to respond
+    pub(super) asynchronous: bool,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -286,9 +281,8 @@ pub(super) struct SubgraphResponseConf {
     pub(super) service_name: bool,
     /// Send the http status
     pub(super) status_code: bool,
-    /// Blocks the response handling in the router
-    #[serde(default = "default_blocking")]
-    pub(super) blocking: bool,
+    /// Handles the response without waiting for the coprocessor to respond
+    pub(super) asynchronous: bool,
 }
 
 /// Configures the externalization plugin
@@ -630,7 +624,7 @@ where
         .method(parts.method.to_string())
         .build();
 
-    if !request_config.blocking {
+    if request_config.asynchronous {
         let context = request.context.clone();
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
@@ -812,7 +806,7 @@ where
         .and_sdl(sdl_to_send.clone())
         .build();
 
-    if !response_config.blocking {
+    if response_config.asynchronous {
         let context = response.context.clone();
 
         let http_client2 = http_client.clone();
@@ -1061,7 +1055,7 @@ where
         .and_uri(uri)
         .build();
 
-    if !request_config.blocking {
+    if request_config.asynchronous {
         let context = request.context.clone();
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
@@ -1225,7 +1219,7 @@ where
         .and_service_name(service_name)
         .build();
 
-    if !response_config.blocking {
+    if response_config.asynchronous {
         let context = response.context.clone();
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");

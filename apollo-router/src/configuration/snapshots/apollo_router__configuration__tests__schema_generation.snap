@@ -759,14 +759,15 @@ expression: "&schema"
               "sdl": false,
               "method": false,
               "query_plan": false,
-              "blocking": false
+              "asynchronous": false
             },
             "response": {
               "headers": false,
               "context": false,
               "body": false,
               "sdl": false,
-              "status_code": false
+              "status_code": false,
+              "asynchronous": false
             }
           },
           "type": "object",
@@ -780,13 +781,13 @@ expression: "&schema"
                 "sdl": false,
                 "method": false,
                 "query_plan": false,
-                "blocking": false
+                "asynchronous": false
               },
               "type": "object",
               "properties": {
-                "blocking": {
-                  "description": "Blocks the request handling in the router",
-                  "default": true,
+                "asynchronous": {
+                  "description": "Handles the request without waiting for the coprocessor to respond",
+                  "default": false,
                   "type": "boolean"
                 },
                 "body": {
@@ -829,10 +830,16 @@ expression: "&schema"
                 "context": false,
                 "body": false,
                 "sdl": false,
-                "status_code": false
+                "status_code": false,
+                "asynchronous": false
               },
               "type": "object",
               "properties": {
+                "asynchronous": {
+                  "description": "Handles the response without waiting for the coprocessor to respond",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "body": {
                   "description": "Send the body",
                   "default": false,
@@ -873,14 +880,15 @@ expression: "&schema"
               "sdl": false,
               "path": false,
               "method": false,
-              "blocking": false
+              "asynchronous": false
             },
             "response": {
               "headers": false,
               "context": false,
               "body": false,
               "sdl": false,
-              "status_code": false
+              "status_code": false,
+              "asynchronous": false
             }
           },
           "type": "object",
@@ -894,13 +902,13 @@ expression: "&schema"
                 "sdl": false,
                 "path": false,
                 "method": false,
-                "blocking": false
+                "asynchronous": false
               },
               "type": "object",
               "properties": {
-                "blocking": {
-                  "description": "Blocks the request handling in the router",
-                  "default": true,
+                "asynchronous": {
+                  "description": "Handles the request without waiting for the coprocessor to respond",
+                  "default": false,
                   "type": "boolean"
                 },
                 "body": {
@@ -943,10 +951,16 @@ expression: "&schema"
                 "context": false,
                 "body": false,
                 "sdl": false,
-                "status_code": false
+                "status_code": false,
+                "asynchronous": false
               },
               "type": "object",
               "properties": {
+                "asynchronous": {
+                  "description": "Handles the response without waiting for the coprocessor to respond",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "body": {
                   "description": "Send the body",
                   "default": false,
@@ -988,14 +1002,15 @@ expression: "&schema"
                 "uri": false,
                 "method": false,
                 "service_name": false,
-                "blocking": false
+                "asynchronous": false
               },
               "response": {
                 "headers": false,
                 "context": false,
                 "body": false,
                 "service_name": false,
-                "status_code": false
+                "status_code": false,
+                "asynchronous": false
               }
             }
           },
@@ -1011,14 +1026,15 @@ expression: "&schema"
                   "uri": false,
                   "method": false,
                   "service_name": false,
-                  "blocking": false
+                  "asynchronous": false
                 },
                 "response": {
                   "headers": false,
                   "context": false,
                   "body": false,
                   "service_name": false,
-                  "status_code": false
+                  "status_code": false,
+                  "asynchronous": false
                 }
               },
               "type": "object",
@@ -1032,13 +1048,13 @@ expression: "&schema"
                     "uri": false,
                     "method": false,
                     "service_name": false,
-                    "blocking": false
+                    "asynchronous": false
                   },
                   "type": "object",
                   "properties": {
-                    "blocking": {
-                      "description": "Blocks the request handling in the router",
-                      "default": true,
+                    "asynchronous": {
+                      "description": "Handles the request without waiting for the coprocessor to respond",
+                      "default": false,
                       "type": "boolean"
                     },
                     "body": {
@@ -1081,10 +1097,16 @@ expression: "&schema"
                     "context": false,
                     "body": false,
                     "service_name": false,
-                    "status_code": false
+                    "status_code": false,
+                    "asynchronous": false
                   },
                   "type": "object",
                   "properties": {
+                    "asynchronous": {
+                      "description": "Handles the response without waiting for the coprocessor to respond",
+                      "default": false,
+                      "type": "boolean"
+                    },
                     "body": {
                       "description": "Send the body",
                       "default": false,
@@ -1128,14 +1150,15 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "method": false,
-              "blocking": false
+              "asynchronous": false
             },
             "response": {
               "headers": false,
               "context": false,
               "body": false,
               "sdl": false,
-              "status_code": false
+              "status_code": false,
+              "asynchronous": false
             }
           },
           "type": "object",
@@ -1148,13 +1171,13 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "method": false,
-                "blocking": false
+                "asynchronous": false
               },
               "type": "object",
               "properties": {
-                "blocking": {
-                  "description": "Blocks the request handling in the router",
-                  "default": true,
+                "asynchronous": {
+                  "description": "Handles the request without waiting for the coprocessor to respond",
+                  "default": false,
                   "type": "boolean"
                 },
                 "body": {
@@ -1192,10 +1215,16 @@ expression: "&schema"
                 "context": false,
                 "body": false,
                 "sdl": false,
-                "status_code": false
+                "status_code": false,
+                "asynchronous": false
               },
               "type": "object",
               "properties": {
+                "asynchronous": {
+                  "description": "Handles the response without waiting for the coprocessor to respond",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "body": {
                   "description": "Send the body",
                   "default": false,
