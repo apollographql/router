@@ -41,8 +41,11 @@ pub(crate) enum SpecError {
     InvalidType(String),
     /// cannot query field '{0}' on type '{1}'
     InvalidField(String, String),
+    // This branch used to be used for parse errors, and is now used primarily for errors
+    // during the query filtering / transform stage. It's also used for a handful of other
+    // random string errors.
     /// parsing error: {0}
-    ParsingError(String),
+    TransformError(String),
     /// parsing error: {0}
     ParseError(ValidationErrors),
     /// validation error: {0}
@@ -60,7 +63,7 @@ pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "## GraphQLValidat
 impl SpecError {
     pub(crate) const fn get_error_key(&self) -> &'static str {
         match self {
-            SpecError::ParsingError(_) | SpecError::ParseError(_) => "## GraphQLParseFailure\n",
+            SpecError::TransformError(_) | SpecError::ParseError(_) => "## GraphQLParseFailure\n",
             SpecError::UnknownOperation(_) => "## GraphQLUnknownOperationName\n",
             _ => GRAPHQL_VALIDATION_FAILURE_ERROR_KEY,
         }
@@ -77,7 +80,7 @@ impl ErrorExtension for SpecError {
             SpecError::RecursionLimitExceeded => "RECURSION_LIMIT_EXCEEDED",
             SpecError::InvalidType(_) => "INVALID_TYPE",
             SpecError::InvalidField(_, _) => "INVALID_FIELD",
-            SpecError::ParsingError(_) => "PARSING_ERROR",
+            SpecError::TransformError(_) => "PARSING_ERROR",
             SpecError::ParseError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
