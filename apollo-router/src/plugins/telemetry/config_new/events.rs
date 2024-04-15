@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+#[cfg(test)]
 use http::HeaderValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
@@ -627,7 +628,6 @@ mod tests {
             assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
         )
         .await
-        // TODO check attributes individually instead of a snapshot because it's not sorted
     }
 
     #[tokio::test(flavor = "multi_thread")]
