@@ -575,13 +575,13 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
     use crate::graphql;
-    use crate::plugins::telemetry::logging::test::PluginTestHarness;
     use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::test::PluginTestHarness;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_router_events() {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .yaml(include_str!("../testdata/custom_events.router.yaml"))
+            .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
             .await;
 
@@ -633,7 +633,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_events() {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .yaml(include_str!("../testdata/custom_events.router.yaml"))
+            .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
             .await;
 
@@ -664,7 +664,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_events() {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .yaml(include_str!("../testdata/custom_events.router.yaml"))
+            .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
             .await;
 

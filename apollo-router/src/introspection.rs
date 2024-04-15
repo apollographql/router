@@ -112,6 +112,7 @@ mod introspection_tests {
                     }),
                     graphql_validation: true,
                     reuse_query_fragments: Some(false),
+                    generate_query_fragments: None,
                     debug: None,
                 },
             )

@@ -1,0 +1,6 @@
+query NamedQuery {
+    users {
+        licenseNumber
+        name
+    }
+}

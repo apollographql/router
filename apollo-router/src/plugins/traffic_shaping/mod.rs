@@ -415,6 +415,7 @@ register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -429,7 +430,7 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlanner;
+    use crate::query_planner::BridgeQueryPlannerPool;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -523,10 +524,15 @@ mod test {
         .unwrap();
 
         let config = Arc::new(config);
-        let planner = BridgeQueryPlanner::new(schema.to_string(), config.clone())
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlannerPool::new(
+            schema.to_string(),
+            config.clone(),
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
         let schema = planner.schema();
+        let subgraph_schemas = planner.subgraph_schemas();
 
         let mut builder =
             PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
@@ -535,6 +541,7 @@ mod test {
             create_plugins(
                 &config,
                 &schema,
+                subgraph_schemas,
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
             )

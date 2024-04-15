@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
@@ -253,7 +254,7 @@ impl Context {
     /// Read only access to the executable document. This is UNSTABLE and may be changed or removed in future router releases.
     /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
     #[doc(hidden)]
-    pub fn unsupported_executable_document(&self) -> Option<Arc<ExecutableDocument>> {
+    pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
             .lock()
             .get::<ParsedDocument>()
@@ -334,8 +335,9 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
+    use crate::spec::Query;
+    use crate::spec::Schema;
+    use crate::Configuration;
     use crate::Context;
 
     #[test]
@@ -413,15 +415,32 @@ mod test {
     #[test]
     fn test_executable_document_access() {
         let c = Context::new();
+        let schema = r#"
+        schema
+          @core(feature: "https://specs.apollo.dev/core/v0.1"),
+          @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+          query: Query
+        }
+        type Query {
+          me: String
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
+            INVENTORY
+              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
+            PRODUCTS
+            @join__graph(name: "products" url: "http://localhost:4003/graphql")
+            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
+        }"#;
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let document =
+            Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
         assert!(c.unsupported_executable_document().is_none());
-        c.extensions().lock().insert(Arc::new(
-            crate::services::layers::query_analysis::ParsedDocumentInner {
-                ast: Default::default(),
-                executable: Default::default(),
-                parse_errors: Default::default(),
-                validation_errors: Default::default(),
-            },
-        ));
+        c.extensions().lock().insert(document);
         assert!(c.unsupported_executable_document().is_some());
     }
 }

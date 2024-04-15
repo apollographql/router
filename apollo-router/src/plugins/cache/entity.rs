@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::header;
+use http::header::CACHE_CONTROL;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -74,7 +75,8 @@ pub(crate) struct Config {
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Subgraph {
-    /// expiration for all keys
+    /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
+    #[serde(default)]
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
@@ -132,6 +134,14 @@ impl Plugin for EntityCache {
             }
         };
 
+        if init.config.redis.ttl.is_none()
+            && init.config.subgraphs.values().any(|s| s.ttl.is_none())
+        {
+            return Err("a TTL must be configured for all subgraphs or globally"
+                .to_string()
+                .into());
+        }
+
         Ok(Self {
             storage,
             enabled: init.config.enabled,
@@ -143,9 +153,11 @@ impl Plugin for EntityCache {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
-                if let Some(cache_control) =
-                    response.context.extensions().lock().get::<CacheControl>()
-                {
+                if let Some(cache_control) = {
+                    let lock = response.context.extensions().lock();
+                    let cache_control = lock.get::<CacheControl>().cloned();
+                    cache_control
+                } {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
@@ -267,7 +279,14 @@ impl InnerCacheService {
                         let response = self.service.call(request).await?;
 
                         let cache_control =
-                            CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                            if response.response.headers().contains_key(CACHE_CONTROL) {
+                                CacheControl::new(response.response.headers(), self.storage.ttl)?
+                            } else {
+                                let mut c = CacheControl::default();
+                                c.no_store = true;
+                                c
+                            };
+
                         update_cache_control(&response.context, &cache_control);
 
                         cache_store_root_from_response(
@@ -294,8 +313,13 @@ impl InnerCacheService {
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
 
-                    let cache_control =
-                        CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                    let cache_control = if response.response.headers().contains_key(CACHE_CONTROL) {
+                        CacheControl::new(response.response.headers(), self.storage.ttl)?
+                    } else {
+                        let mut c = CacheControl::default();
+                        c.no_store = true;
+                        c
+                    };
                     update_cache_control(&response.context, &cache_control);
 
                     cache_store_entities_from_response(
