@@ -2,13 +2,16 @@
 //! This plugin will use the cost calculation algorithm to determine if a query should be allowed to execute.
 //! On the request path it will use estimated
 use std::future;
-use std::ops::{ControlFlow, Deref};
+use std::ops::ControlFlow;
+use std::ops::Deref;
 use std::sync::Arc;
 
-use apollo_compiler::validation::{Valid, WithErrors};
+use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use displaydoc::Display;
-use futures::{stream, StreamExt};
+use futures::stream;
+use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
@@ -17,6 +20,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
+use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -24,10 +28,10 @@ use crate::plugin::PluginInit;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::plugins::test::PluginTestHarness;
+use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
 use crate::services::subgraph;
-use crate::{graphql, register_plugin};
 
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
@@ -292,12 +296,16 @@ mod test {
     use schemars::JsonSchema;
     use serde::Deserialize;
 
+    use crate::graphql;
     use crate::graphql::Response;
-    use crate::plugins::demand_control::{DemandControl, DemandControlError};
+    use crate::plugins::demand_control::DemandControl;
+    use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
-    use crate::services::layers::query_analysis::{ParsedDocument, ParsedDocumentInner};
-    use crate::services::{execution, subgraph};
-    use crate::{graphql, Context};
+    use crate::services::execution;
+    use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::layers::query_analysis::ParsedDocumentInner;
+    use crate::services::subgraph;
+    use crate::Context;
 
     #[tokio::test]
     async fn test_measure_on_execution_request() {

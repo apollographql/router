@@ -4,7 +4,8 @@ use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
 use crate::plugins::demand_control::DemandControlError;
-use crate::services::{execution, subgraph};
+use crate::services::execution;
+use crate::services::subgraph;
 
 /// This strategy will reject requests if the estimated cost of the request exceeds the maximum cost.
 pub(crate) struct StaticEstimated {

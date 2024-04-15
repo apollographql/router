@@ -12,10 +12,11 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::services::execution;
+use crate::services::http;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::{execution, http};
 use crate::Configuration;
 use crate::Notify;
 

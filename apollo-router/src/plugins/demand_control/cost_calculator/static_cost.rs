@@ -12,18 +12,17 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 
-use crate::graphql::Response;
-use crate::query_planner::DeferredNode;
-use crate::query_planner::PlanNode;
-use crate::query_planner::Primary;
-use crate::query_planner::QueryPlan;
-
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::schema_aware_response::SchemaAwareResponse;
 use super::schema_aware_response::TypedValue;
 use super::DemandControlError;
+use crate::graphql::Response;
+use crate::query_planner::DeferredNode;
+use crate::query_planner::PlanNode;
+use crate::query_planner::Primary;
+use crate::query_planner::QueryPlan;
 
 pub(crate) struct StaticCostCalculator {
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
@@ -326,6 +325,7 @@ mod tests {
     use test_log::test;
     use tower::Service;
 
+    use super::*;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::QueryPlannerContent;
@@ -334,8 +334,6 @@ mod tests {
     use crate::spec::Query;
     use crate::Configuration;
     use crate::Context;
-
-    use super::*;
 
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
