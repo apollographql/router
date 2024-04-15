@@ -1426,25 +1426,86 @@ expression: "&schema"
       "description": "Demand control configuration",
       "type": "object",
       "required": [
-        "algorithm",
-        "enabled"
+        "enabled",
+        "mode",
+        "strategy"
       ],
       "properties": {
-        "algorithm": {
-          "description": "The algorithm used to calculate the cost of an incoming request",
-          "oneOf": [
-            {
-              "description": "A simple, statically-defined cost mapping for operations and types.\n\nOperation costs: - Mutation: 10 - Query: 0 - Subscription 0\n\nType costs: - Object: 1 - Interface: 1 - Union: 1 - Scalar: 0 - Enum: 0",
-              "type": "string",
-              "enum": [
-                "basic"
-              ]
-            }
-          ]
-        },
         "enabled": {
           "description": "Enable demand control",
           "type": "boolean"
+        },
+        "mode": {
+          "description": "The mode that the demand control plugin should operate in. - Measure: The plugin will measure the cost of incoming requests but not reject them. - Enforce: The plugin will enforce the cost of incoming requests and reject them if the algorithm indicates that they should be rejected.",
+          "type": "string",
+          "enum": [
+            "measure",
+            "enforce"
+          ]
+        },
+        "strategy": {
+          "description": "The strategy used to reject requests.",
+          "oneOf": [
+            {
+              "description": "A simple, statically-defined cost mapping for operations and types.\n\nOperation costs: - Mutation: 10 - Query: 0 - Subscription 0\n\nType costs: - Object: 1 - Interface: 1 - Union: 1 - Scalar: 0 - Enum: 0",
+              "type": "object",
+              "required": [
+                "static_estimated"
+              ],
+              "properties": {
+                "static_estimated": {
+                  "type": "object",
+                  "required": [
+                    "max"
+                  ],
+                  "properties": {
+                    "max": {
+                      "description": "The maximum cost of a query",
+                      "type": "number",
+                      "format": "double"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "test"
+              ],
+              "properties": {
+                "test": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "stage"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "estimated_cost_too_expensive",
+                        "actual_cost_too_expensive"
+                      ]
+                    },
+                    "stage": {
+                      "type": "string",
+                      "enum": [
+                        "execution_request",
+                        "execution_response",
+                        "subgraph_request",
+                        "subgraph_response"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "additionalProperties": false
