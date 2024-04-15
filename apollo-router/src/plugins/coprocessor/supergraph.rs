@@ -635,6 +635,32 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
+    pub(crate) fn mock_with_asynchronous_response_callback(
+        callback: fn(
+            hyper::Request<Body>,
+        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
+    ) -> MockHttpClientService {
+        let mut mock_http_client = MockHttpClientService::new();
+        mock_http_client.expect_clone().returning(move || {
+            let mut mock_http_client = MockHttpClientService::new();
+
+            mock_http_client.expect_clone().returning(move || {
+                let mut mock_http_client = MockHttpClientService::new();
+                //mock_http_client.expect_call().returning(callback);
+                mock_http_client.expect_clone().returning(move || {
+                    let mut mock_http_client = MockHttpClientService::new();
+                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client
+                });
+                mock_http_client
+            });
+            mock_http_client
+        });
+
+        mock_http_client
+    }
+
+    #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
             hyper::Request<Body>,
@@ -1102,6 +1128,120 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_async() {
+        let supergraph_stage = SupergraphStage {
+            request: SupergraphRequestConf {
+                asynchronous: true,
+                ..Default::default()
+            },
+            response: SupergraphResponseConf::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mock_http_client =
+            mock_with_callback(move |_: hyper::Request<Body>| Box::pin(async { panic!() }));
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .query("query Long {\n  me {\n  name\n}\n}")
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .next()
+                .await
+                .unwrap()
+                .data
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_async() {
+        let supergraph_stage = SupergraphStage {
+            request: SupergraphRequestConf::default(),
+            response: SupergraphResponseConf {
+                asynchronous: true,
+                ..Default::default()
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mock_http_client =
+            mock_with_asynchronous_response_callback(move |_: hyper::Request<Body>| {
+                Box::pin(async { panic!() })
+            });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .query("query Long {\n  me {\n  name\n}\n}")
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .next()
+                .await
+                .unwrap()
+                .data
+                .unwrap()
         );
     }
 }

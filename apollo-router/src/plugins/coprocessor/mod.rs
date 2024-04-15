@@ -812,16 +812,18 @@ where
         let http_client2 = http_client.clone();
         let coprocessor_url2 = coprocessor_url.clone();
         // Second, call our co-processor and get a reply.
-        tracing::debug!(?payload, "externalized output");
-        let guard = context.enter_active_request();
-        let start = Instant::now();
-        let _ = payload.call(http_client.clone(), &coprocessor_url).await;
-        let duration = start.elapsed().as_secs_f64();
-        drop(guard);
-        tracing::info!(
-            histogram.apollo.router.operations.coprocessor.duration = duration,
-            coprocessor.stage = %PipelineStep::RouterResponse,
-        );
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let guard = context.enter_active_request();
+            let start = Instant::now();
+            let _ = payload.call(http_client.clone(), &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            drop(guard);
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::RouterResponse,
+            );
+        });
 
         let map_context = response.context.clone();
         // Map the rest of our body to process subsequent chunks of response
