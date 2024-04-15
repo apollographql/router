@@ -368,8 +368,8 @@ mod test {
     use tracing_subscriber::Layer;
     use tracing_subscriber::Registry;
 
-    use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
-    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+    use crate::plugins::telemetry::dynamic_attribute::DynSpanAttributeLayer;
+    use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
 
     struct RequiresDatadogLayer;
@@ -407,11 +407,11 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(DynAttributeLayer)
+                .with(DynSpanAttributeLayer)
                 .with(tracing_opentelemetry::layer()),
             || {
                 let root_span = tracing::info_span!("root");
-                root_span.set_dyn_attribute("dd.trace_id".into(), "1234".into());
+                root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
                 let _root_span = root_span.enter();
                 tracing::info!("test");
             },
@@ -424,7 +424,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(DynAttributeLayer)
+                .with(DynSpanAttributeLayer)
                 .with(tracing_opentelemetry::layer()),
             || {
                 let root_span = tracing::info_span!("root");

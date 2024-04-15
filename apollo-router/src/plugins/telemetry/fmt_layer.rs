@@ -274,7 +274,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
-    use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
+    use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
     #[derive(Default, Clone)]
     struct LogBuffer(Arc<Mutex<Vec<u8>>>);
@@ -311,8 +311,8 @@ mod tests {
             first = "one",
             apollo_private.should_not_display = "this should be skipped"
         );
-        test_span.set_dyn_attribute("another".into(), 2.into());
-        test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+        test_span.set_span_dyn_attribute("another".into(), 2.into());
+        test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
         let _enter = test_span.enter();
         info!(event_attr = "foo", "Hello from test");
     }
@@ -323,8 +323,8 @@ mod tests {
             first = "one",
             apollo_private.should_not_display = "this should be skipped"
         );
-        test_span.set_dyn_attribute("another".into(), 2.into());
-        test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+        test_span.set_span_dyn_attribute("another".into(), 2.into());
+        test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
         let _enter = test_span.enter();
         {
             let nested_test_span = info_span!(
@@ -334,7 +334,7 @@ mod tests {
             );
             let _enter = nested_test_span.enter();
 
-            nested_test_span.set_dyn_attributes([
+            nested_test_span.set_span_dyn_attributes([
                 KeyValue::new("inner", -42_i64),
                 KeyValue::new("graphql.operation.kind", "Subscription"),
             ]);

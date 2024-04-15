@@ -33,7 +33,7 @@ use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
 use super::config_new::logging::RateLimit;
-use super::dynamic_attribute::DynAttributeLayer;
+use super::dynamic_attribute::DynSpanAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
@@ -47,7 +47,8 @@ use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::router_factory::STARTING_SPAN_NAME;
 
-pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
+pub(crate) type LayeredRegistry =
+    Layered<SpanMetricsLayer, Layered<DynSpanAttributeLayer, Registry>>;
 
 pub(super) type LayeredTracer = Layered<
     Filtered<
@@ -116,7 +117,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
-                .with(DynAttributeLayer::new())
+                .with(DynSpanAttributeLayer::new())
                 .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)

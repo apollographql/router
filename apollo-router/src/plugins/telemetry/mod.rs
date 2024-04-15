@@ -92,7 +92,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
@@ -334,7 +334,7 @@ impl Plugin for Telemetry {
                     if !use_legacy_request_span {
                         let span = Span::current();
 
-                        span.set_dyn_attribute(
+                        span.set_span_dyn_attribute(
                             HTTP_REQUEST_METHOD,
                             request.router_request.method().to_string().into(),
                         );
@@ -410,7 +410,7 @@ impl Plugin for Telemetry {
 
                     async move {
                         let span = Span::current();
-                        span.set_dyn_attributes(custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
 
                         span.record(
@@ -420,7 +420,7 @@ impl Plugin for Telemetry {
 
                         let expose_trace_id = &config.exporters.tracing.response_trace_id;
                         if let Ok(response) = &response {
-                            span.set_dyn_attributes(
+                            span.set_span_dyn_attributes(
                                 config
                                     .instrumentation
                                     .spans
@@ -482,7 +482,7 @@ impl Plugin for Telemetry {
                             }
                         } else if let Err(err) = &response {
                             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            span.set_dyn_attributes(
+                            span.set_span_dyn_attributes(
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
                             custom_instruments.on_error(err, &ctx);
@@ -587,16 +587,16 @@ impl Plugin for Telemetry {
 
                     async move {
                         let span = Span::current();
-                        span.set_dyn_attributes(custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         match &result {
                             Ok(resp) => {
-                                span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
+                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
                                 custom_instruments.on_response(resp);
                                 supergraph_events.on_response(resp);
                             },
                             Err(err) => {
-                                span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
+                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
                             },
@@ -699,7 +699,7 @@ impl Plugin for Telemetry {
                     let now = Instant::now();
                     async move {
                         let span = Span::current();
-                        span.set_dyn_attributes(custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         let result: Result<SubgraphResponse, BoxError> = f.await;
 
                         match &result {
@@ -709,7 +709,7 @@ impl Plugin for Telemetry {
                                 } else {
                                     span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                                 }
-                                span.set_dyn_attributes(
+                                span.set_span_dyn_attributes(
                                     conf.instrumentation
                                         .spans
                                         .subgraph
@@ -722,7 +722,7 @@ impl Plugin for Telemetry {
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
 
-                                span.set_dyn_attributes(
+                                span.set_span_dyn_attributes(
                                     conf.instrumentation.spans.subgraph.attributes.on_error(err),
                                 );
                                 custom_instruments.on_error(err, &context);
