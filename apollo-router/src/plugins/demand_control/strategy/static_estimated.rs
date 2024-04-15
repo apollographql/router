@@ -26,7 +26,7 @@ impl StrategyImpl for StaticEstimated {
             })
     }
 
-    fn on_subgraph_request(&self, _response: &subgraph::Request) -> Result<(), DemandControlError> {
+    fn on_subgraph_request(&self, _request: &subgraph::Request) -> Result<(), DemandControlError> {
         Ok(())
     }
 

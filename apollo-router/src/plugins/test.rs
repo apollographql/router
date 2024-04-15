@@ -12,10 +12,10 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::query_planner::BridgeQueryPlanner;
-use crate::services::http;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::{execution, http};
 use crate::Configuration;
 use crate::Notify;
 
@@ -146,6 +146,20 @@ impl<T: Plugin> PluginTestHarness<T> {
         );
 
         self.plugin.supergraph_service(service).call(request).await
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn call_execution(
+        &self,
+        request: execution::Request,
+        response_fn: fn(execution::Request) -> execution::Response,
+    ) -> Result<execution::Response, BoxError> {
+        let service: execution::BoxService = execution::BoxService::new(
+            ServiceBuilder::new()
+                .service_fn(move |req: execution::Request| async move { Ok((response_fn)(req)) }),
+        );
+
+        self.plugin.execution_service(service).call(request).await
     }
 
     #[allow(dead_code)]

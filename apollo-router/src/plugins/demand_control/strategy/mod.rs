@@ -8,12 +8,15 @@ use apollo_compiler::Schema;
 use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
+use crate::plugins::demand_control::strategy::test::Test;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::StrategyConfig;
 use crate::plugins::demand_control::{DemandControlConfig, Mode};
 use crate::services::{execution, subgraph};
 
 mod static_estimated;
+#[cfg(test)]
+mod test;
 
 /// Strategy for a demand control exists for an entire request. It is Send and Sync but may contain state
 /// such as the amount of budget remaining.
@@ -86,22 +89,27 @@ impl StrategyFactory {
     }
 
     pub(crate) fn create(&self) -> Strategy {
-        let strategy = match self.config.strategy {
-            StrategyConfig::StaticEstimated { max } => StaticEstimated {
-                max,
+        let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
+            StrategyConfig::StaticEstimated { max } => Arc::new(StaticEstimated {
+                max: *max,
                 cost_calculator: StaticCostCalculator::new(self.subgraph_schemas.clone()),
-            },
+            }),
+            #[cfg(test)]
+            StrategyConfig::Test { stage, error } => Arc::new(Test {
+                stage: stage.clone(),
+                error: error.clone(),
+            }),
         };
         Strategy {
             mode: self.config.mode,
-            inner: Arc::new(strategy),
+            inner: strategy,
         }
     }
 }
 
 pub(crate) trait StrategyImpl: Send + Sync {
     fn on_execution_request(&self, request: &execution::Request) -> Result<(), DemandControlError>;
-    fn on_subgraph_request(&self, response: &subgraph::Request) -> Result<(), DemandControlError>;
+    fn on_subgraph_request(&self, request: &subgraph::Request) -> Result<(), DemandControlError>;
 
     fn on_subgraph_response(
         &self,

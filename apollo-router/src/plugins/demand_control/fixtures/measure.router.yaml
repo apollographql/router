@@ -1,7 +1,7 @@
 experimental_demand_control:
   enabled: true
   mode: measure
-  algorithm:
-    basic:
+  strategy:
+    static_estimated:
       max: 100
 

@@ -52,6 +52,12 @@ pub(crate) enum StrategyConfig {
         /// The maximum cost of a query
         max: f64,
     },
+
+    #[cfg(test)]
+    Test {
+        stage: test::TestStage,
+        error: test::TestError,
+    },
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, Eq, PartialEq)]
@@ -90,7 +96,24 @@ pub(crate) enum DemandControlError {
 
 impl IntoGraphQLErrors for DemandControlError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
-        todo!()
+        match self {
+            DemandControlError::EstimatedCostTooExpensive => Ok(vec![graphql::Error::builder()
+                .extension_code("COST_ESTIMATED_TOO_EXPENSIVE")
+                .message(self.to_string())
+                .build()]),
+            DemandControlError::ActualCostTooExpensive => Ok(vec![graphql::Error::builder()
+                .extension_code("COST_ACTUAL_TOO_EXPENSIVE")
+                .message(self.to_string())
+                .build()]),
+            DemandControlError::QueryParseFailure(_) => Ok(vec![graphql::Error::builder()
+                .extension_code("COST_QUERY_PARSE_FAILURE")
+                .message(self.to_string())
+                .build()]),
+            DemandControlError::ResponseTypingFailure(_) => Ok(vec![graphql::Error::builder()
+                .extension_code("COST_RESPONSE_TYPING_FAILURE")
+                .message(self.to_string())
+                .build()]),
+        }
     }
 }
 
@@ -260,20 +283,126 @@ register_plugin!("apollo", "experimental_demand_control", DemandControl);
 
 #[cfg(test)]
 mod test {
-    use crate::plugins::demand_control::DemandControl;
-    use crate::plugins::test::PluginTestHarness;
+    use std::sync::Arc;
 
-    #[test]
-    fn test_measure() {
-        let _plugin = PluginTestHarness::<DemandControl>::builder()
+    use apollo_compiler::ExecutableDocument;
+    use futures::StreamExt;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    use crate::plugins::demand_control::{DemandControl, DemandControlError};
+    use crate::plugins::test::PluginTestHarness;
+    use crate::services::execution;
+    use crate::services::layers::query_analysis::{ParsedDocument, ParsedDocumentInner};
+    use crate::{graphql, Context};
+
+    #[tokio::test]
+    async fn test_measure() {
+        let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(include_str!("fixtures/measure.router.yaml"))
-            .build();
+            .build()
+            .await;
+
+        let ctx = context();
+
+        let resp = plugin
+            .call_execution(
+                execution::Request::fake_builder().context(ctx).build(),
+                |req| {
+                    execution::Response::fake_builder()
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                },
+            )
+            .await
+            .unwrap();
+
+        let body = resp
+            .response
+            .into_body()
+            .collect::<Vec<graphql::Response>>()
+            .await;
+        insta::assert_yaml_snapshot!(body);
     }
 
-    #[test]
-    fn test_enforce() {
-        let _plugin = PluginTestHarness::<DemandControl>::builder()
+    #[tokio::test]
+    async fn test_enforce() {
+        let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(include_str!("fixtures/enforce.router.yaml"))
-            .build();
+            .build()
+            .await;
+
+        let ctx = context();
+
+        let resp = plugin
+            .call_execution(
+                execution::Request::fake_builder().context(ctx).build(),
+                |req| {
+                    execution::Response::fake_builder()
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                },
+            )
+            .await
+            .unwrap();
+
+        let body = resp
+            .response
+            .into_body()
+            .collect::<Vec<graphql::Response>>()
+            .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_abort_on_execution_request() {}
+
+    #[tokio::test]
+    async fn test_abort_on_execution_response_stream() {}
+
+    #[tokio::test]
+    async fn test_abort_on_subgraph_request() {}
+
+    #[tokio::test]
+    async fn test_abort_on_subgraph_response() {}
+
+    fn context() -> Context {
+        let mut parsed_document = ParsedDocumentInner::default();
+        parsed_document.executable = Arc::new(ExecutableDocument::new());
+        let ctx = Context::new();
+        ctx.extensions()
+            .lock()
+            .insert(ParsedDocument::new(parsed_document));
+        ctx
+    }
+
+    #[derive(Clone, Debug, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields, rename_all = "snake_case")]
+    pub(crate) enum TestStage {
+        OnExecutionRequest,
+        OnExecutionResponse,
+        OnSubgraphRequest,
+        OnSubgraphResponse,
+    }
+
+    #[derive(Clone, Debug, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields, rename_all = "snake_case")]
+    pub(crate) enum TestError {
+        EstimatedCostTooExpensive,
+        ActualCostTooExpensive,
+    }
+
+    impl From<&TestError> for DemandControlError {
+        fn from(value: &TestError) -> Self {
+            match value {
+                TestError::EstimatedCostTooExpensive => {
+                    DemandControlError::EstimatedCostTooExpensive
+                }
+
+                TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive,
+            }
+        }
     }
 }
