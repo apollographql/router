@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-scaffold"
-version = "1.43.2"
+version = "1.44.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"

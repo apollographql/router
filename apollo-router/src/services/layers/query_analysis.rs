@@ -1,19 +1,22 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
-use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use lru::LruCache;
+use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
+use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
@@ -31,7 +34,7 @@ use crate::Context;
 pub(crate) struct QueryAnalysisLayer {
     pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    cache: Arc<Mutex<LruCache<QueryAnalysisKey, (Context, ParsedDocument)>>>,
+    cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
 }
 
@@ -117,93 +120,114 @@ impl QueryAnalysisLayer {
             })
             .cloned();
 
-        let (context, doc) = match entry {
+        let res = match entry {
             None => {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-                let doc = match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
-                    Ok(doc) => doc,
-                    Err(err) => {
+                match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
+                    Err(errors) => {
+                        (*self.cache.lock().await).put(
+                            QueryAnalysisKey {
+                                query,
+                                operation_name: op_name,
+                            },
+                            Err(errors.clone()),
+                        );
+                        let errors = match errors.into_graphql_errors() {
+                            Ok(v) => v,
+                            Err(errors) => vec![Error::builder()
+                                .message(errors.to_string())
+                                .extension_code(errors.extension_code())
+                                .build()],
+                        };
+
                         return Err(SupergraphResponse::builder()
-                            .errors(vec![Error::builder()
-                                .message(err.to_string())
-                                .extension_code(err.extension_code())
-                                .build()])
+                            .errors(errors)
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(request.context)
                             .build()
                             .expect("response is valid"));
                     }
-                };
+                    Ok(doc) => {
+                        let context = Context::new();
 
-                let context = Context::new();
+                        let operation = doc.executable.get_operation(op_name.as_deref()).ok();
+                        let operation_name = operation.as_ref().and_then(|operation| {
+                            operation.name.as_ref().map(|s| s.as_str().to_owned())
+                        });
 
-                let operation = doc.executable.get_operation(op_name.as_deref()).ok();
-                let operation_name = operation
-                    .as_ref()
-                    .and_then(|operation| operation.name.as_ref().map(|s| s.as_str().to_owned()));
+                        if self.enable_authorization_directives {
+                            AuthorizationPlugin::query_analysis(
+                                &doc,
+                                operation_name.as_deref(),
+                                &self.schema,
+                                &context,
+                            );
+                        }
 
-                context.insert(OPERATION_NAME, operation_name).unwrap();
-                let operation_kind = operation.map(|op| OperationKind::from(op.operation_type));
-                context
-                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
-                    .expect("cannot insert operation kind in the context; this is a bug");
+                        context
+                            .insert(OPERATION_NAME, operation_name)
+                            .expect("cannot insert operation name into context; this is a bug");
+                        let operation_kind =
+                            operation.map(|op| OperationKind::from(op.operation_type));
+                        context
+                            .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
+                            .expect("cannot insert operation kind in the context; this is a bug");
 
-                if self.enable_authorization_directives {
-                    if let Err(err) = AuthorizationPlugin::query_analysis(
-                        &query,
-                        op_name.as_deref(),
-                        &self.schema,
-                        &self.configuration,
-                        &context,
-                    ) {
-                        return Err(SupergraphResponse::builder()
-                            .errors(vec![Error::builder()
-                                .message(err.to_string())
-                                .extension_code(err.extension_code())
-                                .build()])
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(request.context)
-                            .build()
-                            .expect("response is valid"));
+                        (*self.cache.lock().await).put(
+                            QueryAnalysisKey {
+                                query,
+                                operation_name: op_name,
+                            },
+                            Ok((context.clone(), doc.clone())),
+                        );
+
+                        Ok((context, doc))
                     }
                 }
-
-                (*self.cache.lock().await).put(
-                    QueryAnalysisKey {
-                        query,
-                        operation_name: op_name,
-                    },
-                    (context.clone(), doc.clone()),
-                );
-
-                (context, doc)
             }
             Some(c) => c,
         };
 
-        request.context.extend(&context);
-        request
-            .context
-            .extensions()
-            .lock()
-            .insert::<ParsedDocument>(doc);
-
-        Ok(SupergraphRequest {
-            supergraph_request: request.supergraph_request,
-            context: request.context,
-        })
+        match res {
+            Ok((context, doc)) => {
+                request.context.extend(&context);
+                request
+                    .context
+                    .extensions()
+                    .lock()
+                    .insert::<ParsedDocument>(doc);
+                Ok(SupergraphRequest {
+                    supergraph_request: request.supergraph_request,
+                    context: request.context,
+                })
+            }
+            Err(errors) => {
+                request
+                    .context
+                    .extensions()
+                    .lock()
+                    .insert(Arc::new(UsageReporting {
+                        stats_report_key: errors.get_error_key().to_string(),
+                        referenced_fields_by_type: HashMap::new(),
+                    }));
+                Err(SupergraphResponse::builder()
+                    .errors(errors.into_graphql_errors().unwrap_or_default())
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .context(request.context)
+                    .build()
+                    .expect("response is valid"))
+            }
+        }
     }
 }
 
 pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
-    pub(crate) executable: Arc<ExecutableDocument>,
+    pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
-    pub(crate) parse_errors: Option<DiagnosticList>,
-    pub(crate) validation_errors: Option<DiagnosticList>,
 }
 
 impl Display for ParsedDocumentInner {

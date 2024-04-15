@@ -1065,7 +1065,6 @@ macro_rules! assert_non_zero_metrics_snapshot {
             let metrics = crate::metrics::collect_metrics();
             insta::assert_yaml_snapshot!(&metrics.non_zero());
         });
-
     };
     () => {
         insta::with_settings!({sort_maps => true}, {
