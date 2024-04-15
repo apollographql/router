@@ -11,13 +11,28 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
-apollo-parser = "0.7.6"
+apollo-compiler.workspace = true
+apollo-smith.workspace = true
+apollo-parser.workspace = true
 env_logger = "0.10.2"
 log = "0.4"
-reqwest = { version = "0.11", default-features = false, features = ["json", "blocking"] }
-serde_json = "1"
+reqwest = { workspace = true, features = ["json", "blocking"] }
+router-bridge.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
 
+[dev-dependencies]
+anyhow = "1"
+apollo-router = { path = "../apollo-router" }
+async-trait.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json_bytes.workspace = true
+tower.workspace = true
+http.workspace = true
+
+[[example]]
+name = "usage_reporting_router"
 
 [[bin]]
 name = "invariant_router"
@@ -42,3 +57,10 @@ name = "federation"
 path = "fuzz_targets/federation.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "apollo_router_studio_interop"
+path = "fuzz_targets/apollo_router_studio_interop.rs"
+test = false
+doc = false
+bench = false

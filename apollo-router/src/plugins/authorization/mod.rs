@@ -437,7 +437,7 @@ impl AuthorizationPlugin {
             AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map, dry_run)
         {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_authentication {
                 if is_authenticated {
@@ -476,7 +476,7 @@ impl AuthorizationPlugin {
             dry_run,
         ) {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
             if visitor.query_requires_scopes {
                 tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
@@ -511,7 +511,7 @@ impl AuthorizationPlugin {
             dry_run,
         ) {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_policies {
                 tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
