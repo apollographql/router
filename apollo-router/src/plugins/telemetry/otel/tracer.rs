@@ -1,14 +1,21 @@
-use super::OtelData;
+use opentelemetry::trace as otel;
+use opentelemetry::trace::noop;
 use opentelemetry::trace::OrderMap;
-use opentelemetry::{
-    trace as otel,
-    trace::{
-        noop, SamplingDecision, SamplingResult, SpanBuilder, SpanContext, SpanId, SpanKind,
-        TraceContextExt, TraceFlags, TraceId, TraceState,
-    },
-    Context as OtelContext,
-};
-use opentelemetry_sdk::trace::{Tracer as SdkTracer, TracerProvider as SdkTracerProvider};
+use opentelemetry::trace::SamplingDecision;
+use opentelemetry::trace::SamplingResult;
+use opentelemetry::trace::SpanBuilder;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanId;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceId;
+use opentelemetry::trace::TraceState;
+use opentelemetry::Context as OtelContext;
+use opentelemetry_sdk::trace::Tracer as SdkTracer;
+use opentelemetry_sdk::trace::TracerProvider as SdkTracerProvider;
+
+use super::OtelData;
 
 /// An interface for authors of OpenTelemetry SDKs to build pre-sampled tracers.
 ///
@@ -36,7 +43,7 @@ use opentelemetry_sdk::trace::{Tracer as SdkTracer, TracerProvider as SdkTracerP
 /// [`OpenTelemetrySpanExt::set_parent`]: crate::OpenTelemetrySpanExt::set_parent
 /// [`OpenTelemetrySpanExt::context`]: crate::OpenTelemetrySpanExt::context
 /// [`Context`]: opentelemetry::Context
-pub trait PreSampledTracer {
+pub(crate) trait PreSampledTracer {
     /// Produce an otel context containing an active and pre-sampled span for
     /// the given span builder data.
     ///
@@ -159,9 +166,14 @@ fn process_sampling_result(
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry::trace::SpanBuilder;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::config;
+    use opentelemetry_sdk::trace::Sampler;
+    use opentelemetry_sdk::trace::TracerProvider;
+
     use super::*;
-    use opentelemetry::trace::{SpanBuilder, SpanId, TracerProvider as _};
-    use opentelemetry_sdk::trace::{config, Sampler, TracerProvider};
 
     #[test]
     fn assigns_default_trace_id_if_missing() {

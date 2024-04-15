@@ -3,7 +3,6 @@ source: apollo-router/src/plugins/telemetry/config_new/events.rs
 expression: yaml
 ---
 - fields:
-    attributes: "{\"http.request.body\": \"{\\\"query\\\":\\\"query { foo }\\\"}\", \"http.request.headers\": \"{\\\"content-type\\\": \\\"application/json\\\", \\\"x-log-request\\\": \\\"log\\\"}\", \"http.request.method\": \"POST\", \"http.request.uri\": \"http://default/\", \"http.request.version\": \"HTTP/1.1\"}"
     kind: supergraph.request
   level: INFO
   message: ""
@@ -20,7 +19,6 @@ expression: yaml
       name: supergraph
       otel.kind: INTERNAL
 - fields:
-    attributes: "{}"
     kind: my.request.event
   level: INFO
   message: my event message
@@ -37,7 +35,6 @@ expression: yaml
       name: supergraph
       otel.kind: INTERNAL
 - fields:
-    attributes: "{}"
     kind: my.response_event
   level: WARN
   message: my response event message

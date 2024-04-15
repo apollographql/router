@@ -1,21 +1,33 @@
-use crate::plugins::telemetry::dynamic_attribute::APOLLO_PRIVATE_CUSTOM_EVENT;
-
-use super::{OtelData, PreSampledTracer};
-use once_cell::unsync;
-use opentelemetry::{
-    trace::{self as otel, noop, OrderMap, TraceContextExt},
-    Context as OtelContext, Key, KeyValue, StringValue, Value,
-};
 use std::any::TypeId;
 use std::fmt;
 use std::marker;
 use std::thread;
-use std::time::{Instant, SystemTime};
-use tracing_core::span::{self, Attributes, Id, Record};
-use tracing_core::{field, Event, Subscriber};
+use std::time::Instant;
+use std::time::SystemTime;
+
+use once_cell::unsync;
+use opentelemetry::trace::noop;
+use opentelemetry::trace::OrderMap;
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::{self as otel};
+use opentelemetry::Context as OtelContext;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::StringValue;
+use opentelemetry::Value;
+use tracing_core::field;
+use tracing_core::span::Attributes;
+use tracing_core::span::Id;
+use tracing_core::span::Record;
+use tracing_core::span::{self};
+use tracing_core::Event;
+use tracing_core::Subscriber;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
+
+use super::OtelData;
+use super::PreSampledTracer;
 
 const SPAN_NAME_FIELD: &str = "otel.name";
 const SPAN_KIND_FIELD: &str = "otel.kind";
@@ -127,11 +139,10 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
     fn record_bool(&mut self, field: &field::Field, value: bool) {
         match field.name() {
             "message" => self.event_builder.name = value.to_string().into(),
-            APOLLO_PRIVATE_CUSTOM_EVENT => self.custom_event = true,
-            // Skip fields that are actually log metadata that have already been handled
-            #[cfg(feature = "tracing-log")]
-            name if name.starts_with("log.") => (),
             name => {
+                if name == "kind" {
+                    self.custom_event = true;
+                }
                 self.event_builder
                     .attributes
                     .push(KeyValue::new(name, value));
@@ -802,29 +813,14 @@ where
         if let Some(span) = ctx.lookup_current() {
             // Performing read operations before getting a write lock to avoid a deadlock
             // See https://github.com/tokio-rs/tracing/issues/763
-            #[cfg(feature = "tracing-log")]
-            let normalized_meta = event.normalized_metadata();
-            #[cfg(feature = "tracing-log")]
-            let meta = normalized_meta.as_ref().unwrap_or_else(|| event.metadata());
-            #[cfg(not(feature = "tracing-log"))]
             let meta = event.metadata();
-
             let target = Key::new("target");
 
-            #[cfg(feature = "tracing-log")]
-            let target = if normalized_meta.is_some() {
-                target.string(meta.target().to_owned())
-            } else {
-                target.string(event.metadata().target())
-            };
-
-            #[cfg(not(feature = "tracing-log"))]
             let target = target.string(meta.target());
 
             let mut extensions = span.extensions_mut();
-            let (span_builder, event_attributes) = extensions
-                .get_mut::<OtelData>()
-                .map(|data| (&mut data.builder, &mut event_attributes));
+            let mut otel_data = extensions.get_mut::<OtelData>();
+            let span_builder = otel_data.as_mut().map(|o| &mut o.builder);
 
             let mut otel_event = otel::Event::new(
                 String::new(),
@@ -840,9 +836,11 @@ where
             };
             event.record(&mut span_event_visit);
             let custom_event = span_event_visit.custom_event;
-            // TODO if custom_event, add event_attributes
+            // Add custom event attributes for this event
             if custom_event {
-                if let Some(event_attributes) = event_attributes.clear() {
+                let event_attributes = otel_data.as_ref().and_then(|o| o.event_attributes.clone());
+
+                if let Some(event_attributes) = event_attributes {
                     otel_event.attributes.extend(
                         event_attributes
                             .into_iter()
@@ -859,18 +857,10 @@ where
                 }
 
                 if self.location {
-                    #[cfg(not(feature = "tracing-log"))]
-                    let normalized_meta: Option<tracing_core::Metadata<'_>> = None;
-                    let (file, module) = match &normalized_meta {
-                        Some(meta) => (
-                            meta.file().map(|s| Value::from(s.to_owned())),
-                            meta.module_path().map(|s| Value::from(s.to_owned())),
-                        ),
-                        None => (
-                            event.metadata().file().map(Value::from),
-                            event.metadata().module_path().map(Value::from),
-                        ),
-                    };
+                    let (file, module) = (
+                        event.metadata().file().map(Value::from),
+                        event.metadata().module_path().map(Value::from),
+                    );
 
                     if let Some(file) = file {
                         otel_event
@@ -889,7 +879,6 @@ where
                     }
                 }
 
-                println!("ICIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII !!!!!!!!!!!!!!!!!!!!");
                 if let Some(ref mut events) = builder.events {
                     events.push(otel_event);
                 } else {
@@ -973,21 +962,21 @@ fn thread_id_integer(id: thread::ThreadId) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use opentelemetry::{
-        trace::{noop, TraceFlags},
-        StringValue,
-    };
-    use std::{
-        borrow::Cow,
-        collections::HashMap,
-        error::Error,
-        fmt::Display,
-        sync::{Arc, Mutex},
-        thread,
-        time::SystemTime,
-    };
+    use std::borrow::Cow;
+    use std::collections::HashMap;
+    use std::error::Error;
+    use std::fmt::Display;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::thread;
+    use std::time::SystemTime;
+
+    use opentelemetry::trace::noop;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::StringValue;
     use tracing_subscriber::prelude::*;
+
+    use super::*;
 
     #[derive(Debug, Clone)]
     struct TestTracer(Arc<Mutex<Option<OtelData>>>);

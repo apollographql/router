@@ -14,8 +14,6 @@ use super::otel::OtelData;
 use super::reload::IsSampled;
 use super::tracing::APOLLO_PRIVATE_PREFIX;
 
-pub(crate) const APOLLO_PRIVATE_CUSTOM_EVENT: &str = "apollo_private.custom_event";
-
 #[derive(Debug, Default)]
 pub(crate) struct LogAttributes {
     attributes: Vec<KeyValue>,
@@ -56,7 +54,6 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        println!("LAAA >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<");
         // dbg!(event);
         // let span = ctx.event_span(event);
         // if let Some(span) = span {
@@ -204,89 +201,15 @@ impl Default for EventsAttributes {
 }
 
 /// To add dynamic attributes for spans
-pub(crate) struct DynEventAttributeLayer;
-
-impl<S> Layer<S> for DynEventAttributeLayer
-where
-    S: tracing_core::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
-{
-    fn on_new_span(
-        &self,
-        _attrs: &tracing_core::span::Attributes<'_>,
-        id: &tracing_core::span::Id,
-        ctx: Context<'_, S>,
-    ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<EventsAttributes>().is_none() {
-            extensions.insert(EventsAttributes::default());
-        }
-    }
-
-    // Notifies this layer that an event has occurred.
-    // fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-    //     // Je récupère mes eventsAttributes et specifiquement mon attribut pour l'event et je l'ajoute à mon otelData events.last()
-    //     let mut event_kind = EventKindVisitor::default();
-    //     event.record(&mut event_kind);
-    //     if let Some(event_kind) = event_kind.0 {
-    //         let span = ctx.event_span(event);
-    //         if let Some(span) = span {
-    //             let mut extensions = span.extensions_mut();
-    //             if let (Some(attributes), Some(otel_events)) = (
-    //                 extensions
-    //                     .get::<EventsAttributes>()
-    //                     .and_then(|attrs| attrs.events_attributes.get(&event_kind)),
-    //                 extensions
-    //                     .get_mut::<OtelData>()
-    //                     .and_then(|od| od.builder.events.as_mut())
-    //                     .and_then(|e| e.last_mut()),
-    //             ) {
-    //                 // otel_data.builder.events.
-    //             }
-    //         }
-    //     }
-    // }
-
-    // The best solution might be to directly fetch eventsAttributes from otel layer
-}
-
-impl DynEventAttributeLayer {
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-}
-
-#[derive(Default)]
-struct EventKindVisitor(Option<String>);
-
-impl Visit for EventKindVisitor {
-    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == APOLLO_PRIVATE_CUSTOM_EVENT {
-            self.0 = Some(format!("{value:?}"));
-        }
-    }
-
-    fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
-        if field.name() == APOLLO_PRIVATE_CUSTOM_EVENT {
-            self.0 = Some(value.to_string());
-        }
-    }
-}
-
-/// To add dynamic attributes for spans
 pub(crate) trait EventDynAttribute {
     /// Always use before sending the event
-    fn set_event_dyn_attribute(&self, event_name: String, key: Key, value: opentelemetry::Value);
+    fn set_event_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
     /// Always use before sending the event
-    fn set_event_dyn_attributes(
-        &self,
-        event_name: String,
-        attributes: impl IntoIterator<Item = KeyValue>,
-    );
+    fn set_event_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
 }
 
 impl EventDynAttribute for ::tracing::Span {
-    fn set_event_dyn_attribute(&self, event_name: String, key: Key, value: opentelemetry::Value) {
+    fn set_event_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -320,11 +243,7 @@ impl EventDynAttribute for ::tracing::Span {
         });
     }
 
-    fn set_event_dyn_attributes(
-        &self,
-        event_name: String,
-        attributes: impl IntoIterator<Item = KeyValue>,
-    ) {
+    fn set_event_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
         let mut attributes = attributes.into_iter().peekable();
         if attributes.peek().is_none() {
             return;

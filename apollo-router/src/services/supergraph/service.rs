@@ -353,7 +353,7 @@ async fn service_call(
                                 "http.response.body".to_string(),
                                 serde_json::to_string(resp).unwrap_or_default(),
                             );
-                            log_event(level.0, "supergraph.response", &attrs, "");
+                            log_event(level.0, "supergraph.response", attrs.clone(), "");
                         }));
 
                         Ok(SupergraphResponse {

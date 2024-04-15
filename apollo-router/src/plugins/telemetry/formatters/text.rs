@@ -6,13 +6,17 @@ use std::fmt;
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
 use opentelemetry::sdk::Resource;
+use opentelemetry::Key;
+use opentelemetry::OrderMap;
 use serde_json::Value;
 use tracing_core::Event;
+use tracing_core::Field;
 use tracing_core::Level;
 use tracing_core::Subscriber;
 use tracing_subscriber::field;
 use tracing_subscriber::field::Visit;
-use tracing_subscriber::fmt::format::DefaultVisitor;
+use tracing_subscriber::field::VisitFmt;
+use tracing_subscriber::field::VisitOutput;
 use tracing_subscriber::fmt::format::Writer;
 #[cfg(not(test))]
 use tracing_subscriber::fmt::time::FormatTime;
@@ -357,60 +361,21 @@ where
             self.format_target(&mut writer, meta.target())?;
         }
         self.format_location(event, &mut writer)?;
+        let mut default_visitor =
+            DefaultVisitor::new(writer.by_ref(), true, self.config.ansi_escape_codes);
 
-        let mut visitor = CustomVisitor::new(DefaultVisitor::new(writer.by_ref(), true));
-        event.record(&mut visitor);
+        if let Some(span) = ctx.event_span(event) {
+            let mut extensions = span.extensions_mut();
+            let otel_data = extensions.get_mut::<OtelData>();
+            if let Some(event_attributes) = otel_data.and_then(|od| od.event_attributes.take()) {
+                for (key, value) in event_attributes {
+                    default_visitor.log_debug(key.as_str(), &value.as_str());
+                }
+            }
+        }
+        event.record(&mut default_visitor);
 
         writeln!(writer)
-    }
-}
-
-struct CustomVisitor<N>(N);
-
-impl<N> CustomVisitor<N>
-where
-    N: field::Visit,
-{
-    fn new(inner: N) -> Self {
-        Self(inner)
-    }
-}
-
-// TODO we are now able to filter fields here, for now it's just a passthrough
-impl<N> Visit for CustomVisitor<N>
-where
-    N: Visit,
-{
-    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn fmt::Debug) {
-        self.0.record_debug(field, value)
-    }
-
-    fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
-        self.0.record_str(field, value)
-    }
-
-    fn record_error(
-        &mut self,
-        field: &tracing_core::Field,
-        value: &(dyn std::error::Error + 'static),
-    ) {
-        self.0.record_error(field, value)
-    }
-
-    fn record_f64(&mut self, field: &tracing_core::Field, value: f64) {
-        self.0.record_f64(field, value)
-    }
-
-    fn record_i64(&mut self, field: &tracing_core::Field, value: i64) {
-        self.0.record_i64(field, value)
-    }
-
-    fn record_u64(&mut self, field: &tracing_core::Field, value: u64) {
-        self.0.record_u64(field, value)
-    }
-
-    fn record_bool(&mut self, field: &tracing_core::Field, value: bool) {
-        self.0.record_bool(field, value)
     }
 }
 
@@ -454,5 +419,157 @@ impl<'a> fmt::Display for FmtThreadName<'a> {
 
         // pad thread name using `max_len`
         write!(f, "{:>width$}", self.name, width = max_len)
+    }
+}
+
+/// The [visitor] produced by [`DefaultFields`]'s [`MakeVisitor`] implementation.
+///
+/// [visitor]: super::super::field::Visit
+/// [`MakeVisitor`]: super::super::field::MakeVisitor
+#[derive(Debug)]
+struct DefaultVisitor<'a> {
+    writer: Writer<'a>,
+    is_empty: bool,
+    is_ansi: bool,
+    result: fmt::Result,
+}
+
+// === impl DefaultVisitor ===
+
+impl<'a> DefaultVisitor<'a> {
+    /// Returns a new default visitor that formats to the provided `writer`.
+    ///
+    /// # Arguments
+    /// - `writer`: the writer to format to.
+    /// - `is_empty`: whether or not any fields have been previously written to
+    ///   that writer.
+    fn new(writer: Writer<'a>, is_empty: bool, is_ansi: bool) -> Self {
+        Self {
+            writer,
+            is_empty,
+            is_ansi,
+            result: Ok(()),
+        }
+    }
+
+    fn maybe_pad(&mut self) {
+        if self.is_empty {
+            self.is_empty = false;
+        } else {
+            self.result = write!(self.writer, " ");
+        }
+    }
+
+    fn bold(&self) -> Style {
+        if self.is_ansi {
+            return Style::new().bold();
+        }
+
+        Style::new()
+    }
+
+    fn dimmed(&self) -> Style {
+        if self.is_ansi {
+            return Style::new().dimmed();
+        }
+
+        Style::new()
+    }
+
+    fn italic(&self) -> Style {
+        if self.is_ansi {
+            return Style::new().italic();
+        }
+
+        Style::new()
+    }
+
+    fn log_debug(&mut self, field_name: &str, value: &dyn fmt::Debug) {
+        if self.result.is_err() {
+            return;
+        }
+
+        self.maybe_pad();
+        self.result = match field_name {
+            "message" => write!(self.writer, "{:?}", value),
+            name if name.starts_with("r#") => write!(
+                self.writer,
+                "{}{}{:?}",
+                self.italic().paint(&name[2..]),
+                self.dimmed().paint("="),
+                value
+            ),
+            name => write!(
+                self.writer,
+                "{}{}{:?}",
+                self.italic().paint(name),
+                self.dimmed().paint("="),
+                value
+            ),
+        };
+    }
+}
+
+impl<'a> field::Visit for DefaultVisitor<'a> {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if self.result.is_err() {
+            return;
+        }
+
+        if field.name() == "message" {
+            self.record_debug(field, &format_args!("{}", value))
+        } else {
+            self.record_debug(field, &value)
+        }
+    }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
+        if let Some(source) = value.source() {
+            let italic = self.italic();
+            self.record_debug(
+                field,
+                &format_args!(
+                    "{} {}{}{}{}",
+                    value,
+                    italic.paint(field.name()),
+                    italic.paint(".sources"),
+                    self.dimmed().paint("="),
+                    ErrorSourceList(source)
+                ),
+            )
+        } else {
+            self.record_debug(field, &format_args!("{}", value))
+        }
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        self.log_debug(field.name(), value)
+    }
+}
+
+impl<'a> VisitOutput<fmt::Result> for DefaultVisitor<'a> {
+    fn finish(self) -> fmt::Result {
+        self.result
+    }
+}
+
+impl<'a> VisitFmt for DefaultVisitor<'a> {
+    fn writer(&mut self) -> &mut dyn fmt::Write {
+        &mut self.writer
+    }
+}
+
+/// Renders an error into a list of sources, *including* the error
+struct ErrorSourceList<'a>(&'a (dyn std::error::Error + 'static));
+
+impl<'a> std::fmt::Display for ErrorSourceList<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = f.debug_list();
+        let mut curr = Some(self.0);
+        while let Some(curr_err) = curr {
+            list.entry(&format_args!("{}", curr_err));
+            curr = curr_err.source();
+        }
+        list.finish()
     }
 }

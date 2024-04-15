@@ -3,7 +3,6 @@ source: apollo-router/src/plugins/telemetry/config_new/events.rs
 expression: yaml
 ---
 - fields:
-    attributes: "{}"
     kind: my.request.event
   level: INFO
   message: my event message
@@ -20,7 +19,6 @@ expression: yaml
       name: subgraph
       otel.kind: INTERNAL
 - fields:
-    attributes: "{\"response_status\": \"200\", \"subgraph.name\": \"subgraph\"}"
     kind: my.response.event
   level: ERROR
   message: my response event message

@@ -4,10 +4,12 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use http::HeaderValue;
+use opentelemetry::Key;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tracing::Span;
 
 use super::instruments::Instrumented;
 use super::Selector;
@@ -20,6 +22,7 @@ use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -180,7 +183,7 @@ impl Instrumented
                 "http.request.body".to_string(),
                 format!("{:?}", request.router_request.body()),
             );
-            log_event(self.request, "router.request", &attrs, "");
+            log_event(self.request, "router.request", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -219,7 +222,7 @@ impl Instrumented
                 "http.response.body".to_string(),
                 format!("{:?}", response.response.body()),
             );
-            log_event(self.response, "router.response", &attrs, "");
+            log_event(self.response, "router.response", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_response(response);
@@ -230,7 +233,7 @@ impl Instrumented
         if self.error != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(1);
             attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "router.error", &attrs, "");
+            log_event(self.error, "router.error", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -281,7 +284,7 @@ impl Instrumented
                 "http.request.body".to_string(),
                 serde_json::to_string(request.supergraph_request.body()).unwrap_or_default(),
             );
-            log_event(self.request, "supergraph.request", &attrs, "");
+            log_event(self.request, "supergraph.request", attrs, "");
         }
         if self.response != EventLevel::Off {
             request
@@ -305,7 +308,7 @@ impl Instrumented
         if self.error != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(1);
             attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "supergraph.error", &attrs, "");
+            log_event(self.error, "supergraph.error", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -350,7 +353,7 @@ impl Instrumented
             let mut attrs = HashMap::with_capacity(1);
 
             attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "subgraph.error", &attrs, "");
+            log_event(self.error, "subgraph.error", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -539,7 +542,7 @@ where
             .map(|kv| (kv.key.to_string(), kv.value.to_string()))
             .collect();
 
-        log_event(self.level, &self.name, &attributes, &self.message);
+        log_event(self.level, &self.name, attributes, &self.message);
     }
 }
 
@@ -547,7 +550,7 @@ where
 pub(crate) fn log_event(
     level: EventLevel,
     kind: &str,
-    attributes: &HashMap<String, String>,
+    attributes: HashMap<String, String>,
     message: &str,
 ) {
     #[cfg(test)]
@@ -555,13 +558,23 @@ pub(crate) fn log_event(
         attributes.clone().into_iter().collect();
     #[cfg(test)]
     attributes.sort_keys();
+    let span = Span::current();
+    span.set_event_dyn_attributes(
+        attributes
+            .into_iter()
+            .map(|(key, value)| Key::from(key).string(value)),
+    );
 
     match level {
         EventLevel::Info => {
-            ::tracing::info!(%kind, attributes = ?attributes, "{}", message);
+            ::tracing::info!(%kind, "{}", message);
         }
-        EventLevel::Warn => ::tracing::warn!(%kind, attributes = ?attributes, "{}", message),
-        EventLevel::Error => ::tracing::error!(%kind, attributes = ?attributes, "{}", message),
+        EventLevel::Warn => {
+            ::tracing::warn!(%kind, "{}", message)
+        }
+        EventLevel::Error => {
+            ::tracing::error!(%kind, "{}", message)
+        }
         EventLevel::Off => {}
     }
 }

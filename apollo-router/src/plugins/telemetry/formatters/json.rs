@@ -19,6 +19,7 @@ use super::get_trace_and_span_id;
 use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
@@ -233,6 +234,16 @@ where
                         serializer
                             .serialize_entry("span_id", &span_id.to_string())
                             .unwrap_or(());
+                    }
+                };
+                let event_attributes = {
+                    let mut extensions = span.extensions_mut();
+                    let mut otel_data = extensions.get_mut::<OtelData>();
+                    otel_data.as_mut().and_then(|od| od.event_attributes.take())
+                };
+                if let Some(event_attributes) = event_attributes {
+                    for (key, value) in event_attributes {
+                        serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
                     }
                 }
             }

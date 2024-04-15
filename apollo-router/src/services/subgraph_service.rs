@@ -538,7 +538,7 @@ async fn call_websocket(
         log_event(
             level.0,
             "subgraph.request",
-            &attrs,
+            attrs,
             &format!("Websocket request body to subgraph {service_name:?}"),
         );
     }
@@ -688,7 +688,7 @@ async fn call_http(
         log_event(
             level.0,
             "subgraph.request",
-            &attrs,
+            attrs,
             &format!("Request to subgraph {service_name:?}"),
         );
     }
@@ -782,7 +782,7 @@ async fn call_http(
         log_event(
             level.0,
             "subgraph.response",
-            &attrs,
+            attrs,
             &format!("Raw response from subgraph {service_name:?} received"),
         );
     }
