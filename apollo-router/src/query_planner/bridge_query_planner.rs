@@ -828,7 +828,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             let schema = this.schema.api_schema();
             match add_defer_labels(schema, &doc.ast) {
                 Err(e) => {
-                    return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
+                    return Err(QueryPlannerError::SpecError(SpecError::TransformError(
                         e.to_string(),
                     )))
                 }

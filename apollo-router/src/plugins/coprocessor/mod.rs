@@ -359,11 +359,12 @@ impl RouterStage {
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::RouterRequest,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::RouterRequest,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }
@@ -397,11 +398,12 @@ impl RouterStage {
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::RouterResponse,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::RouterResponse,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }
@@ -491,11 +493,12 @@ impl SubgraphStage {
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::SubgraphRequest,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::SubgraphRequest,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }
@@ -530,11 +533,12 @@ impl SubgraphStage {
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::SubgraphResponse,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::SubgraphResponse,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }
