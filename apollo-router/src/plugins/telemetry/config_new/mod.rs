@@ -5,8 +5,8 @@ use opentelemetry::KeyValue;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
@@ -179,6 +179,7 @@ mod test {
     use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::config_new::DatadogId;
     use crate::plugins::telemetry::config_new::ToOtelValue;
+    use crate::plugins::telemetry::otel;
 
     #[test]
     fn dd_convert() {
@@ -190,7 +191,7 @@ mod test {
     #[test]
     fn test_trace_id() {
         // Create a span with a trace ID
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
@@ -212,7 +213,7 @@ mod test {
     #[test]
     fn test_baggage() {
         // Create a span with a trace ID
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),

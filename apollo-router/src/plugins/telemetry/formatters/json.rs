@@ -10,7 +10,6 @@ use serde::ser::Serializer as _;
 use serde_json::Serializer;
 use tracing_core::Event;
 use tracing_core::Subscriber;
-use tracing_opentelemetry::OtelData;
 use tracing_serde::AsSerde;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -23,6 +22,7 @@ use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
+use crate::plugins::telemetry::otel::OtelData;
 
 #[derive(Debug)]
 pub(crate) struct Json {
@@ -371,6 +371,7 @@ mod test {
     use crate::plugins::telemetry::dynamic_attribute::DynSpanAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
+    use crate::plugins::telemetry::otel;
 
     struct RequiresDatadogLayer;
     impl<S> Layer<S> for RequiresDatadogLayer
@@ -393,7 +394,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root", dd.trace_id = "1234");
                 let _root_span = root_span.enter();
@@ -408,7 +409,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynSpanAttributeLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
@@ -425,7 +426,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynSpanAttributeLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 let _root_span = root_span.enter();

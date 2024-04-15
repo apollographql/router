@@ -16,8 +16,6 @@ use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
 use tracing_core::Subscriber;
-use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_opentelemetry::PreSampledTracer;
 use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Filter;
@@ -44,6 +42,9 @@ use crate::metrics::meter_provider;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::otel;
+use crate::plugins::telemetry::otel::OpenTelemetryLayer;
+use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::router_factory::STARTING_SPAN_NAME;
 
@@ -85,7 +86,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             None,
         ),
     );
-    let opentelemetry_layer = tracing_opentelemetry::layer()
+    let opentelemetry_layer = otel::layer()
         .with_tracer(hot_tracer.clone())
         .with_filter(SamplingFilter::new());
 

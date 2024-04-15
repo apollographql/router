@@ -171,7 +171,11 @@ mod tests {
         builder.span_id = Some(SpanId::from(1u64));
         builder.trace_id = None;
         let parent_cx = OtelContext::new();
-        let cx = tracer.sampled_context(&mut OtelData { builder, parent_cx });
+        let cx = tracer.sampled_context(&mut OtelData {
+            builder,
+            parent_cx,
+            event_attributes: None,
+        });
         let span = cx.span();
         let span_context = span.span_context();
 
@@ -210,7 +214,11 @@ mod tests {
             let tracer = provider.tracer("test");
             let mut builder = SpanBuilder::from_name("parent".to_string());
             builder.sampling_result = previous_sampling_result;
-            let sampled = tracer.sampled_context(&mut OtelData { builder, parent_cx });
+            let sampled = tracer.sampled_context(&mut OtelData {
+                builder,
+                parent_cx,
+                event_attributes: None,
+            });
 
             assert_eq!(
                 sampled.span().span_context().is_sampled(),

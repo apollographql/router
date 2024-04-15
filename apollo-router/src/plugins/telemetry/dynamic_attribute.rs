@@ -2,18 +2,19 @@ use std::collections::HashMap;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry::OrderMap;
 use tracing::field::Visit;
 use tracing::Event;
-use tracing_opentelemetry::OtelData;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
+use super::otel::OtelData;
 use super::reload::IsSampled;
 use super::tracing::APOLLO_PRIVATE_PREFIX;
 
-pub(crate) const APOLLO_PRIVATE_KIND: &str = "apollo_private.kind";
+pub(crate) const APOLLO_PRIVATE_CUSTOM_EVENT: &str = "apollo_private.custom_event";
 
 #[derive(Debug, Default)]
 pub(crate) struct LogAttributes {
@@ -52,6 +53,21 @@ where
         if extensions.get_mut::<LogAttributes>().is_none() {
             extensions.insert(LogAttributes::default());
         }
+    }
+
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        println!("LAAA >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<");
+        // dbg!(event);
+        // let span = ctx.event_span(event);
+        // if let Some(span) = span {
+        //     let mut extensions = span.extensions_mut();
+        //     if let Some(events) = extensions
+        //         .get_mut::<OtelData>()
+        //         .and_then(|ext| ext.builder.events.as_mut())
+        //     {
+        //         dbg!(&events.last());
+        //     }
+        // }
     }
 }
 
@@ -175,8 +191,6 @@ impl SpanDynAttribute for ::tracing::Span {
     }
 }
 
-// TODO il me faut un autre layer juste pour les attributs d'events et il faut qu'il passe après celui de otel
-
 pub(crate) struct EventsAttributes {
     pub(crate) events_attributes: HashMap<String, LogAttributes>,
 }
@@ -209,29 +223,29 @@ where
         }
     }
 
-    /// Notifies this layer that an event has occurred.
-    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        // Je récupère mes eventsAttributes et specifiquement mon attribut pour l'event et je l'ajoute à mon otelData events.last()
-        let mut event_kind = EventKindVisitor::default();
-        event.record(&mut event_kind);
-        if let Some(event_kind) = event_kind.0 {
-            let span = ctx.event_span(event);
-            if let Some(span) = span {
-                let mut extensions = span.extensions_mut();
-                if let (Some(attributes), Some(otel_events)) = (
-                    extensions
-                        .get::<EventsAttributes>()
-                        .and_then(|attrs| attrs.events_attributes.get(&event_kind)),
-                    extensions
-                        .get_mut::<OtelData>()
-                        .and_then(|od| od.builder.events.as_mut())
-                        .and_then(|e| e.last_mut()),
-                ) {
-                    // otel_data.builder.events.
-                }
-            }
-        }
-    }
+    // Notifies this layer that an event has occurred.
+    // fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+    //     // Je récupère mes eventsAttributes et specifiquement mon attribut pour l'event et je l'ajoute à mon otelData events.last()
+    //     let mut event_kind = EventKindVisitor::default();
+    //     event.record(&mut event_kind);
+    //     if let Some(event_kind) = event_kind.0 {
+    //         let span = ctx.event_span(event);
+    //         if let Some(span) = span {
+    //             let mut extensions = span.extensions_mut();
+    //             if let (Some(attributes), Some(otel_events)) = (
+    //                 extensions
+    //                     .get::<EventsAttributes>()
+    //                     .and_then(|attrs| attrs.events_attributes.get(&event_kind)),
+    //                 extensions
+    //                     .get_mut::<OtelData>()
+    //                     .and_then(|od| od.builder.events.as_mut())
+    //                     .and_then(|e| e.last_mut()),
+    //             ) {
+    //                 // otel_data.builder.events.
+    //             }
+    //         }
+    //     }
+    // }
 
     // The best solution might be to directly fetch eventsAttributes from otel layer
 }
@@ -247,13 +261,13 @@ struct EventKindVisitor(Option<String>);
 
 impl Visit for EventKindVisitor {
     fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == APOLLO_PRIVATE_KIND {
+        if field.name() == APOLLO_PRIVATE_CUSTOM_EVENT {
             self.0 = Some(format!("{value:?}"));
         }
     }
 
     fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
-        if field.name() == APOLLO_PRIVATE_KIND {
+        if field.name() == APOLLO_PRIVATE_CUSTOM_EVENT {
             self.0 = Some(value.to_string());
         }
     }
@@ -261,7 +275,9 @@ impl Visit for EventKindVisitor {
 
 /// To add dynamic attributes for spans
 pub(crate) trait EventDynAttribute {
+    /// Always use before sending the event
     fn set_event_dyn_attribute(&self, event_name: String, key: Key, value: opentelemetry::Value);
+    /// Always use before sending the event
     fn set_event_dyn_attributes(
         &self,
         event_name: String,
@@ -280,22 +296,17 @@ impl EventDynAttribute for ::tracing::Span {
                             return;
                         }
                         let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<EventsAttributes>() {
-                            Some(attributes) => {
-                                match attributes.events_attributes.get_mut(&event_name) {
-                                    Some(attributes) => {
-                                        attributes.insert(KeyValue::new(key, value));
-                                    }
-                                    None => {
-                                        attributes.events_attributes.insert(
-                                            event_name,
-                                            LogAttributes {
-                                                attributes: vec![KeyValue::new(key, value)],
-                                            },
-                                        );
-                                    }
+                        match extensions.get_mut::<OtelData>() {
+                            Some(otel_data) => match &mut otel_data.event_attributes {
+                                Some(attributes) => {
+                                    attributes.insert(key, value);
                                 }
-                            }
+                                None => {
+                                    let mut order_map = OrderMap::new();
+                                    order_map.insert(key, value);
+                                    otel_data.event_attributes = Some(order_map);
+                                }
+                            },
                             None => {
                                 // Can't use ::tracing::error! because it could create deadlock on extensions
                                 eprintln!("no EventsAttributes, this is a bug");
@@ -324,22 +335,18 @@ impl EventDynAttribute for ::tracing::Span {
                     None => eprintln!("no spanref, this is a bug"),
                     Some(s) => {
                         let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<EventsAttributes>() {
-                            Some(registered_attributes) => {
-                                match registered_attributes.events_attributes.get_mut(&event_name) {
-                                    Some(registered_attributes) => {
-                                        registered_attributes.extend(attributes);
-                                    }
-                                    None => {
-                                        registered_attributes.events_attributes.insert(
-                                            event_name,
-                                            LogAttributes {
-                                                attributes: attributes.collect(),
-                                            },
-                                        );
-                                    }
+                        match extensions.get_mut::<OtelData>() {
+                            Some(otel_data) => match &mut otel_data.event_attributes {
+                                Some(event_attributes) => {
+                                    event_attributes
+                                        .extend(attributes.map(|kv| (kv.key, kv.value)));
                                 }
-                            }
+                                None => {
+                                    otel_data.event_attributes = Some(OrderMap::from_iter(
+                                        attributes.map(|kv| (kv.key, kv.value)),
+                                    ));
+                                }
+                            },
                             None => {
                                 // Can't use ::tracing::error! because it could create deadlock on extensions
                                 eprintln!("no EventsAttributes, this is a bug");

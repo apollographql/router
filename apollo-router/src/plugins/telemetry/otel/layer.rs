@@ -1,3 +1,5 @@
+use crate::plugins::telemetry::dynamic_attribute::APOLLO_PRIVATE_CUSTOM_EVENT;
+
 use super::{OtelData, PreSampledTracer};
 use once_cell::unsync;
 use opentelemetry::{
@@ -115,6 +117,7 @@ struct SpanEventVisitor<'a, 'b> {
     event_builder: &'a mut otel::Event,
     span_builder: Option<&'b mut otel::SpanBuilder>,
     exception_config: ExceptionFieldConfig,
+    custom_event: bool,
 }
 
 impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
@@ -124,6 +127,7 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
     fn record_bool(&mut self, field: &field::Field, value: bool) {
         match field.name() {
             "message" => self.event_builder.name = value.to_string().into(),
+            APOLLO_PRIVATE_CUSTOM_EVENT => self.custom_event = true,
             // Skip fields that are actually log metadata that have already been handled
             #[cfg(feature = "tracing-log")]
             name if name.starts_with("log.") => (),
@@ -705,7 +709,11 @@ where
             span_builder: &mut builder,
             exception_config: self.exception_config,
         });
-        extensions.insert(OtelData { builder, parent_cx });
+        extensions.insert(OtelData {
+            builder,
+            parent_cx,
+            event_attributes: None,
+        });
     }
 
     fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
@@ -814,9 +822,9 @@ where
             let target = target.string(meta.target());
 
             let mut extensions = span.extensions_mut();
-            let span_builder = extensions
+            let (span_builder, event_attributes) = extensions
                 .get_mut::<OtelData>()
-                .map(|data| &mut data.builder);
+                .map(|data| (&mut data.builder, &mut event_attributes));
 
             let mut otel_event = otel::Event::new(
                 String::new(),
@@ -824,11 +832,24 @@ where
                 vec![Key::new("level").string(meta.level().as_str()), target],
                 0,
             );
-            event.record(&mut SpanEventVisitor {
+            let mut span_event_visit = SpanEventVisitor {
                 event_builder: &mut otel_event,
                 span_builder,
                 exception_config: self.exception_config,
-            });
+                custom_event: false,
+            };
+            event.record(&mut span_event_visit);
+            let custom_event = span_event_visit.custom_event;
+            // TODO if custom_event, add event_attributes
+            if custom_event {
+                if let Some(event_attributes) = event_attributes.clear() {
+                    otel_event.attributes.extend(
+                        event_attributes
+                            .into_iter()
+                            .map(|(key, value)| KeyValue::new(key, value)),
+                    )
+                }
+            }
 
             if let Some(OtelData { builder, .. }) = extensions.get_mut::<OtelData>() {
                 if builder.status == otel::Status::Unset
@@ -888,6 +909,7 @@ where
         if let Some(OtelData {
             mut builder,
             parent_cx,
+            ..
         }) = extensions.remove::<OtelData>()
         {
             if self.tracked_inactivity {
@@ -991,6 +1013,7 @@ mod tests {
             *self.0.lock().unwrap() = Some(OtelData {
                 builder,
                 parent_cx: parent_cx.clone(),
+                event_attributes: None,
             });
             noop::NoopSpan::new()
         }

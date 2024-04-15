@@ -337,6 +337,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry-zipkin",
  "opentelemetry_api",
+ "opentelemetry_sdk 0.20.0",
  "p256 0.13.2",
  "parking_lot",
  "paste",

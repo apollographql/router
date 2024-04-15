@@ -10,7 +10,6 @@ use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Level;
 use tracing_core::Subscriber;
-use tracing_opentelemetry::OtelData;
 use tracing_subscriber::field;
 use tracing_subscriber::field::Visit;
 use tracing_subscriber::fmt::format::DefaultVisitor;
@@ -28,6 +27,7 @@ use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
+use crate::plugins::telemetry::otel::OtelData;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
 pub(crate) struct Text {

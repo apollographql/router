@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
+use apollo_router::otel::OpenTelemetrySpanExt;
 use buildstructor::buildstructor;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -49,7 +50,6 @@ use tracing_core::Dispatch;
 use tracing_core::LevelFilter;
 use tracing_futures::Instrument;
 use tracing_futures::WithSubscriber;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
