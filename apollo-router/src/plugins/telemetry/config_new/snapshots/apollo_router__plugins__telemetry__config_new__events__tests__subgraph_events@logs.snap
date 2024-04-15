@@ -20,7 +20,7 @@ expression: yaml
       name: subgraph
       otel.kind: INTERNAL
 - fields:
-    attributes: "{\"subgraph.name\": \"subgraph\", \"response_status\": \"200\"}"
+    attributes: "{\"response_status\": \"200\", \"subgraph.name\": \"subgraph\"}"
     kind: my.response.event
   level: ERROR
   message: my response event message

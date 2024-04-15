@@ -3,7 +3,7 @@ source: apollo-router/src/plugins/telemetry/config_new/events.rs
 expression: yaml
 ---
 - fields:
-    attributes: "{\"http.request.method\": \"GET\", \"http.request.body\": \"Body(Empty)\", \"http.request.version\": \"HTTP/1.1\", \"http.request.uri\": \"http://example.com/\", \"http.request.headers\": \"{\\\"x-log-request\\\": \\\"log\\\", \\\"content-length\\\": \\\"0\\\", \\\"custom-header\\\": \\\"val1\\\"}\"}"
+    attributes: "{\"http.request.body\": \"Body(Empty)\", \"http.request.headers\": \"{\\\"content-length\\\": \\\"0\\\", \\\"custom-header\\\": \\\"val1\\\", \\\"x-log-request\\\": \\\"log\\\"}\", \"http.request.method\": \"GET\", \"http.request.uri\": \"http://example.com/\", \"http.request.version\": \"HTTP/1.1\"}"
     kind: router.request
   level: INFO
   message: ""
@@ -45,7 +45,7 @@ expression: yaml
       otel.kind: INTERNAL
       trace_id: ""
 - fields:
-    attributes: "{\"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.status\": \"200 OK\", \"http.response.headers\": \"{\\\"custom-header\\\": \\\"val1\\\", \\\"content-length\\\": \\\"25\\\", \\\"x-log-request\\\": \\\"log\\\"}\", \"http.response.version\": \"HTTP/1.1\"}"
+    attributes: "{\"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.headers\": \"{\\\"content-length\\\": \\\"25\\\", \\\"custom-header\\\": \\\"val1\\\", \\\"x-log-request\\\": \\\"log\\\"}\", \"http.response.status\": \"200 OK\", \"http.response.version\": \"HTTP/1.1\"}"
     kind: router.response
   level: INFO
   message: ""
@@ -91,7 +91,7 @@ expression: yaml
       otel.kind: INTERNAL
       trace_id: ""
 - fields:
-    attributes: "{\"http.request.method\": \"GET\", \"http.request.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.request.version\": \"HTTP/1.1\", \"http.request.body\": \"Body(Empty)\", \"http.request.uri\": \"http://example.com/\"}"
+    attributes: "{\"http.request.body\": \"Body(Empty)\", \"http.request.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.request.method\": \"GET\", \"http.request.uri\": \"http://example.com/\", \"http.request.version\": \"HTTP/1.1\"}"
     kind: router.request
   level: INFO
   message: ""
@@ -112,7 +112,7 @@ expression: yaml
       otel.kind: INTERNAL
       trace_id: ""
 - fields:
-    attributes: "{\"http.response.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.response.version\": \"HTTP/1.1\", \"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.status\": \"200 OK\"}"
+    attributes: "{\"http.response.body\": \"Body(Full(b\\\"{\\\\\\\"data\\\\\\\":{\\\\\\\"data\\\\\\\":\\\\\\\"res\\\\\\\"}}\\\"))\", \"http.response.headers\": \"{\\\"custom-header\\\": \\\"val1\\\"}\", \"http.response.status\": \"200 OK\", \"http.response.version\": \"HTTP/1.1\"}"
     kind: router.response
   level: INFO
   message: ""

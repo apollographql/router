@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use http::HeaderName;
 use http::HeaderValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
@@ -150,15 +149,17 @@ impl Instrumented
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(5);
-            // #[cfg(test)]
-            // let headers: indexmap::IndexMap<HeaderName, HeaderValue> = request
-            //     .router_request
-            //     .headers()
-            //     .clone()
-            //     .into_iter()
-            //     .filter_map(|(name, val)| Some((name?, val)))
-            //     .collect();
-            // #[cfg(not(test))]
+            #[cfg(test)]
+            let mut headers: indexmap::IndexMap<String, HeaderValue> = request
+                .router_request
+                .headers()
+                .clone()
+                .into_iter()
+                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .collect();
+            #[cfg(test)]
+            headers.sort_keys();
+            #[cfg(not(test))]
             let headers = request.router_request.headers();
 
             attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
@@ -189,15 +190,17 @@ impl Instrumented
         if self.response != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(4);
 
-            // #[cfg(test)]
-            // let headers: indexmap::IndexMap<HeaderName, HeaderValue> = response
-            //     .response
-            //     .headers()
-            //     .clone()
-            //     .into_iter()
-            //     .filter_map(|(name, val)| Some((name?, val)))
-            //     .collect();
-            // #[cfg(not(test))]
+            #[cfg(test)]
+            let mut headers: indexmap::IndexMap<String, HeaderValue> = response
+                .response
+                .headers()
+                .clone()
+                .into_iter()
+                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .collect();
+            #[cfg(test)]
+            headers.sort_keys();
+            #[cfg(not(test))]
             let headers = response.response.headers();
             attrs.insert(
                 "http.response.headers".to_string(),
@@ -248,15 +251,17 @@ impl Instrumented
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(5);
-            // #[cfg(test)]
-            // let headers: indexmap::IndexMap<HeaderName, HeaderValue> = request
-            //     .supergraph_request
-            //     .headers()
-            //     .clone()
-            //     .into_iter()
-            //     .filter_map(|(name, val)| Some((name?, val)))
-            //     .collect();
-            // #[cfg(not(test))]
+            #[cfg(test)]
+            let mut headers: indexmap::IndexMap<String, HeaderValue> = request
+                .supergraph_request
+                .headers()
+                .clone()
+                .into_iter()
+                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .collect();
+            #[cfg(test)]
+            headers.sort_keys();
+            #[cfg(not(test))]
             let headers = request.supergraph_request.headers();
             attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
             attrs.insert(
@@ -545,7 +550,10 @@ pub(crate) fn log_event(
     message: &str,
 ) {
     #[cfg(test)]
-    let attributes: indexmap::IndexMap<String, String> = attributes.clone().into_iter().collect();
+    let mut attributes: indexmap::IndexMap<String, String> =
+        attributes.clone().into_iter().collect();
+    #[cfg(test)]
+    attributes.sort_keys();
 
     match level {
         EventLevel::Info => {
