@@ -367,10 +367,11 @@ where
         let doc = match request.context.extensions().lock().get::<ParsedDocument>() {
             None => {
                 return Err(CacheResolverError::RetrievalError(Arc::new(
-                    QueryPlannerError::SpecError(SpecError::ParsingError(
+                    // TODO: dedicated error variant?
+                    QueryPlannerError::SpecError(SpecError::TransformError(
                         "missing parsed document".to_string(),
                     )),
-                )))
+                )));
             }
             Some(d) => d.clone(),
         };
