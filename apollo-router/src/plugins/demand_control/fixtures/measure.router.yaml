@@ -2,6 +2,6 @@ experimental_demand_control:
   enabled: true
   mode: measure
   strategy:
-    static_estimated:
-      max: 100
-
+    test:
+      stage: on_execution_request
+      error: estimated_cost_too_expensive
