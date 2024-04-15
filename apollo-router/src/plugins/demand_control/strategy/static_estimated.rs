@@ -43,8 +43,10 @@ impl StrategyImpl for StaticEstimated {
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
-        let _cost = self.cost_calculator.actual(request, response)?;
-        // Todo metrics
+        if response.data.is_some() {
+            let _cost = self.cost_calculator.actual(request, response)?;
+            // Todo metrics
+        }
         Ok(())
     }
 }
