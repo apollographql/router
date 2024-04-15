@@ -39,10 +39,10 @@ use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::register_plugin;
 use crate::services::execution;
+use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -175,14 +175,11 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn query_analysis(
-        query: &str,
+        doc: &ParsedDocumentInner,
         operation_name: Option<&str>,
         schema: &Schema,
-        configuration: &Configuration,
         context: &Context,
-    ) -> Result<(), SpecError> {
-        let doc = Query::parse_document(query, operation_name, schema, configuration)?;
-
+    ) {
         let CacheKeyMetadata {
             is_authenticated,
             scopes,
@@ -206,8 +203,6 @@ impl AuthorizationPlugin {
                 policies.into_iter().map(|policy| (policy, None)).collect();
             context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
         }
-
-        Ok(())
     }
 
     pub(crate) fn generate_cache_metadata(

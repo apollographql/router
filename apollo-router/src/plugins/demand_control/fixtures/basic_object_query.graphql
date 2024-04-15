@@ -1,3 +1,5 @@
 {
-    object1
+    object1 {
+        field1
+    }
 }
