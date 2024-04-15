@@ -106,12 +106,12 @@ pub(crate) fn apply_rewrites(
 #[cfg(test)]
 mod tests {
     use serde_json_bytes::json;
+
     use super::*;
 
     // The schema is not used for the tests
     // but we need a valid one
-    const SCHEMA : &str =
-        r#"
+    const SCHEMA: &str = r#"
        schema
          @core(feature: "https://specs.apollo.dev/core/v0.1"),
          @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -156,20 +156,26 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".to_string()
+            rename_key_to: "testField".to_string(),
         });
 
-        dr.maybe_apply(&Schema::parse_test(SCHEMA, &Default::default()).unwrap(), &mut data);
+        dr.maybe_apply(
+            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &mut data,
+        );
 
-        assert_eq!(json!{{
-            "data": {
-                "__typename": "TestType",
-                "testField": {
-                    "__typename": "TestField",
-                    "field":"thisisatest"
+        assert_eq!(
+            json! {{
+                "data": {
+                    "__typename": "TestType",
+                    "testField": {
+                        "__typename": "TestField",
+                        "field":"thisisatest"
+                    }
                 }
-            }
-        }}, data);
+            }},
+            data
+        );
     }
 
     #[test]
@@ -188,19 +194,25 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".to_string()
+            rename_key_to: "testField".to_string(),
         });
 
-        dr.maybe_apply(&Schema::parse_test(SCHEMA, &Default::default()).unwrap(), &mut data);
+        dr.maybe_apply(
+            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &mut data,
+        );
 
-        assert_eq!(json!{{
-            "data": [{
-                "__typename": "TestType",
-                "testField": {
-                    "__typename": "TestField",
-                    "field":"thisisatest"
-                }
-            }]
-        }}, data);
+        assert_eq!(
+            json! {{
+                "data": [{
+                    "__typename": "TestType",
+                    "testField": {
+                        "__typename": "TestField",
+                        "field":"thisisatest"
+                    }
+                }]
+            }},
+            data
+        );
     }
 }
