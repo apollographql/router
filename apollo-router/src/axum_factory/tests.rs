@@ -2295,6 +2295,7 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
 async fn test_supergraph_timeout() {
     let config = serde_json::json!({
         "supergraph": {
+            "listen": "127.0.0.1:0",
             "defer_support": false,
         },
         "traffic_shaping": {
@@ -2343,10 +2344,14 @@ async fn test_supergraph_timeout() {
     .make();
 
     // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
+    let (server, client) = init_with_config(service, conf.clone(), MultiMap::new())
         .await
         .unwrap();
-    let url = "http://localhost:4000/";
+    let url = server
+        .graphql_listen_address()
+        .as_ref()
+        .unwrap()
+        .to_string();
 
     let response = client
         .post(url)
