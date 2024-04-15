@@ -8,6 +8,7 @@ pub mod merge;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
+mod sources;
 pub mod subgraph;
 
 pub use crate::api_schema::ApiSchemaOptions;

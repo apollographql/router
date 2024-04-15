@@ -1,0 +1,6 @@
+---
+source: src/sources/connect/spec/directives.rs
+expression: fields
+---
+users: [User] @connect(source: "json", http: {GET: "/users"}, selection: "id name")
+posts: [Post] @connect(source: "json", http: {GET: "/posts"}, selection: "id title body")

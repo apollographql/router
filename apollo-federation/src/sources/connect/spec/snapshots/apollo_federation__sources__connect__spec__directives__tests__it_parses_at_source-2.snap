@@ -1,0 +1,22 @@
+---
+source: src/sources/connect/spec/directives.rs
+expression: schema.referencers().get_directive(SOURCE_DIRECTIVE_NAME_IN_SPEC.as_str()).unwrap()
+---
+DirectiveReferencers {
+    schema: Some(
+        SchemaDefinitionPosition,
+    ),
+    scalar_types: {},
+    object_types: {},
+    object_fields: {},
+    object_field_arguments: {},
+    interface_types: {},
+    interface_fields: {},
+    interface_field_arguments: {},
+    union_types: {},
+    enum_types: {},
+    enum_values: {},
+    input_object_types: {},
+    input_object_fields: {},
+    directive_arguments: {},
+}
