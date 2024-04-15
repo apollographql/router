@@ -5,11 +5,12 @@ use crate::query_graph::graph_path::{
 use crate::query_graph::path_tree::{OpPathTree, PathTreeChild};
 use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition};
 use crate::query_plan::conditions::Conditions;
-use crate::query_plan::fetch_dependency_graph_processor::RebasedFragments;
 use crate::query_plan::operation::normalized_field_selection::{
     NormalizedField, NormalizedFieldData,
 };
-use crate::query_plan::operation::{NormalizedSelection, NormalizedSelectionSet, TYPENAME_FIELD};
+use crate::query_plan::operation::{
+    NormalizedSelection, NormalizedSelectionSet, RebasedFragments, TYPENAME_FIELD,
+};
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::{FetchDataRewrite, QueryPlanCost};

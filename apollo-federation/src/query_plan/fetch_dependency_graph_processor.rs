@@ -2,7 +2,7 @@ use crate::error::FederationError;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::{NormalizedSelectionSet, RebasedFragments};
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
@@ -50,9 +50,6 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     assigned_defer_labels: Option<HashSet<NodeStr>>,
     counter: u32,
 }
-
-// TODO
-pub(crate) struct RebasedFragments;
 
 /// Computes the cost of a Plan.
 ///
