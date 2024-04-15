@@ -595,6 +595,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_subgraph_request_async() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                body: true,
+                asynchronous: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client =
+            mock_with_callback(move |_: hyper::Request<Body>| Box::pin(async { panic!() }));
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .data
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn external_plugin_subgraph_response() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
@@ -702,6 +752,53 @@ mod tests {
 
         assert_eq!(
             serde_json_bytes::json!({ "test": 5678_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_async() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                body: true,
+                asynchronous: true,
+                ..Default::default()
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client =
+            mock_with_asynchronous_response_callback(move |_: hyper::Request<Body>| {
+                Box::pin(async { panic!() })
+            });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
     }

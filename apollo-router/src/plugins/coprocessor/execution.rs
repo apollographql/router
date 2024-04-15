@@ -645,6 +645,32 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
+    pub(crate) fn mock_with_asynchronous_response_callback(
+        callback: fn(
+            hyper::Request<Body>,
+        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
+    ) -> MockHttpClientService {
+        let mut mock_http_client = MockHttpClientService::new();
+        mock_http_client.expect_clone().returning(move || {
+            let mut mock_http_client = MockHttpClientService::new();
+
+            mock_http_client.expect_clone().returning(move || {
+                let mut mock_http_client = MockHttpClientService::new();
+                //mock_http_client.expect_call().returning(callback);
+                mock_http_client.expect_clone().returning(move || {
+                    let mut mock_http_client = MockHttpClientService::new();
+                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client
+                });
+                mock_http_client
+            });
+            mock_http_client
+        });
+
+        mock_http_client
+    }
+
+    #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
             hyper::Request<Body>,
@@ -873,6 +899,60 @@ mod tests {
                 .message
                 .as_str(),
             "my error message"
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_request_async() {
+        let execution_stage = ExecutionStage {
+            request: ExecutionRequestConf {
+                body: true,
+                asynchronous: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_call()
+            .returning(|req: execution::Request| {
+                Ok(execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mock_http_client =
+            mock_with_callback(move |_: hyper::Request<Body>| Box::pin(async { panic!() }));
+
+        let service = execution_stage.as_service(
+            mock_http_client,
+            mock_execution_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = execution::Request::fake_builder().build();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .next()
+                .await
+                .unwrap()
+                .data
+                .unwrap()
         );
     }
 
@@ -1113,6 +1193,58 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_async() {
+        let execution_stage = ExecutionStage {
+            response: ExecutionResponseConf {
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                asynchronous: true,
+                ..Default::default()
+            },
+            request: Default::default(),
+        };
+
+        let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_call()
+            .returning(|req: execution::Request| {
+                Ok(execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mock_http_client =
+            mock_with_asynchronous_response_callback(move |_res: hyper::Request<Body>| {
+                Box::pin(async { panic!() })
+            });
+
+        let service = execution_stage.as_service(
+            mock_http_client,
+            mock_execution_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = execution::Request::fake_builder().build();
+
+        let mut res = service.oneshot(request).await.unwrap();
+
+        let body = res.response.body_mut().next().await.unwrap();
+        // the body should have changed:
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 1234_u32 } }),
         );
     }
 }
