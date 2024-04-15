@@ -1,0 +1,5 @@
+The Apollo Router's request lifecycle has three major services:
+
+* **Router service** - Handles an incoming request before it is parsed. Works within a context of opaque bytes.
+* **Supergraph service** - Handles a request after it has been parsed and before it is sent to the subgraph. Works within a GraphQL context.
+* **Subgraph service** - Handles a request after it has been sent to the subgraph. Works within a GraphQL context.

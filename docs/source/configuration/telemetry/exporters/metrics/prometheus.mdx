@@ -1,0 +1,87 @@
+---
+title: Prometheus exporter
+subtitle: Configure the Prometheus metrics exporter
+description: Configure the Prometheus metrics exporter endpoint in the Apollo Router
+---
+
+Enable and configure the [Prometheus](https://www.prometheus.io/) exporter for metrics in the Apollo Router.
+
+For general metrics configuration, refer to [Router Metrics Configuration](./overview).
+
+## Prometheus configuration
+
+To export metrics to Prometheus, enable the Prometheus endpoint and set its address and path in [`router.yaml`](../../../overview#yaml-config-file):
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     metrics:
+       prometheus:
+         enabled: true
+         listen: 127.0.0.1:9090
+         path: /metrics
+```
+
+Once enabled, you will be able to access the Prometheus endpoint at `http://localhost:9090/metrics`.
+
+You can configure your APM agent to scrape the metrics from the endpoint. See the documentation for your APM agent for more details.
+
+### `enabled`
+
+Set to true to enable the Prometheus exporter. Defaults to false.
+
+### `listen`
+
+The address and port to listen on for Prometheus metrics. Defaults to `127.0.0.1`.
+
+### `path`
+
+The path to expose the Prometheus metrics. Defaults to `/metrics`.
+
+## Prometheus configuration reference
+
+| Attribute     | Default          | Description                                |
+|---------------|------------------|--------------------------------------------|
+| `enabled`     | `false`          | Enable the Prometheus exporter.            |
+| `listen`      | `127.0.0.1:9090` | The address to serve Prometheus metric on. |
+| `path`        | `/metrics`       | The path to serve Prometheus metrics on.   |
+
+
+## Using Prometheus with containers
+
+The Prometheus endpoint listens to `127.0.0.1` by default, which won't allow connections issued from a network.
+
+While this is a safe default, _other containers won't be able to access the Prometheus endpoint_, which will disable metric scraping.
+
+You can enable other containers to access it by setting the endpoint to listen to `0.0.0.0`:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     metrics:
+       prometheus:
+         # By setting this endpoint you enable other containers and pods to access the Prometheus endpoint
+         enabled: true
+         listen: 0.0.0.0:9090 #highlight-line
+         path: /metrics
+```
+
+You can validate your setting locally:
+
+1. Run a query against the router.
+2. Navigate to [http://localhost:9090/metrics](http://localhost:9090/metrics), and check that the endpoint returns metrics similar to the following:
+
+    ```
+    # HELP apollo_router_http_request_duration_seconds Total number of HTTP requests made.
+    # TYPE apollo_router_http_request_duration_seconds histogram
+    apollo_router_http_request_duration_seconds_bucket{le="0.5"} 1
+    apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
+    ---SNIP---
+    ```
+
+<Note>
+
+If you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated.
+
+</Note>
+

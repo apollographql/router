@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/plugins/authorization/tests.rs
+expression: response
+---
+{
+  "data": {
+    "orga": {
+      "id": 1,
+      "creatorUser": null
+    }
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "orga",
+        "creatorUser"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
+}

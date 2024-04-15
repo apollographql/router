@@ -5,7 +5,6 @@ use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::time::SystemTime;
 
-use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
@@ -33,23 +32,25 @@ use crate::services::apollo_key;
 pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
-#[derive(Derivative)]
-#[derivative(Debug)]
-#[derive(Clone, Deserialize, JsonSchema)]
+pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
+
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
     pub(crate) endpoint: Url,
 
+    /// The Apollo Studio endpoint for exporting traces and metrics.
+    #[schemars(with = "String", default = "otlp_endpoint_default")]
+    pub(crate) experimental_otlp_endpoint: Url,
+
     /// The Apollo Studio API key.
     #[schemars(skip)]
-    #[serde(skip)]
     pub(crate) apollo_key: Option<String>,
 
     /// The Apollo Studio graph reference.
     #[schemars(skip)]
-    #[serde(skip)]
     pub(crate) apollo_graph_ref: Option<String>,
 
     /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
@@ -98,7 +99,7 @@ pub(crate) struct SubgraphErrorConfig {
     /// Handling of errors coming from all subgraphs
     pub(crate) all: ErrorConfiguration,
     /// Handling of errors coming from specified subgraphs
-    pub(crate) subgraphs: Option<HashMap<String, ErrorConfiguration>>,
+    pub(crate) subgraphs: HashMap<String, ErrorConfiguration>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -113,28 +114,20 @@ pub(crate) struct ErrorConfiguration {
 impl Default for ErrorConfiguration {
     fn default() -> Self {
         Self {
-            send: default_send_errors(),
-            redact: default_redact_errors(),
+            send: true,
+            redact: true,
         }
     }
 }
 
 impl SubgraphErrorConfig {
     pub(crate) fn get_error_config(&self, subgraph: &str) -> &ErrorConfiguration {
-        if let Some(subgraph_conf) = self.subgraphs.as_ref().and_then(|s| s.get(subgraph)) {
+        if let Some(subgraph_conf) = self.subgraphs.get(subgraph) {
             subgraph_conf
         } else {
             &self.all
         }
     }
-}
-
-pub(crate) const fn default_send_errors() -> bool {
-    true
-}
-
-pub(crate) const fn default_redact_errors() -> bool {
-    true
 }
 
 const fn default_field_level_instrumentation_sampler() -> SamplerOption {
@@ -143,6 +136,10 @@ const fn default_field_level_instrumentation_sampler() -> SamplerOption {
 
 fn endpoint_default() -> Url {
     Url::parse(ENDPOINT_DEFAULT).expect("must be valid url")
+}
+
+fn otlp_endpoint_default() -> Url {
+    Url::parse(OTLP_ENDPOINT_DEFAULT).expect("must be valid url")
 }
 
 const fn client_name_header_default_str() -> &'static str {
@@ -169,6 +166,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             endpoint: endpoint_default(),
+            experimental_otlp_endpoint: otlp_endpoint_default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),

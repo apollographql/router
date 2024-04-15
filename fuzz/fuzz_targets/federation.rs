@@ -1,4 +1,6 @@
 #![no_main]
+mod invariant_router;
+
 use std::fs::OpenOptions;
 use std::io::Write;
 
@@ -13,7 +15,7 @@ const GATEWAY_FED2_URL: &str = "http://localhost:4200/graphql";
 
 fuzz_target!(|data: &[u8]| {
     let generated_operation = match generate_valid_operation(data, "fuzz/supergraph.graphql") {
-        Ok(d) => d,
+        Ok((d, _)) => d,
         Err(_err) => {
             return;
         }
@@ -54,7 +56,6 @@ fuzz_target!(|data: &[u8]| {
         }
         let mut file = OpenOptions::new()
             .read(true)
-            .write(true)
             .create(true)
             .append(true)
             .open("federation.txt")
@@ -108,7 +109,6 @@ fuzz_target!(|data: &[u8]| {
         if gateway_fed1_response != gateway_fed2_response {
             let mut file = OpenOptions::new()
                 .read(true)
-                .write(true)
                 .create(true)
                 .append(true)
                 .open("federation.txt")

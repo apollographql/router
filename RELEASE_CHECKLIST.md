@@ -1,75 +1,102 @@
 Release Checklist
 =================
 
-Nightly Releases
-----------------
+## Table of Contents
 
-As of the introduction of [PR #2409](https://github.com/apollographql/router/pull/2409), nightly releases are automatically built on a daily basis.  This is accomplished automatically through use of a parameterized invocation of the [`nightly` workflow](https://github.com/apollographql/router/blob/HEAD/.circleci/config.yml#L704-L711) using [CircleCI's Scheduled Pipelines](https://circleci.com/docs/scheduled-pipelines/) feature.
+- [Building a Release](#building-a-release)
+  - 👀 [Before you begin](#before-you-begin)
+  - [Starting a release PR](#starting-a-release-pr) - The release PR tracks a branch and gathers commits, allows changelog review.
+  - _(optional)_ [Cutting a pre-release](#cutting-a-pre-release) (i.e., release candidate, alpha or beta) - Near-final versions for testing.
+  - [Preparing the final release](#preparing-the-final-release) - Final version number bumps and final changelog preparation.
+  - [Finishing the release](#finishing-the-release) - Builds the final release, merges into `main`, reconcile `dev` trunk.
+  - Verifying the release (TODO)
+  - [Troubleshooting a release](#troubleshooting-a-release) - Something went wrong?
+- [Nightly releases](#nightly-releases)
 
-### One-off builds
+## Building a Release
 
-In the way the schedule is defined, nightly builds are done from the `dev` branch.  However, the functionality that powers nightly builds can be used to also build from _any_ branch (including PRs) and produce a pre-release, "nightly style" build from any desired commit.
+There are different types of releases:
 
-This process can only be done by members of the Apollo Router `router` GitHub repository with contributor permissions on CircleCI.
+- **General release**
 
-To invoke a one-off `nightly` build:
+  These releases are typically identified with a `x.y.z` semver identifier.  (e.g., `1.42.0`).
+- **Pre-release**
 
-1. Go to the CircleCI Pipelines view for this repository](https://app.circleci.com/pipelines/github/apollographql/router)
-2. Click on the **"All Branches"** drop-down menu and choose a branch you'd like to build from.
-3. Press the **"Trigger Pipeline"** button in the top-right of the navigation (to the left of the "Project Settings" button).
-4. Expand the "Add Parameters" section.
-5. Add one parameter using the following configuration:
+  Such a release could be a "release candidate", or an alpha/beta release and would use a `x.y.z-pre.w` identifier (e.g., `1.42.0-alpha.0`).
+- **Nightly releases**
 
-   **Parameter type:** `boolean`
-   **Name:** `nightly`
-   **Value:** `true`
-6. Press **"Trigger Pipeline"**
-7. Wait a couple seconds for the pipeline to begin and show in the list.
+  These are special releases cut from a particular Git commit.  Despite their name, they don't necessarily have to be done at a nightly interval.  They are identified by an identifier of `v0.0.0-nightly-YYYYMMDD-COMMITHASH`.  More details on these is found in the dedicated [Nightly releases] section.
 
-To obtain the binary builds from the pipeline which was launched:
+  [Nightly releases]: #nightly-releases
 
-> **Note**
-> Built nightlies are only available on the Artifacts for a job within 30 days after the CircleCI pipeline that created them is finished.  If you need them after this period, you will need to re-run the pipeline and wait for it to finish again.  You can do this by clicking the "Rerun from start" option on the pipeline.
+The process is **not fully automated**, but the release consists of copying and pasting commands that do all the work for you.  Here's a high level understanding and some terminology, which will help so you can understand some key components:
 
-1. Click on the workflow name: **`nightly`** of the newly launched pipeline.  In the above steps, this is the pipeline that appeared after step 7.
-2. Click on the job representing the system architecture you'd like to obtain the build binary for.  For example, to get the macOS binary, click on `build_release-macos_build`.
-3. If the job hasn't already finished successfully, **wait for the job to finish successfully**.
-4. Click on the **Artifacts** tab.
-5. Click on the link to the `.tar.gz` file to download the tarball of the build distribution.  For example, you might click on a link called `artifacts/router-v0.0.0-nightly-20230119-abcd1234-x86_64-apple-darwin.tar.gz` for a macOS build done on the 19th of January 2023 from commit hash starting with `abcd1234`.
-
-In addition, you will find `docker` and `helm` assets:
- - [docker](https://github.com/apollographql/router/pkgs/container/nightly%2Frouter)
- - [helm](https://github.com/apollographql/router/pkgs/container/helm-charts-nightly%2Frouter)
-
-This is a list of the things that need to happen during a release.
-
-Build a Release
----------------
-
-Most of this will be executing some simple commands but here's a high level understanding and some terminology.  There will be a total of 3 pull-requests involved:
-
-- **a Release PR**: this will merge **into `main`**.  It will be a real merge commit and it **should NOT be squashed**.
-- **a Release _Prep_ PR**: this will merge into the release PR _above_.  It **SHOULD be squashed**.
-- **Reconciliation PR**: a PR that merges `main` back into `dev`.  It will be a real merge commit and it **should NOT be squashed**.
+- Pull Requests
+  - There will be a total of 3 pull-requests involved:
+    - **a Release "Staging" PR**: this will merge **into `main`**.  When it merges it will be a real merge commit and it **should NOT be squashed**.  It starts off as a draft, and graduates to a "ready for review" PR once any pre-release versions are issued and after preparation is done.
+    - **a Release _Prep_ PR**: this will merge into the release PR _above_.  It **SHOULD be squashed**.  The release preparation PR is only done just before the final release and _**after** any prereleases_.
+    - **Reconciliation PR**: a PR that merges `main` back into `dev` after the final release is done.  It will be a real merge commit and it **should NOT be squashed**.
+- Peer Reviews
+  - The actual code being released will have been reviewed in other PRs.
+  - The "Release Prep" PR is reviewed
 
 The examples below will use [the GitHub CLI (`gh`)](https://cli.github.com/) to simplify the steps.  We can automate it further in the future, but feels like the right level of abstraction right now.
 
-A release can be cut from any branch, but we assume you'll be doing it from `dev`.  If you're just doing a release candidate, you can skip merging it back into `main`.
+### Before you begin
 
-1. Make sure you have `cargo` installed on your machine and in your `PATH`.
-2. Pick the version number you are going to release.  This project uses [Semantic Versioning 2.0.0](https://semver.org/), so analyze the existing changes in the `.changesets/` directory to pick the right next version.  (e.g., If there are `feat_` changes, it must be a minor version bump.  If there are `breaking_` changes, it must be a _major_ version bump).  **Do not release a major version without explicit agreement from core team members**.
-3. Checkout the branch you want to cut from.  Typically, this is `dev`, but you could do this from another branch as well.
+#### Software requirements
+
+Make sure you have the following software installed and available in your `PATH`.
+
+  - `gh`: [The GitHub CLI](https://cli.github.com/)
+  - `cargo`: [Cargo & Rust Installation](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+  - `helm-docs`: see <https://github.com/norwoodj/helm-docs#installation>
+  - `cargo-about`: install with `cargo install --locked cargo-about`
+  - `cargo-deny`: install with `cargo install --locked cargo-deny`
+  - `set-version` from `cargo-edit`: `cargo install --locked cargo-edit`
+
+#### Pick a version
+
+This project uses [Semantic Versioning 2.0.0](https://semver.org/).  When releasing, analyze the existing changes in the [`.changesets/`](./.changesets) directory to pick the right next version:
+
+- If there are `feat_` changes, it must be a _semver-minor_ version bump.
+- If there are `breaking_` changes, it must be a _semver-major_ version bump.  **Do not release a major version without explicit agreement from core team members**.
+- In all other cases, you can release a _semver-patch_ version.
+
+> **Note**
+> The full details of the `.changesets/` file-prefix convention can be found [its README](.changesets/README.md#conventions-used-in-this-changesets-directory).
+
+### Starting a release PR
+
+Creating a release PR is the first step of starting a release, whether there will be pre-releases or not.  About a release PR:
+
+* A release PR is based on a release branch and a release branch gathers all the commits for a release.
+* The release PR merges into `main` at the time that the release becomes official.
+* A release can be started from any branch or commit, but it is almost always started from `dev` as that is the main development trunk of the Router.
+* The release PR is in a draft mode until after the preparation PR has been merged into it.
+
+Start following the steps below to start a release PR.  The process is **not fully automated**, but largely consists of copying and pasting commands that do all the work for you.  The descriptions above each command explain what the command aims to do.
+
+1. Make sure you have all the [Software Requirements](#software-requirements) above fulfilled.
+
+2. Ensure you have decided the version using [Pick a version](#pick-a-version).
+
+3. Checkout the branch or commit you want to cut from.  Typically, this is `dev`, but you could do this from another branch as well:
 
    ```
    git checkout dev
    ```
 
-4. We'll set some environment variables for steps that follow this, to simplify copy and pasting.  Be sure to customize these for your own conditions, and **set the version you picked in the above step** as `APOLLO_ROUTER_RELEASE_VERSION`:
+4. We'll set some environment variables for steps that follow this, which will enable copying-and-pasting subsequent steps.  Customize these for your own conditions, **set the version you picked in the above step** as `APOLLO_ROUTER_RELEASE_VERSION`, and then paste into your terminal (press enter to complete it):
+
+   > **Note**
+   > You should **not** fill in `APOLLO_ROUTER_PRERELEASE_SUFFIX` at this time.  Visit [Cutting a pre-release](#cutting-a-pre-release) after opening the original release PR.
 
    ```
-   APOLLO_ROUTER_RELEASE_VERSION=#.#.#
+   APOLLO_ROUTER_RELEASE_VERSION="#.#.#"                  # Set me!
    APOLLO_ROUTER_RELEASE_GIT_ORIGIN=origin
    APOLLO_ROUTER_RELEASE_GITHUB_REPO=apollographql/router
+   APOLLO_ROUTER_PRERELEASE_SUFFIX=""                     # Intentionally blank.
    ```
 
 5. Make sure you have the latest from the remote before releasing, ensuring you're using the right remote!
@@ -78,27 +105,142 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}"
    ```
 
-6. Create a new branch `#.#.#`.  (The `#.#.#` values should be this release's version, and it is perfectly acceptable to use prerelease semantics, e.g., a branch named `1.5.3-rc.9`).  To do this using the environment variable we just set, we'll just run the following from the same terminal:
+6. Create a new branch `#.#.#` from the current branch which will act as the release branch.  (The `#.#.#` values should be this release's version.  To do this using the environment variable we just set, we'll just run the following from the same terminal:
 
    ```
    git checkout -b "${APOLLO_ROUTER_RELEASE_VERSION}"
    ```
+
 7. Push this new branch to the appropriate remote.  We will open a PR for it **later**, but this will be the **base** for the PR created in the next step).  (And `--set-upstream` will of course track this locally.  This is commonly abbreviated as `-u`.)
 
    ```
    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
    ```
 
-8. Create _another_ new branch called `prep-#.#.#` off of `#.#.#`.  This branch will be used for bumping version numbers and getting review on the changelog.  We'll do this using the same environment variable, so you can just run:
+8. Now, open a draft PR with a small boilerplate header from the branch which was just pushed:
+
+   ```
+   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
+   > **Note**
+   > **This particular PR must be true-merged to \`main\`.**
+
+   * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title).
+   * It will act as a staging branch until we are ready to finalize the release.
+   * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it.
+   * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**:
+       - Does this PR target the right branch? (usually, \`main\`)
+       - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
+       - If those things look good, this PR is good to merge!
+   EOM
+   ```
+
+### Cutting a pre-release
+
+1. Make sure you have all the [Software Requirements](#software-requirements) above fulfilled.
+
+2. Be aware of the version you are cutting a pre-release for.  This would have been picked during the initial [Starting a release PR](#starting-a-release-pr) step.
+
+3. Select a pre-release suffix for the above version.  This could be `-alpha.0`, `-rc.4` or whatever is appropriate.  Most commonly, we cut `-rc.x` releases right before the final release.  Release candidates should have minimal new substantial changes and only changes that are necessary to secure the release.
+
+4. We'll set some environment variables for steps that follow this, which will enable copying-and-pasting subsequent steps.  **Customize these for your own conditions**:
+
+   - Set the version from step 2 as `APOLLO_ROUTER_RELEASE_VERSION`; and
+   - Set the pre-release suffix from step 3 as `APOLLO_ROUTER_PRERELEASE_SUFFIX`
+
+     ```
+     APOLLO_ROUTER_RELEASE_VERSION="#.#.#"                  # Set me!
+     APOLLO_ROUTER_RELEASE_GIT_ORIGIN=origin
+     APOLLO_ROUTER_RELEASE_GITHUB_REPO=apollographql/router
+     APOLLO_ROUTER_PRERELEASE_SUFFIX="-word.#"              # Set me!
+     ```
+
+   After editing, paste the resulting block into your terminal and press _Return_ to activate them.
+
+5. Change your local branch back to the _non-_prep branch, pull any changes you (or others) may have added on GitHub :
+
+    ```
+    git checkout "${APOLLO_ROUTER_RELEASE_VERSION}" && \
+    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
+    ```
+
+6. Run the release automation script using this command to use the environment variable set previously:
+
+   ```
+   cargo xtask release prepare "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
+   ```
+
+   Running this command will:
+
+     - Bump the necessary versions to the version specified, including those in the documentation.
+     - Run our compliance checks and update the `licenses.html` file as appropriate.
+     - Ensure we're not using any incompatible licenses in the release.
+
+   Currently, it will also do one step which we will **immediately undo** in the next step, since it is not desireable for pre-release versions:
+
+     - Migrate the current set of `/.changesets/*.md` files into `/CHANGELOG.md` using the version specified.
+
+7. Revert the changes to the `CHANGELOG.md` made in the last step since we don't finalize the changelog from the `.changesets` until the final release is prepared.  (This really could be replaced with a `--skip-changesets` flag.)
+
+   ```
+   git checkout -- .changesets/ CHANGELOG.md
+   ```
+
+8. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
+
+    ```
+    git add -up .
+    ```
+
+9. Now commit those changes locally, using a brief message:
+
+    ```
+    git commit -m "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
+    ```
+
+10. Push this commit up to the existing release PR:
+
+   ```
+   git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
+   ```
+
+10. Git tag & push the pre-release:
+
+    This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
+
+    ```
+    git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" -m "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" && \
+      git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
+    ```
+
+### Preparing the final release
+
+1. Make sure you have all the [Software Requirements](#software-requirements) above fulfilled.
+
+2. Ensure you have decided the version using [Pick a version](#pick-a-version).
+
+3. We'll set some environment variables for steps that follow this, which will enable copying-and-pasting subsequent steps.  Customize these for your own conditions, **set the version you picked in the above step** as `APOLLO_ROUTER_RELEASE_VERSION`, and then paste into your terminal (press enter to complete it):
+
+   ```
+   APOLLO_ROUTER_RELEASE_VERSION="#.#.#"                  # Set me!
+   APOLLO_ROUTER_RELEASE_GIT_ORIGIN=origin
+   APOLLO_ROUTER_RELEASE_GITHUB_REPO=apollographql/router
+   APOLLO_ROUTER_PRERELEASE_SUFFIX=""                     # Intentionally blank.
+   ```
+
+4. Change your local branch back to the _non-_prep branch, pull any changes you (or others) may have added on GitHub :
+
+    ```
+    git checkout "${APOLLO_ROUTER_RELEASE_VERSION}" && \
+    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}"
+    ```
+
+5. Create a new branch called `prep-#.#.#` off of `#.#.#`.  This branch will be used for bumping version numbers and getting final review on the changelog.  We'll do this using the environment variables, so you can just run:
 
    ```
    git checkout -b "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
    ```
 
-9. On this new `prep-#.#.#` branch, run the release automation script using this command to use the environment variable set previously:
-
-   > **Note**
-   > For this command, `GITHUB_TOKEN` is **not used**, but it is still _required_ at the moment, so it's set here to `prep`.  This is a bug in the releasing script that needs to be changed.
+6. On this new `prep-#.#.#` branch, run the release automation script using this command to use the environment variable set previously:
 
    ```
    cargo xtask release prepare $APOLLO_ROUTER_RELEASE_VERSION
@@ -111,7 +253,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-10. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.  This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).
+7. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.  This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).
 
 11. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
@@ -125,9 +267,9 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
     git commit -m "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-13. (Optional) Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
+13. _**(Optional)**_ Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
 
-    These things should typically be resolved earlier in the review process, but need to be double checked:
+    These things should have *ALWAYS* been resolved earlier in the review process of the PRs that introduced the changes, but they must be double checked:
 
      - There are no breaking changes.
      - Entries are in categories (e.g., Fixes vs Features) that make sense.
@@ -191,56 +333,47 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
     echo "${apollo_prep_release_header}\n${apollo_prep_release_notes}" | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create -B "${APOLLO_ROUTER_RELEASE_VERSION}" --title "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
     ```
 
-18. Use the `gh` CLI to enable **auto-squash** (**_NOT_** auto-**_merge_**) on the PR you just opened:
+18. 🗣️ **Solicit feedback from the Router team on the prep PR**
+
+    Once approved, you can proceed with [Finishing the release](#finishing-the-release).
+
+### Finishing the release
+
+1. Make sure you have all the [Software Requirements](#software-requirements) above fulfilled.
+
+2. Be aware of the version you are finalizing.  This would have been picked during the initial [Starting a release PR](#starting-a-release-pr) step.
+
+3. We'll set some environment variables for steps that follow this, which will enable copying-and-pasting subsequent steps.  Customize these for your own conditions, **set the version you picked in the above step** as `APOLLO_ROUTER_RELEASE_VERSION`, and then paste into your terminal (press enter to complete it):
+
+   ```
+   APOLLO_ROUTER_RELEASE_VERSION="#.#.#"                  # Set me!
+   APOLLO_ROUTER_RELEASE_GIT_ORIGIN=origin
+   APOLLO_ROUTER_RELEASE_GITHUB_REPO=apollographql/router
+   APOLLO_ROUTER_PRERELEASE_SUFFIX=""                     # Intentionally blank.
+   ```
+
+4. Use the `gh` CLI to **squash** (**_NOT true-merge_**) on the prep PR opened previously:
 
     ```
-    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --squash --body "" -t "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --squash --body "" -t "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-19. 🗣️ **Solicit feedback from the Router team on the prep PR**
-
-    Once approved, the PR will squash-merge itself into the next branch.
-
-20. After the PR has auto-merged, change your local branch back to the _non-_prep branch, pull any changes you (or others) may have added on GitHub :
+5. After the prep PR has squash-merged into the release PR, change your local branch back to release branch, pull any changes you (or others) may have added on GitHub, so you have them locally:
 
     ```
     git checkout "${APOLLO_ROUTER_RELEASE_VERSION}" && \
-    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}"
+    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-20. Now, from your local final release branch, open the PR from the branch the prep PR already merged into:
-
-    ```
-    apollo_release_pr_header="$(
-    cat <<EOM
-
-    > **Note**
-    > **This particular PR should be true-merged to \`main\`.**
-
-    This PR represents the merge to \`main\` of the v${APOLLO_ROUTER_RELEASE_VERSION} release.
-
-    This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.
-
-    **However!** Some things to review on this PR:
-
-    - Does this PR target the right branch? (usually, \`main\`)
-    - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
-
-    If those things look good, this PR is good to merge.
-    EOM
-    )"
-    echo "${apollo_release_pr_header}" | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
-    ```
-
-21. Use the `gh` CLI to enable **auto-merge** (**_NOT_** auto-**_squash_**):
+6. Use the `gh` CLI to enable **auto-merge** (**_NOT_** auto-**_squash_**):
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --body "" -t "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-22. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `main`**
+7. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `main`**
 
-23. After the PR has merged to `main`, pull `main` to your local terminal, and Git tag & push the release:
+8. After the PR has merged to `main`, pull `main` to your local terminal, and Git tag & push the release:
 
     This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
 
@@ -251,103 +384,114 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
     git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-24. Open a PR that reconciles `dev` (Make sure to merge this reconciliation PR back to dev, do not squash or rebase):
+9. Open a PR that reconciles `dev` (Make sure to merge this reconciliation PR back to dev, **do not squash or rebase**):
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --title "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}" -B dev -H main --body "Follow-up to the v${APOLLO_ROUTER_RELEASE_VERSION} being officially released, bringing version bumps and changelog updates into the \`dev\` branch."
     ```
 
-25. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.  **Wait for `publish_github_release` to finish on this job before continuing.**
+10. Mark the PR to **auto-merge NOT auto-squash** using the URL that is output from the previous command
 
-26. After the CI job has finished for the tag, re-run the `perl` command from Step 15, which will regenerate the `this_release.md` with changes that happened in the release review.
+    ```
+    APOLLO_RECONCILE_PR_URL=$(gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr list --state open --base dev --head main --json url --jq '.[-1] | .url')
+    test -n "${APOLLO_RECONCILE_PR_URL}" && \
+      gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge "${APOLLO_RECONCILE_PR_URL}"
+    ```
 
-27. Change the links from `[@username](https://github.com/username)` to `@username` (TODO: Write more `perl` here. 😄)
 
-    This ensures that contribution credit is clearly displayed using the user avatars on the GitHub Releases page when the notes are published in the next step.
+11. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `dev`**
 
-28. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we created earlier):
+12. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.
+
+13. ⚠️ **Wait for `publish_github_release` on CircleCI to finish on this job before continuing.** ⚠️
+
+    You should expect this will take at least 30 minutes.
+
+14. Re-create the file you may have previously created called `this_release.md` just to make sure its up to date after final edits from review:
+
+    ```
+    perl -0777 \
+      -sne 'print "$1\n" if m{
+        (?:\#\s               # Look for H1 Markdown (line starting with "# ")
+        \[v?\Q$version\E\]    # ...followed by [$version] (optionally with a "v")
+                              #    since some versions had that in the past.
+        \s.*?\n$)             # ... then "space" until the end of the line.
+        \s*                   # Ignore PRE-entry-whitespace
+        (.*?)                 # Capture the ACTUAL body of the release.  But do it
+                              # in a non-greedy way, leading us to stop when we
+                              # reach the next version boundary/heading.
+        \s*                   # Ignore POST-entry-whitespace
+        (?=^\#\s\[[^\]]+\]\s) # Once again, look for a version boundary.  This is
+                              # the same bit at the start, just on one line.
+      }msx' -- \
+        -version="${APOLLO_ROUTER_RELEASE_VERSION}" \
+        CHANGELOG.md >  this_release.md
+    ```
+
+15. Change the links in `this_release.md` from `[@username](https://github.com/username)` to `@username` in order to facilitate the correct "Contributorship" attribution on the final GitHub release.
+
+    ```
+    perl -pi -e 's/\[@([^\]]+)\]\([^)]+\)/@\1/g' this_release.md
+    ```
+
+16. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we just created):
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-29. Publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+17. Finally, publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     ```
     cargo publish -p apollo-router
     ```
 
-30. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
+18. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content
     ```
 
-### prep PR Review
+## Nightly Releases
 
-Most review comments for the prep PR will be about the changelog. Once the prep PR is finalized and approved:
+As of the introduction of [PR #2409](https://github.com/apollographql/router/pull/2409), nightly releases are automatically built on a daily basis.  This is accomplished automatically through use of a parameterized invocation of the [`nightly` workflow](https://github.com/apollographql/router/blob/HEAD/.circleci/config.yml#L704-L711) using [CircleCI's Scheduled Pipelines](https://circleci.com/docs/scheduled-pipelines/) feature.
 
-1.  Always use `Squash and Merge` GitHub button.
+### One-off builds
 
-### Tag and build release
+In the way the schedule is defined, nightly builds are done from the `dev` branch.  However, the functionality that powers nightly builds can be used to also build from _any_ branch (including PRs) and produce a pre-release, "nightly style" build from any desired commit.
 
-This part of the release process is handled by CircleCI, and our binaries are
-distributed as GitHub Releases. When you push a version tag, it kicks off a
-workflow that checks out the tag, builds release binaries for multiple
-platforms, and creates a new GitHub release for that tag.
+This process can only be done by members of the Apollo Router `router` GitHub repository with contributor permissions on CircleCI.
 
-1.  Wait for tests to pass.
-2.  Have your PR merged to `main`.
-3.  Once merged, run `git checkout main` and `git pull`.
-4.  Sync your local tags with the remote tags by running
-    `git tag -d $(git tag) && git fetch --tags`
-5.  Tag the commit by running either `git tag -a v#.#.# -m "#.#.#"` (release),
-    or `git tag -a v#.#.#-rc.# -m "#.#.#-rc.#"` (release candidate)
-6.  Run `git push --tags`.
-7.  Wait for CI to pass.
+To invoke a one-off `nightly` build:
 
-### Edit the release
+1. Go to the CircleCI Pipelines view for this repository](https://app.circleci.com/pipelines/github/apollographql/router)
+2. Click on the **"All Branches"** drop-down menu and choose a branch you'd like to build from.
+3. Press the **"Trigger Pipeline"** button in the top-right of the navigation (to the left of the "Project Settings" button).
+4. Expand the "Add Parameters" section.
+5. Add one parameter using the following configuration:
 
-After CI builds the release binaries, a new release will appear on the
-[releases page](https://github.com/apollographql/router/releases), click
-`Edit`, update the release notes, and save the changes to the release.
+   **Parameter type:** `boolean`
+   **Name:** `nightly`
+   **Value:** `true`
+6. Press **"Trigger Pipeline"**
+7. Wait a couple seconds for the pipeline to begin and show in the list.
 
-#### If this is a stable release (not a release candidate)
+To obtain the binary builds from the pipeline which was launched:
 
-1. Paste the current release notes from `NEXT_CHANGELOG.md` into the release body.
-2. Reset the content of `NEXT_CHANGELOG.md`.
+> **Note**
+> Built nightlies are only available on the Artifacts for a job within 30 days after the CircleCI pipeline that created them is finished.  If you need them after this period, you will need to re-run the pipeline and wait for it to finish again.  You can do this by clicking the "Rerun from start" option on the pipeline.
 
-#### If this is a release candidate
+1. Click on the workflow name: **`nightly`** of the newly launched pipeline.  In the above steps, this is the pipeline that appeared after step 7.
+2. Click on the job representing the system architecture you'd like to obtain the build binary for.  For example, to get the macOS binary, click on `build_release-macos_build`.
+3. If the job hasn't already finished successfully, **wait for the job to finish successfully**.
+4. Click on the **Artifacts** tab.
+5. Click on the link to the `.tar.gz` file to download the tarball of the build distribution.  For example, you might click on a link called `artifacts/router-v0.0.0-nightly-20230119-abcd1234-x86_64-apple-darwin.tar.gz` for a macOS build done on the 19th of January 2023 from commit hash starting with `abcd1234`.
 
-1.  CI should already mark the release as a `pre-release`. Double check that
-    it's listed as a pre-release on the release's `Edit` page.
-2.  If this is a new rc (rc.0), paste testing instructions into the release
-    notes.
-3.  If this is a rc.1 or later, the old release candidate testing instructions
-    should be moved to the latest release candidate testing instructions, and
-    replaced with the following message:
+In addition, you will find `docker` and `helm` assets:
+ - [docker](https://github.com/apollographql/router/pkgs/container/nightly%2Frouter)
+ - [helm](https://github.com/apollographql/router/pkgs/container/helm-charts-nightly%2Frouter)
 
-    ```markdown
-    This beta release is now out of date. If you previously installed this
-    release, you should reinstall and see what's changed in the latest
-    [release](https://github.com/apollographql/router/releases).
-    ```
-
-    The new release candidate should then include updated testing instructions
-    with a small changelog at the top to get folks who installed the old
-    release candidate up to speed.
-
-### Publish the release to Crates.io
-
-0. **To perform these steps, you'll need access credentials which allow you publishing to Crates.io.**
-1. Make sure you are on the Git tag you have published and pushed in the previous step by running `git checkout v#.#.#` (release) or `git checkout v#.#.#-rc.#` (release candidate).  (You are probably still on this commit)
-2. Change into the `apollo-router/` directory at the root of the repository.
-3. Make sure that the `README.md` in this directory is up to date with any necessary or relevant changes.  It will be published as the crates README on Crates.io.
-4. Run `cargo publish --dry-run` if you'd like to smoke test things
-5. Do the real publish with `cargo publish`.
-
-Troubleshooting a release
--------------------------
+## Troubleshooting a release
 
 Mistakes happen. Most of these release steps are recoverable if you mess up.
 

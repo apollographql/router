@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.non_zero()"
+---
+- name: apollo.router.config.entity_cache
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.enabled: true
+          opt.subgraph.enabled: true
+          opt.subgraph.ttl: true

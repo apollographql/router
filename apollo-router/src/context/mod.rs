@@ -7,22 +7,27 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
 use derivative::Derivative;
+use extensions::sync::ExtensionsMutex;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use self::extensions::Extensions;
 use crate::json_ext::Value;
+use crate::services::layers::query_analysis::ParsedDocument;
 
 pub(crate) mod extensions;
 
 /// The key of the resolved operation name. This is subject to change and should not be relied on.
 pub(crate) const OPERATION_NAME: &str = "operation_name";
+/// The key of the resolved operation kind. This is subject to change and should not be relied on.
+pub(crate) const OPERATION_KIND: &str = "operation_kind";
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -39,37 +44,57 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
 #[derive(Clone, Deserialize, Serialize, Derivative)]
+#[serde(default)]
 #[derivative(Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
-    #[serde(skip, default)]
-    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
+    #[serde(skip)]
+    extensions: ExtensionsMutex,
 
     /// Creation time
     #[serde(skip)]
-    #[serde(default = "Instant::now")]
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
     #[derivative(Debug = "ignore")]
     busy_timer: Arc<Mutex<BusyTimer>>,
+
+    #[serde(skip)]
+    pub(crate) id: String,
 }
 
 impl Context {
     /// Create a new context.
     pub fn new() -> Self {
+        let id = uuid::Uuid::new_v4()
+            .as_hyphenated()
+            .encode_lower(&mut uuid::Uuid::encode_buffer())
+            .to_string();
         Context {
             entries: Default::default(),
-            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
+            extensions: ExtensionsMutex::default(),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
+            id,
         }
     }
 }
 
 impl Context {
+    /// Returns extensions of the context.
+    ///
+    /// You can use `Extensions` to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
+    ///
+    /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.
+    /// Doing so may cause performance degradation or even deadlocks.
+    ///
+    /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
+    pub fn extensions(&self) -> &ExtensionsMutex {
+        &self.extensions
+    }
+
     /// Returns true if the context contains a value for the specified key.
     pub fn contains_key<K>(&self, key: K) -> bool
     where
@@ -225,6 +250,16 @@ impl Context {
             self.entries.insert(kv.key().clone(), kv.value().clone());
         }
     }
+
+    /// Read only access to the executable document. This is UNSTABLE and may be changed or removed in future router releases.
+    /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
+    #[doc(hidden)]
+    pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
+        self.extensions()
+            .lock()
+            .get::<ParsedDocument>()
+            .map(|d| d.executable.clone())
+    }
 }
 
 pub(crate) struct BusyTimerGuard {
@@ -300,6 +335,9 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
+    use crate::spec::Query;
+    use crate::spec::Schema;
+    use crate::Configuration;
     use crate::Context;
 
     #[test]
@@ -362,5 +400,47 @@ mod test {
         });
         assert_eq!(c.get("one").unwrap(), Some(2));
         assert_eq!(c.get("two").unwrap(), Some(3));
+    }
+
+    #[test]
+    fn context_extensions() {
+        // This is mostly tested in the extensions module.
+        let c = Context::new();
+        let mut extensions = c.extensions().lock();
+        extensions.insert(1usize);
+        let v = extensions.get::<usize>();
+        assert_eq!(v, Some(&1usize));
+    }
+
+    #[test]
+    fn test_executable_document_access() {
+        let c = Context::new();
+        let schema = r#"
+        schema
+          @core(feature: "https://specs.apollo.dev/core/v0.1"),
+          @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+          query: Query
+        }
+        type Query {
+          me: String
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        enum join__Graph {
+            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
+            INVENTORY
+              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
+            PRODUCTS
+            @join__graph(name: "products" url: "http://localhost:4003/graphql")
+            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
+        }"#;
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let document =
+            Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
+        assert!(c.unsupported_executable_document().is_none());
+        c.extensions().lock().insert(document);
+        assert!(c.unsupported_executable_document().is_some());
     }
 }

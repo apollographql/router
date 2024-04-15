@@ -1,0 +1,148 @@
+---
+title: OpenTelemetry Protocol (OTLP) exporter
+subtitle: Configure the OpenTelemetry Protocol exporter for tracing
+description: Configure the OpenTelemetry Protocol (OTLP) exporter for tracing in the Apollo Router
+---
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+
+Enable and configure the [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md) exporter for tracing in the Apollo Router.
+
+OTLP is the native protocol for OpenTelemetry. It can be used to export traces over HTTP or gRPC to a variety of backends including:
+
+* [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
+* [Datadog](./datadog)
+* [Jaeger](./jaeger)
+* [New Relic](./new-relic)
+
+For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+
+## OTLP configuration
+
+The Apollo Router can be configured to export tracing data using OTLP either via HTTP or gRPC:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       otlp:
+         enabled: true
+         
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
+         endpoint: default
+   
+         # Optional protocol (Defaults to grpc)
+         protocol: grpc
+   
+         # Optional Grpc configuration
+         grpc:
+           metadata:
+             "my-header": "value1"
+   
+         # Optional Http configuration
+         http:
+           headers:
+             "my-header": "value1"
+```
+
+### `enabled`
+Set to true to enable the OTLP exporter. Defaults to false.
+
+### `endpoint`
+The OTLP endpoint. 
+
+Defaults to:
+* http://127.0.0.1:4317 for gRPC 
+* http://127.0.0.1:4318 for HTTP
+
+<Note>
+
+Specify only the base URL in the endpoint parameter. The router automatically adds the `/v1/traces` portion of the URL to match the [OpenTelemetry specification](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request).
+
+</Note>
+
+### `grpc`
+Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        grpc:
+          domain_name: "<my-domain>"
+          key: "<key>"
+          ca: "<certificate-authority>"
+          cert: "<certificate>"
+          metadata:
+            key1: value1
+            key2: value2    
+```
+
+<Tip>
+
+Use the [variable expansion feature](../../overview#variable-expansion) for referencing environment variables and file paths in YAML configuration files. Use `env.` and `file.` prefixes, for example `${file.ca.txt}`.
+
+</Tip>
+
+#### gRPC configuration reference
+
+| Attribute     | Description                            |
+|---------------|----------------------------------------|
+| `domain_name` | An optional domain name.               |
+| `key`         | An optional key.                       |
+| `ca`          | An optional certificate authority.     |
+| `cert`        | An optional certificate.               |
+| `metadata`    | A map of headers to send with requests |
+
+
+### `http`
+Settings specific to the HTTP protocol for setting custom headers.
+
+```yaml
+http:
+  headers:
+    key1: value1
+    key2: value2    
+```
+
+#### HTTP configuration reference
+
+| Attribute | Description                            |
+|-----------|----------------------------------------|
+| `headers` | A map of headers to send with requests |
+
+### `batch_processor`
+
+<BatchProcessorPreamble/>
+
+An example configuration using OTLP with `batch_processor`:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      otlp: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
+```
+
+#### `batch_processor` configuration reference
+
+<BatchProcessorRef/>
+
+## OTLP configuration reference
+
+| Attribute         | Values         | Default                                                               | Description                                      |
+|-------------------|----------------|-----------------------------------------------------------------------|--------------------------------------------------|
+| `enabled`         |                | `false`                                                               | Enable the OTLP exporter.                        |
+| `protocol`        | `grpc`\|`http` | `grpc`                                                                | The protocol to use.                             |
+| `endpoint`        |                | `http://127.0.0.1:4317` for gRPC and `http://127.0.0.1:4318` for HTTP | The endpoint to send spans to.                   |
+| `grpc`            |                |                                                                       | Configuration specific to gRPC protocol.         |
+| `http`            |                |                                                                       | Configuration specific to HTTP protocol.         |
+| `temporarility`   |                |                                                                       | This configuration option is unused for tracing. |
+| `batch_processor` |                |                                                                       | The batch processor settings.                    |

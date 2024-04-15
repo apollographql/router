@@ -103,6 +103,9 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn is_valid_int_input(&self) -> bool;
 
+    #[track_caller]
+    fn is_valid_id_input(&self) -> bool;
+
     /// Returns whether this value is an object that matches the provided type.
     ///
     /// More precisely, this checks that this value is an object, looks at
@@ -144,7 +147,7 @@ impl ValueExt for Value {
                     a_value.deep_merge(b_value);
                 }
 
-                a.extend(b.into_iter());
+                a.extend(b);
             }
             (_, Value::Null) => {}
             (Value::Object(_), Value::Array(_)) => {
@@ -395,6 +398,17 @@ impl ValueExt for Value {
     }
 
     #[track_caller]
+    fn is_valid_id_input(&self) -> bool {
+        // https://spec.graphql.org/October2021/#sec-ID.Input-Coercion
+        match self {
+            // Any string and integer values are accepted
+            Value::String(_) => true,
+            Value::Number(n) => n.is_i64() || n.is_u64(),
+            _ => false,
+        }
+    }
+
+    #[track_caller]
     fn is_valid_float_input(&self) -> bool {
         // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
         match self {
@@ -438,7 +452,7 @@ fn iterate_path<'a, F>(
 ) where
     F: FnMut(&Path, &'a Value),
 {
-    match path.get(0) {
+    match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten) => {
             if let Some(array) = data.as_array() {
@@ -502,7 +516,7 @@ fn iterate_path_mut<'a, F>(
 ) where
     F: FnMut(&Path, &'a mut Value),
 {
-    match path.get(0) {
+    match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten) => {
             if let Some(array) = data.as_array_mut() {

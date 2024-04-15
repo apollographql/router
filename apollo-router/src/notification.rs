@@ -4,25 +4,27 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Weak;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 
-use futures::channel::mpsc;
-use futures::channel::mpsc::SendError;
-use futures::channel::oneshot;
-use futures::channel::oneshot::Canceled;
 use futures::Sink;
-use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
 use pin_project_lite::pin_project;
 use thiserror::Error;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::RecvError;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::graphql;
 use crate::spec::Schema;
@@ -34,13 +36,40 @@ static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
 #[derive(Error, Debug)]
 pub(crate) enum NotifyError<V> {
     #[error("cannot send data to pubsub")]
-    SendError(#[from] SendError),
+    SendError(#[from] SendError<V>),
     #[error("cannot send data to response stream")]
     BroadcastSendError(#[from] broadcast::error::SendError<V>),
-    #[error("cannot send data to pubsub because channel has been closed")]
-    Canceled(#[from] Canceled),
     #[error("this topic doesn't exist")]
     UnknownTopic,
+}
+
+impl<K, V> From<SendError<Notification<K, V>>> for NotifyError<V>
+where
+    K: Send + Hash + Eq + Clone + 'static,
+    V: Send + Clone + 'static,
+{
+    fn from(error: SendError<Notification<K, V>>) -> Self {
+        error.into()
+    }
+}
+
+impl<V> From<RecvError> for NotifyError<V>
+where
+    V: Send + Clone + 'static,
+{
+    fn from(error: RecvError) -> Self {
+        error.into()
+    }
+}
+
+impl<K, V> From<TrySendError<Notification<K, V>>> for NotifyError<V>
+where
+    K: Send + Hash + Eq + Clone + 'static,
+    V: Send + Clone + 'static,
+{
+    fn from(error: TrySendError<Notification<K, V>>) -> Self {
+        error.into()
+    }
 }
 
 type ResponseSender<V> =
@@ -85,6 +114,9 @@ enum Notification<K, V> {
         topics: Vec<K>,
         response_sender: oneshot::Sender<(Vec<K>, Vec<K>)>,
     },
+    UpdateHeartbeat {
+        new_ttl: Option<Duration>,
+    },
     #[cfg(test)]
     TryDelete {
         topic: K,
@@ -123,7 +155,8 @@ where
         router_broadcasts: Option<Arc<RouterBroadcasts>>,
     ) -> Notify<K, V> {
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
-        tokio::task::spawn(task(receiver, ttl, heartbeat_error_message));
+        let receiver_stream = ReceiverStream::new(receiver);
+        tokio::task::spawn(task(receiver_stream, ttl, heartbeat_error_message));
         Notify {
             sender,
             queue_size,
@@ -146,11 +179,11 @@ where
 
 impl<K, V> Notify<K, V> {
     /// Broadcast a new configuration
-    pub(crate) fn broadcast_configuration(&self, configuration: Arc<Configuration>) {
+    pub(crate) fn broadcast_configuration(&self, configuration: Weak<Configuration>) {
         self.router_broadcasts.configuration.0.send(configuration).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new configuration everytime we have a new router configuration
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Arc<Configuration>> {
+    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
         self.router_broadcasts.subscribe_configuration()
     }
     /// Receive the new schema everytime we have a new schema
@@ -172,6 +205,14 @@ where
     pub(crate) fn set_queue_size(mut self, queue_size: Option<usize>) -> Self {
         self.queue_size = queue_size;
         self
+    }
+
+    pub(crate) async fn set_ttl(&self, new_ttl: Option<Duration>) -> Result<(), NotifyError<V>> {
+        self.sender
+            .send(Notification::UpdateHeartbeat { new_ttl })
+            .await?;
+
+        Ok(())
     }
 
     // boolean in the tuple means `created`
@@ -304,7 +345,7 @@ where
         // if disconnected, we don't care (the task was stopped)
         self.sender
             .try_send(Notification::TryDelete { topic })
-            .map_err(|try_send_error| try_send_error.into_send_error().into())
+            .map_err(|try_send_error| try_send_error.into())
     }
 
     #[cfg(test)]
@@ -350,7 +391,7 @@ struct HandleGuard<K, V>
 where
     K: Clone,
 {
-    topic: K,
+    topic: Arc<K>,
     pubsub_sender: mpsc::Sender<Notification<K, V>>,
 }
 
@@ -372,7 +413,7 @@ where
 {
     fn drop(&mut self) {
         let err = self.pubsub_sender.try_send(Notification::Unsubscribe {
-            topic: self.topic.clone(),
+            topic: self.topic.as_ref().clone(),
         });
         if let Err(err) = err {
             tracing::trace!("cannot unsubscribe {err:?}");
@@ -419,7 +460,7 @@ where
     ) -> Self {
         Self {
             handle_guard: HandleGuard {
-                topic,
+                topic: Arc::new(topic),
                 pubsub_sender,
             },
             msg_sender,
@@ -541,11 +582,8 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let topic = self.handle_guard.topic.clone();
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let topic = self.handle_guard.topic.as_ref().clone();
         let _ = self
             .handle_guard
             .pubsub_sender
@@ -557,8 +595,8 @@ where
 impl<K, V> Handle<K, V> where K: Clone {}
 
 async fn task<K, V>(
-    mut receiver: mpsc::Receiver<Notification<K, V>>,
-    ttl: Option<Duration>,
+    mut receiver: ReceiverStream<Notification<K, V>>,
+    mut ttl: Option<Duration>,
     heartbeat_error_message: Option<V>,
 ) where
     K: Send + Hash + Eq + Clone + 'static,
@@ -576,8 +614,10 @@ async fn task<K, V>(
             _ = ttl_fut.next() => {
                 let heartbeat_error_message = heartbeat_error_message.clone();
                 pubsub.kill_dead_topics(heartbeat_error_message).await;
-                tracing::info!(
-                    value.apollo_router_opened_subscriptions = pubsub.subscriptions.len() as u64,
+                u64_counter!(
+                    "apollo_router_opened_subscriptions",
+                    "Number of opened subscriptions",
+                    pubsub.subscriptions.len() as u64
                 );
             }
             message = receiver.next() => {
@@ -612,6 +652,25 @@ async fn task<K, V>(
                             } => {
                                 let invalid_topics = pubsub.invalid_topics(topics);
                                 let _ = response_sender.send(invalid_topics);
+                            }
+                            Notification::UpdateHeartbeat {
+                                mut new_ttl
+                            } => {
+                                // We accept to miss max 3 heartbeats before cutting the connection
+                                new_ttl = new_ttl.map(|ttl| ttl * 3);
+                                if ttl != new_ttl {
+                                    ttl = new_ttl;
+                                    pubsub.ttl = new_ttl;
+                                    match new_ttl {
+                                        Some(new_ttl) => {
+                                            ttl_fut = Box::new(IntervalStream::new(tokio::time::interval(new_ttl)));
+                                        },
+                                        None => {
+                                            ttl_fut = Box::new(tokio_stream::pending());
+                                        }
+                                    }
+                                }
+
                             }
                             Notification::Exist {
                                 topic,
@@ -875,8 +934,8 @@ where
 
 pub(crate) struct RouterBroadcasts {
     configuration: (
-        broadcast::Sender<Arc<Configuration>>,
-        broadcast::Receiver<Arc<Configuration>>,
+        broadcast::Sender<Weak<Configuration>>,
+        broadcast::Receiver<Weak<Configuration>>,
     ),
     schema: (
         broadcast::Sender<Arc<Schema>>,
@@ -892,7 +951,7 @@ impl RouterBroadcasts {
         }
     }
 
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Arc<Configuration>> {
+    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
         BroadcastStream::new(self.configuration.0.subscribe())
             .filter_map(|cfg| futures::future::ready(cfg.ok()))
     }
@@ -906,6 +965,8 @@ impl RouterBroadcasts {
 #[cfg(test)]
 mod tests {
 
+    use futures::FutureExt;
+    use tokio_stream::StreamExt;
     use uuid::Uuid;
 
     use super::*;
@@ -995,7 +1056,7 @@ mod tests {
     #[tokio::test]
     async fn it_test_ttl() {
         let mut notify = Notify::builder()
-            .ttl(Duration::from_millis(100))
+            .ttl(Duration::from_millis(300))
             .heartbeat_error_message(serde_json_bytes::json!({"error": "connection_closed"}))
             .build();
         let topic_1 = Uuid::new_v4();
@@ -1024,9 +1085,28 @@ mod tests {
         let new_msg = handle_1_other.next().await.unwrap();
         assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let res = handle_1_bis.next().await.unwrap();
-        assert_eq!(res, serde_json_bytes::json!({"error": "connection_closed"}));
+        notify
+            .set_ttl(Duration::from_millis(70).into())
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let mut cloned_notify = notify.clone();
+        tokio::spawn(async move {
+            let mut handle = cloned_notify.subscribe(topic_1).await.unwrap().into_sink();
+            handle
+                .send_sync(serde_json_bytes::json!({"test": "ok"}))
+                .unwrap();
+        });
+        let new_msg = handle_1_bis.next().await.unwrap();
+        assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let res = handle_1_bis.next().now_or_never().unwrap();
+        assert_eq!(
+            res,
+            Some(serde_json_bytes::json!({"error": "connection_closed"}))
+        );
 
         assert!(handle_1_bis.next().await.is_none());
 

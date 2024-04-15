@@ -3,15 +3,11 @@ title: HTTP callback protocol for GraphQL subscriptions
 description: For federated subgraphs communicating with the Apollo Router
 ---
 
-> This protocol is currently in [preview](/resources/product-launch-stages#preview). Breaking changes might be introduced during the preview period.
->
-> **You only need to read this reference if you're adding support for this protocol to a GraphQL server library or other system!**
-
-This reference describes a protocol for GraphQL servers (or **subgraphs**) to send subscription data to a subscribing **graph router** (such as the Apollo Router) via HTTP callbacks.
+This reference describes a protocol for GraphQL servers (or **subgraphs**) to send subscription data to a subscribing **graph router** (such as the Apollo Router) via HTTP callbacks. Use this reference if you're adding support for this protocol to a GraphQL server library or other system.
 
 For routers with many simultaneous open subscriptions, this protocol scales better than WebSocket-based protocols, which require long-lasting open connections.
 
-The Apollo Router provides [preview support for this protocol](./subscription-support/#http-callback-setup-preview) as part of its support for federated subscriptions:
+The Apollo Router provides [support for this protocol](./subscription-support/#http-callback-setup) as part of its support for federated subscriptions:
 
 ```mermaid
 sequenceDiagram
@@ -32,58 +28,61 @@ All actions described in these steps are performed by one of **Router**, **Subgr
 
 ### Initialization
 
-1. Before it executes a subscription operation, **Router** generates a unique ID (version 4 UUID recommended) to represent that operation.
+1. Before it executes a subscription operation, **Router** generates a unique ID to represent that operation.
 
-2. **Router** sends a GraphQL subscription operation to **Subgraph** via HTTP POST using the standard [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters):
+2. **Router** sends a GraphQL subscription operation to **Subgraph** via HTTP POST using the standard [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters) with `Accept` header containing `application/json;callbackSpec=1.0`:
 
-    ```json
-    {
-      "query": "subscription { userWasCreated { name reviews { body } } }",
-      "extensions": {
-        "subscription": {
-          "callback_url": "http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-          "subscription_id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-          "verifier": "XXX"
-        }
+  ```json
+  {
+    "query": "subscription { userWasCreated { name reviews { body } } }",
+    "extensions": {
+      "subscription": {
+        "callbackUrl": "http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+        "subscriptionId": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+        "verifier": "XXX",
+        "heartbeatIntervalMs": 5000
       }
     }
-    ```
+  }
+  ```
 
-    The `extensions` property of this payload includes a `subscription` object with the following:
+  The `extensions` property of this payload includes a `subscription` object with the following:
 
-    - `callback_url`: The URL that **Emitter** will send subscription data to
-    - `subscription_id`: The generated unique ID for the subscription operation
+    - `callbackUrl`: The URL that **Emitter** will send subscription data to
+    - `subscriptionId`: The generated unique ID for the subscription operation
     - `verifier`: A string that **Emitter** will include in all HTTP callback requests to verify its identity
+    - `heartbeatIntervalMs`: The number of milliseconds a heartbeat has to be sent to the callback endpoint for the subscription operation, if `0` it means the heartbeat is disabled
 
-3. _Before **Subgraph** responds to **Router**'s request,_ it sends a [`check` message](#check) to the provided `callback_url` for confirmation from **Router**:
+3. _Before **Subgraph** responds to **Router**'s request,_ it sends a [`check` message](#check) with callback protocol version header
+(`subscription-protocol: callback/1.0`) to the provided `callbackUrl` for confirmation from **Router**:
 
-    ```json
-    {
-      "kind": "subscription",
-      "action": "check",
-      "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-      "verifier": "XXX"
-    }
-    ```
+  ```json
+  {
+    "kind": "subscription",
+    "action": "check",
+    "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+    "verifier": "XXX"
+  }
+  ```
 
-    > All messages sent to `callback_url` are HTTP POST requests. Message types are [documented below](#message-types).
+  > All messages sent to `callbackUrl` are HTTP POST requests. Message types are [documented below](#message-types).
 
-    This helps ensure that **Subgraph** is able to send callbacks successfully, and that the `id` and `verifier` fields are correct.
+  This helps ensure that **Subgraph** is able to send callbacks successfully, and that the `id` and `verifier` fields are correct.
 
 4. **Router** validates the `check` message using its `id` and `verifier` fields.
 
-    > Again, **Subgraph** has not yet responded to **Router**'s original request!
+  > Again, **Subgraph** has not yet responded to **Router**'s original request!
 
     - If the `check` message is valid, **Router** responds with the following details:
       - A 204 HTTP status code
       - An empty response body
-      - The response header `subscription-protocol: callback`
+      - The response header that specifies the maximum supported protocol version `subscription-protocol: callback/1.0`
     - If the `check` message is _invalid_, **Router** responds with a status code _besides_ 204 (400-level recommended).
       - If this occurs, **Subgraph** then responds to **Router**'s request with a 400-level status code, and the subscription is canceled.
 
 5. If validation succeeds, **Subgraph** spawns a background process or notifies a separate system (**Emitter**) to begin listening for subscription events.
 
-6. **Subgraph** finally responds to **Router** with a 200-level status code. This indicates to **Router** that the subscription has been initialized.
+6. **Subgraph** finally responds to **Router** with a 200-level status code and empty data GraphQL response (`{ "data": null }`). This indicates to **Router** that the subscription has been initialized.
 
 With initialization complete, the protocol commences its [main loop](#main-loop).
 
@@ -91,7 +90,7 @@ With initialization complete, the protocol commences its [main loop](#main-loop)
 
 The protocol's main loop remains active for the duration of the subscription. During the main loop, all of the following occur:
 
-- Every five seconds, **Emitter** must send a [`heartbeat` message](#heartbeat) to **Router** to confirm that **Router** is still listening.
+- If heartbeats are enabled (`heartbeatIntervalMs` > 0), within every period of `heartbeatIntervalMs` milliseconds, **Emitter** must send a [`check` message](#check) to **Router** to confirm that **Router** is still listening. (Note, the value of `heartbeatIntervalMs` is set by the initial payload sent in `extensions` from the **Router**.)
 - Whenever new subscription data is available, **Emitter** sends a [`next` message](#next) to **Router** containing the new data.
 - If an error occurs and the subscription must be terminated, **Emitter** sends a [`complete` message](#complete) to **Router** and includes the `errors` field.
 - If the subscription reaches the end of its stream and no new data is forthcoming, **Emitter** sends a [`complete` message](#complete) to **Router** and _omits_ the `errors` field.
@@ -101,6 +100,7 @@ The protocol's main loop remains active for the duration of the subscription. Du
 ## Message types
 
 During the [protocol flow](#protocol-flow), **Subgraph** and **Emitter** send various messages to **Router**'s callback URL via HTTP POST requests.
+All HTTP requests should include callback protocol version header (`subscription-protocol: callback/1.0`).
 
 _All_ of these messages include the following base properties in their JSON body:
 
@@ -146,7 +146,6 @@ This value is currently always `subscription`.
 The message type, which is one of the following:
 
 - `check`
-- `hearbeat`
 - `next`
 - `complete`
 
@@ -195,7 +194,7 @@ Fields and behaviors specific to individual message types are documented below.
 
 During protocol [initialization](#initialization), **Subgraph** sends a synchronous `check` message to **Router** to help ensure that it can send callbacks successfully, and that the `id` and `verifier` fields provided by **Router** are correct.
 
-> While subscriptions are active, you can also use a `check` message in place of a [`heartbeat`](#heartbeat) message if you only need to verify _one_ active subscription. (If you want to verify _multiple_ active subscriptions with a single message, use `heartbeat`.)
+As long as subscription is active and heartbeat is enabled (`heartbeatIntervalMs` > 0), **Emitter** must send a `check` message to **Router** every `heartbeatIntervalMs` milliseconds (value coming from the initial payload sent in `extensions` from the **Router**). This enables **Emitter** to confirm both that it can still reach **Router**'s callback endpoint, and that subscription is still active.
 
 A `check` message includes only [base message fields](#message-types):
 
@@ -212,53 +211,11 @@ If `id` and `verifier` both match **Router**'s provided values, **Router** shoul
 
 - A 204 HTTP status code
 - An empty response body
-- The response header `subscription-protocol: callback`
+- The response header that specifies the maximum supported protocol version `subscription-protocol: callback/1.0`
 
-Otherwise, **Router** should respond with an error.
+Otherwise, **Router** should respond with an error and subgraph should terminate the associated subscription.
 
 > During [initialization](#initialization), **Subgraph** _must_ send this message _synchronously_. That's because it sends this message to **Router** to confirm a subscription request from **Router**, _before responding to that request_.
-
-### `heartbeat`
-
-As long as at least one subscription is active, **Emitter** must send a `heartbeat` message to **Router** every five seconds. This enables **Emitter** to confirm both that it can still reach **Router**'s callback endpoint, and that all known subscriptions are still active.
-
-The `heartbeat` message includes an `ids` field, which is an array of **Emitter**'s active subscription IDs:
-
-```json
-{
-    "kind": "subscription",
-    "action": "heartbeat",
-    "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-    "verifier": "XXX",
-    "ids": ["c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945", "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b254"] // highlight-line
-}
-```
-
-> **This message still includes an `id` field!** Even though this value is also present in the `ids` list, **Emitter** must specify whichever subscription is associated with the `verifier` it's providing.
-
-On receiving a `heartbeat` message, **Router** checks whether all subscriptions listed in `ids` are indeed still active on _its_ end.
-
-- If _all_ listed subscriptions are active, **Router** should respond with the following details:
-  - A 204 HTTP status code
-  - An empty response body
-- If the list includes both active _and_ inactive subscriptions, **Router** should respond with the following details:
-  - A 400 HTTP status code
-  - A JSON response body containing:
-    - An `invalid_ids` field. This is a list containing all IDs of _inactive_ subscriptions.
-    - A `verifier` field. This value _replaces_ the value of `verifier` provided by **Emitter**.
-- If _all_ listed subscriptions are _inactive_, **Router** should respond with the following details:
-  - A 404 HTTP status code
-  - An empty response body
-
-Here's an example payload sent with a 400 HTTP status code if `ids` contains both active and inactive subscription IDs:
-
-```json
-{
-    "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-    "invalid_ids": ["c4a9d1b8-dc57-44ab-9e5a-6e6189b2b254"],
-    "verifier": "XXX"
-}
-```
 
 ### `next`
 
@@ -314,6 +271,5 @@ The following are common error states that can occur with this protcol:
 - **Emitter** can't communicate with **Router**'s callback endpoint, either because the endpoint isn't available or because its provided credentials (`id` and/or `verifier`) are invalid.
 - **Emitter** receives an error HTTP status code from **Router**'s callback endpoint. 
   - If the error code is 404, **Emitter** should consider the associated subscription terminated by **Router**.
-  - If the error code is 400 in response to a [`heartbeat`](#heartbeat) message, **Emitter** should terminate all subscriptions listed in the response body's `invalid_ids` field.
   - In other error cases, **Emitter** should consider the subscription terminated due to an unexpected error.
-- **Emitter** fails to send **Router** a [`heartbeat`](#heartbeat) or [`check`](#check) message for an active subscription every five seconds, causing **Router** to terminate that subscription.
+- **Emitter** fails to send **Router** a [`check`](#check) message for an active subscription every `heartbeatIntervalMs` milliseconds (value coming from the initial payload sent in `extensions` from the **Router**), causing **Router** to terminate that subscription.

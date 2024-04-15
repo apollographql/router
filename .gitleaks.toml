@@ -6,7 +6,14 @@
             "f12bcddc663aa4c4d90218a1bb718fe74e0e7be3",
             "e1e6f93341aea383da2ec6b36a9bfcf7e63a111e",
             "e5590027506337381887dadef9baadd063e05830",
-            
+
+            # https://github.com/apollographql/router/blob/d826844c8cf433f78938059f02feecc108468e49/licenses.html#L8558
+            # https://github.com/apollographql/router-private/blob/d826844c8cf433f78938059f02feecc108468e49/licenses.html#L8558
+            "d826844c8cf433f78938059f02feecc108468e49", 
+        ]
+
+        paths = [
+            '''^apollo-router\/src\/.+\/testdata\/.+''',
         ]
 
 [[ rules ]]
@@ -14,17 +21,55 @@
     [ rules.allowlist ]
         commits = [
             "7fdb0a5a0831d309524e98503760c16bd3de160c",
-            # Example private key for test cases
+            # Example private keys for test cases
             "9d6464b96eed3a20c48d5ec653bf9986757c89e5",
-            
+            "74ebb0269933c703efd9143c029f69e30330478b",
+
+            # https://github.com/apollographql/router/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/CA/ca.key#L1
+            # https://github.com/apollographql/router/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/client.key#L1
+            # https://github.com/apollographql/router/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/server.key#L1
+            # https://github.com/apollographql/router/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/configuration/testdata/metrics/tls.router.yaml#L41
+            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/client.key#L1
+            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/CA/ca.key#L1
+            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/server.key#L1
+            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/configuration/testdata/metrics/tls.router.yaml#L41
+            "3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085",
+        ]
+
+        paths = [
+            '''^apollo-router\/src\/.+\/testdata\/.+''',
         ]
 
 [[ rules ]]
     id = "jwt"
     [ rules.allowlist ]
         commits = [
-            # Example jwt
+            # Example jwts
             "f12bcddc663aa4c4d90218a1bb718fe74e0e7be3",
+            "6ff43869e0cf8ab0de8dd0e898f80c08ad135552",
+            "b11412918d58db34693488b29495e148dbb27cc2",
+            "a4ceefc8d51879330f10861438401a3a3deb316e",
+            "d19de3cbca36981676ff03c7f3cab113609772b1",
+            "3ee3d4bda9efcf4f175fdcfd59abc16cb9a4657e",
+            "76aaa5ec21d4fbde65676c6cf0dc265dd6daee99",
+            "d2b85acee5cf94120b47093f87ae80a7365d7b28",
+            "f107c2a42292d0c8068395f5cb8f491377559a42",
+
+            # https://github.com/apollographql/router-private/blob/0a9f1a720dc532e8c090541a59d32c9377a6320b/apollo-router/src/uplink/license_enforcement.rs#L336
+            # https://github.com/apollographql/router-private/blob/15c337ee5ee5003fc72ef93d570d11e73a7bd7fb/apollo-router/src/uplink/license_enforcement.rs#L341
+            "0a9f1a720dc532e8c090541a59d32c9377a6320b",
+            "15c337ee5ee5003fc72ef93d570d11e73a7bd7fb",
+
+            # https://github.com/apollographql/router-private/blob/0a9f1a720dc532e8c090541a59d32c9377a6320b/apollo-router/src/uplink/license_enforcement.rs#L351
+            # https://github.com/apollographql/router-private/blob/15c337ee5ee5003fc72ef93d570d11e73a7bd7fb/apollo-router/src/uplink/license_enforcement.rs#L356
+            "0a9f1a720dc532e8c090541a59d32c9377a6320b",
+            "15c337ee5ee5003fc72ef93d570d11e73a7bd7fb",
+
+        ]
+
+        paths = [
+            '''^apollo-router\/src\/.+\/testdata\/.+''',
+            '''^apollo-router/src/plugins/authentication/tests.rs$'''
         ]
 
 [[ rules ]]
@@ -33,4 +78,23 @@
         commits = [
             # Non-Sensitive Test data
             "728552f0ca934e0bc6803b803859d5c956a832d9",
+        ]
+
+[[ rules ]]
+    id = "hashicorp-tf-password"
+    [ rules.allowlist ]
+        commits = [
+            # https://github.com/apollographql/router/blob/fe1c3cb5d597a6521e02b3cdb1db980cf7c202b5/examples/telemetry/jaeger-collector.router.yaml#L9
+            # https://github.com/apollographql/router/blob/3fa7c11b0f3dfcdcade1971bd8a3996431459565/examples/telemetry/jaeger-collector.router.yaml#L11
+            # https://github.com/apollographql/router-private/blob/422307d33d300c896f949c2af53803f42aee9485/examples/telemetry/jaeger-collector.router.yaml#L11
+            # https://github.com/apollographql/router-private/blob/3fa7c11b0f3dfcdcade1971bd8a3996431459565/examples/telemetry/jaeger-collector.router.yaml#L11
+            # https://github.com/apollographql/router-private/blob/fe1c3cb5d597a6521e02b3cdb1db980cf7c202b5/examples/telemetry/jaeger-collector.router.yaml#L9
+            "fe1c3cb5d597a6521e02b3cdb1db980cf7c202b5",
+            "3fa7c11b0f3dfcdcade1971bd8a3996431459565",
+            "422307d33d300c896f949c2af53803f42aee9485",
+        ]
+
+        paths = [
+            '''^apollo-router\/src\/.+\/testdata\/.+''',
+            '''^examples/telemetry/jaeger-collector.router.yaml$'''
         ]

@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use clap::builder::FalseyValueParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::CommandFactory;
@@ -28,6 +29,7 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Discussed;
+use crate::metrics::meter_provider;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
@@ -157,9 +159,10 @@ pub struct Opt {
         value_parser = add_log_filter,
         env = "APOLLO_ROUTER_LOG"
     )]
+    // FIXME: when upgrading to router 2.0 we should put this value in an Option
     log_level: String,
 
-    /// Reload configuration and schema files automatically.
+    /// Reload locally provided configuration and supergraph files automatically.  This only affects watching of local files and does not affect supergraphs and configuration provided by GraphOS through Uplink, which is always reloaded immediately.
     #[clap(
         alias = "hr",
         long = "hot-reload",
@@ -194,6 +197,10 @@ pub struct Opt {
     )]
     supergraph_path: Option<PathBuf>,
 
+    /// Locations (comma separated) to fetch the supergraph from. These will be queried in order.
+    #[clap(env = "APOLLO_ROUTER_SUPERGRAPH_URLS", value_delimiter = ',')]
+    supergraph_urls: Option<Vec<Url>>,
+
     /// Prints the configuration schema.
     #[clap(long, action(ArgAction::SetTrue), hide(true))]
     schema: bool,
@@ -211,12 +218,11 @@ pub struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// Your Apollo Router license.
-    /// EXPERIMENTAL and not subject to semver.
     #[clap(skip = std::env::var("APOLLO_ROUTER_LICENSE").ok())]
     apollo_router_license: Option<String>,
 
     /// License location relative to the current directory.
-    #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH", hide(true))]
+    #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH")]
     apollo_router_license_path: Option<PathBuf>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
@@ -229,7 +235,7 @@ pub struct Opt {
     apollo_uplink_poll_interval: Duration,
 
     /// Disable sending anonymous usage information to Apollo.
-    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED")]
+    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
@@ -258,10 +264,11 @@ fn add_log_filter(raw: &str) -> Result<String, String> {
             let rgx =
                 Regex::new(r"(^|,)(off|error|warn|info|debug|trace)").expect("regex must be valid");
             let res = rgx.replace_all(&lowered, |caps: &Captures| {
+                // The default level is info, then other ones can override the default one
                 // If the pattern matches, we must have caps 1 and 2
                 format!("{}apollo_router={}", &caps[1], &caps[2])
             });
-            Ok(res.into_owned())
+            Ok(format!("info,{res}"))
         }
     }
 }
@@ -285,6 +292,10 @@ impl Opt {
             poll_interval: self.apollo_uplink_poll_interval,
             timeout: self.apollo_uplink_timeout,
         })
+    }
+
+    pub(crate) fn is_telemetry_disabled(&self) -> bool {
+        self.anonymous_telemetry_disabled
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -427,7 +438,15 @@ impl Executable {
         }
 
         copy_args_to_env();
-        init_telemetry(&opt.log_level)?;
+
+        let apollo_telemetry_initialized = if graph_os() {
+            init_telemetry(&opt.log_level)?;
+            true
+        } else {
+            // Best effort init telemetry
+            init_telemetry(&opt.log_level).is_ok()
+        };
+
         setup_panic_handler();
 
         if opt.schema {
@@ -468,8 +487,14 @@ impl Executable {
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
-        //We should be good to shutdown the tracer provider now as the router should have finished everything.
-        opentelemetry::global::shutdown_tracer_provider();
+        if apollo_telemetry_initialized {
+            // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
+            tokio::task::spawn_blocking(move || {
+                opentelemetry::global::shutdown_tracer_provider();
+                meter_provider().shutdown();
+            })
+            .await?;
+        }
         result
     }
 
@@ -494,6 +519,7 @@ impl Executable {
                 ));
             }
             (Some(config), None) => config,
+            #[allow(clippy::blocks_in_conditions)]
             _ => match opt.config_path.as_ref().map(|path| {
                 let path = if path.is_relative() {
                     current_directory.join(path)
@@ -520,14 +546,19 @@ impl Executable {
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
 
-        let schema_source = match (schema, &opt.supergraph_path, &opt.apollo_key) {
-            (Some(_), Some(_), _) => {
+        // Schema source will be in order of precedence:
+        // 1. Cli --supergraph
+        // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
+        // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key) {
+            (Some(_), Some(_), _, _) | (Some(_), _, Some(_), _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
                 ))
             }
-            (Some(source), None, _) => source,
-            (_, Some(supergraph_path), _) => {
+            (Some(source), None, None,_) => source,
+            (_, Some(supergraph_path), _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
@@ -542,7 +573,17 @@ impl Executable {
                     delay: None,
                 }
             }
-            (_, None, Some(_apollo_key)) => {
+            (_, _, Some(supergraph_urls), _) => {
+                tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+
+                SchemaSource::URLs {
+                    urls: supergraph_urls.clone(),
+                    watch: opt.hot_reload,
+                    period: opt.apollo_uplink_poll_interval
+                }
+            }
+            (_, None, None, Some(_apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
                 SchemaSource::Registry(opt.uplink_config()?)
@@ -627,9 +668,22 @@ impl Executable {
             tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
         }
 
+        let uplink_config = opt.uplink_config().ok();
+        if uplink_config
+            .clone()
+            .unwrap_or_default()
+            .endpoints
+            .unwrap_or_default()
+            .url_count()
+            == 1
+        {
+            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+        }
+
         let router = RouterHttpServer::builder()
+            .is_telemetry_disabled(opt.is_telemetry_disabled())
             .configuration(configuration)
-            .and_uplink(opt.uplink_config().ok())
+            .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
@@ -641,6 +695,10 @@ impl Executable {
         }
         Ok(())
     }
+}
+
+fn graph_os() -> bool {
+    std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
 }
 
 fn setup_panic_handler() {
@@ -697,7 +755,7 @@ mod tests {
         for level in ["off", "error", "warn", "info", "debug", "trace"] {
             assert_eq!(
                 add_log_filter(level).expect("conversion works"),
-                format!("apollo_router={level}")
+                format!("info,apollo_router={level}")
             );
         }
     }
@@ -708,49 +766,49 @@ mod tests {
     // which is a reasonably corpus of things to test.
     #[test]
     fn complex_logging_modifications() {
-        assert_eq!(add_log_filter("hello").unwrap(), "hello");
-        assert_eq!(add_log_filter("trace").unwrap(), "apollo_router=trace");
-        assert_eq!(add_log_filter("TRACE").unwrap(), "apollo_router=trace");
-        assert_eq!(add_log_filter("info").unwrap(), "apollo_router=info");
-        assert_eq!(add_log_filter("INFO").unwrap(), "apollo_router=info");
-        assert_eq!(add_log_filter("hello=debug").unwrap(), "hello=debug");
-        assert_eq!(add_log_filter("hello=DEBUG").unwrap(), "hello=debug");
+        assert_eq!(add_log_filter("hello").unwrap(), "info,hello");
+        assert_eq!(add_log_filter("trace").unwrap(), "info,apollo_router=trace");
+        assert_eq!(add_log_filter("TRACE").unwrap(), "info,apollo_router=trace");
+        assert_eq!(add_log_filter("info").unwrap(), "info,apollo_router=info");
+        assert_eq!(add_log_filter("INFO").unwrap(), "info,apollo_router=info");
+        assert_eq!(add_log_filter("hello=debug").unwrap(), "info,hello=debug");
+        assert_eq!(add_log_filter("hello=DEBUG").unwrap(), "info,hello=debug");
         assert_eq!(
             add_log_filter("hello,std::option").unwrap(),
-            "hello,std::option"
+            "info,hello,std::option"
         );
         assert_eq!(
             add_log_filter("error,hello=warn").unwrap(),
-            "apollo_router=error,hello=warn"
+            "info,apollo_router=error,hello=warn"
         );
         assert_eq!(
             add_log_filter("error,hello=off").unwrap(),
-            "apollo_router=error,hello=off"
+            "info,apollo_router=error,hello=off"
         );
-        assert_eq!(add_log_filter("off").unwrap(), "apollo_router=off");
-        assert_eq!(add_log_filter("OFF").unwrap(), "apollo_router=off");
-        assert_eq!(add_log_filter("hello/foo").unwrap(), "hello/foo");
-        assert_eq!(add_log_filter("hello/f.o").unwrap(), "hello/f.o");
+        assert_eq!(add_log_filter("off").unwrap(), "info,apollo_router=off");
+        assert_eq!(add_log_filter("OFF").unwrap(), "info,apollo_router=off");
+        assert_eq!(add_log_filter("hello/foo").unwrap(), "info,hello/foo");
+        assert_eq!(add_log_filter("hello/f.o").unwrap(), "info,hello/f.o");
         assert_eq!(
             add_log_filter("hello=debug/foo*foo").unwrap(),
-            "hello=debug/foo*foo"
+            "info,hello=debug/foo*foo"
         );
         assert_eq!(
             add_log_filter("error,hello=warn/[0-9]scopes").unwrap(),
-            "apollo_router=error,hello=warn/[0-9]scopes"
+            "info,apollo_router=error,hello=warn/[0-9]scopes"
         );
         // Add some hard ones
         assert_eq!(
             add_log_filter("hyper=debug,warn,regex=warn,h2=off").unwrap(),
-            "hyper=debug,apollo_router=warn,regex=warn,h2=off"
+            "info,hyper=debug,apollo_router=warn,regex=warn,h2=off"
         );
         assert_eq!(
             add_log_filter("hyper=debug,apollo_router=off,regex=info,h2=off").unwrap(),
-            "hyper=debug,apollo_router=off,regex=info,h2=off"
+            "info,hyper=debug,apollo_router=off,regex=info,h2=off"
         );
         assert_eq!(
             add_log_filter("apollo_router::plugins=debug").unwrap(),
-            "apollo_router::plugins=debug"
+            "info,apollo_router::plugins=debug"
         );
     }
 }

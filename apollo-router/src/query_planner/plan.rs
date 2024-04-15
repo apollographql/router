@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
+use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
@@ -10,17 +13,25 @@ use super::subscription::SubscriptionNode;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::spec::Query;
 
 /// A planner key.
 ///
-/// This type consists of a query string and an optional operation string
-pub(crate) type QueryKey = (String, Option<String>);
+/// This type contains everything needed to separate query plan cache entries
+#[derive(Clone)]
+pub(crate) struct QueryKey {
+    pub(crate) filtered_query: String,
+    pub(crate) original_query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) metadata: CacheKeyMetadata,
+    pub(crate) plan_options: PlanOptions,
+}
 
 /// A plan for a given GraphQL query
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QueryPlan {
-    pub(crate) usage_reporting: UsageReporting,
+    pub(crate) usage_reporting: Arc<UsageReporting>,
     pub(crate) root: PlanNode,
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<String>,
@@ -37,10 +48,12 @@ impl QueryPlan {
         usage_reporting: Option<UsageReporting>,
     ) -> Self {
         Self {
-            usage_reporting: usage_reporting.unwrap_or_else(|| UsageReporting {
-                stats_report_key: "this is a test report key".to_string(),
-                referenced_fields_by_type: Default::default(),
-            }),
+            usage_reporting: usage_reporting
+                .unwrap_or_else(|| UsageReporting {
+                    stats_report_key: "this is a test report key".to_string(),
+                    referenced_fields_by_type: Default::default(),
+                })
+                .into(),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
@@ -179,6 +192,95 @@ impl PlanNode {
         }
     }
 
+    pub(crate) fn subgraph_fetches(&self) -> usize {
+        match self {
+            PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Fetch(_) => 1,
+            PlanNode::Flatten(node) => node.node.subgraph_fetches(),
+            PlanNode::Defer { primary, deferred } => {
+                primary.node.as_ref().map_or(0, |n| n.subgraph_fetches())
+                    + deferred
+                        .iter()
+                        .map(|n| n.node.as_ref().map_or(0, |n| n.subgraph_fetches()))
+                        .sum::<usize>()
+            }
+            // A `SubscriptionNode` makes a request to a subgraph, so counting it as 1
+            PlanNode::Subscription { rest, .. } => {
+                rest.as_ref().map_or(0, |n| n.subgraph_fetches()) + 1
+            }
+            // Compute the highest possible value for condition nodes
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => std::cmp::max(
+                if_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches())
+                    .unwrap_or(0),
+                else_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches())
+                    .unwrap_or(0),
+            ),
+        }
+    }
+
+    pub(crate) fn hash_subqueries(
+        &mut self,
+        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
+    ) {
+        match self {
+            PlanNode::Fetch(fetch_node) => {
+                if let Some(schema) = schemas.get(&fetch_node.service_name) {
+                    fetch_node.hash_subquery(schema);
+                }
+            }
+
+            PlanNode::Sequence { nodes } => {
+                for node in nodes {
+                    node.hash_subqueries(schemas);
+                }
+            }
+            PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    node.hash_subqueries(schemas);
+                }
+            }
+            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(schemas),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.hash_subqueries(schemas);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.hash_subqueries(schemas);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Subscription { primary: _, rest } => {
+                if let Some(node) = rest.as_mut() {
+                    node.hash_subqueries(schemas);
+                }
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => {
+                if let Some(node) = if_clause.as_mut() {
+                    node.hash_subqueries(schemas);
+                }
+                if let Some(node) = else_clause.as_mut() {
+                    node.hash_subqueries(schemas);
+                }
+            }
+        }
+    }
+
     #[cfg(test)]
     /// Retrieves all the services used across all plan nodes.
     ///
@@ -192,7 +294,7 @@ impl PlanNode {
             Self::Subscription { primary, rest } => match rest {
                 Some(rest) => Box::new(
                     rest.service_usage()
-                        .chain(Some(primary.service_name.as_str()).into_iter()),
+                        .chain(Some(primary.service_name.as_str())),
                 ) as Box<dyn Iterator<Item = &'a str> + 'a>,
                 None => Box::new(Some(primary.service_name.as_str()).into_iter()),
             },
@@ -225,6 +327,59 @@ impl PlanNode {
                     Box::new(if_node.service_usage().chain(else_node.service_usage()))
                 }
             },
+        }
+    }
+
+    pub(crate) fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        key: &CacheKeyMetadata,
+    ) {
+        match self {
+            PlanNode::Fetch(fetch_node) => {
+                fetch_node.extract_authorization_metadata(schema, key);
+            }
+
+            PlanNode::Sequence { nodes } => {
+                for node in nodes {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Flatten(flatten) => flatten.node.extract_authorization_metadata(schema, key),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.extract_authorization_metadata(schema, key);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Subscription { primary: _, rest } => {
+                if let Some(node) = rest.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => {
+                if let Some(node) = if_clause.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+                if let Some(node) = else_clause.as_mut() {
+                    node.extract_authorization_metadata(schema, key);
+                }
+            }
         }
     }
 }

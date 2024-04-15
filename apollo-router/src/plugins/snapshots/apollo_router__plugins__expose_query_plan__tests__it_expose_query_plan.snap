@@ -1,0 +1,215 @@
+---
+source: apollo-router/src/plugins/expose_query_plan.rs
+expression: "serde_json::to_value(response).unwrap()"
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "upc": "1",
+        "name": "Table",
+        "reviews": [
+          {
+            "id": "1",
+            "product": {
+              "name": "Table"
+            },
+            "author": {
+              "id": "1",
+              "name": "Ada Lovelace"
+            }
+          },
+          {
+            "id": "4",
+            "product": {
+              "name": "Table"
+            },
+            "author": {
+              "id": "2",
+              "name": "Alan Turing"
+            }
+          }
+        ]
+      },
+      {
+        "upc": "2",
+        "name": "Couch",
+        "reviews": [
+          {
+            "id": "2",
+            "product": {
+              "name": "Couch"
+            },
+            "author": {
+              "id": "1",
+              "name": "Ada Lovelace"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "extensions": {
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Fetch",
+              "serviceName": "products",
+              "variableUsages": [
+                "first"
+              ],
+              "operation": "query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}",
+              "operationName": "TopProducts__products__0",
+              "operationKind": "query",
+              "id": null,
+              "inputRewrites": null,
+              "outputRewrites": null,
+              "schemaAwareHash": "34be619a78867ab9d0670048f4c93574e38cd9253e9cc032f567078355b25086",
+              "authorization": {
+                "is_authenticated": false,
+                "scopes": [],
+                "policies": []
+              }
+            },
+            {
+              "kind": "Flatten",
+              "path": [
+                "topProducts",
+                "@"
+              ],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "reviews",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Product",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "upc"
+                      }
+                    ]
+                  }
+                ],
+                "variableUsages": [],
+                "operation": "query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}",
+                "operationName": "TopProducts__reviews__1",
+                "operationKind": "query",
+                "id": null,
+                "inputRewrites": null,
+                "outputRewrites": null,
+                "schemaAwareHash": "f1582d942020b23347d84f6ae46c018492ae7c59c9b1472e0b442121ddf16368",
+                "authorization": {
+                  "is_authenticated": false,
+                  "scopes": [],
+                  "policies": []
+                }
+              }
+            },
+            {
+              "kind": "Parallel",
+              "nodes": [
+                {
+                  "kind": "Flatten",
+                  "path": [
+                    "topProducts",
+                    "@",
+                    "reviews",
+                    "@",
+                    "product"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "products",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "Product",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "upc"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [],
+                    "operation": "query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}",
+                    "operationName": "TopProducts__products__2",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "schemaAwareHash": "6fa5a74c5af2b18f343e9e69bbcbc9335e9faaa46c3d8964d199002dfeb0026f",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                },
+                {
+                  "kind": "Flatten",
+                  "path": [
+                    "topProducts",
+                    "@",
+                    "reviews",
+                    "@",
+                    "author"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "accounts",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "User",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [],
+                    "operation": "query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                    "operationName": "TopProducts__accounts__3",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "schemaAwareHash": "6fa5a74c5af2b18f343e9e69bbcbc9335e9faaa46c3d8964d199002dfeb0026f",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"products\") {\n      {\n        topProducts(first: $first) {\n          __typename\n          upc\n          name\n        }\n      }\n    },\n    Flatten(path: \"topProducts.@\") {\n      Fetch(service: \"reviews\") {\n        {\n          ... on Product {\n            __typename\n            upc\n          }\n        } =>\n        {\n          ... on Product {\n            reviews {\n              id\n              product {\n                __typename\n                upc\n              }\n              author {\n                __typename\n                id\n              }\n            }\n          }\n        }\n      },\n    },\n    Parallel {\n      Flatten(path: \"topProducts.@.reviews.@.product\") {\n        Fetch(service: \"products\") {\n          {\n            ... on Product {\n              __typename\n              upc\n            }\n          } =>\n          {\n            ... on Product {\n              name\n            }\n          }\n        },\n      },\n      Flatten(path: \"topProducts.@.reviews.@.author\") {\n        Fetch(service: \"accounts\") {\n          {\n            ... on User {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on User {\n              name\n            }\n          }\n        },\n      },\n    },\n  },\n}"
+    }
+  }
+}

@@ -1,0 +1,67 @@
+---
+title: Zipkin exporter
+subtitle: Configure the Zipkin exporter for tracing
+description: Enable and configure the Zipkin exporter for tracing in the Apollo Router
+---
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+
+Enable and configure the [Zipkin](https://zipkin.io/) exporter for tracing in the Apollo Router.
+
+For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+
+## Zipkin configuration
+
+The Apollo Router can be configured to export tracing data for Zipkin to either the default collector address or a URL:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       zipkin:
+         enabled: true
+   
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/span)
+         endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
+```
+
+### `enabled`
+
+Flag to enable the Zipkin exporter.
+
+Set to true to enable the Zipkin exporter. Defaults to false.
+
+### `endpoint`
+
+The Zipkin endpoint address. Defaults to http://127.0.0.1:9411/api/v2/span
+
+### `batch_processor`
+
+<BatchProcessorPreamble />
+
+An example configuration using Zipkin with `batch_processor`:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      zipkin: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
+```
+
+#### `batch_processor` configuration reference
+
+<BatchProcessorRef />
+
+## Zipkin configuration reference
+
+| Attribute         | Default                             | Description                    |
+|-------------------|-------------------------------------|--------------------------------|
+| `enabled`         | `false`                             | Enable the Zipkin exporter.    |
+| `endpoint`        | `http://127.0.0.1:9411/api/v2/span` | The endpoint to send spans to. |
+| `batch_processor` |                                     | The batch processor settings.  |

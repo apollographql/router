@@ -1,6 +1,6 @@
 # Use the rust build image from docker as our base
 # renovate-automation: rustc version
-FROM rust:1.70.0 as build
+FROM rust:1.76.0 as build
 
 # Set our working directory for the build
 WORKDIR /usr/src/router

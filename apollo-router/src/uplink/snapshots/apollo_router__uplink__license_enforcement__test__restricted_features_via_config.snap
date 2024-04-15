@@ -13,16 +13,13 @@ Configuration yaml:
   .coprocessor
 
 * Query plan caching
-  .supergraph.query_planning.experimental_cache.redis
+  .supergraph.query_planning.cache.redis
 
 * APQ caching
   .apq.router.cache.redis
 
-* Subgraph caching
-  .traffic_shaping.experimental_cache
-
 * Subgraph entity caching
-  .traffic_shaping..experimental_entity_caching
+  .preview_entity_cache.enabled
 
 * Federated subscriptions
   .subscription.enabled
@@ -38,3 +35,18 @@ Configuration yaml:
 
 * Operation aliases limiting
   .limits.max_aliases
+
+* Advanced telemetry
+  .telemetry..spans.router
+
+* Advanced telemetry
+  .telemetry..spans.supergraph
+
+* Advanced telemetry
+  .telemetry..spans.subgraph
+
+* File uploads plugin
+  .preview_file_uploads
+
+* Demand control plugin
+  .experimental_demand_control

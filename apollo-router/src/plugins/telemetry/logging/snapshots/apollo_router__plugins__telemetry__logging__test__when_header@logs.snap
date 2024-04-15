@@ -1,0 +1,71 @@
+---
+source: apollo-router/src/plugins/telemetry/logging/mod.rs
+expression: yaml
+---
+- fields:
+    http.request.headers: "{\"content-type\": \"application/json\", \"custom-header1\": \"val1\", \"custom-header2\": \"val2\"}"
+  level: INFO
+  message: Supergraph request headers
+  span:
+    apollo_private.field_level_instrumentation_ratio: 0.01
+    apollo_private.graphql.variables: "{}"
+    graphql.document: "query { foo }"
+    name: supergraph
+    otel.kind: INTERNAL
+  spans:
+    - apollo_private.field_level_instrumentation_ratio: 0.01
+      apollo_private.graphql.variables: "{}"
+      graphql.document: "query { foo }"
+      name: supergraph
+      otel.kind: INTERNAL
+- fields:
+    http.request.body: "Request { query: Some(\"query { foo }\"), operation_name: None, variables: {}, extensions: {} }"
+  level: INFO
+  message: Supergraph request body
+  span:
+    apollo_private.field_level_instrumentation_ratio: 0.01
+    apollo_private.graphql.variables: "{}"
+    graphql.document: "query { foo }"
+    name: supergraph
+    otel.kind: INTERNAL
+  spans:
+    - apollo_private.field_level_instrumentation_ratio: 0.01
+      apollo_private.graphql.variables: "{}"
+      graphql.document: "query { foo }"
+      name: supergraph
+      otel.kind: INTERNAL
+- fields: {}
+  level: INFO
+  message: response
+  span:
+    apollo_private.field_level_instrumentation_ratio: 0.01
+    apollo_private.graphql.variables: "{}"
+    graphql.document: "query { foo }"
+    name: supergraph
+    otel.kind: INTERNAL
+  spans:
+    - apollo_private.field_level_instrumentation_ratio: 0.01
+      apollo_private.graphql.variables: "{}"
+      graphql.document: "query { foo }"
+      name: supergraph
+      otel.kind: INTERNAL
+- fields:
+    http.response.headers: "{\"custom-header1\": \"val1\", \"custom-header2\": \"val2\"}"
+  level: INFO
+  message: Supergraph response headers
+  span:
+    apollo_private.field_level_instrumentation_ratio: 0.01
+    apollo_private.graphql.variables: "{}"
+    graphql.document: "query { foo }"
+    name: supergraph
+    otel.kind: INTERNAL
+  spans:
+    - apollo_private.field_level_instrumentation_ratio: 0.01
+      apollo_private.graphql.variables: "{}"
+      graphql.document: "query { foo }"
+      name: supergraph
+      otel.kind: INTERNAL
+- fields:
+    http.response.body: "Response { label: None, data: Some(Object({\"data\": String(\"res\")})), path: None, errors: [], extensions: {}, has_next: None, subscribed: None, created_at: None, incremental: [] }"
+  level: INFO
+  message: Supergraph GraphQL response

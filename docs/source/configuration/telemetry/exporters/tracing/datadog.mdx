@@ -1,0 +1,159 @@
+---
+title: Datadog exporter (via OTLP)
+subtitle: Configure the Datadog exporter for tracing
+description: Configure the Datadog exporter for tracing via OpenTelemetry Protocol (OTLP) in the Apollo Router
+---
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+
+Enable and configure the [Datadog](https://www.datadoghq.com/) exporter for tracing in the Apollo Router.
+
+For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+
+## OTLP configuration
+
+To export traces to Datadog via OTLP, you must do the following:
+- Configure the Datadog agent to accept OTLP traces.
+- Configure the router to send traces to the Datadog agent.
+
+To configure the Datadog agent, add OTLP configuration to your `datadog.yaml`. For example:
+
+```yaml title="datadog.yaml"
+otlp_config:
+  receiver:
+    protocols:
+      grpc:
+        endpoint: <dd-agent-ip>:4317
+```
+
+To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>`. For example: 
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       otlp:
+         enabled: true
+   
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+```
+
+For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
+
+### Enabling log correlation
+
+To enable Datadog log correlation, you must configure `dd.trace_id` to appear on the `router` span:
+  
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          dd.trace_id: true #highlight-line
+```
+
+Your JSON formatted log messages will automatically output `dd.trace_id` on each log message if `dd.trace_id` was detected on the `router` span.
+
+## Datadog native configuration
+
+<Caution>
+
+Native Datadog tracing is not part of the OpenTelemetry spec, and given that Datadog supports OTLP we will be deprecating native Datadog tracing in the future. Use [OTLP configuration](#otlp-configuration) instead.
+
+</Caution>
+
+The Apollo Router can be configured to connect to either the native, default Datadog agent address or a URL:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       datadog:
+         enabled: true
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
+         endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+```
+
+### `enabled`
+
+Set to true to enable the Datadog exporter. Defaults to false.
+
+### `enable_span_mapping`
+
+[There are some incompatibilities](https://docs.rs/opentelemetry-datadog/latest/opentelemetry_datadog/#quirks) between Datadog and OpenTelemetry, the Datadog exporter might not provide meaningful contextual information in the exported spans. To fix this, you can configure the Apollo Router to perform a mapping for the span name and the span resource name.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       datadog:
+         enabled: true
+         enable_span_mapping: true
+```
+
+When `enable_span_mapping: true`, the Apollo Router will perform the following mapping:
+
+1. Use the OpenTelemetry span name to set the Datadog span operation name.
+2. Use the OpenTelemetry span attributes to set the Datadog span resource name.
+
+#### Example trace
+
+Let's say we send a query `MyQuery` to the Apollo Router, then the Router using the operation's query plan will send a query to `my-subgraph-name` and the following trace will be created:
+
+```
+    | apollo_router request                                                                 |
+        | apollo_router router                                                              |
+            | apollo_router supergraph                                                      |
+            | apollo_router query_planning  | apollo_router execution                       |
+                                                | apollo_router fetch                       |
+                                                    | apollo_router subgraph                |
+                                                        | apollo_router subgraph_request    |
+```
+
+As you can see, there is no clear information about the name of the query, the name of the subgraph, and the name of the query sent to the subgraph.
+
+Instead, when `enable_span_mapping` is set to `true` the following trace will be created:
+
+```
+    | request /graphql                                                                                   |
+        | router                                                                                         |
+            | supergraph MyQuery                                                                         |
+                | query_planning MyQuery  | execution                                                    |
+                                              | fetch fetch                                              |
+                                                  | subgraph my-subgraph-name                            |
+                                                      | subgraph_request MyQuery__my-subgraph-name__0    |
+```
+
+### `batch_processor`
+
+<BatchProcessorPreamble/>
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      datadog: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
+```
+
+#### `batch_processor` configuration reference
+<BatchProcessorRef/>
+
+
+## Datadog native configuration reference
+
+| Attribute             | Default                               | Description                     |
+|-----------------------|---------------------------------------|---------------------------------|
+| `enabled`             | `false`                               | Enable the OTLP exporter.       |
+| `enable_span_mapping` | `false`                               | If span mapping should be used. |
+| `endpoint`            | `http://localhost:8126/v0.4/traces`   | The endpoint to send spans to.  |
+| `batch_processor`     |                                       | The batch processor settings.   |
+

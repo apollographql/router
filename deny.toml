@@ -26,10 +26,8 @@ git-fetch-with-cli = true
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 
-# while https://github.com/chronotope/chrono/issues/499 is open.
-# We need to keep track of this issue, and make sure `tracing-subscriber` is updated
-# We will then be able to remove this
-ignore = ["RUSTSEC-2020-0159", "RUSTSEC-2020-0071"]
+# rustsec advisory exemptions
+ignore = ["RUSTSEC-2023-0071"]
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
@@ -105,7 +103,7 @@ deny = [
   # exception.
   { name = "openssl-sys", wrappers = ["git2", "libssh2-sys", "libgit2-sys"] },
   # Note! This line is required to support the above exception.
-  { name = "git2", wrappers = ["cargo-scaffold"] },
+  { name = "git2", wrappers = ["auth-git2", "cargo-scaffold"] },
   # Note! This line is required to support the above exception.
   { name = "libgit2-sys", wrappers = ["git2"] },
   # Note! This line is required to support the above exception.

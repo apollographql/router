@@ -1,3 +1,4 @@
+use apollo_compiler::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;
@@ -14,6 +15,26 @@ macro_rules! assert_eq_and_ordered {
             \n  left: `{:?}`\n right: `{:?}`",
             $a,
             $b,
+        );
+    };
+}
+
+macro_rules! assert_eq_and_ordered_json {
+    ($a:expr, $b:expr $(,)?) => {
+        assert_eq!(
+            $a,
+            $b,
+            "assertion failed: objects are not the same:\
+            \n  left: `{}`\n right: `{}`",
+            serde_json::to_string(&$a).unwrap(),
+            serde_json::to_string(&$b).unwrap()
+        );
+        assert!(
+            $a.eq_and_ordered(&$b),
+            "assertion failed: objects are not ordered the same:\
+            \n  left: `{}`\n right: `{}`",
+            serde_json::to_string(&$a).unwrap(),
+            serde_json::to_string(&$b).unwrap(),
         );
     };
 }
@@ -106,7 +127,7 @@ impl FormatTest {
 
         let api_schema = schema.api_schema();
         let query =
-            Query::parse(query, &schema, &Default::default()).expect("could not parse query");
+            Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
         let mut response = Response::builder().data(response).build();
 
         query.format_response(
@@ -122,15 +143,21 @@ impl FormatTest {
         );
 
         if let Some(e) = self.expected {
-            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &e);
+            assert_eq_and_ordered_json!(
+                serde_json_bytes::to_value(response.data.as_ref()).unwrap(),
+                e
+            );
         }
 
         if let Some(e) = self.expected_errors {
-            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
+            assert_eq_and_ordered_json!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
         }
 
         if let Some(e) = self.expected_extensions {
-            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.extensions).unwrap(), e);
+            assert_eq_and_ordered_json!(
+                serde_json_bytes::to_value(&response.extensions).unwrap(),
+                e
+            );
         }
     }
 }
@@ -444,6 +471,112 @@ fn reformat_response_data_fragment_spread() {
 }
 
 #[test]
+fn reformat_response_data_abstract_fragment_spread() {
+    let schema = "type Query {
+  dog: Dog
+}
+
+type Dog {
+  name: String!
+  nickname: String!
+  barkVolume: Int
+}
+
+type Cat {
+  name: String!
+  nickname: String!
+  meowVolume: Int
+}
+
+union CatOrDog = Cat | Dog";
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { __isCatOrDog: __typename ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "dog": {"__isCatOrDog": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .expected(json! {
+            {"dog": {"__isCatOrDog": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .test();
+
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } __isCatOrDog: __typename }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "dog": {"name": "Fido", "nickname": "Fi", "barkVolume": 7, "__isCatOrDog": "Dog" }}
+        })
+        .expected(json! {
+            {"dog": {"name": "Fido", "nickname": "Fi", "barkVolume": 7, "__isCatOrDog": "Dog" }}
+        })
+        .test();
+
+    let query = "query test { dog { ...petFragment } } fragment petFragment on CatOrDog { __typename ... on Dog { name nickname barkVolume } ... on Cat { name nickname meowVolume } }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"dog": { "__typename": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .expected(json! {
+            {"dog": { "__typename": "Dog", "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}
+        })
+        .test();
+}
+
+#[test]
+fn reformat_response_data_nested_abstract_fragment_spread() {
+    let schema = "type Query {
+  nestedDog: NestedDog
+}
+
+type NestedDog {
+  dog: Dog!
+}
+
+type Dog {
+  name: String!
+  nickname: String!
+  barkVolume: Int
+}
+
+type Cat {
+  name: String!
+  nickname: String!
+  meowVolume: Int
+}
+
+union CatOrDog = Cat | NestedDog";
+    let query = "query test { nestedDog { ...petFragment } } fragment petFragment on CatOrDog { __isCatOrDog: __typename ... on NestedDog { dog { name nickname barkVolume } } ... on Cat { name nickname meowVolume } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            { "nestedDog": {"__isCatOrDog": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .expected(json! {
+            {"nestedDog": {"__isCatOrDog": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .test();
+
+    let query = "query test { nestedDog { ...petFragment } } fragment petFragment on CatOrDog { __typename ... on NestedDog { dog { name nickname barkVolume } } ... on Cat { name nickname meowVolume } }";
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"nestedDog": { "__typename": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .expected(json! {
+            {"nestedDog": { "__typename": "NestedDog", "dog": { "name": "Fido", "nickname": "Fi", "barkVolume": 7 }}}
+        })
+        .test();
+}
+
+#[test]
 fn reformat_response_data_best_effort() {
     FormatTest::builder()
         .schema(
@@ -498,7 +631,86 @@ fn reformat_response_data_best_effort() {
                     "array": [
                         {},
                         null,
-                        {},
+                        {}
+                    ],
+                    "other": null,
+                },
+            }
+        })
+        .test();
+}
+
+#[test]
+// just like the test above, except the query is one the planner would generate.
+fn reformat_response_data_best_effort_relevant_query() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+        get: Thing
+    }
+    type Thing {
+        foo: String
+        stuff: Baz
+        array: [Element]
+        other: Bar
+    }
+
+    type Baz {
+        bar: String
+        baz: String
+    }
+
+    type Bar {
+        bar: String
+    }
+
+    union Element = Baz | Bar
+    ",
+        )
+        .query("{get{foo stuff{bar baz}array{...on Baz{bar baz}}other{bar}}}")
+        // the planner generates this:
+        // {get{foo stuff{bar baz}array{__typename ...on Baz{bar baz}}other{bar}}}
+        .response(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {"baz": "2"},
+                    "array": [
+                        {
+                            "__typename": "Baz",
+                            "baz": "3"
+                        },
+                        "4",
+                        {
+                            "__typename": "Baz",
+                            "baz": "5"
+                        },
+                    ],
+                    "other": "6",
+                },
+                "should_be_removed": {
+                    "aaa": 2
+                },
+            }
+        })
+        .expected(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {
+                        "bar": null,
+                        "baz": "2",
+                    },
+                    "array": [
+                        {
+                            "bar":null,
+                            "baz":"3"
+                        },
+                        null,
+                        {
+                            "bar": null,
+                            "baz":"5"
+                        }
                     ],
                     "other": null,
                 },
@@ -1193,6 +1405,7 @@ macro_rules! run_validation {
                 .query
                 .as_ref()
                 .expect("query has been added right above; qed"),
+            None,
             &schema,
             &Default::default(),
         )
@@ -1479,55 +1692,56 @@ fn variable_validation() {
 
     // https://spec.graphql.org/June2018/#sec-Input-Objects
     assert_validation!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({})
     );
     assert_validation!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation_error!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":1})
     );
     assert_validation_error!(
-        "input Foo{ y: String } type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{ y: String } type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":"str"})
     );
     assert_validation_error!(
-        "input Foo{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation!(
-        "input Foo{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{"x":1}})
     );
     assert_validation!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({"foo":{}})
     );
     assert_validation!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({"foo":1})
     );
     assert_validation_error!(
-        "scalar Foo type Query { x: String }",
-        "query($foo:Foo!){x}",
+        "scalar Foo type Query { x(foo: Foo): String }",
+        "query($foo:Foo!){x(foo: $foo)}",
         json!({})
     );
     assert_validation!(
-        "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x: String }",
-        "query($foo:Foo){x}",
+        "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x(foo: Foo): String }",
+        "query($foo:Foo){x(foo: $foo)}",
         json!({"foo":{"bar":{"x":1}}})
     );
+
     assert_validation!(
         "enum Availability{AVAILABLE} type Product{availability:Availability! name:String} type Query{products(availability: Availability!): [Product]!}",
         "query GetProductsByAvailability($availability: Availability!){products(availability: $availability) {name}}",
@@ -1543,7 +1757,7 @@ fn variable_validation() {
               id: ID!
           }
           type Query{
-              send(message: MessageInput): String}",
+              send(message: MessageInput): Receipt}",
         "query {
             send(message: {
                 content: \"Hello\"
@@ -1563,7 +1777,7 @@ fn variable_validation() {
               id: ID!
           }
           type Query{
-              send(message: MessageInput): String}",
+              send(message: MessageInput): Receipt}",
         "query($msg: MessageInput) {
             send(message: $msg) {
                 id
@@ -1574,8 +1788,23 @@ fn variable_validation() {
         }})
     );
 
-    assert_validation!(
-        "type Mutation{
+    let schema = r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1")
+            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+             {
+            query: Query
+            mutation: Mutation
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type Mutation{
             foo(input: FooInput!): FooResponse!
         }
         type Query{
@@ -1592,13 +1821,18 @@ fn variable_validation() {
         enum EnumWithDefault {
           WEB
           MOBILE
-        }",
+        }
+        "#;
+
+    let res = run_validation!(
+        schema,
         "mutation foo($input: FooInput!) {
             foo (input: $input) {
             __typename
         }}",
         json!({"input":{}})
     );
+    assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
 }
 
 #[test]
@@ -2992,13 +3226,14 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query)
         .response(json! {{
+            "__typename": "Query",
             "get": {
                 "name": "a",
                 "other": "b"
             }
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": "a",
             }
@@ -3010,10 +3245,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": null,
             }
@@ -3026,10 +3262,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query2)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name2": "a",
             }
@@ -3041,10 +3278,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query2)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": null
         }})
         .test();
@@ -3055,10 +3293,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query3)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": "a",
             }
@@ -3070,10 +3309,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query3)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": null,
             }
@@ -3086,10 +3326,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query4)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name2": "a",
             }
@@ -3101,10 +3342,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query4)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": null,
         }})
         .test();
@@ -3217,12 +3459,15 @@ fn it_parses_default_floats() {
     );
 
     let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
-    let value = schema.type_system.definitions.input_objects["WithAllKindsOfFloats"]
-        .field("a_float_that_doesnt_fit_an_int")
+    let value = schema
+        .definitions
+        .get_input_object("WithAllKindsOfFloats")
         .unwrap()
-        .default_value()
+        .fields["a_float_that_doesnt_fit_an_int"]
+        .default_value
+        .as_ref()
         .unwrap();
-    assert_eq!(f64::try_from(value).unwrap() as i64, 9876543210);
+    assert_eq!(value.to_f64().unwrap() as i64, 9876543210);
 }
 
 #[test]
@@ -3258,6 +3503,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3265,7 +3511,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3280,6 +3526,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3288,7 +3535,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3310,6 +3557,7 @@ fn it_statically_includes() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3318,7 +3566,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3345,6 +3593,7 @@ fn it_statically_includes() {
                 ...ProductName @include(if: false)
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3353,7 +3602,7 @@ fn it_statically_includes() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3403,6 +3652,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3410,7 +3660,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3425,6 +3675,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3433,7 +3684,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3455,6 +3706,7 @@ fn it_statically_skips() {
                 name
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3463,7 +3715,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3490,6 +3742,7 @@ fn it_statically_skips() {
                 ...ProductName @skip(if: true)
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3498,7 +3751,7 @@ fn it_statically_skips() {
     assert_eq!(query.operations.len(), 1);
     let operation = &query.operations[0];
     assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.get(0).unwrap() {
+    match operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
@@ -3535,6 +3788,7 @@ fn it_should_fail_with_empty_selection_set() {
             product {
             }
         }",
+        None,
         &schema,
         &Default::default(),
     )
@@ -3558,6 +3812,59 @@ fn skip() {
         body: String
     }";
 
+    // with variables
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query($skip: Boolean = false)  {
+                get @skip(if: $skip) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+        )
+        .variables(json! {{
+            "skip": true
+        }})
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "review": {
+                    "id": "b",
+                }
+            },
+        }})
+        .expected(json! {{}})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query {
+                get @skip(if: true) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+        )
+        .variables(json! {{
+            "skip": true
+        }})
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "review": {
+                    "id": "b",
+                }
+            },
+        }})
+        .expected(json! {{}})
+        .test();
+
     // duplicate operation name
     FormatTest::builder()
         .schema(schema)
@@ -3567,7 +3874,7 @@ fn skip() {
                     name @skip(if: true)
                 }
                 get @skip(if: false) {
-                    id 
+                    id
                     review {
                         id
                     }
@@ -3733,7 +4040,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -3760,7 +4067,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -3789,7 +4096,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean) {
+            "query Example($shouldSkip: Boolean!) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -3817,7 +4124,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean = true) {
+            "query Example($shouldSkip: Boolean! = true) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -3845,7 +4152,7 @@ fn skip() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldSkip: Boolean = true) {
+            "query Example($shouldSkip: Boolean! = true) {
                 get {
                     id
                     name @skip(if: $shouldSkip)
@@ -4245,7 +4552,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4272,7 +4579,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4301,7 +4608,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean = false) {
+            "query Example($shouldInclude: Boolean! = false) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4326,7 +4633,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean = false) {
+            "query Example($shouldInclude: Boolean! = false) {
             get {
                 id
                 name @include(if: $shouldInclude)
@@ -4354,7 +4661,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4386,7 +4693,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4413,7 +4720,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4443,7 +4750,7 @@ fn include() {
     FormatTest::builder()
         .schema(schema)
         .query(
-            "query Example($shouldInclude: Boolean) {
+            "query Example($shouldInclude: Boolean!) {
             get {
                 name
             }
@@ -4824,7 +5131,8 @@ fn fragment_on_interface_on_query() {
 
     let schema = Schema::parse_test(schema, &Default::default()).expect("could not parse schema");
     let api_schema = schema.api_schema();
-    let query = Query::parse(query, &schema, &Default::default()).expect("could not parse query");
+    let query =
+        Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
     let mut response = Response::builder()
         .data(json! {{
             "object": {
@@ -5028,10 +5336,10 @@ fn parse_introspection_query() {
           }
         }
       }";
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 
@@ -5043,10 +5351,10 @@ fn parse_introspection_query() {
         }
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 
@@ -5054,10 +5362,10 @@ fn parse_introspection_query() {
         __typename
       }";
 
-    assert!(Query::parse(query, api_schema, &Default::default())
+    assert!(Query::parse(query, None, api_schema, &Default::default())
         .unwrap()
         .operations
-        .get(0)
+        .first()
         .unwrap()
         .is_introspection());
 }
@@ -5397,8 +5705,7 @@ fn test_error_path_works_across_inline_fragments() {
         id: ID!
         myField: String!
     }
-"#,
-        &Default::default(),
+"#, &Default::default()
     )
     .unwrap();
 
@@ -5427,6 +5734,7 @@ fn test_error_path_works_across_inline_fragments() {
                   }
                 }
               }"#,
+        Some("MyQueryThatContainsFragments"),
         &schema,
         &Default::default(),
     )
@@ -5461,16 +5769,16 @@ fn test_query_not_named_query() {
 
         type TheOneAndOnlyQuery { example: Boolean }
         "#,
-        &config,
+        &Default::default(),
     )
     .unwrap();
-    let query = Query::parse("{ example }", &schema, &config).unwrap();
+    let query = Query::parse("{ example }", None, &schema, &config).unwrap();
     let selection = &query.operations[0].selection_set[0];
     assert!(
         matches!(
             selection,
             Selection::Field {
-                field_type: FieldType(hir::Type::Named { name, .. }),
+                field_type: FieldType(apollo_compiler::executable::Type::Named(name)),
                 ..
             }
             if name == "Boolean"
@@ -5507,7 +5815,7 @@ fn filtered_defer_fragment() {
             c: String!
         }
         "#,
-        &config,
+        &Default::default(),
     )
     .unwrap();
     let query = r#"{
@@ -5525,10 +5833,12 @@ fn filtered_defer_fragment() {
         }
       }";
 
-    let mut compiler = ApolloCompiler::new();
-    compiler.add_executable(query, "query.graphql");
-    let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, &schema).unwrap();
+    let ast = Parser::new()
+        .parse_ast(filtered_query, "filtered_query.graphql")
+        .unwrap();
+    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let (fragments, operations, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5545,13 +5855,16 @@ fn filtered_defer_fragment() {
         subselections,
         defer_stats,
         is_original: true,
-        validation_error: None,
+        unauthorized: UnauthorizedPaths::default(),
+        schema_aware_hash,
     };
 
-    let mut compiler = ApolloCompiler::new();
-    compiler.add_executable(filtered_query, "filtered_query.graphql");
-    let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, &schema).unwrap();
+    let ast = Parser::new()
+        .parse_ast(filtered_query, "filtered_query.graphql")
+        .unwrap();
+    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let (fragments, operations, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5569,7 +5882,8 @@ fn filtered_defer_fragment() {
         subselections,
         defer_stats,
         is_original: false,
-        validation_error: None,
+        unauthorized: UnauthorizedPaths::default(),
+        schema_aware_hash,
     };
 
     query.filtered_query = Some(Arc::new(filtered));

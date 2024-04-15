@@ -1,0 +1,4 @@
+telemetry:
+  tracing:
+    zipkin:
+      endpoint: default

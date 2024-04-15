@@ -1,33 +1,56 @@
 ---
-title: Configuring CSRF (Cross-Site Request Forgery) prevention in the Apollo Router
+title: Cross-Site Request Forgery (CSRF) Prevention
 sidebar_title: CSRF prevention
+subtitle: Prevent CSRF attacks in the Apollo Router
+description: Prevent cross-site request forgery (CSRF) attacks in the Apollo Router.
+minVersion: 0.9.0
 ---
 
-Your router's [CORS policy](./cors/) enables you to control which websites can talk to your server. In most cases, the browser checks your server's CORS policy by sending a [preflight request](https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request) before sending the actual operation. This is a separate HTTP request. Unlike most HTTP requests (which use the `GET` or `POST` method), this request uses a method called `OPTIONS`. The browser sends an `Origin` header, along with some other headers that start with `Access-Control-`. These headers describe the kind of request that the potentially untrusted JavaScript wants to make. Your server returns a response with `Access-Control-*` headers describing its policies (as described above), and the browser uses that response to decide whether it's OK to send the real request.  Processing the `OPTIONS` preflight request never actually executes GraphQL operations.
+## About CSRF
+
+[Cross-site request forgery (CSRF)](https://owasp.org/www-community/attacks/csrf) attacks use side effects of ["simple"](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests) requests to execute GraphQL operations from requests sent by sites that shouldn't be allowed to communicate with your server, based on your Apollo Router's [CORS policy](./cors/).
+
+Your router's CORS policy enables you to control which websites can talk to your server. In most cases, the browser checks your server's CORS policy by sending a [preflight request](https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request) before sending the actual operation. This is a separate HTTP request. Unlike most HTTP requests (which use the `GET` or `POST` method), this request uses a method called `OPTIONS`. The browser sends an `Origin` header, along with some other headers that start with `Access-Control-`. These headers describe the kind of request that the potentially untrusted JavaScript wants to make. Your server returns a response with `Access-Control-*` headers describing its policies (as described above), and the browser uses that response to decide whether it's OK to send the real request.  Processing the `OPTIONS` preflight request never actually executes GraphQL operations.
 
 However, in some circumstances, the browser will *not* send this preflight request. If the request is considered ["simple"](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests), then the browser just sends the request without sending a preflight first. Your server's response can still contain `Access-Control-*` headers, and if they indicate that the origin that sent the request shouldn't be able to access the site, the browser will hide your server's response from the problematic JavaScript code.
 
-Unfortunately, this means that your server might execute GraphQL operations from "simple" requests sent by sites that shouldn't be allowed to communicate with your server. And these requests can even contain cookies! Although the browser will hide your server's response data from the malicious code, that might not be sufficient. If running the operation has side effects, then the attacker might not care if it can read the response or not, as long as it can use an unsuspecting user's browser (and cookies!) to trigger those side effects. Even with a read-only query, the malicious code might be able to figure out something about the response based entirely on how long the query takes to execute.
+Unfortunately, this means that your server might execute GraphQL operations from "simple" requests sent by sites that shouldn't be allowed to communicate with your server. These requests can even contain cookies. Although the browser will hide your server's response data from the malicious code, that might not be sufficient. If running the operation has side effects, then the attacker might not care if it can read the response or not, as long as it can use an unsuspecting user's browser (and cookies) to trigger those side effects. Even with a read-only query, the malicious code might be able to figure out something about the response based entirely on how long the query takes to execute.
 
-Attacks that use simple requests for their side effects are called ["cross-site request forgery" attacks](https://owasp.org/www-community/attacks/csrf), or CSRF. Attacks that measure the timing of simple requests are called "cross-site search" attacks, or XS-Search.
+In addition to CSRF, attacks that measure the timing of simple requests are called "cross-site search" attacks, or XS-Search.
+
+## Preventing CSRF
 
 To avoid CSRF and XS-Search attacks, GraphQL servers should refuse to execute any operation coming from a browser that has not "preflighted" that operation. There's no reliable way to detect whether a request came from a browser, so GraphQL servers should not execute any operation in a "simple request".
 
-The most important rule for whether or not a request is ["simple"](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests) is whether it tries to set arbitrary HTTP request headers. Any request that sets the `Content-Type` header to `application/json` (or anything other than a list of three particular values) cannot be a simple request, and thus it must be preflighted. Because all `POST` requests recognized by Apollo Server must contain a `Content-Type` header specifying `application/json`, we can be confident that they are not simple requests and that if they come from a browser, they have been preflighted.
+The most important rule for whether or not a request is "simple" is whether it tries to set arbitrary HTTP request headers. Any request that sets the `Content-Type` header to `application/json` (or anything other than a list of three particular values) cannot be a simple request, and thus it must be preflighted. Because all `POST` requests recognized by Apollo Server must contain a `Content-Type` header specifying `application/json`, we can be confident that they are not simple requests and that if they come from a browser, they have been preflighted.
 
-However, Apollo Router also handles `GET` requests which do not require a `Content-Type` header, so they can potentially be simple requests. So how can we ensure that we only execute `GET` requests that are _not_ simple requests? If we require the request to include an HTTP header that is never set automatically by the browser, then that is sufficient: requests that set HTTP headers other than the handful defined in the spec must be preflighted.
+However, the Apollo Router also handles `GET` requests which do not require a `Content-Type` header, so they can potentially be simple requests. So how can we ensure that we only execute `GET` requests that are _not_ simple requests? If we require the request to include an HTTP header that is never set automatically by the browser, then that is sufficient: requests that set HTTP headers other than the handful defined in the spec must be preflighted.
 
-Apollo Router 0.9 introduced a CSRF prevention feature, which is enabled by default. When this feature is enabled, Apollo Router only executes GraphQL operations if at least one of the following conditions is true:
+## Configuring CSRF prevention in the router
 
-- The incoming request includes a `Content-Type` header that specifies a type other than `text/plain`, `application/x-www-form-urlencoded`, or `multipart/form-data`. Notably, a `Content-Type` of `application/json` (including any suffix like `application/json; charset=utf-8`) is sufficient. This means that all `POST` requests (which must use `Content-Type: application/json`) will be executed. Additionally, all versions of [Apollo Client Web](/react/api/link/apollo-link-http) that support `GET` requests do include `Content-Type: application/json` headers, so any request from Apollo Client Web (`POST` or `GET`) will be executed.
-- There is a `X-Apollo-Operation-Name` header. This header is sent with all operations (`POST` or `GET`) by [Apollo iOS](/ios) (v0.13.0+) and [Apollo Kotlin](/kotlin) (all versions, including its former name "Apollo Android"), so any request from Apollo iOS or Apollo Kotlin will be executed.
+### Enable CSRF prevention
+
+The Apollo Router **enables CSRF prevention by default**. When this feature is enabled, the router only executes GraphQL operations if at least one of the following conditions is true:
+
+- The incoming request includes a `Content-Type` header that specifies a type other than `text/plain`, `application/x-www-form-urlencoded`, or `multipart/form-data`. 
+
+  <Note>
+  
+   A `Content-Type` of `application/json` is sufficient, including any suffix like `application/json; charset=utf-8`. Since all `POST` requests must use `Content-Type: application/json`, this means all `POST` requests will be executed. And because all versions of [Apollo Client Web](/react/api/link/apollo-link-http) that support `GET` requests include `Content-Type: application/json` headers, any request from Apollo Client Web (`POST` or `GET`) will also be executed.
+
+  </Note>
+
+- There is a `X-Apollo-Operation-Name` header. This header is sent with all `POST` or `GET` operations by [Apollo iOS](/ios) (v0.13.0+) and [Apollo Kotlin](/kotlin) (all versions, including its former name "Apollo Android"), so any request from Apollo iOS or Apollo Kotlin will be executed.
 - There is a `Apollo-Require-Preflight` header.
 
-Note that all HTTP header names are case-insensitive.
+<Note>
 
-> Unlike requests that will execute GraphQL operations, CSRF prevention is not applied to the landing page or to health checks. It does however apply to new endpoints added by plugins.
+* All HTTP header names are case-insensitive.
+* Unlike requests that will execute GraphQL operations, CSRF prevention is not applied to the landing page or to health checks. It does however apply to new endpoints added by plugins.
 
-HTTP requests that satisfy none of the conditions above will be rejected with a 400 status code and a message clearly explaining which headers need to be added in order to make the request succeed.
+</Note> 
+
+HTTP requests that satisfy none of the conditions above will be rejected with a `400` status code and a message clearly explaining which headers need to be added in order to make the request succeed.
 
 This should have no impact on legitimate use of your graph, *unless* you have clients that send `GET` requests and are not Apollo Client Web, Apollo iOS, or Apollo Kotlin. If you do send `GET` requests with other clients, you should configure them to send a non-empty `Apollo-Require-Preflight` header along with all requests.
 
@@ -43,11 +66,19 @@ csrf:
 
 The check for `Content-Type` remains the same.
 
-**We highly recommend that you leave CSRF prevention enabled**. However it is still possible to disable the plugin entirely:
+### Disable CSRF prevention
+
+<Caution>
+
+We highly recommend that you keep CSRF prevention enabled in the Apollo Router. 
+
+</Caution>
+
+Disabling CSRF in the Apollo Router might be appropriate for a GraphQL server that only contains public data and allows no mutation, or on a closed private network where browsers cannot reach untrusted websites.
+
+To disable CSRF prevention in the router, set `csrf.unsafe_disabled` to `true`:
 
 ```yaml title="router.yaml"
 csrf:
   unsafe_disabled: true
 ```
-
-This could be appropriate for a GraphQL server that only contains public data and allows no mutation, or on a closed private network where browsers cannot reach untrusted websites.

@@ -1,0 +1,139 @@
+---
+title: Jaeger exporter (via OTLP)
+subtitle: Configure the Jaeger exporter for tracing
+description: Configure the Jaeger exporter for tracing via OpenTelemetry Protocol (OTLP) in the Apollo Router
+---
+
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+
+Enable and configure the [Jaeger exporter](https://www.jaegertracing.io/) for tracing in the Apollo Router.
+
+For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+
+## Jaeger OTLP configuration
+
+Since Jaeger v1.35.0, [Jaeger supports native OTLP ingestion](https://medium.com/jaegertracing/introducing-native-support-for-opentelemetry-in-jaeger-eb661be8183c), and it's the recommended way to send traces to Jaeger.
+
+When running Jaeger with Docker, make sure that port **4317** is exposed and that `COLLECTOR_OTLP_ENABLED` is set to `true`. For example:
+
+```bash
+docker run --name jaeger \
+  -e COLLECTOR_OTLP_ENABLED=true \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  jaegertracing/all-in-one:1.35
+```
+
+To configure the router to send traces via OTLP, set the Jaeger endpoint with port 4317. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       otlp:
+         enabled: true   
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+         endpoint: "http://${env.JAEGER_HOST}:4317"
+```
+
+See [OTLP configuration](./otlp#configuration) for more details on settings.
+
+## Jaeger Native configuration
+
+<Caution>
+
+[Native Jaegar tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the Apollo Router. Use [Jaeger via OTLP](#jaeger-otlp-configuration) instead.
+
+</Caution>
+
+The Apollo Router can be configured to export tracing data to Jaeger either via an agent or HTTP collector.
+
+Unless explicitly configured to use a collector, the router will use Jaeger agent by default.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       jaeger:
+         enabled: true  
+```
+
+#### `enabled`
+Set to true to enable the Jaeger exporter. Defaults to false.
+
+#### `batch_processor`
+<BatchProcessorPreamble />
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      jaeger: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
+```
+
+#### `batch_processor` configuration reference
+<BatchProcessorRef />
+
+### Jaeger configuration reference
+
+| Attribute         | Default | Description                   |
+|-------------------|---------|-------------------------------|
+| `enabled`         | `false` | Enable the OTLP exporter.     |
+| `collector`       |         | Collector specific settings.  |
+| `agent`           |         | Agent specific settings.      |
+| `batch_processor` |         | The batch processor settings. |
+
+
+
+### Agent configuration
+
+If you are running Jaeger agent then use the `agent` configuration to set the agent endpoint. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       jaeger:
+         enabled: true
+         # Optional agent configuration,
+         agent:
+           # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6832)
+           endpoint: "${env.JAEGER_HOST}:6832"  
+```
+#### Jaeger agent configuration reference
+
+| Attribute         | Default | Description                        |
+|-------------------|---------|------------------------------------|
+| `endpoint`        | `false` | Enable the OTLP exporter.          |
+
+### Collector configuration
+
+If you are running Jaeger collector then use the `collector` configuration to set the agent endpoint. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       jaeger:
+         enabled: true
+         # Optional collector configuration,
+         collector:
+           # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
+           endpoint: "http://${env.JAEGER_HOST}:14268/api/traces"
+           username: "${env.JAEGER_USERNAME}"
+           password: "${env.JAEGER_PASSWORD}"
+```
+#### Jaeger Collector configuration reference
+| Attribute         | Default | Description                        |
+|-------------------|---------|------------------------------------|
+| `endpoint`        | `false` | Enable the OTLP exporter.          |
+| `username`        |         | The username for Jaeger collector. |
+| `password`        |         | The password for Jaeger collector. |
+

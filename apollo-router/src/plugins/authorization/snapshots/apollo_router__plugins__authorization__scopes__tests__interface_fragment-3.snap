@@ -1,0 +1,40 @@
+---
+source: apollo-router/src/plugins/authorization/scopes.rs
+expression: "TestResult {\n    query: QUERY,\n    extracted_scopes: &extracted_scopes,\n    scopes: [\"read:user\".to_string(),\n                    \"read:username\".to_string()].into_iter().collect(),\n    result: doc,\n    paths,\n}"
+---
+query:
+
+        query {
+            topProducts {
+                type
+            }
+            itf {
+                id
+                ...F
+            }
+        }
+
+        fragment F on User {
+            id2: id
+            name
+        }
+        
+extracted_scopes: {"read:user", "read:username"}
+request scopes: ["read:user", "read:username"]
+filtered:
+fragment F on User {
+  id2: id
+  name
+}
+
+query {
+  topProducts {
+    type
+  }
+  itf {
+    id
+    ...F
+  }
+}
+
+paths: []

@@ -9,7 +9,7 @@ jobs:
   Update-Uplink-Schema:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
       - name: Install Rover
         run: |
           curl -sSL https://rover.apollo.dev/nix/v0.14.1 | sh
@@ -19,7 +19,7 @@ jobs:
           rover graph introspect https://uplink.api.apollographql.com/ | perl -pe 'chomp if eof' > ./apollo-router/src/uplink/uplink.graphql
       - name: Create Pull Request
         id: cpr
-        uses: peter-evans/create-pull-request@v5
+        uses: peter-evans/create-pull-request@v6
         with:
           commit-message: Update Uplink schema
           committer: GitHub <noreply@github.com>

@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 default-members = ["apollo-router"]
 members = [
     "apollo-router",
@@ -43,10 +44,32 @@ incremental = false
 inherits = "release"
 debug = 1
 
-[patch.crates-io]
-# TODO: to delete
-# opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-http = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-zipkin = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-datadog = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
+# Dependencies used in more than one place are specified here in order to keep versions in sync:
+# https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
+[workspace.dependencies]
+apollo-compiler = "=1.0.0-beta.15"
+apollo-parser = "0.7.6"
+apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
+async-trait = "0.1.77"
+http = "0.2.11"
+once_cell = "1.19.0"
+reqwest = { version = "0.11.24", default-features = false, features = [
+    "rustls-tls",
+    "rustls-native-certs",
+    "gzip",
+    "json",
+    "stream",
+] }
+
+# note: this dependency should _always_ be pinned, prefix the version with an `=`
+router-bridge = "=0.5.18+v2.7.2"
+
+schemars = { version = "0.8.16", features = ["url"] }
+serde = { version = "1.0.197", features = ["derive", "rc"] }
+serde_json = { version = "1.0.114", features = [
+    "preserve_order",
+    "float_roundtrip",
+] }
+serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
+tokio = { version = "1.36.0", features = ["full"] }
+tower = { version = "0.4.13", features = ["full"] }

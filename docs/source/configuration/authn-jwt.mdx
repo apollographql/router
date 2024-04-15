@@ -1,25 +1,21 @@
 ---
 title: JWT Authentication in the Apollo Router
+description: Restrict access to credentialed users and systems
 ---
 
-> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
->
-> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
-The Apollo Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
+Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The Apollo Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
-By enabling JWT authentication, you can block malicious traffic at the edge of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
+By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
-> ⚠️ Under all circumstances, your subgraphs should be accessible _only_ via the router—not directly by clients. This is especially true if you're relying on JWT authentication in the router. Make sure to [secure your subgraphs](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs).
+<Tip>
 
-**To use this feature:**
+Your subgraphs should always be accessible _only_ via the router—not directly by clients. This is especially true if you rely on JWT authentication in the router. See [Securing your subgraphs](/graphos/graphs/securing-a-subgraph) for steps to restrict subgraph access to only your router.
 
-- You must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
-- You must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) and [connect your router to GraphOS](./overview/#environment-variables).
+</Tip>
 
-If you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), adding JWT authentication to your router is comparatively straightforward. If you use your own custom IdP, [advanced configuration is required](#creating-your-own-jwks-advanced).
-
-## How it works
+## How JWT authentication works
 
 These are the high-level steps of JWT-based authentication with the Apollo Router:
 
@@ -37,7 +33,9 @@ These are the high-level steps of JWT-based authentication with the Apollo Route
 
 ## Turning it on
 
-You enable JWT authentication for your router with the following steps:
+If you use your own custom IdP, [advanced configuration is required](#creating-your-own-jwks-advanced).
+
+Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), enabling JWT authentication in your router is a two step process described below. 
 
 1. Set configuration options for JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication` key:
 
@@ -46,12 +44,22 @@ You enable JWT authentication for your router with the following steps:
       router:
         jwt:
           jwks: # This key is required.
-          - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-            issuer: <optional name of issuer>
-
+            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+              issuer: <optional name of issuer>
+              poll_interval: <optional poll interval>
+              headers: # optional list of static headers added to the HTTP request to the JWKS URL
+                - name: User-Agent
+                  value: router
           # These keys are optional. Default values are shown.
           header_name: Authorization
           header_value_prefix: Bearer
+          # array of alternative token sources
+          sources:
+            - type: header
+              name: X-Authorization
+              value_prefix: Bearer
+            - type: cookie
+              name: authz
     ```
 
     These options are documented [below](#configuration-options).
@@ -100,6 +108,8 @@ The following configuration options are supported:
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
 - `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
+- `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
+- `headers`: **optional** a list of headers sent when downloading from the JWKS URL
 
 </td>
 </tr>
@@ -134,6 +144,33 @@ The default value is `Bearer`.
 </td>
 </tr>
 
+<tr>
+<td style="min-width: 150px;">
+
+##### `sources`
+
+</td>
+<td>
+
+This is an array of possible token sources, as it could be provided in different headers depending on the client, or it could be stored in a cookie. If the default token source defined by the above `header_name` and `header_value_prefix` does not find the token, then each of the alternative sources is tried until one matches.
+
+```yaml title="router.yaml"
+    authentication:
+      router:
+        jwt:
+          jwks:
+            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+          sources:
+            - type: header
+              name: X-Authorization
+              value_prefix: Bearer
+            - type: cookie
+              name: authz
+```
+
+</td>
+</tr>
+
 </tbody>
 </table>
 
@@ -161,7 +198,11 @@ Below are 2 example [Rhai script](../customizations/rhai/) customizations that d
 
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+<Note>
+
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+</Note>
 
 <ExpansionPanel title="Click to expand">
 
@@ -186,13 +227,21 @@ fn process_request(request) {
 
 </ExpansionPanel>
 
-> ⚠️ Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
+<Tip>
+
+Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
+
+</Tip>
 
 ### Example: Forwarding claims to subgraphs as GraphQL extensions
 
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+<Note>
+
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+</Note>
 
 <ExpansionPanel title="Click to expand">
 
@@ -204,7 +253,7 @@ fn process_request(request) {
         status: 401
       };
     }
-    request.subgraph.extensions["claims"] = claims;
+    request.subgraph.body.extensions["claims"] = claims;
 }
 ```
 
@@ -214,7 +263,11 @@ fn process_request(request) {
 
 Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+<Note>
+
+This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+</Note>
 
 <ExpansionPanel title="Click to expand">
 
@@ -266,13 +319,17 @@ fn subgraph_service(service, subgraph) {
 
 ### Claim augmentation via coprocessors
 
-Tokens can come in with limited information, that is then used to look up user specific information like roles. This can be done with [coprocessors](/customizations/coprocessor).
+You may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can augment the claims from your JSON web tokens with [coprocessors](../customizations/coprocessor#how-it-works).
 
 <ExpansionPanel title="Click to expand">
 
-The router level coprocessor is guaranteed to be called after the authentication plugin, so the coprocessor can receive the list of claims extracted from the token, use information like the `sub` (subject) claim to look up the user, insert its data in the claims list and return it to the router.
+A [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
+- receive the list of claims extracted from the JWT
+- use information like the `sub` (subject) claim to look up the user in an external database or service
+- insert additional data in the claims list
+- return the claims list to the router
 
-If the router is configured with:
+For example, if you use this [router configuration](./overview#yaml-config-file):
 
 ```yaml title="router.yaml"
 authentication:
@@ -288,7 +345,7 @@ coprocessor:
       context: true
 ```
 
-The coprocessor will then receive a request with this format:
+The router sends requests to the coprocessor with this format:
 
 ```json
 {
@@ -307,15 +364,44 @@ The coprocessor will then receive a request with this format:
     "method": "POST"
 }
 ```
+
+The coprocessor can then look up the user with the identifier specified in the `sub` claim and return a response with more claims:
+
+
+```json
+{
+    "version": 1,
+    "stage": "RouterRequest",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+        "entries": {
+            "apollo_authentication::JWT::claims": {
+                "exp": 10000000000,
+                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a",
+                "scope": "profile:read profile:write"
+            }
+        }
+    }
+}
+```
+
+For more information, refer to [the coprocessor documentation](../customizations/coprocessor/).
+
 </ExpansionPanel>
 
 ## Creating your own JWKS (advanced)
 
-> ⚠️ **Most third-party IdP services create and host a JWKS for you.** If you use a third-party IdP, consult its documentation to obtain the [JWKS URL](#jwks) to pass to your router.
->
-> Read this section if you use a _custom_ IdP that doesn't currently publish its JWKS at a router-accessible URL.
+<Note>
+
+- **Most third-party IdP services create and host a JSON Web Key Set (JWKS) for you.** Read this section only if you use a _custom_ IdP that doesn't publish its JWKS at a router-accessible URL.
+- To be compatible with JWT authentication supported by Apollo Router, your IdP (or whatever service issues JWTs to authenticated clients) must use one of the [signature algorithms](https://crates.io/crates/jsonwebtoken#algorithms) supported by the router.
+
+</Note>
 
 The Apollo Router obtains each JSON Web Key (JWK) that it uses from the URLs that you specify via the [`jwks`](#jwks) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a JWK Set (or **JWKS**).
+
+Consult your IdP's documentation to obtain the [JWKS URL](#jwks) to pass to your router.
 
 To provide a JWKS to your router, configure your IdP service to do the following whenever its collection of valid JWKs changes (such as when a JWK expires or is rotated):
 
@@ -323,7 +409,11 @@ To provide a JWKS to your router, configure your IdP service to do the following
 2. Write the JWKS object to a location that your router can reach via a `file://` or `https://` URL.
     - ⚠️ **If _any_ of your JWKs uses a symmetric signature algorithm (such as `HS256`), always use a `file://` URL.** Symmetric signature algorithms use a shared key that should _never_ be accessible over the network.
 
-Again, make sure the IdP is configured to perform these steps _every time_ its collection of JWKs changes!
+<Tip>
+
+Make sure the IdP is configured to perform these steps _every time_ its collection of JWKs changes.
+
+</Tip>
 
 ### JWKS format
 
@@ -577,7 +667,7 @@ The y-coordinate of the elliptic curve point for this public key, as the base64-
 
   // highlight-start
   // Symmetric-algorithm-specific property
-  "k": "c2VjcmV0Cg==" // ⚠️ This is a base64-encoded shared secret! ⚠️
+  "k": "c2VjcmV0Cg" // ⚠️ This is a base64-encoded shared secret! ⚠️
   // highlight-end
 }
 ```
@@ -599,7 +689,7 @@ The y-coordinate of the elliptic curve point for this public key, as the base64-
 </td>
 <td>
 
-The value of the shared symmetric key, as the base64-encoded value of the key's octet sequence representation.
+The value of the shared symmetric key, as the [(URL safe, without padding) base64-encoded value](https://datatracker.ietf.org/doc/html/rfc7515#section-2) of the key's octet sequence representation.
 
 **⚠️ If your JWK uses a symmetric signature algorithm, always [provide your JWKS to the router](#jwks) via a `file://` URL!** Shared keys should never be made available over the network.
 
@@ -622,15 +712,15 @@ This matching strategy is necessary because some identity providers (IdPs) don't
 
 ## Forwarding JWTs to subgraphs
 
-Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs) to enable fine-grained access control.
+Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs-as-headers) to enable fine-grained access control.
 
 If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
 
 ## Observability
 
-If your router enables [tracing](./tracing/), the JWT authentication plugin has its own tracing span: `authentication_plugin`
+If your router enables [tracing](./telemetry/exporters/tracing/overview), the JWT authentication plugin has its own tracing span: `authentication_plugin`
 
-If your router enables [metrics collection via Prometheus](./metrics/#using-prometheus), the JWT authentication plugin provides and exports the following metrics:
+If your router enables [metrics collection via Prometheus](./telemetry/exporters/metrics/prometheus), the JWT authentication plugin provides and exports the following metrics:
 
 - `apollo_authentication_failure_count`
 - `apollo_authentication_success_count`

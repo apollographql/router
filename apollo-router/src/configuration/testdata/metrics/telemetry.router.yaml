@@ -1,0 +1,101 @@
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+      otlp:
+        enabled: true
+        endpoint: default
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: default
+      zipkin:
+        enabled: true
+        endpoint: default
+      datadog:
+        enabled: true
+        endpoint: default
+      jaeger:
+        enabled: true
+        agent:
+          endpoint: default
+    logging:
+      experimental_when_header:
+        - name: apollo-router-log-request
+          value: test
+          headers: true # default: false
+          body: true # default: false
+        # log request for all requests coming from Iphones
+        - name: custom-header
+          match: ^foo.*
+          headers: true
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      default_attribute_requirement_level: recommended
+      router:
+        attributes:
+          "custom_one":
+            request_header: host
+      supergraph:
+        attributes:
+          graphql.document: true
+      subgraph:
+        attributes:
+          subgraph.graphql.document: true
+    instruments:
+      router:
+        http.server.request.body.size:
+          attributes:
+            # Standard attributes
+            http.response.status_code: true
+            "my_attribute":
+              response_header: "content-type"
+        http.server.request.duration:
+          attributes:
+            # Standard attributes
+            http.response.status_code: true
+            http.request.method: true
+            # Custom attribute
+            "my_attribute":
+              response_header: "content-type"
+        my.request.duration: # The name of your custom instrument/metric
+          value: duration
+          type: counter
+          unit: s
+          description: "my description"
+        acme.request.size: # The name of your custom instrument/metric
+          value:
+           request_header: "content-length"
+          type: counter
+          unit: s
+          description: "my description" 
+            
+        acme.request.length: # The name of your custom instrument/metric
+          value:
+           request_header: "content-length"
+          type: histogram
+          unit: s
+          description: "my description"
+      supergraph:
+        acme.graphql.requests:
+          value: unit
+          type: counter
+          unit: request
+          description: "supergraph requests"
+          attributes:
+            static: hello
+            graphql_operation_kind:
+              operation_kind: string
+      subgraph:
+        request_including_price1:
+          value: unit
+          type: counter
+          unit: request
+          description: "supergraph requests"
+          condition:
+            exists:
+             subgraph_response_data: "$.products[*].price1"
+          attributes:
+            subgraph.name: true

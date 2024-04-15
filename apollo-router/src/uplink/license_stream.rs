@@ -3,14 +3,20 @@
 // Read more: https://github.com/hyperium/tonic/issues/1056
 #![allow(clippy::derive_partial_eq_without_eq)]
 
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Instant;
 use std::time::SystemTime;
 
+use futures::future::Ready;
+use futures::stream::FilterMap;
 use futures::stream::Fuse;
+use futures::stream::Repeat;
+use futures::stream::Zip;
 use futures::Stream;
 use futures::StreamExt;
 use graphql_client::GraphQLQuery;
@@ -18,12 +24,17 @@ use pin_project_lite::pin_project;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
+use crate::uplink::license_enforcement::Audience;
+use crate::uplink::license_enforcement::Claims;
 use crate::uplink::license_enforcement::License;
 use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::OneOrMany;
 use crate::uplink::license_stream::license_query::FetchErrorCode;
 use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
+
+const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -209,6 +220,12 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
     }
 }
 
+type ValidateAudience<T> = FilterMap<
+    Zip<T, Repeat<Arc<HashSet<Audience>>>>,
+    Ready<Option<License>>,
+    fn((License, Arc<HashSet<Audience>>)) -> Ready<Option<License>>,
+>;
+
 pub(crate) trait LicenseStreamExt: Stream<Item = License> {
     fn expand_licenses(self) -> LicenseExpander<Self>
     where
@@ -219,20 +236,61 @@ pub(crate) trait LicenseStreamExt: Stream<Item = License> {
             upstream: self.fuse(),
         }
     }
+
+    fn validate_audience(self, audiences: impl Into<HashSet<Audience>>) -> ValidateAudience<Self>
+    where
+        Self: Sized,
+    {
+        // Zip is used to inject the data into the stream, and then filter_map can be used to actually deal with the data.
+        // There's no way to do this with a closure without hitting compiler issues.
+        // In the past we have implemented our own steps where we have needed to inject state, but this is the recommended way to do it.
+        let audiences: Arc<HashSet<Audience>> = Arc::new(audiences.into());
+        self.zip(futures::stream::repeat(audiences))
+            .filter_map(|(license, audiences)| {
+                let matches = match &license {
+                    License {
+                        claims:
+                            Some(Claims {
+                                aud: OneOrMany::Many(aud),
+                                ..
+                            }),
+                    } => aud.iter().any(|aud| audiences.contains(aud)),
+                    License {
+                        claims:
+                            Some(Claims {
+                                aud: OneOrMany::One(aud),
+                                ..
+                            }),
+                    } => audiences.contains(aud),
+                    // A license with no claims is always valid. We will check later if any commercial features are in use.
+                    License { claims: None } => true,
+                };
+
+                if !matches {
+                    tracing::error!(
+                        code = APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED,
+                        "the license file was valid, but was not enabled offline use",
+                    );
+                }
+                futures::future::ready(if matches { Some(license) } else { None })
+            })
+    }
 }
 
 impl<T: Stream<Item = License>> LicenseStreamExt for T {}
 
 #[cfg(test)]
 mod test {
+    use std::future::ready;
     use std::time::Duration;
     use std::time::Instant;
     use std::time::SystemTime;
 
-    use futures::SinkExt;
     use futures::StreamExt;
     use futures_test::stream::StreamTestExt;
+    use tracing::instrument::WithSubscriber;
 
+    use crate::assert_snapshot_subscriber;
     use crate::router::Event;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
@@ -263,7 +321,7 @@ mod test {
             .await;
 
             assert!(results
-                .get(0)
+                .first()
                 .expect("expected one result")
                 .as_ref()
                 .expect("license should be OK")
@@ -384,8 +442,9 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn license_expander_claim_pause_claim() {
-        let (mut tx, rx) = futures::channel::mpsc::channel(10);
-        let events_stream = rx.expand_licenses().map(SimpleEvent::from);
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let rx_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        let events_stream = rx_stream.expand_licenses().map(SimpleEvent::from);
 
         tokio::task::spawn(async move {
             // This simulates a new claim coming in before in between the warning and halt
@@ -452,5 +511,97 @@ mod test {
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_validate_audience_single() {
+        assert_eq!(
+            futures::stream::once(ready(License {
+                claims: Some(Claims {
+                    iss: "".to_string(),
+                    sub: "".to_string(),
+                    aud: OneOrMany::One(Audience::Offline),
+                    warn_at: SystemTime::now(),
+                    halt_at: SystemTime::now(),
+                }),
+            }))
+            .validate_audience([Audience::Offline, Audience::Cloud])
+            .count()
+            .with_subscriber(assert_snapshot_subscriber!())
+            .await,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_audience_single_filtered() {
+        assert_eq!(
+            futures::stream::once(ready(License {
+                claims: Some(Claims {
+                    iss: "".to_string(),
+                    sub: "".to_string(),
+                    aud: OneOrMany::One(Audience::SelfHosted),
+                    warn_at: SystemTime::now(),
+                    halt_at: SystemTime::now(),
+                }),
+            }))
+            .validate_audience([Audience::Offline, Audience::Cloud])
+            .count()
+            .with_subscriber(assert_snapshot_subscriber!())
+            .await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_audience_multiple() {
+        assert_eq!(
+            futures::stream::once(ready(License {
+                claims: Some(Claims {
+                    iss: "".to_string(),
+                    sub: "".to_string(),
+                    aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::Offline]),
+                    warn_at: SystemTime::now(),
+                    halt_at: SystemTime::now(),
+                }),
+            }))
+            .validate_audience([Audience::Offline, Audience::Cloud])
+            .count()
+            .with_subscriber(assert_snapshot_subscriber!())
+            .await,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_audience_multiple_filtered() {
+        assert_eq!(
+            futures::stream::once(ready(License {
+                claims: Some(Claims {
+                    iss: "".to_string(),
+                    sub: "".to_string(),
+                    aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::SelfHosted]),
+                    warn_at: SystemTime::now(),
+                    halt_at: SystemTime::now(),
+                }),
+            }))
+            .validate_audience([Audience::Offline, Audience::Cloud])
+            .count()
+            .with_subscriber(assert_snapshot_subscriber!())
+            .await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_no_claim() {
+        assert_eq!(
+            futures::stream::once(ready(License::default()))
+                .validate_audience([Audience::Offline, Audience::Cloud])
+                .count()
+                .with_subscriber(assert_snapshot_subscriber!())
+                .await,
+            1
+        );
     }
 }

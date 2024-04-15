@@ -1,7 +1,9 @@
 supergraph:
   listen: 1.2.3.4:5
 telemetry:
-  tracing:
-    datadog:
-      endpoint: ${env.TEST_CONFIG_ENDPOINT}
+  exporters:
+    tracing:
+      datadog:
+        enabled: true
+        endpoint: ${env.TEST_CONFIG_ENDPOINT}
 

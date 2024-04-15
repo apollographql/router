@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/plugins/telemetry/fmt_layer.rs
+expression: buff.to_string()
+---
+[timestamp] ERROR  Hello from nested test http.method="GET"
+[timestamp] INFO  Hello from test event_attr="foo"
+

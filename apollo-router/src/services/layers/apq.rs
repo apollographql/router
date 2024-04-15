@@ -17,6 +17,7 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
+static DONT_CACHE_HEADER_VALUE: HeaderValue = HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE);
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -87,7 +88,11 @@ async fn apq_request(
             if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                 tracing::trace!("apq: cache insert");
                 let _ = request.context.insert("persisted_query_register", true);
-                cache.insert(redis_key(&query_hash), query).await;
+                let query = query.to_owned();
+                let cache = cache.clone();
+                tokio::spawn(async move {
+                    cache.insert(redis_key(&query_hash), query).await;
+                });
                 Ok(request)
             } else {
                 tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
@@ -134,10 +139,7 @@ async fn apq_request(
                     // Persisted query errors (especially "not found") need to be uncached, because
                     // hopefully we're about to fill in the APQ cache and the same request will
                     // succeed next time.
-                    .header(
-                        CACHE_CONTROL,
-                        HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE),
-                    )
+                    .header(CACHE_CONTROL, DONT_CACHE_HEADER_VALUE.clone())
                     .context(request.context)
                     .build()
                     .expect("response is valid");
@@ -156,7 +158,7 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 }
 
 fn redis_key(query_hash: &str) -> String {
-    format!("apq\0{query_hash}")
+    format!("apq:{query_hash}")
 }
 
 pub(crate) fn calculate_hash_for_query(query: &str) -> String {
@@ -208,9 +210,9 @@ mod apq_tests {
     use super::*;
     use crate::error::Error;
     use crate::graphql::Response;
+    use crate::services::router::service::from_supergraph_mock_callback;
+    use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
     use crate::services::router::ClientRequestAccepts;
-    use crate::services::router_service::from_supergraph_mock_callback;
-    use crate::services::router_service::from_supergraph_mock_callback_and_configuration;
     use crate::Configuration;
     use crate::Context;
 
@@ -542,7 +544,7 @@ mod apq_tests {
 
     fn new_context() -> Context {
         let context = Context::new();
-        context.private_entries.lock().insert(ClientRequestAccepts {
+        context.extensions().lock().insert(ClientRequestAccepts {
             json: true,
             ..Default::default()
         });

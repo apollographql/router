@@ -2,6 +2,9 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -16,13 +19,19 @@ use multimap::MultiMap;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
+use tower_service::Service;
 
+use crate::axum_factory::utils::ConnectionInfo;
+use crate::axum_factory::utils::InjectConnectionInfo;
+use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
+
+pub(crate) static SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
@@ -82,7 +91,15 @@ pub(super) fn extra_endpoints(
     mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
         (
             listen_addr,
-            e.into_iter().map(|e| e.into_router()).collect::<Vec<_>>(),
+            e.into_iter()
+                .map(|e| {
+                    let mut router = e.into_router();
+                    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+                        router = main_endpoint_layer(router);
+                    }
+                    router
+                })
+                .collect::<Vec<_>>(),
         )
     }));
     mm
@@ -217,8 +234,9 @@ pub(super) fn serve_router_on_listen_addr(
                                 max_open_file_warning = None;
                             }
 
+                            let session_count = SESSION_COUNT.fetch_add(1, Ordering::Acquire)+1;
                             tracing::info!(
-                                counter.apollo_router_session_count_total = 1,
+                                value.apollo_router_session_count_total = session_count,
                                 listener = &address
                             );
 
@@ -229,6 +247,13 @@ pub(super) fn serve_router_on_listen_addr(
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
+                                        let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = InjectConnectionInfo::new(app, ConnectionInfo {
+                                            peer_address: stream.peer_addr().ok(),
+                                            server_address: stream.local_addr().ok(),
+                                        });
+                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+
                                         stream
                                             .set_nodelay(true)
                                             .expect(
@@ -251,12 +276,19 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
 
-                                                let _= connection.await;
+                                                // if the connection was idle and we never received the first request,
+                                                // hyper's graceful shutdown would wait indefinitely, so instead we
+                                                // close the connection right away
+                                                if received_first_request.load(Ordering::Relaxed) {
+                                                    let _= connection.await;
+                                                }
                                             }
                                         }
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
+                                        let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
                                         let connection = Http::new()
                                         .http1_keep_alive(true)
                                         .serve_connection(stream, app);
@@ -273,11 +305,19 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
 
-                                                let _= connection.await;
+                                                // if the connection was idle and we never received the first request,
+                                                // hyper's graceful shutdown would wait indefinitely, so instead we
+                                                // close the connection right away
+                                                if received_first_request.load(Ordering::Relaxed) {
+                                                    let _= connection.await;
+                                                }
                                             }
                                         }
                                     },
                                     NetworkStream::Tls(stream) => {
+                                        let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+
                                         stream.get_ref().0
                                             .set_nodelay(true)
                                             .expect(
@@ -305,14 +345,20 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
 
-                                                let _= connection.await;
+                                                // if the connection was idle and we never received the first request,
+                                                // hyper's graceful shutdown would wait indefinitely, so instead we
+                                                // close the connection right away
+                                                if received_first_request.load(Ordering::Relaxed) {
+                                                    let _= connection.await;
+                                                }
                                             }
                                         }
                                     }
                                 }
 
+                                let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Acquire)-1;
                                 tracing::info!(
-                                    counter.apollo_router_session_count_total = -1,
+                                    value.apollo_router_session_count_total = session_count,
                                     listener = &address
                                 );
 
@@ -405,6 +451,42 @@ pub(super) fn serve_router_on_listen_addr(
     (server, shutdown_sender)
 }
 
+struct IdleConnectionChecker<S> {
+    received_request: Arc<AtomicBool>,
+    inner: S,
+}
+
+impl<S> IdleConnectionChecker<S> {
+    fn new(b: Arc<AtomicBool>, service: S) -> Self {
+        IdleConnectionChecker {
+            received_request: b,
+            inner: service,
+        }
+    }
+}
+impl<S, B> Service<http::Request<B>> for IdleConnectionChecker<S>
+where
+    S: Service<http::Request<B>>,
+{
+    type Response = <S as Service<http::Request<B>>>::Response;
+
+    type Error = <S as Service<http::Request<B>>>::Error;
+
+    type Future = <S as Service<http::Request<B>>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::result::Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<B>) -> Self::Future {
+        self.received_request.store(true, Ordering::Relaxed);
+        self.inner.call(req)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
@@ -419,14 +501,13 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
-    use crate::services::router_service;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             MultiMap::new(),
         )
@@ -463,7 +544,7 @@ mod tests {
         );
 
         let error = init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             web_endpoints,
         )
@@ -501,7 +582,7 @@ mod tests {
             Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router_service::empty().await, Arc::new(configuration), mm)
+        let error = init_with_config(router::service::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 

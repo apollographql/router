@@ -27,9 +27,11 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
+use crate::configuration::metrics::Metrics;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
+use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -58,6 +60,7 @@ enum State<FA: RouterSuperServiceFactory> {
     },
     Running {
         configuration: Arc<Configuration>,
+        _metrics: Option<Metrics>,
         schema: Arc<String>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
@@ -163,6 +166,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 server_handle,
                 router_service_factory,
                 all_connections_stopped_signals,
+                ..
             } => {
                 // When we get an unlicensed event, if we were licensed before then just carry on.
                 // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
@@ -313,13 +317,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
-        let parsed_schema = Arc::new(
-            Schema::parse(&schema, &configuration)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
-        );
-
-        // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &parsed_schema);
+        let report = {
+            let ast = Schema::parse_ast(&schema)
+                .map_err(|e| ServiceCreationError(e.to_string().into()))?;
+            // Check the license
+            LicenseEnforcementReport::build(&configuration, &ast)
+        };
 
         match license {
             LicenseState::Licensed => {
@@ -357,6 +360,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         let router_service_factory = state_machine
             .router_configurator
             .create(
+                state_machine.is_telemetry_disabled,
                 configuration.clone(),
                 schema.to_string(),
                 previous_router_service_factory,
@@ -412,8 +416,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
+        let metrics =
+            apollo_opentelemetry_initialized().then(|| Metrics::new(&configuration, &license));
+
         Ok(Running {
             configuration,
+            _metrics: metrics,
             schema,
             license,
             server_handle: Some(server_handle),
@@ -434,6 +442,7 @@ where
     S: HttpServerFactory,
     FA: RouterSuperServiceFactory,
 {
+    is_telemetry_disabled: bool,
     http_server_factory: S,
     router_configurator: FA,
     pub(crate) listen_addresses: Arc<RwLock<ListenAddresses>>,
@@ -448,7 +457,11 @@ where
     FA: RouterSuperServiceFactory + Send,
     FA::RouterFactory: RouterFactory,
 {
-    pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
+    pub(crate) fn new(
+        is_telemetry_disabled: bool,
+        http_server_factory: S,
+        router_factory: FA,
+    ) -> Self {
         // Listen address is created locked so that if a consumer tries to examine the listen address before the state machine has reached running state they are blocked.
         let listen_addresses: Arc<RwLock<ListenAddresses>> = Default::default();
         let listen_addresses_guard = Some(
@@ -458,6 +471,7 @@ where
                 .expect("lock just created, qed"),
         );
         Self {
+            is_telemetry_disabled,
             http_server_factory,
             router_configurator: router_factory,
             listen_addresses,
@@ -482,6 +496,7 @@ where
                 .expect("lock just created, qed"),
         );
         Self {
+            is_telemetry_disabled: false,
             http_server_factory,
             router_configurator: router_factory,
             listen_addresses,
@@ -513,7 +528,7 @@ where
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
-            let last_state = format!("{state:?}");
+            let previous_state = format!("{state:?}");
 
             state = match event {
                 UpdateConfiguration(configuration) => {
@@ -543,7 +558,11 @@ where
             self.notify_updated.notify_one();
 
             tracing::debug!(
-                "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
+                monotonic_counter.apollo_router_state_change_total = 1u64,
+                event = event_name,
+                state = ?state,
+                previous_state,
+                "state machine transitioned"
             );
 
             // If we've errored then exit even if there are potentially more messages
@@ -802,7 +821,9 @@ mod tests {
     async fn listen_addresses_are_locked() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0, 0, 0, 0, 0);
-        let state_machine = StateMachine::new(server_factory, router_factory);
+        let is_telemetry_disabled = false;
+        let state_machine =
+            StateMachine::new(is_telemetry_disabled, server_factory, router_factory);
         assert!(state_machine.listen_addresses.try_read().is_err());
     }
 
@@ -967,7 +988,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(1)
-            .returning(|_, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("Error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0, 1, 0, 1, 0);
 
@@ -995,7 +1016,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _| {
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1005,7 +1026,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
@@ -1036,7 +1057,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _| {
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1046,13 +1067,13 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
         router_factory
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .withf(|configuration, _, _, _| configuration.homepage.enabled)
-            .returning(|_, _, _, _| {
+            .withf(|_, configuration, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1096,6 +1117,7 @@ mod tests {
 
             async fn create<'a>(
                 &'a mut self,
+                is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
                 schema: String,
                 previous_router_service_factory: Option<&'a MockMyRouterFactory>,
@@ -1168,7 +1190,9 @@ mod tests {
         router_factory: MockMyRouterConfigurator,
         events: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), ApolloRouterError> {
-        let state_machine = StateMachine::new(server_factory, router_factory);
+        let is_telemetry_disabled = false;
+        let state_machine =
+            StateMachine::new(is_telemetry_disabled, server_factory, router_factory);
         state_machine.process_events(events).await
     }
 
@@ -1263,7 +1287,7 @@ mod tests {
             } else {
                 expect_times_called
             })
-            .returning(move |_, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1276,7 +1300,7 @@ mod tests {
                 .expect_create()
                 .times(expect_times_called - 1)
                 .withf(
-                    move |_configuration: &Arc<Configuration>,
+                    move |_, _configuration: &Arc<Configuration>,
                           _,
                           previous_router_service_factory: &Option<&MockMyRouterFactory>,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>|
@@ -1284,7 +1308,7 @@ mod tests {
                             previous_router_service_factory.is_some()
                           },
                 )
-                .returning(move |_, _, _, _| {
+                .returning(move |_, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
                     router.expect_clone().return_once(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);

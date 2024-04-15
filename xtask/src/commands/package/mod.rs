@@ -18,6 +18,7 @@ pub(crate) const TARGET_X86_64_GNU_LINUX: &str = "x86_64-unknown-linux-gnu";
 pub(crate) const TARGET_AARCH64_GNU_LINUX: &str = "aarch64-unknown-linux-gnu";
 pub(crate) const TARGET_X86_64_WINDOWS: &str = "x86_64-pc-windows-msvc";
 pub(crate) const TARGET_X86_64_MACOS: &str = "x86_64-apple-darwin";
+pub(crate) const TARGET_ARM64_MACOS: &str = "aarch64-apple-darwin";
 
 #[derive(Debug, clap::Parser)]
 pub struct Package {
@@ -35,7 +36,13 @@ pub struct Package {
 
 impl Package {
     pub fn run(&self) -> Result<()> {
-        let release_path = TARGET_DIR.join("release").join(RELEASE_BIN);
+        let release_path = match &self.target {
+            None => TARGET_DIR.join("release").join(RELEASE_BIN),
+            Some(target) => TARGET_DIR
+                .join(target.to_string())
+                .join("release")
+                .join(RELEASE_BIN),
+        };
 
         ensure!(
             release_path.exists(),
@@ -103,6 +110,8 @@ pub(crate) enum Target {
     Windows,
     #[value(name = "x86_64-apple-darwin")]
     MacOS,
+    #[value(name = "aarch64-apple-darwin")]
+    ArmMacOS,
     #[value(skip)]
     Other,
 }
@@ -125,11 +134,14 @@ impl Default for Target {
             } else {
                 Target::Other
             }
-        } else if cfg!(target_arch = "aarch64")
-            && cfg!(target_os = "linux")
-            && cfg!(target_env = "gnu")
-        {
-            Target::ArmLinux
+        } else if cfg!(target_arch = "aarch64") {
+            if cfg!(target_os = "linux") || cfg!(target_env = "gnu") {
+                Target::ArmLinux
+            } else if cfg!(target_os = "macos") {
+                Target::ArmMacOS
+            } else {
+                Target::Other
+            }
         } else {
             Target::Other
         }
@@ -146,6 +158,7 @@ impl FromStr for Target {
             TARGET_AARCH64_GNU_LINUX => Ok(Self::ArmLinux),
             TARGET_X86_64_WINDOWS => Ok(Self::Windows),
             TARGET_X86_64_MACOS => Ok(Self::MacOS),
+            TARGET_ARM64_MACOS => Ok(Self::ArmMacOS),
             _ => Ok(Self::Other),
         }
     }
@@ -159,6 +172,7 @@ impl fmt::Display for Target {
             Target::ArmLinux => TARGET_AARCH64_GNU_LINUX,
             Target::Windows => TARGET_X86_64_WINDOWS,
             Target::MacOS => TARGET_X86_64_MACOS,
+            Target::ArmMacOS => TARGET_ARM64_MACOS,
             Target::Other => "unknown-target",
         };
         write!(f, "{msg}")

@@ -1,0 +1,36 @@
+---
+source: apollo-router/src/plugins/authorization/scopes.rs
+expression: "TestResult {\n    query: QUERY2,\n    extracted_scopes: &extracted_scopes,\n    scopes: Vec::new(),\n    result: doc,\n    paths,\n}"
+---
+query:
+
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                    other
+                }
+                ... on B {
+                    id
+                    other
+                }
+            }
+        }
+        
+extracted_scopes: {"a", "b", "c", "d"}
+request scopes: []
+filtered:
+{
+  test
+  itf {
+    ... on A {
+      other
+    }
+    ... on B {
+      other
+    }
+  }
+}
+
+paths: ["/itf/... on A/id", "/itf/... on B/id"]

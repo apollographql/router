@@ -1,0 +1,24 @@
+telemetry:
+  apollo:
+    client_name_header: name_header
+    client_version_header: version_header
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: apollo_router_http_request_duration_seconds
+            unit: seconds
+            description: duration of the http request
+            aggregation:
+              histogram:
+                buckets:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+            allowed_attribute_keys:
+            - otel_scope_name
+      prometheus:
+        enabled: true

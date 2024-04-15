@@ -1,9 +1,8 @@
 ---
 title: Apollo Router support for @defer
 description: Improve performance by delivering fields incrementally
+minVersion: 1.8.0
 ---
-
-> 📣 **Defer support is generally available as of Apollo Router v1.8.0.** [Learn more about launch stages.](/resources/product-launch-stages)
 
 Queries sent to the Apollo Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
 
@@ -40,6 +39,19 @@ The Apollo Router's `@defer` support is compatible with all [federation-compatib
 To learn the basics of the `@defer` directive and how you can use it with your supergraph, first read [Deferring query response data with GraphOS](/graphos/operations/defer).
 
 The remainder of this article covers the Apollo Router's defer implementation in greater depth.
+
+## Executing a `@defer` query
+
+To execute a deferred query on the Apollo Router, a GraphQL client sends an HTTP request with _almost_ the exact same format that it uses for usual query and mutation requests.
+
+The only difference is that the request must include the following `Accept` header:
+
+```text title="Example header"
+Accept: multipart/mixed;deferSpec=20220824, application/json
+```
+
+> Note: because the parts are always JSON, it is never possible for `\r\n--graphql` to appear in the contents of a part. For convenience, servers MAY use `graphql` as a boundary.
+> Clients MUST accomodate any boundary returned by the server in `Content-Type`.
 
 ## How does the Apollo Router defer fields?
 

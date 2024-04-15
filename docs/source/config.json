@@ -1,5 +1,5 @@
 {
-  "title": "Router (self-hosted)",
+  "title": "Self-Hosted Router",
   "algoliaFilters": [
     "docset:router"
   ],
@@ -23,10 +23,18 @@
           [
             "enterprise"
           ]
+        ],
+        "Entity caching": [
+          "/configuration/entity-caching",
+          [
+            "enterprise",
+            "preview"
+          ]
         ]
       },
       "Debugging": {
-        "Logging": "/configuration/logging",
+        "Errors": "/errors",
+        "Telemetry": "/configuration/telemetry/overview",
         "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
       },
       "Networking": {
@@ -41,10 +49,22 @@
           [
             "enterprise"
           ]
-        ],        
+        ],
+        "Authorization": [
+          "/configuration/authorization",
+          [
+            "enterprise"
+          ]
+        ],
         "Subgraph Authentication": "/configuration/authn-subgraph",
         "Operation limits": [
           "/configuration/operation-limits",
+          [
+            "enterprise"
+          ]
+        ],
+        "Safelisting with persisted queries": [
+          "/configuration/persisted-queries",
           [
             "enterprise"
           ]
@@ -56,6 +76,12 @@
       "Build and run queries": "/executing-operations/build-run-queries",
       "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests",
+      "Query batching": [
+        "/executing-operations/query-batching",
+        [
+          "experimental"
+        ]
+      ],
       "GraphQL Subscriptions": {
         "Subscriptions setup": [
           "/executing-operations/subscription-support",
@@ -78,17 +104,42 @@
         ]
       }
     },
-    "Metrics & Monitoring": {
-      "GraphOS reporting": "/configuration/apollo-telemetry",
-      "OpenTelemetry tracing": "/configuration/tracing",
-      "Configuring metrics collectors": "/configuration/metrics",
+    "Telemetry and Monitoring": {
+      "Overview": "/configuration/telemetry/overview",
+      "GraphOS reporting": "/configuration/telemetry/apollo-telemetry",
       "Client awareness": "/managed-federation/client-awareness",
-      "Health check": "/configuration/health-checks"
+      "Log exporters": {
+        "Configuration": "/configuration/telemetry/exporters/logging/overview",
+        "Stdout": "/configuration/telemetry/exporters/logging/stdout"
+      },
+      "Metrics exporters": {
+        "Configuration": "/configuration/telemetry/exporters/metrics/overview",
+        "Datadog": "/configuration/telemetry/exporters/metrics/datadog",
+        "New Relic": "/configuration/telemetry/exporters/metrics/new-relic",
+        "OTLP": "/configuration/telemetry/exporters/metrics/otlp",
+        "Prometheus": "/configuration/telemetry/exporters/metrics/prometheus"
+      },
+      "Trace exporters": {
+        "Configuration": "/configuration/telemetry/exporters/tracing/overview",
+        "Datadog": "/configuration/telemetry/exporters/tracing/datadog",
+        "Jaeger": "/configuration/telemetry/exporters/tracing/jaeger",
+        "New Relic": "/configuration/telemetry/exporters/tracing/new-relic",
+        "OTLP": "/configuration/telemetry/exporters/tracing/otlp",
+        "Zipkin": "/configuration/telemetry/exporters/tracing/zipkin"
+      },
+      "Instrumentation": {
+        "Instruments": "/configuration/telemetry/instrumentation/instruments",
+        "Spans": "/configuration/telemetry/instrumentation/spans",
+        "Selectors": "/configuration/telemetry/instrumentation/selectors",
+        "Standard attributes": "/configuration/telemetry/instrumentation/standard-attributes",
+        "Standard instruments": "/configuration/telemetry/instrumentation/standard-instruments"
+      }
     },
     "Containerization": {
       "Overview": "/containerization/overview",
-      "Docker": "/containerization/docker",
-      "Kubernetes": "/containerization/kubernetes"
+      "Deploy on Kubernetes": "/containerization/kubernetes",
+      "Run with Docker": "/containerization/docker",
+      "Health checks": "/configuration/health-checks"
     },
     "Managed Federation": {
       "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",

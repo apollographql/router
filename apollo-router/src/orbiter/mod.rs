@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,7 +22,8 @@ use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
+use crate::services::HasSchema;
 use crate::spec::Schema;
 use crate::Configuration;
 
@@ -95,6 +95,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
 
     async fn create<'a>(
         &'a mut self,
+        is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
@@ -102,6 +103,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create(
+                is_telemetry_disabled,
                 configuration.clone(),
                 schema.clone(),
                 previous_router,
@@ -109,11 +111,10 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
             )
             .await
             .map(|factory| {
-                if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
+                if !is_telemetry_disabled {
+                    let schema = factory.supergraph_creator.schema();
+
                     tokio::task::spawn(async move {
-                        let schema = Arc::new(Schema::parse(&schema, &configuration).expect(
-                            "if we get here the schema was already parsed successfully elsewhere",
-                        ));
                         tracing::debug!("sending anonymous usage data to Apollo");
                         let report = create_report(configuration, schema);
                         if let Err(e) = send(report).await {
@@ -162,7 +163,7 @@ fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> Usa
     // Check the command line options. This encapsulates both env and command line functionality
     // This won't work in tests so we have separate test code.
     #[cfg(not(test))]
-    visit_args(&mut usage, env::args().collect());
+    visit_args(&mut usage, std::env::args().collect());
 
     UsageReport {
         session_id: *SESSION_ID.get_or_init(Uuid::new_v4),
@@ -382,7 +383,7 @@ mod test {
         let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
             .expect("config must be valid");
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -400,7 +401,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(Value::Null);
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -418,7 +419,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(json!({"garbage": "garbage"}));
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {

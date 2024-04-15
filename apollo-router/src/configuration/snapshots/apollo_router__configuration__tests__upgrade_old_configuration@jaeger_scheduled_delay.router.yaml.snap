@@ -4,10 +4,12 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    jaeger:
-      agent:
-        endpoint: default
-      batch_processor:
-        scheduled_delay: 100ms
+  exporters:
+    tracing:
+      jaeger:
+        agent:
+          endpoint: default
+        batch_processor:
+          scheduled_delay: 100ms
+        enabled: true
 

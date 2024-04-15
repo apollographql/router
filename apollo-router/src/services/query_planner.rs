@@ -79,7 +79,7 @@ pub(crate) struct Response {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerContent {
     Plan { plan: Arc<QueryPlan> },
-    Introspection { response: Box<graphql::Response> },
+    Response { response: Box<graphql::Response> },
     IntrospectionDisabled,
 }
 

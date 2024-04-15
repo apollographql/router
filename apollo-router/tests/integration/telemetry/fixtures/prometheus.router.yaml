@@ -1,0 +1,41 @@
+limits:
+  http_max_request_bytes: 60
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        views:
+        - name: apollo_router_http_request_duration_seconds
+          aggregation:
+            histogram:
+              buckets:
+              - 0.1
+              - 0.5
+              - 1
+              - 2
+              - 3
+              - 4
+              - 5
+              - 100
+        attributes:
+          subgraph:
+            all:
+              request:
+                header:
+                  - named: "x-custom-header"
+                    rename: "custom_header"
+                    default: "unknown"
+headers:
+  all:
+    request:
+      - insert:
+          name: "x-custom-header"
+          value: "test_custom"
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true

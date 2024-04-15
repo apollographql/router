@@ -13,5 +13,13 @@ Fetch(
         id: None,
         input_rewrites: None,
         output_rewrites: None,
+        schema_aware_hash: QueryHash(
+            "68a86d7602ea2876e77b84d7942f585ef6b6101887bb2979d1f0af3b28c9a0ed",
+        ),
+        authorization: CacheKeyMetadata {
+            is_authenticated: false,
+            scopes: [],
+            policies: [],
+        },
     },
 )

@@ -11,7 +11,7 @@ BINARY_DOWNLOAD_PREFIX="https://github.com/apollographql/router/releases/downloa
 
 # Router version defined in apollo-router's Cargo.toml
 # Note: Change this line manually during the release steps.
-PACKAGE_VERSION="v1.26.0"
+PACKAGE_VERSION="v1.44.0"
 
 download_binary() {
     downloader --check
@@ -97,14 +97,6 @@ get_architecture() {
         fi
     fi
 
-    if [ "$_ostype" = Darwin ] && [ "$_cputype" = arm64 ]; then
-        # Darwin `uname -s` doesn't seem to lie on Big Sur
-        # but we want to serve x86_64 binaries anyway so that they can
-        # then run in x86_64 emulation mode on their arm64 devices
-        _cputype=x86_64
-    fi
-
-
     case "$_ostype" in
         Linux)
             _ostype=unknown-linux-gnu
@@ -125,6 +117,10 @@ get_architecture() {
 
     case "$_cputype" in
         x86_64 | x86-64 | x64 | amd64 | aarch64)
+            ;;
+        arm64)
+            # Our binaries use aarch64 as part of their name, not arm64
+            _cputype=aarch64
             ;;
         *)
             err "no precompiled binaries available for CPU architecture: $_cputype"

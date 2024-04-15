@@ -1,8 +1,0 @@
----
-source: apollo-router/src/query_planner/bridge_query_planner.rs
-expression: plan_errors.usage_reporting
----
-{
-  "statsReportKey": "## GraphQLValidationFailure\n",
-  "referencedFieldsByType": {}
-}

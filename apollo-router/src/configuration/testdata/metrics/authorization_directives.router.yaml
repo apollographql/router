@@ -1,0 +1,3 @@
+authorization:
+  directives:
+    enabled: true

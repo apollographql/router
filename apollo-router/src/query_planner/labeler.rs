@@ -1,39 +1,39 @@
 //! Query Transformer implementation adding labels to @defer directives to identify deferred responses
 //!
 
-use apollo_compiler::hir;
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::FileId;
+use apollo_compiler::ast;
+use apollo_compiler::name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use tower::BoxError;
 
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::document;
-use crate::spec::query::transform::selection_set;
 use crate::spec::query::transform::Visitor;
 
-const LABEL_NAME: &str = "label";
+const LABEL_NAME: ast::Name = name!("label");
 
 /// go through the query and adds labels to defer fragments that do not have any
 ///
 /// This is used to uniquely identify deferred responses
 pub(crate) fn add_defer_labels(
-    file_id: FileId,
-    compiler: &ApolloCompiler,
-) -> Result<String, BoxError> {
+    schema: &Schema,
+    doc: &ast::Document,
+) -> Result<ast::Document, BoxError> {
     let mut visitor = Labeler {
-        compiler,
         next_label: 0,
+        schema,
     };
-    let encoder_document = document(&mut visitor, file_id)?;
-    Ok(encoder_document.to_string())
+    document(&mut visitor, doc)
 }
+
 pub(crate) struct Labeler<'a> {
-    compiler: &'a ApolloCompiler,
+    schema: &'a Schema,
     next_label: u32,
 }
 
-impl<'a> Labeler<'a> {
+impl Labeler<'_> {
     fn generate_label(&mut self) -> String {
         let label = self.next_label.to_string();
         self.next_label += 1;
@@ -41,77 +41,78 @@ impl<'a> Labeler<'a> {
     }
 }
 
-impl<'a> Visitor for Labeler<'a> {
-    fn compiler(&self) -> &apollo_compiler::ApolloCompiler {
-        self.compiler
-    }
-
+impl Visitor for Labeler<'_> {
     fn fragment_spread(
         &mut self,
-        hir: &hir::FragmentSpread,
-    ) -> Result<Option<apollo_encoder::FragmentSpread>, BoxError> {
-        let name = hir.name();
-        let mut encoder_node = apollo_encoder::FragmentSpread::new(name.into());
-        for hir in hir.directives() {
-            encoder_node.directive(directive(self, hir)?);
-        }
-        Ok(Some(encoder_node))
+        def: &ast::FragmentSpread,
+    ) -> Result<Option<ast::FragmentSpread>, BoxError> {
+        let mut new = transform::fragment_spread(self, def)?.unwrap();
+        directives(self, &mut new.directives)?;
+        Ok(Some(new))
     }
 
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        hir: &hir::InlineFragment,
-    ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
-        let parent_type = hir.type_condition().unwrap_or(parent_type);
+        def: &ast::InlineFragment,
+    ) -> Result<Option<ast::InlineFragment>, BoxError> {
+        let mut new = transform::inline_fragment(self, parent_type, def)?.unwrap();
+        directives(self, &mut new.directives)?;
+        Ok(Some(new))
+    }
 
-        let Some(selection_set) = selection_set(self, hir.selection_set(), parent_type)?
-    else { return Ok(None) };
-
-        let mut encoder_node = apollo_encoder::InlineFragment::new(selection_set);
-
-        encoder_node.type_condition(
-            hir.type_condition()
-                .map(|name| apollo_encoder::TypeCondition::new(name.into())),
-        );
-
-        for hir in hir.directives() {
-            encoder_node.directive(directive(self, hir)?);
-        }
-        Ok(Some(encoder_node))
+    fn schema(&self) -> &apollo_compiler::Schema {
+        self.schema
     }
 }
 
-pub(crate) fn directive(
-    visitor: &mut Labeler<'_>,
-    hir: &hir::Directive,
-) -> Result<apollo_encoder::Directive, BoxError> {
-    let name = hir.name().into();
-    let is_defer = name == DEFER_DIRECTIVE_NAME;
-    let mut encoder_directive = apollo_encoder::Directive::new(name);
-
-    let mut has_label = false;
-    for arg in hir.arguments() {
-        // Add a prefix to existing labels
-        let value = if is_defer && arg.name() == LABEL_NAME {
-            has_label = true;
-            if let Some(label) = arg.value().as_str() {
-                apollo_encoder::Value::String(format!("_{label}"))
-            } else {
-                return Err("@defer with a non-string label".into());
+fn directives(
+    visitor: &mut Labeler,
+    directives: &mut [Node<ast::Directive>],
+) -> Result<(), BoxError> {
+    for directive in directives {
+        if directive.name != DEFER_DIRECTIVE_NAME {
+            continue;
+        }
+        let directive = directive.make_mut();
+        let mut has_label = false;
+        for arg in &mut directive.arguments {
+            if arg.name == LABEL_NAME {
+                has_label = true;
+                if let ast::Value::String(label) = arg.make_mut().value.make_mut() {
+                    // Add a prefix to existing labels
+                    *label = format!("_{label}").into();
+                } else {
+                    return Err("@defer with a non-string label".into());
+                }
             }
-        } else {
-            transform::value(arg.value())?
-        };
-        encoder_directive.arg(apollo_encoder::Argument::new(arg.name().into(), value));
+        }
+        // Add a generated label if there wasn’t one already
+        if !has_label {
+            directive.arguments.push(
+                ast::Argument {
+                    name: LABEL_NAME,
+                    value: visitor.generate_label().into(),
+                }
+                .into(),
+            );
+        }
     }
-    // Add a generated label if there wasn’t one already
-    if is_defer && !has_label {
-        encoder_directive.arg(apollo_encoder::Argument::new(
-            LABEL_NAME.into(),
-            apollo_encoder::Value::String(visitor.generate_label()),
-        ));
-    }
+    Ok(())
+}
 
-    Ok(encoder_directive)
+#[cfg(test)]
+mod tests {
+
+    use super::add_defer_labels;
+
+    #[test]
+    fn large_float_written_as_int() {
+        let schema = "type Query { field(id: Float): String! }";
+        let query = r#"{ field(id: 1234567890123) }"#;
+        let schema = apollo_compiler::Schema::parse(schema, "schema.graphql").unwrap();
+        let doc = apollo_compiler::ast::Document::parse(query, "query.graphql").unwrap();
+        let result = add_defer_labels(&schema, &doc).unwrap().to_string();
+        insta::assert_snapshot!(result);
+    }
 }

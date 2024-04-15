@@ -4,10 +4,14 @@ sidebar_title: CORS
 description: Control browser access to your router
 ---
 
-> **This article describes CORS configuration that's specific to the Apollo Router**. For a more general introduction to CORS and common considerations, see the following sections:
->
-> * [Why use CORS?](/apollo-server/security/cors#why-use-cors)
-> * [Choosing CORS options for your project](/apollo-server/security/cors#choosing-cors-options-for-your-project)
+<Note> 
+
+**This article describes CORS configuration that's specific to the Apollo Router**. For a more general introduction to CORS and common considerations, see the following sections:
+
+* [Why use CORS?](/apollo-server/security/cors#why-use-cors)
+* [Choosing CORS options for your project](/apollo-server/security/cors#choosing-cors-options-for-your-project)
+
+</Note>
 
 By default, the Apollo Router enables _only_ Apollo Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](./overview/#yaml-config-file):
 
@@ -19,9 +23,9 @@ By default, the Apollo Router enables _only_ Apollo Studio to initiate browser c
     * Use this option if your supergraph is a public API with arbitrarily many web app consumers.
     * With this option enabled, the router sends the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the `Access-Control-Allow-Origin` header. This enables _any_ website to initiate browser connections to it (but they can't provide cookies or other credentials).
 
-* You _must_ use the `origins` + `match_origins` option if clients need to [authenticate their requests with cookies](#passing-credentials-with-cors).
+* If clients need to [authenticate their requests with cookies](#passing-credentials), you _must_ use either `origins`, `match_origins`, or the combination of both options. When using both options, note that `origins` is evaluated before `match_origins`.
 
-The following snippet includes an example of each option (use either `allow_any_origin`, or `origins + match_origins`):
+The following snippet includes an example of each option (use either `allow_any_origin`, or `origins` and/or `match_origins`):
 
 ```yaml title="router.yaml"
 cors:
@@ -50,15 +54,13 @@ cors:
   origins: []
 ```
 
-> If your router serves exclusively _non_-browser-based clients, you probably don't need to modify the default CORS configuration.
+If your router serves exclusively _non_-browser-based clients, you probably don't need to modify the default CORS configuration.
 
 ## Passing credentials
 
 If your router requires requests to [include a user's credentials](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#requests_with_credentials) (e.g., via cookies), you need to modify your CORS configuration to tell the browser those credentials are allowed.
 
 You can enable credentials with CORS by setting the [`Access-Control-Allow-Credentials`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Credentials) HTTP header to `true`.
-
-> **Your router's config file must specify individual `origins` to support credentialed requests.** If your router enables `allow_any_origin`, your browser will refuse to send credentials.
 
 To allow browsers to pass credentials to the Apollo Router, set `allow_credentials` to `true`, like so:
 
@@ -69,6 +71,12 @@ cors:
     - https://studio.apollographql.com
   allow_credentials: true
 ```
+
+<Tip> 
+
+**To support credentialed requests, your router's config file must specify individual `origins`**. If your router enables `allow_any_origin`, your browser will refuse to send credentials.
+
+</Tip>
 
 Additionally, you'll need to configure the router to forward the [`Cookie`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cookie) header to some (or all) of your subgraphs:
 

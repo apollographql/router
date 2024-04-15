@@ -1,207 +1,205 @@
-#![cfg_attr(not(test), allow(unused))] // TODO: remove when used
-
-use apollo_compiler::hir;
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::HirDatabase;
+use apollo_compiler::ast;
+use apollo_compiler::executable;
+use apollo_compiler::schema::FieldLookupError;
+use apollo_compiler::ExecutableDocument;
 use tower::BoxError;
 
-/// Transform an executable document with the given visitor.
+/// Traverse a document with the given visitor.
 pub(crate) fn document(
     visitor: &mut impl Visitor,
-    file_id: apollo_compiler::FileId,
+    document: &ExecutableDocument,
+    operation_name: Option<&str>,
 ) -> Result<(), BoxError> {
-    for def in visitor.compiler().db.operations(file_id).iter() {
-        visitor.operation(def)?;
+    if let Ok(operation) = document.get_operation(operation_name) {
+        visitor.operation(operation.object_type().as_str(), operation)?;
     }
-    for def in visitor.compiler().db.fragments(file_id).values() {
-        visitor.fragment_definition(def)?;
+
+    for fragment in document.fragments.values() {
+        visitor.fragment(fragment)?;
     }
+
     Ok(())
 }
 
 pub(crate) trait Visitor: Sized {
-    /// A compiler that contains both the executable document to transform
-    /// and the corresponding type system definitions.
-    fn compiler(&self) -> &ApolloCompiler;
+    fn schema(&self) -> &apollo_compiler::Schema;
 
-    /// Transform an operation definition.
+    /// Traverse an operation definition.
     ///
     /// Call the [`operation`] free function for the default behavior.
     /// Return `Ok(None)` to remove this operation.
-    fn operation(&mut self, hir: &hir::OperationDefinition) -> Result<(), BoxError> {
-        operation(self, hir)
+    fn operation(&mut self, root_type: &str, def: &executable::Operation) -> Result<(), BoxError> {
+        operation(self, root_type, def)
     }
 
-    /// Transform a fragment definition.
+    /// Traverse a fragment definition.
     ///
     /// Call the [`fragment_definition`] free function for the default behavior.
     /// Return `Ok(None)` to remove this fragment.
-    fn fragment_definition(&mut self, hir: &hir::FragmentDefinition) -> Result<(), BoxError> {
-        fragment_definition(self, hir)
+    fn fragment(&mut self, def: &executable::Fragment) -> Result<(), BoxError> {
+        fragment(self, def)
     }
 
-    /// Transform a field within a selection set.
+    /// Traverse a field within a selection set.
     ///
     /// Call the [`field`] free function for the default behavior.
     /// Return `Ok(None)` to remove this field.
-    fn field(&mut self, parent_type: &str, hir: &hir::Field) -> Result<(), BoxError> {
-        field(self, parent_type, hir)
+    fn field(
+        &mut self,
+        _parent_type: &str,
+        field_def: &ast::FieldDefinition,
+        def: &executable::Field,
+    ) -> Result<(), BoxError> {
+        field(self, field_def, def)
     }
 
-    /// Transform a fragment spread within a selection set.
+    /// Traverse a fragment spread within a selection set.
     ///
     /// Call the [`fragment_spread`] free function for the default behavior.
     /// Return `Ok(None)` to remove this fragment spread.
-    fn fragment_spread(&mut self, hir: &hir::FragmentSpread) -> Result<(), BoxError> {
-        fragment_spread(self, hir)
+    fn fragment_spread(&mut self, def: &executable::FragmentSpread) -> Result<(), BoxError> {
+        fragment_spread(self, def)
     }
 
-    /// Transform a inline fragment within a selection set.
+    /// Traverse a inline fragment within a selection set.
     ///
     /// Call the [`inline_fragment`] free function for the default behavior.
     /// Return `Ok(None)` to remove this inline fragment.
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        hir: &hir::InlineFragment,
+        def: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
-        inline_fragment(self, parent_type, hir)
+        inline_fragment(self, parent_type, def)
     }
 }
 
-/// The default behavior for transforming an operation.
+/// The default behavior for traversing an operation.
 ///
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
 pub(crate) fn operation(
     visitor: &mut impl Visitor,
-    def: &hir::OperationDefinition,
+    root_type: &str,
+    def: &executable::Operation,
 ) -> Result<(), BoxError> {
-    let object_type = def
-        .object_type(&visitor.compiler().db)
-        .ok_or("ObjectTypeDefMissing")?;
-    let type_name = object_type.name();
-    selection_set(visitor, def.selection_set(), type_name)?;
-    Ok(())
+    //FIXME: we should look at directives etc on operation
+    selection_set(visitor, root_type, &def.selection_set.selections)
 }
 
-/// The default behavior for transforming a fragment definition.
+/// The default behavior for traversing a fragment definition.
 ///
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
-pub(crate) fn fragment_definition(
+pub(crate) fn fragment(
     visitor: &mut impl Visitor,
-    hir: &hir::FragmentDefinition,
+    def: &executable::Fragment,
 ) -> Result<(), BoxError> {
-    let type_condition = hir.type_condition();
-    selection_set(visitor, hir.selection_set(), type_condition)?;
+    selection_set(visitor, def.type_condition(), &def.selection_set.selections)?;
     Ok(())
 }
 
-/// The default behavior for transforming a field within a selection set.
+/// The default behavior for traversing a field within a selection set.
 ///
 /// Returns `Ok(None)` if the field had nested selections and they’re all removed.
 pub(crate) fn field(
     visitor: &mut impl Visitor,
-    parent_type: &str,
-    hir: &hir::Field,
+    field_def: &ast::FieldDefinition,
+    def: &executable::Field,
 ) -> Result<(), BoxError> {
-    let name = hir.name();
-    let selections = hir.selection_set();
-    if !selections.selection().is_empty() {
-        let field_type = get_field_type(visitor, parent_type, name)
-            .ok_or_else(|| format!("cannot query field '{name}' on type '{parent_type}'"))?;
-        selection_set(visitor, selections, &field_type)?
-    }
-    Ok(())
+    selection_set(
+        visitor,
+        field_def.ty.inner_named_type(),
+        &def.selection_set.selections,
+    )
 }
 
-/// The default behavior for transforming a fragment spread.
+/// The default behavior for traversing a fragment spread.
 ///
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
 pub(crate) fn fragment_spread(
     visitor: &mut impl Visitor,
-    hir: &hir::FragmentSpread,
+    def: &executable::FragmentSpread,
 ) -> Result<(), BoxError> {
-    let _ = (visitor, hir); // Unused, but matches trait method signature
+    let _ = (visitor, def); // Unused, but matches trait method signature
     Ok(())
 }
 
-/// The default behavior for transforming an inline fragment.
+/// The default behavior for traversing an inline fragment.
 ///
 /// Returns `Ok(None)` if all selections within the fragment are removed.
 pub(crate) fn inline_fragment(
     visitor: &mut impl Visitor,
     parent_type: &str,
-    hir: &hir::InlineFragment,
+    def: &executable::InlineFragment,
 ) -> Result<(), BoxError> {
-    let parent_type = hir.type_condition().unwrap_or(parent_type);
-    selection_set(visitor, hir.selection_set(), parent_type)?;
-    Ok(())
+    selection_set(visitor, parent_type, &def.selection_set.selections)
 }
 
-fn get_field_type(visitor: &impl Visitor, parent: &str, field_name: &str) -> Option<String> {
-    Some(if field_name == "__typename" {
-        "String".into()
-    } else {
-        let db = &visitor.compiler().db;
-        db.types_definitions_by_name()
-            .get(parent)?
-            .field(db, field_name)?
-            .ty()
-            .name()
+pub(crate) fn selection_set(
+    visitor: &mut impl Visitor,
+    parent_type: &str,
+    set: &[executable::Selection],
+) -> Result<(), BoxError> {
+    set.iter().try_for_each(|def| match def {
+        executable::Selection::Field(def) => {
+            let field_def = &visitor
+                .schema()
+                .type_field(parent_type, &def.name)
+                .map_err(|e| match e {
+                    FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
+                    FieldLookupError::NoSuchField(_, _) => {
+                        format!("no field `{}` in type `{parent_type}`", &def.name)
+                    }
+                })?
+                .clone();
+            visitor.field(parent_type, field_def, def)
+        }
+        executable::Selection::FragmentSpread(def) => visitor.fragment_spread(def),
+        executable::Selection::InlineFragment(def) => {
+            let fragment_type = def
+                .type_condition
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or(parent_type);
+            visitor.inline_fragment(fragment_type, def)
+        }
     })
-}
-
-fn selection_set(
-    visitor: &mut impl Visitor,
-    hir: &hir::SelectionSet,
-    parent_type: &str,
-) -> Result<(), BoxError> {
-    hir.selection()
-        .iter()
-        .try_for_each(|hir| selection(visitor, hir, parent_type))
-}
-
-fn selection(
-    visitor: &mut impl Visitor,
-    selection: &hir::Selection,
-    parent_type: &str,
-) -> Result<(), BoxError> {
-    match selection {
-        hir::Selection::Field(hir) => visitor.field(parent_type, hir)?,
-        hir::Selection::FragmentSpread(hir) => visitor.fragment_spread(hir)?,
-        hir::Selection::InlineFragment(hir) => visitor.inline_fragment(parent_type, hir)?,
-    }
-    Ok(())
 }
 
 #[test]
 fn test_count_fields() {
-    struct CountFields<'a> {
-        compiler: &'a ApolloCompiler,
+    use apollo_compiler::validation::Valid;
+
+    struct CountFields {
+        schema: apollo_compiler::Schema,
         fields: u32,
     }
 
-    impl<'a> Visitor for CountFields<'a> {
-        fn compiler(&self) -> &ApolloCompiler {
-            self.compiler
+    impl Visitor for CountFields {
+        fn field(
+            &mut self,
+            _parent_type: &str,
+            field_def: &ast::FieldDefinition,
+            def: &executable::Field,
+        ) -> Result<(), BoxError> {
+            self.fields += 1;
+            field(self, field_def, def)
         }
 
-        fn field(&mut self, parent_type: &str, hir: &hir::Field) -> Result<(), BoxError> {
-            self.fields += 1;
-            field(self, parent_type, hir)
+        fn schema(&self) -> &apollo_compiler::Schema {
+            &self.schema
         }
     }
 
-    let mut compiler = ApolloCompiler::new();
-    let graphql = "
-        type Query {
-            a: String
-            b: Int
-            next: Query
-        }
-
+    let schema = "
+    type Query {
+        a(id: ID): String
+        b: Int
+        next: Query
+    }
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT";
+    let query = "
         query($id: ID = null) {
-            a
+            a(id: $id)
             ... @defer {
                 b
             }
@@ -215,11 +213,12 @@ fn test_count_fields() {
             }
         }
     ";
-    let file_id = compiler.add_document(graphql, "");
-    let mut visitor = CountFields {
-        compiler: &compiler,
-        fields: 0,
-    };
-    document(&mut visitor, file_id).unwrap();
+    let ast = apollo_compiler::ast::Document::parse(schema, "").unwrap();
+    let schema = ast.to_schema_validate().unwrap();
+    let schema = schema.into_inner();
+    let executable =
+        ExecutableDocument::parse(Valid::assume_valid_ref(&schema), query, "").unwrap();
+    let mut visitor = CountFields { fields: 0, schema };
+    document(&mut visitor, &executable, None).unwrap();
     assert_eq!(visitor.fields, 4)
 }

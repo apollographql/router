@@ -1,0 +1,194 @@
+---
+title: Router Logging
+subtitle: Configure logging in the Apollo Router
+description: Configure logging in the Apollo Router. Set the log level and output format.
+---
+
+The Apollo Router provides built-in logging to capture records about the router's activity.
+
+The router supports [configurable log levels](#log-level) and [stdout output](./stdout) of log  messages (with [configurable output formats](./stdout/#logging-output-format)).
+
+## Log level
+
+The Apollo Router accepts a command-line argument to set its log level:
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--log`
+
+</td>
+<td>
+
+The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+
+The default value is `info`.
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+The router also accepts both `RUST_LOG` and `APOLLO_ROUTER_LOG` environment variables with the same possible values as the command-line argument. With multiple ways to set the log level, the router checks for them in the following order, and it uses the first one that is set:
+
+ 1. `RUST_LOG`
+ 1. Command-line argument
+ 1. `APOLLO_ROUTER_LOG`
+
+`RUST_LOG` is supported for advanced users with specific filtering requirements who may wish to see log messages from crates consumed by the router. Most users should use the command-line argument or `APOLLO_ROUTER_LOG`. Both of these options constrain log output to the router.
+
+For example, every environment variable and command-line argument below sets the log level to `debug`:
+
+```
+RUST_LOG=apollo_router::debug
+APOLLO_ROUTER_LOG=debug
+--log=debug
+```
+
+For another example, every line below sets the same log levels:
+
+```
+RUST_LOG=hyper=debug,apollo_router::info,h2=trace
+APOLLO_ROUTER_LOG=hyper=debug,info,h2=trace
+--log=hyper=debug,info,h2=trace
+```
+
+In both examples, the actual filter used by the router the value defined by `RUST_LOG`.
+
+For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
+
+
+## Logging common configuration
+
+The router supports configuration options that apply to all logging exporters:
+
+* [Service name](#service-name)
+* [Resource attributes](#resource)
+
+### Service name
+
+Set a service name for your router's logs so they can be easily searched and found in your metrics dashboards. 
+
+The service name can be set by an environment variable or in `router.yaml`. With multiple ways to set the service name, the router checks for them in the following order, and it uses the first one that is set:
+
+1. `OTEL_SERVICE_NAME` environment variable
+2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
+3. `telemetry.exporters.logging.common.service_name` in `router.yaml`
+
+      <ExpansionPanel title="Example service_name">
+
+      Example setting service name in `telemetry.exporters.logging.common.service_name`:
+
+      ```yaml title="router.yaml"
+      telemetry:
+        exporters:
+          logging:
+            common:
+              # (Optional) Set the service name to easily find logs related to the apollo-router in your metrics dashboards
+              service_name: "router" #highlight-line
+      ```
+
+      </ExpansionPanel>
+
+
+4. `telemetry.exporters.logging.common.resource` in `router.yaml`
+
+      <ExpansionPanel title="Example resource">
+
+      Example setting service name in `telemetry.exporters.logging.common.resource`:
+
+      ```yaml title="router.yaml"
+      telemetry:
+        exporters:
+          logging:
+            common:
+              resource:
+                # (Optional) Set the service name to easily find logs related to the apollo-router in your metrics dashboards
+                "service.name": "router" #highlight-line
+      ```
+
+      </ExpansionPanel>
+
+If the service name isn't explicitly set, then it is set by default to `unknown_service:apollo_router` (or `unknown_service` if the executable name cannot be determined).
+
+### Resource attribute
+
+A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
+
+In `router.yaml`, resource attributes are set in `telemetry.exporters.logging.common.resource`. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     logging:
+       common:
+         resource:
+           "environment.name": "production"
+           "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+```
+
+For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).
+
+### Request/Response logging
+
+<ExperimentalFeature appendText="If you want to give feedback or participate in the feature, feel free to join [the discussion on GitHub](https://github.com/apollographql/router/discussions/1961)." />
+
+
+By default, the router _doesn't_ log the following values that might contain sensitive data, even if a sufficient log level is set:
+
+ - Request bodies
+ - Response bodies
+ - Headers 
+
+You can enable selective logging of these values via the `experimental_when_header` option:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    logging:
+      # If one of these headers matches we will log supergraph and subgraphs requests/responses
+      experimental_when_header:
+        - name: apollo-router-log-request
+          value: my_client
+          headers: true # default: false
+          body: true # default: false
+        # log request for all requests coming from Iphones
+        - name: user-agent
+          match: ^Mozilla/5.0 (iPhone*
+          headers: true
+```
+
+## Logging common reference
+
+| Attribute           | Default                  | Description                                                   |
+|---------------------|--------------------------|---------------------------------------------------------------|
+| `service_name`      | `unknown_service:router` | The OpenTelemetry service name.                               |
+| `service_namespace` |                          | The OpenTelemetry namespace.                                  |
+| `resource`          |                          | The OpenTelemetry resource to attach to generated log events. |
+
+
+## Experimental logging of broken pipe errors
+
+You can emit a log message each time the client closes the connection early, which can help you debug issues with clients that close connections before the server can respond. 
+
+This feature is disabled by default but can be enabled by setting the `experimental_log_broken_pipe` option to `true`:
+
+```yaml title="router.yaml"
+supergraph:
+   experimental_log_on_broken_pipe: true
+```
+| Attribute                        | Default | Description                                         |
+|----------------------------------|---------|-----------------------------------------------------|
+| `experimental_log_on_broken_pipe`   | false   | Emit a log message if a broken pipe was detected.   |
+

@@ -1,17 +1,14 @@
 ---
 title: Creating a custom Apollo Router binary
+description: Compile a custom router binary from source
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
+import NativePluginNotice from '../../shared/native-plugin-notice.mdx';
 
-> ⚠️ **Native Rust plugins are an advanced feature of the Apollo Router.** We _do not recommend_ creating them for the following reasons:
->
-> - Native plugins require familiarity with programming in Rust.
-> - Native plugins require compiling a custom router binary from source, which can introduce unexpected behavior in your router that's difficult to diagnose and support.
->
-> **For most router customizations,** we recommend instead creating a [Rhai script](./rhai/) or [external coprocessor](./coprocessor/). Both of these customization types provide strong separation of concerns and fault isolation.
->
-> **If a native plugin seems necessary for your use case,** please [open an issue](https://github.com/apollographql/router/issues) so we can investigate adding the required functionality to the stock router binary.
+Learn how to compile a custom Apollo Router binary from source, which is required to create custom native Rust plugins for the router.
+
+<NativePluginNotice />
 
 <ElasticNotice />
 
@@ -20,8 +17,9 @@ import ElasticNotice from '../../shared/elastic-notice.mdx';
 To compile the Apollo Router, you need to have the following installed:
 
 <!-- renovate-automation: rustc version -->
-* [Rust 1.70.0 or later](https://www.rust-lang.org/tools/install)
+* [Rust 1.76.0 or later](https://www.rust-lang.org/tools/install)
 * [Node.js 16.9.1 or later](https://nodejs.org/en/download/)
+* [CMake 3.5.1 or later](https://cmake.org/download/)
 
 After you install the above, also install the `cargo-xtask` and `cargo-scaffold` crates:
 
@@ -101,7 +99,7 @@ Now you can test out your compiled router with an example supergraph schema.
 
    During development, it's helpful to use `cargo run` to run the router.
 
-> If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables instead of specifying the supergraph schema as a file. For details, see [this section](/federation/managed-federation/setup#4-connect-your-router-to-graphos).
+If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables instead of specifying the supergraph schema as a file. For details, see [this section](/federation/managed-federation/setup#4-connect-your-router-to-graphos).
 
 ## 4. Create a plugin
 
@@ -209,3 +207,7 @@ COPY my_supergraph.graphql /dist/supergraph.graphql
 # Default executable is the router
 ENTRYPOINT ["/dist/router", "-s", "/dist/supergraph.graphql"]
 ```
+
+## Related topics
+
+* [Optimizing Custom Apollo Router Builds](/technotes/TN0030-optimizing-router-builds/)

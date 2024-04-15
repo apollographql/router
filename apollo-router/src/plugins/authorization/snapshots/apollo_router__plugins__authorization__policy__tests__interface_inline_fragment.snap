@@ -1,0 +1,31 @@
+---
+source: apollo-router/src/plugins/authorization/policy.rs
+expression: "TestResult {\n    query: QUERY,\n    extracted_policies: &extracted_policies,\n    successful_policies: Vec::new(),\n    result: doc,\n    paths,\n}"
+---
+query:
+
+        query {
+            topProducts {
+                type
+            }
+            itf {
+                id
+                ... on User {
+                    name
+                }
+            }
+        }
+        
+extracted_policies: {"read user", "read username"}
+successful policies: []
+filtered:
+{
+  topProducts {
+    type
+  }
+  itf {
+    id
+  }
+}
+
+paths: ["/itf/... on User"]

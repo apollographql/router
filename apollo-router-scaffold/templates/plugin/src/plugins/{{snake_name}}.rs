@@ -113,11 +113,10 @@ impl Plugin for {{pascal_name}} {
     ) -> supergraph::BoxService {
 
         ServiceBuilder::new()
-                    .checkpoint_async(|request : supergraph::Request| async {
+                    .oneshot_checkpoint_async(|request : supergraph::Request| async {
                         // Do some async call here to auth, and decide if to continue or not.
                         Ok(ControlFlow::Continue(request))
                     })
-                    .buffered()
                     .service(service)
                     .boxed()
     }

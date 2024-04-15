@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/authentication/tests.rs
+expression: yaml
+---
+- fields:
+    alg: UnknownAlg
+    err: "unknown variant `UnknownAlg`, expected one of `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`, `RSA1_5`, `RSA-OAEP`, `RSA-OAEP-256`"
+    index: 2
+  level: WARN
+  message: "ignoring a key since it is not valid, enable debug logs to full content"
+- fields:
+    alg: "<unknown>"
+    err: "invalid value: map, expected map with a single key"
+    index: 3
+  level: WARN
+  message: "ignoring a key since it is not valid, enable debug logs to full content"
+- fields:
+    alg: ES256
+    err: "invalid type: string \"Hmm\", expected a sequence"
+    index: 5
+  level: WARN
+  message: "ignoring a key since it is not valid, enable debug logs to full content"
+

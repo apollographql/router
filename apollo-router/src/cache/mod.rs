@@ -5,10 +5,13 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+use tower::BoxError;
 
 use self::storage::CacheStorage;
+use self::storage::InMemoryCache;
 use self::storage::KeyType;
 use self::storage::ValueType;
+use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
 pub(crate) mod storage;
@@ -33,25 +36,20 @@ where
 {
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
-        redis_urls: Option<Vec<url::Url>>,
+        redis: Option<RedisCache>,
         caller: &str,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BoxError> {
+        Ok(Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity, redis_urls, caller).await,
-        }
+            storage: CacheStorage::new(capacity, redis, caller).await?,
+        })
     }
 
     pub(crate) async fn from_configuration(
         config: &crate::configuration::Cache,
         caller: &str,
-    ) -> Self {
-        Self::with_capacity(
-            config.in_memory.limit,
-            config.redis.as_ref().map(|c| c.urls.clone()),
-            caller,
-        )
-        .await
+    ) -> Result<Self, BoxError> {
+        Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
@@ -116,6 +114,10 @@ where
         self.storage.insert(key, value).await;
     }
 
+    pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
+        self.storage.insert_in_memory(key, value).await;
+    }
+
     async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
         // Lock the wait map to prevent more subscribers racing with our send
         // notification
@@ -124,8 +126,8 @@ where
         let _ = sender.send(value);
     }
 
-    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
-        self.storage.in_memory_keys().await
+    pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
+        self.storage.in_memory_cache()
     }
 }
 
@@ -210,8 +212,9 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache =
-            DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test").await;
+        let cache = DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test")
+            .await
+            .unwrap();
 
         let entry = cache.get(&k).await;
 
@@ -228,7 +231,9 @@ mod tests {
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(NonZeroUsize::new(13).unwrap(), None, "test").await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(13).unwrap(), None, "test")
+                .await
+                .unwrap();
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -251,7 +256,9 @@ mod tests {
         mock.expect_retrieve().times(1).return_const(1usize);
 
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test").await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test")
+                .await
+                .unwrap();
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made
