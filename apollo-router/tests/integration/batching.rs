@@ -818,12 +818,12 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
             entryA:
               index: 2
         - errors:
-            - message: "syntax error: expected a Selection Set"
+            - message: "parsing error: syntax error: expected a Selection Set"
               locations:
                 - line: 1
                   column: 10
               extensions:
-                code: GRAPHQL_VALIDATION_FAILED
+                code: PARSING_ERROR
         - data:
             entryA:
               index: 4
