@@ -3,5 +3,5 @@ experimental_demand_control:
   mode: enforce
   strategy:
     test:
-      stage: on_subgraph_response
+      stage: subgraph_response
       error: estimated_cost_too_expensive

@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -196,5 +197,19 @@ impl<T: Plugin> PluginTestHarness<T> {
             .http_client_service(subgraph_name, service)
             .call(request)
             .await
+    }
+}
+
+impl<T> Deref for PluginTestHarness<T>
+where
+    T: Plugin,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.plugin
+            .as_any()
+            .downcast_ref()
+            .expect("plugin should be of type T")
     }
 }

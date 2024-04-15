@@ -8,7 +8,6 @@ use apollo_compiler::Schema;
 use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
-use crate::plugins::demand_control::strategy::test::Test;
 use crate::plugins::demand_control::DemandControlConfig;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::Mode;
@@ -97,7 +96,7 @@ impl StrategyFactory {
                 cost_calculator: StaticCostCalculator::new(self.subgraph_schemas.clone()),
             }),
             #[cfg(test)]
-            StrategyConfig::Test { stage, error } => Arc::new(Test {
+            StrategyConfig::Test { stage, error } => Arc::new(test::Test {
                 stage: stage.clone(),
                 error: error.clone(),
             }),

@@ -7,6 +7,8 @@ use crate::plugins::demand_control::DemandControlError;
 use crate::services::execution::Request;
 use crate::services::subgraph::Response;
 
+/// Test strategy for demand control.
+/// Can be configured to fail at different stages of the request processing.
 pub(crate) struct Test {
     pub(crate) stage: TestStage,
     pub(crate) error: TestError,
@@ -16,7 +18,7 @@ impl StrategyImpl for Test {
     fn on_execution_request(&self, _request: &Request) -> Result<(), DemandControlError> {
         match self {
             Test {
-                stage: TestStage::OnExecutionRequest,
+                stage: TestStage::ExecutionRequest,
                 error,
             } => Err(error.into()),
             _ => Ok(()),
@@ -29,7 +31,7 @@ impl StrategyImpl for Test {
     ) -> Result<(), DemandControlError> {
         match self {
             Test {
-                stage: TestStage::OnSubgraphRequest,
+                stage: TestStage::SubgraphRequest,
                 error,
             } => Err(error.into()),
             _ => Ok(()),
@@ -43,7 +45,7 @@ impl StrategyImpl for Test {
     ) -> Result<(), DemandControlError> {
         match self {
             Test {
-                stage: TestStage::OnSubgraphResponse,
+                stage: TestStage::SubgraphResponse,
                 error,
             } => Err(error.into()),
             _ => Ok(()),
@@ -57,7 +59,7 @@ impl StrategyImpl for Test {
     ) -> Result<(), DemandControlError> {
         match self {
             Test {
-                stage: TestStage::OnExecutionResponse,
+                stage: TestStage::ExecutionResponse,
                 error,
             } => Err(error.into()),
             _ => Ok(()),

@@ -3,7 +3,6 @@
 //! On the request path it will use estimated
 use std::future;
 use std::ops::ControlFlow;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
@@ -27,7 +26,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
-use crate::plugins::test::PluginTestHarness;
 use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
@@ -400,12 +398,10 @@ mod test {
             .await
             .unwrap();
 
-        let body = resp
-            .response
+        resp.response
             .into_body()
             .collect::<Vec<graphql::Response>>()
-            .await;
-        body
+            .await
     }
 
     async fn test_on_subgraph(config: &'static str) -> Response {
@@ -440,8 +436,10 @@ mod test {
     }
 
     fn context() -> Context {
-        let mut parsed_document = ParsedDocumentInner::default();
-        parsed_document.executable = Arc::new(ExecutableDocument::new());
+        let parsed_document = ParsedDocumentInner {
+            executable: Arc::new(ExecutableDocument::new()),
+            ..Default::default()
+        };
         let ctx = Context::new();
         ctx.extensions()
             .lock()
@@ -452,10 +450,10 @@ mod test {
     #[derive(Clone, Debug, Deserialize, JsonSchema)]
     #[serde(deny_unknown_fields, rename_all = "snake_case")]
     pub(crate) enum TestStage {
-        OnExecutionRequest,
-        OnExecutionResponse,
-        OnSubgraphRequest,
-        OnSubgraphResponse,
+        ExecutionRequest,
+        ExecutionResponse,
+        SubgraphRequest,
+        SubgraphResponse,
     }
 
     #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -475,19 +473,5 @@ mod test {
                 TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive,
             }
         }
-    }
-}
-
-impl<T> Deref for PluginTestHarness<T>
-where
-    T: Plugin,
-{
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.plugin
-            .as_any()
-            .downcast_ref()
-            .expect("plugin should be of type T")
     }
 }

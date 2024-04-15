@@ -3,5 +3,5 @@ experimental_demand_control:
   mode: measure
   strategy:
     test:
-      stage: on_execution_request
+      stage: execution_request
       error: estimated_cost_too_expensive
