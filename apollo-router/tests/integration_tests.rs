@@ -115,7 +115,7 @@ async fn api_schema_hides_field() {
 
     let message = &actual.errors[0].message;
     assert!(
-        message.contains("type `Product` does not have a field `inStock`"),
+        message.contains(r#"Cannot query field "inStock" on type "Product"."#),
         "{message}"
     );
     assert_eq!(

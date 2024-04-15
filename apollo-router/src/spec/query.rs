@@ -277,7 +277,7 @@ impl Query {
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
             Err(errors) => {
-                return Err(SpecError::ValidationError(errors.into()));
+                return Err(SpecError::ParseError(errors.into()));
             }
         };
         let schema = &schema.api_schema().definitions;
@@ -345,7 +345,7 @@ impl Query {
 
         let mut visitor = QueryHashVisitor::new(&schema.definitions, document);
         traverse::document(&mut visitor, document, operation_name).map_err(|e| {
-            SpecError::ParsingError(format!("could not calculate the query hash: {e}"))
+            SpecError::QueryHashing(format!("could not calculate the query hash: {e}"))
         })?;
         let hash = visitor.finish();
 
