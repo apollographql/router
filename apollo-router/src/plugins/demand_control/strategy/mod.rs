@@ -67,6 +67,7 @@ impl Strategy {
 
 pub(crate) struct StrategyFactory {
     config: DemandControlConfig,
+    #[allow(dead_code)]
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 }

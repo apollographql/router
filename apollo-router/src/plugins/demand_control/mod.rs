@@ -80,6 +80,7 @@ pub(crate) enum DemandControlError {
     /// Query estimated cost exceeded configured maximum
     EstimatedCostTooExpensive,
     /// Query actual cost exceeded configured maximum
+    #[allow(dead_code)]
     ActualCostTooExpensive,
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
