@@ -100,7 +100,7 @@ where
     ///
     /// This will fail if the supplied JSON cannot be deserialized into the configuration
     /// struct.
-    #[deprecated = "use PluginInit::try_builder() instead"]
+    // TODO: Keep this alive for binary plugins for now #[deprecated = "use PluginInit::try_builder() instead"]
     pub fn try_new(
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,

@@ -74,7 +74,7 @@ async-compression = { version = "0.4.6", features = [
     "gzip",
     "deflate",
 ] }
-async-ffi = "0.4.0"
+async-ffi = "0.5.0"
 async-trait.workspace = true
 axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.7"
@@ -120,7 +120,7 @@ jsonschema = { version = "0.17.1", default-features = false }
 jsonwebtoken = "9.2.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
-libloading = "0.7"
+libloading = "0.8"
 linkme = "0.3.23"
 lru = "0.12.2"
 maplit = "1.0.2"

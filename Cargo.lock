@@ -260,7 +260,7 @@ dependencies = [
  "askama",
  "async-channel 1.9.0",
  "async-compression",
- "async-ffi",
+ "async-ffi 0.5.0",
  "async-trait",
  "aws-config",
  "aws-credential-types",
@@ -604,6 +604,12 @@ name = "async-ffi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ed5a937a789391ebc1c77d3a15b060e0d100e6d7c483a2af3f250d6b8dc2a23"
+
+[[package]]
+name = "async-ffi"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4de21c0feef7e5a556e51af767c953f0501f7f300ba785cc99c47bdc8081a50"
 
 [[package]]
 name = "async-global-executor"
@@ -1217,7 +1223,7 @@ name = "bin-forbid-anonymous-operations"
 version = "0.1.0"
 dependencies = [
  "apollo-router",
- "async-ffi",
+ "async-ffi 0.4.1",
  "async-trait",
  "http 0.2.11",
  "serde_json",
@@ -1232,7 +1238,7 @@ name = "bin-hello-world"
 version = "0.1.0"
 dependencies = [
  "apollo-router",
- "async-ffi",
+ "async-ffi 0.4.1",
  "async-trait",
  "http 0.2.11",
  "schemars",
@@ -3910,12 +3916,12 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.7.4"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
+checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "winapi",
+ "windows-targets 0.52.0",
 ]
 
 [[package]]
