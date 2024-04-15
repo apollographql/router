@@ -288,6 +288,7 @@ register_plugin!("apollo", "experimental_demand_control", DemandControl);
 mod test {
     use std::sync::Arc;
 
+    use apollo_compiler::ast;
     use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use futures::StreamExt;
@@ -299,6 +300,7 @@ mod test {
     use crate::plugins::demand_control::DemandControl;
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
+    use crate::query_planner::fetch::QueryHash;
     use crate::services::execution;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -437,8 +439,9 @@ mod test {
 
     fn context() -> Context {
         let parsed_document = ParsedDocumentInner {
-            executable: Arc::new(ExecutableDocument::new()),
-            ..Default::default()
+            executable: Arc::new(Valid::assume_valid(ExecutableDocument::new())),
+            hash: Arc::new(QueryHash::default()),
+            ast: ast::Document::new(),
         };
         let ctx = Context::new();
         ctx.extensions()

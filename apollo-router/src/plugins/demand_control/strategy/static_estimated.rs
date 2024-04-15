@@ -17,7 +17,7 @@ pub(crate) struct StaticEstimated {
 impl StrategyImpl for StaticEstimated {
     fn on_execution_request(&self, request: &execution::Request) -> Result<(), DemandControlError> {
         self.cost_calculator
-            .estimate_plan(&request.query_plan)
+            .planned(&request.query_plan)
             .and_then(|cost| {
                 if cost > self.max {
                     Err(DemandControlError::EstimatedCostTooExpensive)
