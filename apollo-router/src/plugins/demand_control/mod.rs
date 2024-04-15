@@ -2,7 +2,7 @@
 //! This plugin will use the cost calculation algorithm to determine if a query should be allowed to execute.
 //! On the request path it will use estimated
 use std::future;
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Deref};
 use std::sync::Arc;
 
 use apollo_compiler::validation::{Valid, WithErrors};
@@ -23,6 +23,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
+use crate::plugins::test::PluginTestHarness;
 use crate::services::execution;
 use crate::services::execution::BoxService;
 use crate::services::subgraph;
@@ -285,21 +286,94 @@ register_plugin!("apollo", "experimental_demand_control", DemandControl);
 mod test {
     use std::sync::Arc;
 
+    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use futures::StreamExt;
     use schemars::JsonSchema;
     use serde::Deserialize;
 
+    use crate::graphql::Response;
     use crate::plugins::demand_control::{DemandControl, DemandControlError};
     use crate::plugins::test::PluginTestHarness;
-    use crate::services::execution;
     use crate::services::layers::query_analysis::{ParsedDocument, ParsedDocumentInner};
+    use crate::services::{execution, subgraph};
     use crate::{graphql, Context};
 
     #[tokio::test]
-    async fn test_measure() {
+    async fn test_measure_on_execution_request() {
+        let body = test_on_execution(include_str!(
+            "fixtures/measure_on_execution_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_enforce_on_execution_request() {
+        let body = test_on_execution(include_str!(
+            "fixtures/enforce_on_execution_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_measure_on_execution_response() {
+        let body = test_on_execution(include_str!(
+            "fixtures/measure_on_execution_response.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_enforce_on_execution_response() {
+        let body = test_on_execution(include_str!(
+            "fixtures/enforce_on_execution_response.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_measure_on_subgraph_request() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/measure_on_subgraph_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_enforce_on_subgraph_request() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/enforce_on_subgraph_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_measure_on_subgraph_response() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/measure_on_subgraph_response.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_enforce_on_subgraph_response() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/enforce_on_subgraph_response.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
+
+    async fn test_on_execution(config: &'static str) -> Vec<Response> {
         let plugin = PluginTestHarness::<DemandControl>::builder()
-            .config(include_str!("fixtures/measure.router.yaml"))
+            .config(config)
             .build()
             .await;
 
@@ -323,50 +397,39 @@ mod test {
             .into_body()
             .collect::<Vec<graphql::Response>>()
             .await;
-        insta::assert_yaml_snapshot!(body);
+        body
     }
 
-    #[tokio::test]
-    async fn test_enforce() {
+    async fn test_on_subgraph(config: &'static str) -> Response {
         let plugin = PluginTestHarness::<DemandControl>::builder()
-            .config(include_str!("fixtures/enforce.router.yaml"))
+            .config(config)
             .build()
             .await;
+        let strategy = plugin.strategy_factory.create();
 
         let ctx = context();
+        ctx.extensions().lock().insert(strategy);
 
         let resp = plugin
-            .call_execution(
-                execution::Request::fake_builder().context(ctx).build(),
+            .call_subgraph(
+                subgraph::Request::fake_builder()
+                    .subgraph_name("test")
+                    .subgraph_request_document(Arc::new(Valid::assume_valid(
+                        ExecutableDocument::new(),
+                    )))
+                    .context(ctx)
+                    .build(),
                 |req| {
-                    execution::Response::fake_builder()
+                    subgraph::Response::fake_builder()
                         .context(req.context)
                         .build()
-                        .unwrap()
                 },
             )
             .await
             .unwrap();
 
-        let body = resp
-            .response
-            .into_body()
-            .collect::<Vec<graphql::Response>>()
-            .await;
-        insta::assert_yaml_snapshot!(body);
+        resp.response.into_body()
     }
-
-    #[tokio::test]
-    async fn test_abort_on_execution_request() {}
-
-    #[tokio::test]
-    async fn test_abort_on_execution_response_stream() {}
-
-    #[tokio::test]
-    async fn test_abort_on_subgraph_request() {}
-
-    #[tokio::test]
-    async fn test_abort_on_subgraph_response() {}
 
     fn context() -> Context {
         let mut parsed_document = ParsedDocumentInner::default();
@@ -404,5 +467,19 @@ mod test {
                 TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive,
             }
         }
+    }
+}
+
+impl<T> Deref for PluginTestHarness<T>
+where
+    T: Plugin,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.plugin
+            .as_any()
+            .downcast_ref()
+            .expect("plugin should be of type T")
     }
 }
