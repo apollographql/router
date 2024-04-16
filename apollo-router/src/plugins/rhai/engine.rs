@@ -174,6 +174,17 @@ mod router_json {
 }
 
 #[export_module]
+mod router_sha256 {
+    use sha2::Digest;
+
+    #[rhai_fn(pure)]
+    pub(crate) fn digest(input: &mut ImmutableString) -> String {
+        let hash = sha2::Sha256::digest(input.as_bytes());
+        hex::encode(hash)
+    }
+}
+
+#[export_module]
 mod router_expansion {
     pub(crate) type Expansion = expansion::Expansion;
 
@@ -1625,6 +1636,7 @@ impl Rhai {
 
         let base64_module = exported_module!(router_base64);
         let json_module = exported_module!(router_json);
+        let sha256_module = exported_module!(router_sha256);
 
         let expansion_module = exported_module!(router_expansion);
 
@@ -1651,6 +1663,8 @@ impl Rhai {
             .register_static_module("base64", base64_module.into())
             // Register our json module (not global)
             .register_static_module("json", json_module.into())
+            // Register our SHA256 module (not global)
+            .register_static_module("sha256", sha256_module.into())
             // Register our expansion module (not global)
             // Hide the fact that it is an expansion module by calling it "env"
             .register_static_module("env", expansion_module.into())

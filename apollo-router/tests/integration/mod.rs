@@ -1,3 +1,4 @@
+mod batching;
 #[path = "../common.rs"]
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;

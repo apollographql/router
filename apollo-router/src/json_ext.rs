@@ -45,6 +45,15 @@ macro_rules! extract_key_value_from_object {
     }};
 }
 
+macro_rules! ensure_array {
+    ($value:expr) => {{
+        match $value {
+            crate::json_ext::Value::Array(a) => Ok(a),
+            _ => Err("invalid type, expected an array"),
+        }
+    }};
+}
+
 macro_rules! ensure_object {
     ($value:expr) => {{
         match $value {
