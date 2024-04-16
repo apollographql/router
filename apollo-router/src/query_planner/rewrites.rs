@@ -79,7 +79,7 @@ impl DataRewrite {
                             for item in arr {
                                 if let Some(obj) = item.as_object_mut() {
                                     if let Some(value) = obj.remove(k.as_str()) {
-                                        obj.insert(renamer.rename_key_to.clone(), value);
+                                        obj.insert(renamer.rename_key_to.as_str(), value);
                                     }
                                 }
                             }
@@ -157,7 +157,7 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".to_string(),
+            rename_key_to: "testField".into(),
         });
 
         dr.maybe_apply(
@@ -195,7 +195,7 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".to_string(),
+            rename_key_to: "testField".into(),
         });
 
         dr.maybe_apply(
