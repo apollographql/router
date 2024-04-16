@@ -188,18 +188,6 @@ impl SpanDynAttribute for ::tracing::Span {
     }
 }
 
-pub(crate) struct EventsAttributes {
-    pub(crate) events_attributes: HashMap<String, LogAttributes>,
-}
-
-impl Default for EventsAttributes {
-    fn default() -> Self {
-        Self {
-            events_attributes: HashMap::with_capacity(0),
-        }
-    }
-}
-
 /// To add dynamic attributes for spans
 pub(crate) trait EventDynAttribute {
     /// Always use before sending the event

@@ -140,9 +140,6 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
         match field.name() {
             "message" => self.event_builder.name = value.to_string().into(),
             name => {
-                if name == "kind" {
-                    self.custom_event = true;
-                }
                 self.event_builder
                     .attributes
                     .push(KeyValue::new(name, value));
@@ -173,9 +170,6 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
     fn record_i64(&mut self, field: &field::Field, value: i64) {
         match field.name() {
             "message" => self.event_builder.name = value.to_string().into(),
-            // Skip fields that are actually log metadata that have already been handled
-            #[cfg(feature = "tracing-log")]
-            name if name.starts_with("log.") => (),
             name => {
                 self.event_builder
                     .attributes
@@ -190,10 +184,10 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
     fn record_str(&mut self, field: &field::Field, value: &str) {
         match field.name() {
             "message" => self.event_builder.name = value.to_string().into(),
-            // Skip fields that are actually log metadata that have already been handled
-            #[cfg(feature = "tracing-log")]
-            name if name.starts_with("log.") => (),
             name => {
+                if name == "kind" {
+                    self.custom_event = true;
+                }
                 self.event_builder
                     .attributes
                     .push(KeyValue::new(name, value.to_string()));
@@ -208,10 +202,10 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
             "message" => self.event_builder.name = format!("{:?}", value).into(),
-            // Skip fields that are actually log metadata that have already been handled
-            #[cfg(feature = "tracing-log")]
-            name if name.starts_with("log.") => (),
             name => {
+                if name == "kind" {
+                    self.custom_event = true;
+                }
                 self.event_builder
                     .attributes
                     .push(KeyValue::new(name, format!("{:?}", value)));
