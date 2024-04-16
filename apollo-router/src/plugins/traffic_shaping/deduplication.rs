@@ -78,12 +78,13 @@ where
         // will break any request batches which this request is part of.
         // This check is what enables Batching and Dedup to work together, so be very careful
         // before making any changes to it.
-        if request
-            .context
-            .extensions()
-            .lock()
-            .contains_key::<BatchQuery>()
-        {
+        if {
+            request
+                .context
+                .extensions()
+                .lock()
+                .contains_key::<BatchQuery>()
+        } {
             return service.ready_oneshot().await?.call(request).await;
         }
         loop {

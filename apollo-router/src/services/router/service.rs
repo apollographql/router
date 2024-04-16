@@ -41,7 +41,6 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-// use crate::configuration::SubgraphBatchingConfig;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]

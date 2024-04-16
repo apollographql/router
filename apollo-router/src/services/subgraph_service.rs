@@ -1021,7 +1021,6 @@ async fn call_http(
             .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
             .and_then(|_| extensions_guard.get::<BatchQuery>().cloned())
             .and_then(|bq| (!bq.finished()).then_some(bq))
-        //TODO: I'm not sure that we need to check if bq is finished.
     };
 
     // If we have a batch query, then it's time for batching
