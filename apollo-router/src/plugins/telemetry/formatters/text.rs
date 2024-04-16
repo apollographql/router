@@ -369,7 +369,7 @@ where
             let otel_data = extensions.get_mut::<OtelData>();
             if let Some(event_attributes) = otel_data.and_then(|od| od.event_attributes.take()) {
                 for (key, value) in event_attributes {
-                    default_visitor.log_debug(key.as_str(), &value.as_str());
+                    default_visitor.log_debug_attrs(key.as_str(), &value.as_str());
                 }
             }
         }
@@ -482,6 +482,34 @@ impl<'a> DefaultVisitor<'a> {
         }
 
         Style::new()
+    }
+
+    fn log_debug_attrs(&mut self, field_name: &str, value: &dyn fmt::Debug) {
+        let style = self.dimmed();
+
+        self.result = write!(self.writer, "{}", style.prefix());
+        if self.result.is_err() {
+            return;
+        }
+
+        self.maybe_pad();
+        self.result = match field_name {
+            name if name.starts_with("r#") => write!(
+                self.writer,
+                "{}{}{:?}",
+                self.italic().paint(&name[2..]),
+                self.dimmed().paint("="),
+                value
+            ),
+            name => write!(
+                self.writer,
+                "{}{}{:?}",
+                self.italic().paint(name),
+                self.dimmed().paint("="),
+                value
+            ),
+        };
+        self.result = write!(self.writer, "{}", style.suffix());
     }
 
     fn log_debug(&mut self, field_name: &str, value: &dyn fmt::Debug) {

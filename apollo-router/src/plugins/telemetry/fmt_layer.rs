@@ -271,6 +271,9 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
+    use crate::otel;
+    use crate::plugins::telemetry::config_new::events::log_event;
+    use crate::plugins::telemetry::config_new::events::EventLevel;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
@@ -458,6 +461,49 @@ mod tests {
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
             generate_nested_spans,
+        );
+
+        insta::assert_display_snapshot!(buff.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_text_logging_with_custom_events() {
+        let buff = LogBuffer::default();
+        let text_format = TextFormat {
+            ansi_escape_codes: false,
+            ..Default::default()
+        };
+        let format = Text::new(Default::default(), text_format);
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            || {
+                let test_span = info_span!(
+                    "test",
+                    first = "one",
+                    apollo_private.should_not_display = "this should be skipped"
+                );
+                test_span.set_span_dyn_attribute("another".into(), 2.into());
+                test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                let _enter = test_span.enter();
+                let mut attributes = HashMap::new();
+                attributes.insert("http.response.body.size".to_string(), "125".to_string());
+                attributes.insert(
+                    "http.response.body".to_string(),
+                    r#"{"foo": "bar"}"#.to_string(),
+                );
+                log_event(
+                    EventLevel::Info,
+                    "my_custom_event",
+                    attributes,
+                    "my message",
+                );
+            },
         );
 
         insta::assert_display_snapshot!(buff.to_string());
