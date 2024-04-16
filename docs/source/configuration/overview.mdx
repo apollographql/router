@@ -546,6 +546,38 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 - You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
 - You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the Apollo Router](./entity-caching/).
 
+<MinVersion version="1.44.0">
+
+### Query planner pools
+
+</MinVersion>
+
+<ExperimentalFeature appendText="And join the [GitHub discussion about query planner pools](https://github.com/apollographql/router/discussions/4917)."
+/>
+
+You can improve the performance of the router's query planner by configuring parallelized query planning.
+
+By default, the query planner plans one operation at a time. It plans one operation to completion before planning the next one. This serial planning can be problematic when an operation takes a long time to plan and consequently blocks the query planner from working on other operations.
+
+To resolve such blocking scenarios, you can enable parallel query planning. Configure it in `router.yaml` with `supergraph.query_planner.experimental_parallelism`:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planner:
+    experimental_parallelism: auto # number of available cpus 
+```
+
+The value of `experimental_parallelism` is the number of query planners in the router's _query planner pool_. A query planner pool is a preallocated set of query planners from which the router can use to plan operations. The total number of pools is the maximum number of query planners that can run in parallel and therefore the maximum number of operations that can be worked on simultaneously. 
+
+Valid values of `experimental_parallelism`:
+- Any integer starting from `1`
+- The special value `auto`, which sets the number of query planners equal to the number of available CPUs on the router's host machine
+
+The default value of `experimental_parallelism` is `1`.
+
+In practice, you should tune `experimental_parallelism` based on metrics and benchmarks gathered from your router.
+
+
 ### Safelisting with persisted queries
 
 You can enhance your graph's security by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
