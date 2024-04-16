@@ -3414,7 +3414,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.9",
+ "socket2 0.5.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -5710,8 +5710,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.18+v2.7.2"
-source = "git+https://github.com/apollographql/federation-rs?branch=igni/type_conditioned_fetching#8805368d0b163f26de49ad4c9352c5a9b368cf12"
+version = "0.5.19+v2.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a138c06c9fc845dca603f17d85bdb54e907aacb8fa45dfda7098edf9f33a7084"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",

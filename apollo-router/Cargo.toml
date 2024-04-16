@@ -187,7 +187,7 @@ reqwest = { version = "0.11.24", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = { git = "https://github.com/apollographql/federation-rs", branch = "igni/type_conditioned_fetching", version = "=0.5.18+v2.7.2" }
+router-bridge = "=0.5.19+v2.7.3"
 rust-embed = "8.2.0"
 rustls = "0.21.10"
 rustls-native-certs = "0.6.3"
