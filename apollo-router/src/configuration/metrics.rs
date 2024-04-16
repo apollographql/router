@@ -336,7 +336,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.batching,
-            "$.experimental_batching[?(@.enabled == true)]",
+            "$.batching[?(@.enabled == true)]",
             opt.mode,
             "$.mode"
         );
