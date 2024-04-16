@@ -336,8 +336,8 @@ impl QueryGraph {
         })
     }
 
-    pub(crate) fn sources(&self) -> impl Iterator<Item = &ValidFederationSchema> {
-        self.sources.values()
+    pub(crate) fn sources(&self) -> impl Iterator<Item = (&NodeStr, &ValidFederationSchema)> {
+        self.sources.iter()
     }
 
     pub(crate) fn types_to_nodes(

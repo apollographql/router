@@ -14,6 +14,7 @@ use crate::query_plan::operation::{
     NormalizedOperation, NormalizedSelection, NormalizedSelectionSet,
 };
 use crate::query_plan::query_planner::QueryPlannerConfig;
+use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
@@ -29,30 +30,31 @@ use std::sync::Arc;
 // runtime (introducing the new field `head_must_be_root`).
 pub(crate) struct QueryPlanningParameters {
     /// The supergraph schema that generated the federated query graph.
-    supergraph_schema: ValidFederationSchema,
+    pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph used for query planning.
-    federated_query_graph: Arc<QueryGraph>,
+    pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
-    operation: Arc<NormalizedOperation>,
+    pub(crate) operation: Arc<NormalizedOperation>,
     /// A processor for converting fetch dependency graphs to query plans.
-    processor: FetchDependencyGraphToQueryPlanProcessor,
+    pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor,
     /// The query graph node at which query planning begins.
-    head: NodeIndex,
+    pub(crate) head: NodeIndex,
     /// Whether the head must be a root node for query planning.
-    head_must_be_root: bool,
+    pub(crate) head_must_be_root: bool,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    abstract_types_with_inconsistent_runtime_types: Arc<IndexSet<AbstractTypeDefinitionPosition>>,
+    pub(crate) abstract_types_with_inconsistent_runtime_types:
+        Arc<IndexSet<AbstractTypeDefinitionPosition>>,
     /// The configuration for the query planner.
-    config: Arc<QueryPlannerConfig>,
-    // TODO: When `PlanningStatistics` is ported, add a field for it.
+    pub(crate) config: QueryPlannerConfig,
+    pub(crate) statistics: QueryPlanningStatistics,
 }
 
-pub(crate) struct QueryPlanningTraversal {
+pub(crate) struct QueryPlanningTraversal<'a> {
     /// The parameters given to query planning.
-    parameters: QueryPlanningParameters,
+    parameters: &'a QueryPlanningParameters,
     /// The root kind of the operation.
     root_kind: SchemaRootDefinitionKind,
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
@@ -87,17 +89,69 @@ struct OpenBranchAndSelections {
     selections: Vec<NormalizedSelection>,
 }
 
-struct BestQueryPlanInfo {
+pub(crate) struct BestQueryPlanInfo {
     /// The fetch dependency graph for this query plan.
-    fetch_dependency_graph: FetchDependencyGraph,
+    pub fetch_dependency_graph: FetchDependencyGraph,
     /// The path tree for the closed branch options chosen for this query plan.
-    path_tree: OpPathTree,
+    pub path_tree: OpPathTree,
     /// The cost of this query plan.
-    cost: QueryPlanCost,
+    pub cost: QueryPlanCost,
 }
 
-impl QueryPlanningTraversal {
-    fn find_best_plan(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
+impl BestQueryPlanInfo {
+    // PORT_NOTE: The equivalent of `createEmptyPlan` in the JS codebase.
+    pub fn empty(parameters: &QueryPlanningParameters) -> Self {
+        Self {
+            fetch_dependency_graph: FetchDependencyGraph::new(
+                parameters.supergraph_schema.clone(),
+                parameters.federated_query_graph.clone(),
+                None,
+                0,
+            ),
+            path_tree: OpPathTree::new(parameters.federated_query_graph.clone(), parameters.head),
+            cost: Default::default(),
+        }
+    }
+}
+
+impl<'a> QueryPlanningTraversal<'a> {
+    pub fn new(
+        // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
+        // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
+        // The ownership of `QueryPlanningParameters` is awkward and should probably be
+        // refactored.
+        parameters: &'a QueryPlanningParameters,
+        _selection_set: NormalizedSelectionSet,
+        has_defers: bool,
+        root_kind: SchemaRootDefinitionKind,
+        cost_processor: FetchDependencyGraphToCostProcessor,
+    ) -> Self {
+        // FIXME(@goto-bus-stop): Is this correct?
+        let is_top_level = parameters.head_must_be_root;
+        Self {
+            parameters,
+            root_kind,
+            has_defers,
+            starting_id_generation: 0,
+            cost_processor,
+            is_top_level,
+            // TODO: Use `self.resolve_condition_plan()` once it exists. See FED-46.
+            condition_resolver: CachingConditionResolver,
+            // TODO: In JS this calls `createInitialOptions()`. Do we still need that? See FED-147.
+            open_branches: Default::default(),
+            closed_branches: Default::default(),
+            best_plan: None,
+        }
+    }
+
+    // PORT_NOTE: In JS, the traversal is still usable after finding the best plan. Here we consume
+    // the struct so we do not need to return a reference, which is very unergonomic.
+    pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
+        self.find_best_plan_inner()?;
+        Ok(self.best_plan)
+    }
+
+    fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
             let Some(current_selection) = current_branch.selections.pop() else {
                 return Err(FederationError::internal(
@@ -446,7 +500,8 @@ impl QueryPlanningTraversal {
             .unwrap_or(0);
         // debug!("Query has {plan_count} possible plans");
 
-        let max_evaluated_plans = self.parameters.config.debug.max_evaluated_plans as usize;
+        let max_evaluated_plans =
+            u32::from(self.parameters.config.debug.max_evaluated_plans) as usize;
         loop {
             // Note that if `self.closed_branches[0]` is our only branch, it's fine,
             // we'll continue to remove options from it (but that is beyond unlikely).

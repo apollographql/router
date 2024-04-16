@@ -37,7 +37,10 @@ impl State<'_, '_> {
 
 impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
-        let Self { node } = self;
+        let Self {
+            node,
+            statistics: _,
+        } = self;
         state.write("QueryPlan {")?;
         if let Some(node) = node {
             state.indent()?;

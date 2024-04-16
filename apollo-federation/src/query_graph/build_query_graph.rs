@@ -1343,7 +1343,7 @@ impl FederatedQueryGraphBuilder {
                         message: "Singleton list was unexpectedly empty".to_owned(),
                     })?
             } else {
-                merge_selection_sets(all_conditions.into_iter())?
+                merge_selection_sets(all_conditions)?
             };
             let edge_weight_mut = self.base.query_graph.edge_weight_mut(edge)?;
             edge_weight_mut.conditions = Some(Arc::new(new_conditions));
@@ -1414,7 +1414,7 @@ impl FederatedQueryGraphBuilder {
                         message: "Singleton list was unexpectedly empty".to_owned(),
                     })?
             } else {
-                merge_selection_sets(all_conditions.into_iter())?
+                merge_selection_sets(all_conditions)?
             };
             // We make a copy of the tail node (representing the field's type) with all the same
             // out-edges, and we change this particular in-edge to point to the new copy. We then
