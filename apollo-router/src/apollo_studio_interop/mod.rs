@@ -523,3 +523,6 @@ fn format_value(value: &Value, f: &mut fmt::Formatter) -> fmt::Result {
         rest => f.write_str(&rest.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests;
