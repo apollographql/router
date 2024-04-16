@@ -651,7 +651,7 @@ impl Service<router::Request> for CallbackService {
                                         });
                                     }
                                 }
-                                if let Err(err) = notify.force_delete(id).await {
+                                if let Err(_err) = notify.force_delete(id).await {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
