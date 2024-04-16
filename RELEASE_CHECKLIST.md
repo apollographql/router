@@ -50,6 +50,7 @@ Make sure you have the following software installed and available in your `PATH`
 
   - `gh`: [The GitHub CLI](https://cli.github.com/)
   - `cargo`: [Cargo & Rust Installation](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+  - `helm`: see <https://helm.sh/docs/intro/install/>
   - `helm-docs`: see <https://github.com/norwoodj/helm-docs#installation>
   - `cargo-about`: install with `cargo install --locked cargo-about`
   - `cargo-deny`: install with `cargo install --locked cargo-deny`
@@ -166,7 +167,7 @@ Start following the steps below to start a release PR.  The process is **not ful
 6. Run the release automation script using this command to use the environment variable set previously:
 
    ```
-   cargo xtask release prepare "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
+   cargo xtask release prepare --pre-release "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
    ```
 
    Running this command will:
@@ -175,29 +176,19 @@ Start following the steps below to start a release PR.  The process is **not ful
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-   Currently, it will also do one step which we will **immediately undo** in the next step, since it is not desireable for pre-release versions:
-
-     - Migrate the current set of `/.changesets/*.md` files into `/CHANGELOG.md` using the version specified.
-
-7. Revert the changes to the `CHANGELOG.md` made in the last step since we don't finalize the changelog from the `.changesets` until the final release is prepared.  (This really could be replaced with a `--skip-changesets` flag.)
-
-   ```
-   git checkout -- .changesets/ CHANGELOG.md
-   ```
-
-8. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
+7. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
     ```
     git add -up .
     ```
 
-9. Now commit those changes locally, using a brief message:
+8. Now commit those changes locally, using a brief message:
 
     ```
     git commit -m "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
-10. Push this commit up to the existing release PR:
+9. Push this commit up to the existing release PR:
 
    ```
    git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
