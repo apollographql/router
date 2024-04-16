@@ -7,6 +7,7 @@ pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const SOURCE_HTTP_ARGUMENT_NAME: Name = name!("http");
 pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
+pub(crate) const SOURCE_HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
@@ -35,9 +36,6 @@ pub(crate) struct SourceSpecDefinition {
 /// Refer to [SourceSpecDefinition] for more info.
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceDirectiveArguments {
-    /// The owning subgraph
-    pub(crate) graph: NodeStr,
-
     /// The friendly name of this source for use in `@connect` directives
     pub(crate) name: NodeStr,
 
@@ -52,6 +50,8 @@ pub(crate) struct HTTPArguments {
     pub(crate) base_url: NodeStr,
 
     /// HTTP headers used when requesting resources from the upstream source
+    // TODO: The spec says that this is nullable, so should we encode this as
+    // an `Option` or do we not care if null maps to an empty list?
     pub(crate) headers: Vec<HTTPHeaderMapping>,
 }
 
