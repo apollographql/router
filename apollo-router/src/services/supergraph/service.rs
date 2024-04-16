@@ -24,6 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
@@ -617,19 +618,33 @@ async fn plan_query(
             .insert::<crate::services::layers::query_analysis::ParsedDocument>(doc);
     }
 
-    planning
+    let qpr = planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context)
+                .context(context.clone())
                 .build(),
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
             "otel.kind" = "INTERNAL"
         ))
-        .await
+        .await?;
+
+    let batching = context.extensions().lock().get::<BatchQuery>().cloned();
+    if let Some(batch_query) = batching {
+        if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
+            let query_hashes = plan.root.query_hashes()?;
+            batch_query
+                .set_query_hashes(query_hashes)
+                .await
+                .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
+            tracing::debug!("batch registered: {}", batch_query);
+        }
+    }
+
+    Ok(qpr)
 }
 
 fn clone_supergraph_request(

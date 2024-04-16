@@ -968,6 +968,132 @@ fn it_adds_slash_to_custom_health_check_path_if_missing() {
     assert_eq!(&conf.health_check.path, "/healthz");
 }
 
+#[test]
+fn it_processes_batching_subgraph_all_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": true
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(config.batch_include("anything"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_all_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": true
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": false
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": true
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": false
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(config.batch_include("anything"));
+    assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": true
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(config.batch_include("accounts"));
+}
+
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {
     let serde_field_default = Regex::new(
         r#"^\s*#[\s\n]*\[serde\s*\((.*,)?\s*default\s*=\s*"[a-zA-Z0-9_:]+"\s*(,.*)?\)\s*\]\s*$"#,

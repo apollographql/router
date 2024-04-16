@@ -15,6 +15,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceExt;
 
+use crate::batching::BatchQuery;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -73,6 +74,18 @@ where
         wait_map: WaitMap,
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
+        // Check if the request is part of a batch. If it is, completely bypass dedup since it
+        // will break any request batches which this request is part of.
+        // This check is what enables Batching and Dedup to work together, so be very careful
+        // before making any changes to it.
+        if request
+            .context
+            .extensions()
+            .lock()
+            .contains_key::<BatchQuery>()
+        {
+            return service.ready_oneshot().await?.call(request).await;
+        }
         loop {
             let mut locked_wait_map = wait_map.lock().await;
             let authorization_cache_key = request.authorization.clone();

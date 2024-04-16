@@ -194,7 +194,7 @@ pub struct Configuration {
 
     /// Batching configuration.
     #[serde(default)]
-    pub(crate) experimental_batching: Batching,
+    pub(crate) batching: Batching,
 }
 
 impl PartialEq for Configuration {
@@ -273,7 +273,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
-            experimental_batching: Batching,
+            batching: Batching,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -292,7 +292,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
-            .experimental_batching(ad_hoc.experimental_batching)
+            .batching(ad_hoc.batching)
             .experimental_apollo_metrics_generation_mode(
                 ad_hoc.experimental_apollo_metrics_generation_mode,
             )
@@ -332,9 +332,9 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        batching: Option<Batching>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
-        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -371,7 +371,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
+            batching: batching.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -409,7 +409,7 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        experimental_batching: Option<Batching>,
+        batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
@@ -439,7 +439,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
+            batching: batching.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -1605,4 +1605,42 @@ pub(crate) struct Batching {
 
     /// Batching mode
     pub(crate) mode: BatchingMode,
+
+    /// Subgraph options for batching
+    pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
+}
+
+/// Common options for configuring subgraph batching
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+pub(crate) struct CommonBatchingConfig {
+    /// Whether this batching config should be enabled
+    pub(crate) enabled: bool,
+}
+
+impl Batching {
+    // Check if we should enable batching for a particular subgraph (service_name)
+    pub(crate) fn batch_include(&self, service_name: &str) -> bool {
+        match &self.subgraph {
+            Some(subgraph_batching_config) => {
+                // Override by checking if all is enabled
+                if subgraph_batching_config.all.enabled {
+                    // If it is, require:
+                    // - no subgraph entry OR
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .map_or(true, |x| x.enabled)
+                } else {
+                    // If it isn't, require:
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .is_some_and(|x| x.enabled)
+                }
+            }
+            None => false,
+        }
+    }
 }
