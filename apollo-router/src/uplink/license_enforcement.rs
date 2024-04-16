@@ -383,6 +383,10 @@ impl LicenseEnforcementReport {
                 .name("File uploads plugin")
                 .build(),
             ConfigurationRestriction::builder()
+                .path("$.batching")
+                .name("Batching support")
+                .build(),
+            ConfigurationRestriction::builder()
                 .path("$.experimental_demand_control")
                 .name("Demand control plugin")
                 .build(),
