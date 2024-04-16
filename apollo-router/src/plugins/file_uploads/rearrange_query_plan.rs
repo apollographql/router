@@ -1,8 +1,9 @@
 use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::collections::HashSet;
 
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use itertools::Itertools;
 
 use super::error::FileUploadError;
@@ -36,7 +37,7 @@ pub(super) fn rearrange_query_plan(
         );
     }
 
-    let root = rearrange_plan_node(root, &mut HashMap::new(), &variable_ranges)?;
+    let root = rearrange_plan_node(root, &mut IndexMap::new(), &variable_ranges)?;
     Ok(QueryPlan {
         root,
         usage_reporting: query_plan.usage_reporting.clone(),
@@ -48,7 +49,7 @@ pub(super) fn rearrange_query_plan(
 // Recursive, and recursion is safe here since query plan is also executed recursively.
 fn rearrange_plan_node<'a>(
     node: &PlanNode,
-    acc_variables: &mut HashMap<&'a str, &'a (Option<usize>, Option<usize>)>,
+    acc_variables: &mut IndexMap<&'a str, &'a (Option<usize>, Option<usize>)>,
     variable_ranges: &'a HashMap<&str, (Option<usize>, Option<usize>)>,
 ) -> UploadResult<PlanNode> {
     Ok(match node {
@@ -94,7 +95,7 @@ fn rearrange_plan_node<'a>(
 
             // Error if 'rest' contains file variables
             if let Some(rest) = rest {
-                let mut rest_variables = HashMap::new();
+                let mut rest_variables = IndexMap::new();
                 // ignore result use it just to collect variables
                 drop(rearrange_plan_node(
                     rest,
@@ -127,7 +128,7 @@ fn rearrange_plan_node<'a>(
                 .transpose();
 
             // Error if 'deferred' contains file variables
-            let mut deferred_variables = HashMap::new();
+            let mut deferred_variables = IndexMap::new();
             for DeferredNode { node, .. } in deferred.iter() {
                 if let Some(node) = node {
                     // ignore result use it just to collect variables
@@ -164,9 +165,9 @@ fn rearrange_plan_node<'a>(
             let mut sequence_last = None;
 
             let mut has_overlap = false;
-            let mut duplicate_variables = HashSet::new();
+            let mut duplicate_variables = IndexSet::new();
             for node in nodes.iter() {
-                let mut node_variables = HashMap::new();
+                let mut node_variables = IndexMap::new();
                 let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
                 sequence.push(node);
 
@@ -203,10 +204,10 @@ fn rearrange_plan_node<'a>(
             // Note: we don't wrap or change order of nodes that don't use "file variables".
             let mut parallel = Vec::new();
             let mut sequence = BTreeMap::new();
-            let mut duplicate_variables = HashSet::new();
+            let mut duplicate_variables = IndexSet::new();
 
             for node in nodes.iter() {
-                let mut node_variables = HashMap::new();
+                let mut node_variables = IndexMap::new();
                 let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
                 if node_variables.is_empty() {
                     parallel.push(node);
@@ -242,7 +243,11 @@ fn rearrange_plan_node<'a>(
                 ));
             }
 
-            if !sequence.is_empty() {
+            if sequence.len() <= 1 {
+                // if there are no node competing for files, keep nodes nodes in Parallel
+                parallel.extend(sequence.into_values().map(|(node, _)| node));
+                PlanNode::Parallel { nodes: parallel }
+            } else {
                 let mut nodes = Vec::new();
                 let mut sequence_last_file = None;
                 for (first_file, (node, last_file)) in sequence.into_iter() {
@@ -253,62 +258,651 @@ fn rearrange_plan_node<'a>(
                     nodes.push(node);
                 }
 
-                parallel.push(PlanNode::Sequence { nodes });
+                if parallel.is_empty() {
+                    // if all nodes competing for files replace Parallel with Sequence
+                    PlanNode::Sequence { nodes }
+                } else {
+                    // if some of the nodes competing for files wrap them with Sequence within Parallel
+                    parallel.push(PlanNode::Sequence { nodes });
+                    PlanNode::Parallel { nodes: parallel }
+                }
             }
-
-            PlanNode::Parallel { nodes: parallel }
         }
     })
 }
 
-#[test]
-fn test_rearrange_impossible_plan() {
-    let root = serde_json::from_str(r#"{
-        "kind": "Sequence",
-        "nodes": [
-          {
-            "kind": "Fetch",
-            "serviceName": "uploads1",
-            "variableUsages": [
-              "file1"
-            ],
-            "operation": "mutation SomeMutation__uploads1__0($file1:Upload1){file1:singleUpload1(file:$file1){filename}}",
-            "operationName": "SomeMutation__uploads1__0",
-            "operationKind": "mutation",
-            "id": null,
-            "inputRewrites": null,
-            "outputRewrites": null,
-            "schemaAwareHash": "0239133f4bf1e52ed2d84a06563d98d61a197ec417490a38b37aaeecd98b315c",
-            "authorization": {
-              "is_authenticated": false,
-              "scopes": [],
-              "policies": []
-            }
-          },
-          {
-            "kind": "Fetch",
-            "serviceName": "uploads2",
-            "variableUsages": [
-              "file0"
-            ],
-            "operation": "mutation SomeMutation__uploads2__1($file0:Upload2){file0:singleUpload2(file:$file0){filename}}",
-            "operationName": "SomeMutation__uploads2__1",
-            "operationKind": "mutation",
-            "id": null,
-            "inputRewrites": null,
-            "outputRewrites": null,
-            "schemaAwareHash": "41fda639a3b69227226d234fed29d63124e0a95ac9ff98c611e903d4b2adcd8c",
-            "authorization": {
-              "is_authenticated": false,
-              "scopes": [],
-              "policies": []
-            }
-          }
-        ]
-      }"#).unwrap();
+#[cfg(test)]
+mod tests {
+    use indexmap::indexmap;
+    use serde_json::json;
 
-    let variable_ranges =
-        HashMap::from([("file1", (Some(1), Some(1))), ("file0", (Some(0), Some(0)))]);
-    let root = rearrange_plan_node(&root, &mut HashMap::new(), &variable_ranges).unwrap_err();
-    assert_eq!("References to variables containing files are ordered in the way that prevent streaming of files.".to_string(), root.to_string());
+    use super::*;
+    use crate::query_planner::subscription::SubscriptionNode;
+    use crate::query_planner::Primary;
+    use crate::services::execution::QueryPlan;
+
+    // Custom `assert_matches` due to its current nightly-only status, see
+    // https://github.com/rust-lang/rust/issues/82775
+    macro_rules! assert_matches {
+        ($actual:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
+            let result = $actual;
+            assert!(
+                matches!(result, $( $pattern )|+ $( if $guard )?),
+                "got {:?} but expected {:?}",
+                result,
+                "", // stringify!($pattern)
+            );
+        };
+    }
+
+    fn fake_query_plan(root_json: serde_json::Value) -> QueryPlan {
+        QueryPlan::fake_new(Some(serde_json::from_value(root_json).unwrap()), None)
+    }
+
+    fn to_root_json(query_plan: QueryPlan) -> serde_json::Value {
+        serde_json::to_value(query_plan.root).unwrap()
+    }
+
+    fn normalize_json<T: serde::de::DeserializeOwned + serde::ser::Serialize>(
+        json: serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::to_value(serde_json::from_value::<T>(json).unwrap()).unwrap()
+    }
+
+    fn fake_fetch(service_name: &str, variables: Vec<&str>) -> serde_json::Value {
+        normalize_json::<PlanNode>(json!({
+          "kind": "Fetch",
+          "serviceName": service_name.to_owned(),
+          "variableUsages": variables.to_owned(),
+          "operation": "",
+          "operationKind": "query"
+        }))
+    }
+
+    fn fake_subscription(service_name: &str, variables: Vec<&str>) -> serde_json::Value {
+        normalize_json::<SubscriptionNode>(json!({
+          "serviceName": service_name.to_owned(),
+          "variableUsages": variables.to_owned(),
+          "operation": "",
+          "operationKind": "subscription"
+        }))
+    }
+
+    fn fake_primary(node: serde_json::Value) -> serde_json::Value {
+        normalize_json::<Primary>(json!({ "node": node }))
+    }
+
+    fn fake_deferred(node: serde_json::Value) -> serde_json::Value {
+        normalize_json::<DeferredNode>(json!({
+          "depends": [],
+          "queryPath": [],
+          "node": node,
+        }))
+    }
+
+    #[test]
+    fn test_valid_conditional_node() {
+        let root_json = json!({
+          "kind": "Condition",
+          "condition": "",
+          "ifClause": fake_fetch("uploads1", vec!["file"]),
+          "elseClause":  fake_fetch("uploads2", vec!["file"]),
+        });
+        let query_plan = fake_query_plan(root_json.clone());
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(to_root_json(result.unwrap()), root_json);
+    }
+
+    #[test]
+    fn test_inner_error_within_conditional_node() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Condition",
+          "condition": "",
+          "ifClause": {
+            "kind": "Sequence",
+            "nodes": [
+              fake_fetch("uploads1", vec!["file2"]),
+              fake_fetch("uploads2", vec!["file1"])
+            ]
+          }
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
+    }
+
+    #[test]
+    fn test_conditional_node_overlapping_with_external_node() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Condition",
+              "condition": "",
+              "ifClause": fake_fetch("uploads1", vec!["file"]),
+              "elseClause":  fake_fetch("uploads2", vec!["file"]),
+            },
+            fake_fetch("uploads3", vec!["file"]),
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(
+            result,
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file",
+        );
+    }
+
+    #[test]
+    fn test_valid_subscription_node() {
+        let root_json = json!({
+          "kind": "Subscription",
+          "primary": fake_subscription("uploads", vec!["file"]),
+          "rest":  fake_fetch("subgraph", vec!["not_a_file"]),
+        });
+        let query_plan = fake_query_plan(root_json.clone());
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(to_root_json(result.unwrap()), root_json);
+    }
+
+    #[test]
+    fn test_valid_file_inside_of_subscription_rest() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Subscription",
+          "primary": fake_subscription("uploads1", vec!["file2"]),
+          "rest":  {
+            "kind": "Sequence",
+            "nodes": [
+              // Note: order is invalid on purpose since we are testing that user get
+              // error about variables inside subscription instead of internal error.
+              fake_fetch("uploads1", vec!["file2"]),
+              fake_fetch("uploads2", vec!["file1"])
+            ]
+           }
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(
+            result,
+            Err(FileUploadError::VariablesForbiddenInsideSubscription(ref variables)) if variables == "$file2, $file1",
+        );
+    }
+
+    #[test]
+    fn test_valid_defer_node() {
+        let root_json = json!({
+          "kind": "Defer",
+          "primary": fake_primary(fake_fetch("uploads", vec!["file"])),
+          "deferred":  [fake_deferred(fake_fetch("subgraph", vec!["not_a_file"]))],
+        });
+        let query_plan = fake_query_plan(root_json.clone());
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(to_root_json(result.unwrap()), root_json);
+    }
+
+    #[test]
+    fn test_file_inside_of_deffered() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Defer",
+          "primary": fake_primary(fake_fetch("uploads", vec!["file"])),
+          "deferred":  [
+              fake_deferred(json!({
+                "kind": "Sequence",
+                "nodes": [
+                  // Note: order is invalid on purpose since we are testing that user get
+                  // error about variables inside deffered instead of internal error.
+                  fake_fetch("uploads1", vec!["file2"]),
+                  fake_fetch("uploads2", vec!["file1"])
+                ]
+              }))
+          ],
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(
+            result,
+            Err(FileUploadError::VariablesForbiddenInsideDefer(ref variables)) if variables == "$file2, $file1",
+        );
+    }
+
+    #[test]
+    fn test_inner_error_within_defer_node() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Defer",
+          "primary": fake_primary(json!({
+            "kind": "Sequence",
+            "nodes": [
+              fake_fetch("uploads1", vec!["file2"]),
+              fake_fetch("uploads2", vec!["file1"])
+            ]
+          })),
+          "deferred":  []
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
+    }
+
+    #[test]
+    fn test_defer_node_overlapping_with_external_node() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Defer",
+              "primary": fake_primary(json!(fake_fetch("uploads1", vec!["file"]))),
+              "deferred":  []
+            },
+            fake_fetch("uploads2", vec!["file"]),
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(
+            result,
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file",
+        );
+    }
+
+    #[test]
+    fn test_valid_flatten_node() {
+        let root_json = json!({
+          "kind": "Flatten",
+          "path": [],
+          "node": fake_fetch("uploads", vec!["file"]),
+        });
+        let query_plan = fake_query_plan(root_json.clone());
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(to_root_json(result.unwrap()), root_json);
+    }
+
+    #[test]
+    fn test_inner_error_within_flatten_node() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Flatten",
+          "path": [],
+          "node": {
+            "kind": "Sequence",
+            "nodes": [
+              fake_fetch("uploads1", vec!["file2"]),
+              fake_fetch("uploads2", vec!["file1"])
+            ]
+          },
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
+    }
+
+    #[test]
+    fn test_flatten_node_overlapping_with_external_node() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Flatten",
+              "path": [],
+              "node": fake_fetch("uploads1", vec!["file"]),
+            },
+            fake_fetch("uploads2", vec!["file"]),
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(
+            result,
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file",
+        );
+    }
+
+    #[test]
+    fn test_valid_sequence() {
+        let root_json = json!({
+          "kind": "Sequence",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file1"]),
+            fake_fetch("uploads2", vec!["file2"])
+          ]
+        });
+        let query_plan = fake_query_plan(root_json.clone());
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(to_root_json(result.unwrap()), root_json);
+    }
+
+    #[test]
+    fn test_missordered_sequence() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Sequence",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file2"]),
+            fake_fetch("uploads2", vec!["file1"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
+    }
+
+    #[test]
+    fn test_sequence_with_overlapping_variables() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Sequence",
+          "nodes": [
+            fake_fetch("uploads1", vec!["files1"]),
+            fake_fetch("uploads2", vec!["files2"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.files1.0".to_owned()],
+            "1".to_owned() => vec!["variables.files2.0".to_owned()],
+            "2".to_owned() => vec!["variables.files1.1".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
+    }
+
+    #[test]
+    fn test_sequence_with_duplicated_variables() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Sequence",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file1"]),
+            fake_fetch("uploads2", vec!["file2", "file3"]),
+            fake_fetch("uploads3", vec!["file1"]),
+            fake_fetch("uploads4", vec!["file2", "file4"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+            "2".to_owned() => vec!["variables.file3".to_owned()],
+            "3".to_owned() => vec!["variables.file4".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(
+            result,
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file1, $file2",
+        );
+    }
+
+    #[test]
+    fn test_keep_nodes_in_parallel() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Parallel",
+          "nodes": [
+            fake_fetch("subgraph1", vec!["not_a_file"]),
+            fake_fetch("subgraph2", vec!["not_a_file"]),
+            fake_fetch("uploads1", vec!["file1"]),
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            json!({
+              "kind": "Parallel",
+              "nodes": [
+                fake_fetch("subgraph1", vec!["not_a_file"]),
+                fake_fetch("subgraph2", vec!["not_a_file"]),
+                fake_fetch("uploads1", vec!["file1"]),
+              ]
+            })
+        );
+    }
+
+    #[test]
+    fn test_convert_parallel_to_sequence() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Parallel",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file1"]),
+            fake_fetch("uploads2", vec!["file2"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            json!({
+              "kind": "Sequence",
+              "nodes": [
+                fake_fetch("uploads1", vec!["file1"]),
+                fake_fetch("uploads2", vec!["file2"])
+              ]
+            })
+        );
+    }
+
+    #[test]
+    fn test_embedded_sequence_into_parallel() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Parallel",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file1"]),
+            fake_fetch("subgraph1", vec!["not_a_file"]),
+            fake_fetch("uploads2", vec!["file2"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            json!({
+              "kind": "Parallel",
+              "nodes": [
+                fake_fetch("subgraph1", vec!["not_a_file"]),
+                {
+                  "kind": "Sequence",
+                  "nodes": [
+                    fake_fetch("uploads1", vec!["file1"]),
+                    fake_fetch("uploads2", vec!["file2"])
+                  ]
+                }
+              ]
+            })
+        );
+    }
+
+    #[test]
+    fn test_fix_order_in_parallel() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Parallel",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file1"]),
+            fake_fetch("uploads2", vec!["file0"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file0".to_owned()],
+            "1".to_owned() => vec!["variables.file1".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            json!({
+              "kind": "Sequence",
+              "nodes": [
+                fake_fetch("uploads2", vec!["file0"]),
+                fake_fetch("uploads1", vec!["file1"])
+              ]
+            })
+        );
+    }
+
+    #[test]
+    fn test_parallel_with_overlapping_variables() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Parallel",
+          "nodes": [
+            fake_fetch("uploads1", vec!["files1"]),
+            fake_fetch("uploads2", vec!["files2"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.files1.0".to_owned()],
+            "1".to_owned() => vec!["variables.files2.0".to_owned()],
+            "2".to_owned() => vec!["variables.files1.1".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
+    }
+
+    #[test]
+    fn test_parallel_with_overlapping_fetch_nodes() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Parallel",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file1", "file3"]),
+            fake_fetch("uploads2", vec!["file2"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+            "2".to_owned() => vec!["variables.file3".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
+    }
+
+    #[test]
+    fn test_parallel_with_duplicated_variables() {
+        let query_plan = fake_query_plan(json!({
+          "kind": "Parallel",
+          "nodes": [
+            fake_fetch("uploads1", vec!["file1"]),
+            fake_fetch("uploads2", vec!["file2", "file3"]),
+            fake_fetch("uploads3", vec!["file1"]),
+            fake_fetch("uploads4", vec!["file2", "file4"])
+          ]
+        }));
+
+        let map_field = MapField::new(indexmap! {
+            "0".to_owned() => vec!["variables.file1".to_owned()],
+            "1".to_owned() => vec!["variables.file2".to_owned()],
+            "2".to_owned() => vec!["variables.file3".to_owned()],
+            "3".to_owned() => vec!["variables.file4".to_owned()],
+        })
+        .unwrap();
+
+        let result = rearrange_query_plan(&query_plan, &map_field);
+        assert_matches!(
+            result,
+            Err(FileUploadError::DuplicateVariableUsages(ref variables)) if variables == "$file1, $file2",
+        );
+    }
 }
