@@ -546,6 +546,38 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 - You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
 - You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the Apollo Router](./entity-caching/).
 
+<MinVersion version="1.44.0">
+
+### Query planner pools
+
+</MinVersion>
+
+<ExperimentalFeature appendText="And join the [GitHub discussion about query planner pools](https://github.com/apollographql/router/discussions/4917)."
+/>
+
+You can improve the performance of the router's query planner by configuring parallelized query planning.
+
+By default, the query planner plans one operation at a time. It plans one operation to completion before planning the next one. This serial planning can be problematic when an operation takes a long time to plan and consequently blocks the query planner from working on other operations.
+
+To resolve such blocking scenarios, you can enable parallel query planning. Configure it in `router.yaml` with `supergraph.query_planner.experimental_parallelism`:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planner:
+    experimental_parallelism: auto # number of available cpus 
+```
+
+The value of `experimental_parallelism` is the number of query planners in the router's _query planner pool_. A query planner pool is a preallocated set of query planners from which the router can use to plan operations. The total number of pools is the maximum number of query planners that can run in parallel and therefore the maximum number of operations that can be worked on simultaneously. 
+
+Valid values of `experimental_parallelism`:
+- Any integer starting from `1`
+- The special value `auto`, which sets the number of query planners equal to the number of available CPUs on the router's host machine
+
+The default value of `experimental_parallelism` is `1`.
+
+In practice, you should tune `experimental_parallelism` based on metrics and benchmarks gathered from your router.
+
+
 ### Safelisting with persisted queries
 
 You can enhance your graph's security by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
@@ -804,18 +836,6 @@ In versions of the Apollo Router prior to 1.17, this limit was defined via the c
 
 </Note>
 
-### GraphQL Validation Mode
-
-We are experimenting with a new GraphQL validation implementation written in Rust. The legacy implementation is part of the JavaScript query planner. This is part of a project to remove JavaScript from the Router to improve performance and memory behavior.
-
-To opt in to the new validation implementation, set:
-
-```yaml {4,8} title="router.yaml"
-experimental_graphql_validation_mode: new
-```
-
-This is an experimental option while we are still finding edge cases in the new implementation, but it will become the default in the future.
-
 ### Plugins
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
@@ -848,6 +868,22 @@ supergraph:
   listen: "${env.MY_LISTEN_ADDRESS}" #highlight-line
 example:
   password: "${env.MY_PASSWORD}" #highlight-line
+```
+
+### Fragment reuse and generation
+
+By default, the Apollo Router will attempt to reuse fragments from the original query while forming subgraph requests. This behavior can be disabled by setting the option to `false`:
+
+```yaml
+supergraph:
+  experimental_reuse_query_fragments: false
+```
+
+Alternatively, the Apollo Router can be configured to _generate_ fragments for subgraph requests. When set to `true`, the Apollo Router will extract _inline fragments only_ into fragment definitions before sending queries to subgraphs. This can significantly reduce the size of the query sent to subgraphs, but may increase the time it takes for planning. Note that this option and `experimental_reuse_query_fragments` are mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments` will take precedence.
+
+```yaml
+supergraph:
+  generate_query_fragments: true
 ```
 
 ### Reusing configuration

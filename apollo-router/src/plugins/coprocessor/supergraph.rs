@@ -105,11 +105,12 @@ impl SupergraphStage {
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::SupergraphRequest,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::SupergraphRequest,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }
@@ -144,11 +145,12 @@ impl SupergraphStage {
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::SupergraphResponse,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::SupergraphResponse,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }

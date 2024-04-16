@@ -55,7 +55,7 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
+    let schema = crate::spec::Schema::parse(schema).unwrap();
 
     let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -107,7 +107,7 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
+    let schema_error = crate::spec::Schema::parse(schema_error)
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -999,4 +999,20 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
+}
+
+#[test]
+fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
+    let conf = Configuration::builder()
+        .supergraph(
+            Supergraph::builder()
+                .generate_query_fragments(true)
+                .reuse_query_fragments(true)
+                .build(),
+        )
+        .build()
+        .unwrap();
+
+    assert!(conf.supergraph.generate_query_fragments);
+    assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
 }

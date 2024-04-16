@@ -30,7 +30,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
@@ -244,12 +244,19 @@ impl YamlRouterFactory {
         let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         if let Some(previous_router) = previous_router {
-            let cache_keys = previous_router
-                .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
-                .await;
+            let previous_cache = previous_router.previous_cache();
 
             supergraph_creator
-                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, cache_keys)
+                .warm_up_query_planner(
+                    &query_analysis_layer,
+                    &persisted_query_layer,
+                    previous_cache,
+                    configuration.supergraph.query_planning.warmed_up_queries,
+                    configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_reuse_query_plans,
+                )
                 .await;
         };
         RouterCreator::new(
@@ -271,19 +278,34 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = match previous_supergraph.as_ref().map(|router| router.planner())
-        {
-            None => {
-                BridgeQueryPlanner::new(schema.clone(), configuration.clone())
+        let bridge_query_planner =
+            match previous_supergraph.as_ref().map(|router| router.planners()) {
+                None => {
+                    BridgeQueryPlannerPool::new(
+                        schema.clone(),
+                        configuration.clone(),
+                        configuration
+                            .supergraph
+                            .query_planner
+                            .experimental_query_planner_parallelism()?,
+                    )
                     .instrument(query_planner_span)
                     .await?
-            }
-            Some(planner) => {
-                BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                }
+                Some(planners) => {
+                    BridgeQueryPlannerPool::new_from_planners(
+                        planners,
+                        schema.clone(),
+                        configuration.clone(),
+                        configuration
+                            .supergraph
+                            .query_planner
+                            .experimental_query_planner_parallelism()?,
+                    )
                     .instrument(query_planner_span)
                     .await?
-            }
-        };
+                }
+            };
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl.as_ref() == &schema)
@@ -850,7 +872,10 @@ mod test {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let mut config = json!({ "apollo": {} });
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        inject_schema_id(schema.api_schema().schema_id.as_deref(), &mut config);
+        inject_schema_id(
+            Some(&Schema::schema_id(&schema.api_schema().raw_sdl)),
+            &mut config,
+        );
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
