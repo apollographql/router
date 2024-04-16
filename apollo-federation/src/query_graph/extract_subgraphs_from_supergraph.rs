@@ -7,7 +7,7 @@ use crate::link::join_spec_definition::{
 };
 use crate::link::spec::{Identity, Version};
 use crate::link::spec_definition::SpecDefinition;
-use crate::query_graph::field_set::parse_field_set_without_normalization;
+use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::{
     is_graphql_reserved_name, CompositeTypeDefinitionPosition, DirectiveDefinitionPosition,
     EnumTypeDefinitionPosition, FieldDefinitionPosition, InputObjectFieldDefinitionPosition,
@@ -34,7 +34,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::Deref;
-use std::sync::Arc;
 use time::OffsetDateTime;
 
 /// Assumes the given schema has been validated.
@@ -113,7 +112,7 @@ pub(crate) fn extract_subgraphs_from_supergraph(
                 }
             }
         } else {
-            ValidFederationSchema(Arc::new(Valid::assume_valid(subgraph.schema)))
+            subgraph.schema.assume_valid()?
         };
         valid_subgraphs.add(ValidFederationSubgraph {
             name: subgraph.name,

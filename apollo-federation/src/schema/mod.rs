@@ -1,5 +1,7 @@
 use crate::error::{FederationError, SingleFederationError};
-use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::{
+    get_federation_spec_definition_from_subgraph, FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
+};
 use crate::link::LinksMetadata;
 use crate::schema::position::{
     CompositeTypeDefinitionPosition, DirectiveDefinitionPosition, EnumTypeDefinitionPosition,
@@ -7,6 +9,7 @@ use crate::schema::position::{
     ObjectTypeDefinitionPosition, ScalarTypeDefinitionPosition, TypeDefinitionPosition,
     UnionTypeDefinitionPosition,
 };
+use crate::schema::subgraph_metadata::SubgraphMetadata;
 use apollo_compiler::schema::{ExtendedType, Name};
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
@@ -16,15 +19,33 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
+pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
+pub(crate) mod subgraph_metadata;
+
+fn compute_subgraph_metadata(
+    schema: &Valid<FederationSchema>,
+) -> Result<Option<SubgraphMetadata>, FederationError> {
+    Ok(
+        if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
+        {
+            Some(SubgraphMetadata::new(schema, federation_spec_definition)?)
+        } else {
+            None
+        },
+    )
+}
 
 /// A GraphQL schema with federation data.
 #[derive(Debug)]
 pub struct FederationSchema {
     schema: Schema,
-    metadata: Option<LinksMetadata>,
     referencers: Referencers,
+    links_metadata: Option<Box<LinksMetadata>>,
+    /// This is only populated for valid subgraphs, and can only be accessed if you have a
+    /// `ValidFederationSchema`.
+    subgraph_metadata: Option<Box<SubgraphMetadata>>,
 }
 
 impl FederationSchema {
@@ -42,7 +63,7 @@ impl FederationSchema {
     }
 
     pub(crate) fn metadata(&self) -> Option<&LinksMetadata> {
-        self.metadata.as_ref()
+        self.links_metadata.as_deref()
     }
 
     pub(crate) fn referencers(&self) -> &Referencers {
@@ -146,17 +167,11 @@ impl FederationSchema {
                 return Err((self, e.errors.into()));
             }
         };
-        Ok(ValidFederationSchema(Arc::new(Valid::assume_valid(
-            FederationSchema {
-                schema,
-                metadata: self.metadata,
-                referencers: self.referencers,
-            },
-        ))))
+        ValidFederationSchema::new_assume_valid(FederationSchema { schema, ..self })
     }
 
-    pub(crate) fn assume_valid(self) -> ValidFederationSchema {
-        ValidFederationSchema(Arc::new(Valid::assume_valid(self)))
+    pub(crate) fn assume_valid(self) -> Result<ValidFederationSchema, FederationError> {
+        ValidFederationSchema::new_assume_valid(self).map_err(|(_schema, error)| error)
     }
 
     pub(crate) fn get_directive_definition(
@@ -194,21 +209,48 @@ impl FederationSchema {
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
 #[derive(Debug, Clone)]
-pub struct ValidFederationSchema(pub(crate) Arc<Valid<FederationSchema>>);
+pub struct ValidFederationSchema {
+    schema: Arc<Valid<FederationSchema>>,
+}
 
 impl ValidFederationSchema {
     pub fn new(schema: Valid<Schema>) -> Result<ValidFederationSchema, FederationError> {
         let schema = FederationSchema::new(schema.into_inner())?;
-        Ok(ValidFederationSchema(Arc::new(Valid::assume_valid(schema))))
+
+        Self::new_assume_valid(schema).map_err(|(_schema, error)| error)
+    }
+
+    /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
+    fn new_assume_valid(
+        mut schema: FederationSchema,
+    ) -> Result<ValidFederationSchema, (FederationSchema, FederationError)> {
+        // Populating subgraph metadata requires a mutable FederationSchema, while computing the subgraph
+        // metadata requires a valid FederationSchema. Since valid schemas are immutable, we have
+        // to jump through some hoops here. We already assume that `schema` is valid GraphQL, so we
+        // can temporarily create a `&Valid<FederationSchema>` to compute subgraph metadata, drop
+        // that reference to populate the metadata, and finally move the finished FederationSchema into
+        // the ValidFederationSchema instance.
+        let valid_schema = Valid::assume_valid_ref(&schema);
+        let subgraph_metadata = match compute_subgraph_metadata(valid_schema) {
+            Ok(metadata) => metadata.map(Box::new),
+            Err(err) => return Err((schema, err)),
+        };
+        schema.subgraph_metadata = subgraph_metadata;
+
+        let schema = Arc::new(Valid::assume_valid(schema));
+        Ok(ValidFederationSchema { schema })
     }
 
     /// Access the GraphQL schema.
     pub fn schema(&self) -> &Valid<Schema> {
-        Valid::assume_valid_ref(&self.schema)
+        Valid::assume_valid_ref(&self.schema.schema)
     }
 
-    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+    /// Returns subgraph-specific metadata.
+    ///
+    /// Returns `None` for supergraph schemas.
+    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
+        self.schema.subgraph_metadata.as_deref()
     }
 }
 
@@ -216,7 +258,7 @@ impl Deref for ValidFederationSchema {
     type Target = FederationSchema;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.schema
     }
 }
 
@@ -224,12 +266,12 @@ impl Eq for ValidFederationSchema {}
 
 impl PartialEq for ValidFederationSchema {
     fn eq(&self, other: &ValidFederationSchema) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(&self.schema, &other.schema)
     }
 }
 
 impl Hash for ValidFederationSchema {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        Arc::as_ptr(&self.0).hash(state);
+        Arc::as_ptr(&self.schema).hash(state);
     }
 }

@@ -707,8 +707,8 @@ impl FetchInputs {
     }
 
     fn add(&self, selection: &NormalizedSelectionSet) {
-        assert!(
-            selection.schema.ptr_eq(&self.supergraph_schema),
+        assert_eq!(
+            selection.schema, self.supergraph_schema,
             "Inputs selections must be based on the supergraph schema"
         );
         todo!()

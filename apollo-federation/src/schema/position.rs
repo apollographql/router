@@ -716,7 +716,7 @@ impl SchemaDefinitionPosition {
         let name = directive.name.clone();
         schema_definition.make_mut().directives.push(directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)?;
-        schema.metadata = links_metadata(&schema.schema)?;
+        schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
         Ok(())
     }
 
@@ -732,7 +732,7 @@ impl SchemaDefinitionPosition {
             .directives
             .retain(|other_directive| other_directive.name != name);
         if is_link {
-            schema.metadata = links_metadata(&schema.schema)?;
+            schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
         }
         Ok(())
     }
@@ -754,7 +754,7 @@ impl SchemaDefinitionPosition {
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
         if is_link {
-            schema.metadata = links_metadata(&schema.schema)?;
+            schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
         }
         Ok(())
     }
@@ -817,7 +817,7 @@ impl SchemaDefinitionPosition {
     }
 
     fn is_link(schema: &FederationSchema, name: &str) -> Result<bool, FederationError> {
-        Ok(match &schema.metadata {
+        Ok(match schema.metadata() {
             Some(metadata) => {
                 let link_spec_definition = metadata.link_spec_definition()?;
                 let link_name_in_schema = link_spec_definition
@@ -6431,8 +6431,9 @@ impl FederationSchema {
 
         Ok(FederationSchema {
             schema,
-            metadata,
             referencers,
+            links_metadata: metadata.map(Box::new),
+            subgraph_metadata: None,
         })
     }
 }

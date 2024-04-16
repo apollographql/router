@@ -3034,10 +3034,10 @@ fn print_possible_runtimes(
 
 #[cfg(test)]
 mod tests {
-    use crate::query_plan::operation::normalize_operation;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
-    use apollo_compiler::{name, ExecutableDocument, Schema};
+    use crate::{query_plan::operation::normalize_operation, subgraph::Subgraph};
+    use apollo_compiler::{name, ExecutableDocument};
     use indexmap::IndexSet;
 
     fn parse_schema_and_operation(
@@ -3051,9 +3051,10 @@ mod tests {
         (schema, executable_document)
     }
 
-    fn parse_schema(schema: &str) -> ValidFederationSchema {
-        let parsed_schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
-        ValidFederationSchema::new(parsed_schema).unwrap()
+    fn parse_subgraph(name: &str, schema: &str) -> ValidFederationSchema {
+        let parsed_schema =
+            Subgraph::parse_and_expand(name, &format!("https://{name}"), schema).unwrap();
+        ValidFederationSchema::new(parsed_schema.schema).unwrap()
     }
 
     #[test]
@@ -4047,7 +4048,7 @@ scalar FieldSet
     #[cfg(test)]
     mod rebase_tests {
         use crate::query_plan::operation::normalize_operation;
-        use crate::query_plan::operation::tests::{parse_schema, parse_schema_and_operation};
+        use crate::query_plan::operation::tests::{parse_schema_and_operation, parse_subgraph};
         use crate::schema::position::InterfaceTypeDefinitionPosition;
         use apollo_compiler::name;
         use indexmap::IndexSet;
@@ -4122,7 +4123,7 @@ type U {
   v3: Int
   v5: Int
 }"#;
-                let subgraph = parse_schema(subgraph_schema);
+                let subgraph = parse_subgraph("A", subgraph_schema);
                 let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
                 assert!(!rebased_fragments.is_empty());
                 assert!(rebased_fragments.contains(&name!("FragOnT")));
@@ -4201,7 +4202,7 @@ type T {
   x: Int
   y: Int
 }"#;
-                let subgraph = parse_schema(subgraph_schema);
+                let subgraph = parse_subgraph("A", subgraph_schema);
                 let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
                 assert!(!rebased_fragments.is_empty());
                 assert!(rebased_fragments.contains(&name!("FragOnT")));
@@ -4286,7 +4287,7 @@ type T2 implements I {
   y: Int
 }
 "#;
-                let subgraph = parse_schema(subgraph_schema);
+                let subgraph = parse_subgraph("A", subgraph_schema);
                 let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
                 assert!(!rebased_fragments.is_empty());
                 assert!(rebased_fragments.contains(&name!("FragOnI")));
@@ -4374,7 +4375,7 @@ scalar link__Import
 
 scalar federation__FieldSet
 "#;
-                let subgraph = parse_schema(subgraph_schema);
+                let subgraph = parse_subgraph("A", subgraph_schema);
                 let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
                 assert!(!rebased_fragments.is_empty());
                 assert!(rebased_fragments.contains(&name!("FragOnI")));
@@ -4454,7 +4455,7 @@ type T {
   d: Int
 }
 "#;
-                let subgraph = parse_schema(subgraph_schema);
+                let subgraph = parse_subgraph("A", subgraph_schema);
                 let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
                 // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
                 assert_eq!(1, rebased_fragments.size());
@@ -4528,7 +4529,7 @@ type U {
 type T {
   x: Int
 }"#;
-                let subgraph = parse_schema(subgraph_schema);
+                let subgraph = parse_subgraph("A", subgraph_schema);
                 let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
                 // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
                 assert_eq!(1, rebased_fragments.size());
@@ -4604,7 +4605,7 @@ type T {
 }
 "#;
 
-                let subgraph = parse_schema(subgraph_schema);
+                let subgraph = parse_subgraph("A", subgraph_schema);
                 let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
                 // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
                 assert_eq!(1, rebased_fragments.size());

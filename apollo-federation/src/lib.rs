@@ -93,7 +93,7 @@ impl Supergraph {
 
         Ok(Self {
             // We know it's valid because the input was.
-            schema: schema.assume_valid(),
+            schema: schema.assume_valid()?,
         })
     }
 
