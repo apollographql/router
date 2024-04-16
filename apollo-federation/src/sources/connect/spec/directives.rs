@@ -1,69 +1,10 @@
-use apollo_compiler::NodeStr;
-
-/// An upstream connector source
-///
-/// A source describes an HTTP endpoint that contains data that can be scraped
-/// and automatically transformed into GraphQL objects.
-///
-/// The relevant GraphQL directive is `@source` and is mainly used to allow
-/// for sharing common HTTP parameters, allowing for a more DRY subgraph configuration.
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct Source {
-    /// The owning subgraph
-    pub(crate) graph: NodeStr,
-
-    /// The friendly name of this source for use in `@connect` directives
-    pub(crate) name: NodeStr,
-
-    /// Common HTTP options
-    pub(crate) http: HTTPSource,
-}
-
-/// Common HTTP options for a connector [Source]
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct HTTPSource {
-    /// The base URL containing all sub API endpoints
-    pub(crate) base_url: NodeStr,
-
-    /// ???
-    pub(crate) default: bool,
-
-    /// HTTP headers used when requesting resources from the upstream source
-    pub(crate) headers: Vec<HTTPHeaderMapping>,
-}
-
-/// Pairs of HTTP header names to values
-///
-/// Note: At most one of {as,value} can be present.
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct HTTPHeaderMapping {
-    /// The HTTP header name to propagate
-    pub(crate) name: NodeStr,
-
-    /// Configuration option for the HTTP header name supplied above
-    pub(crate) option: Option<HTTPHeaderOption>,
-}
-
-/// Configuration option for an HTTP header
-#[cfg_attr(test, derive(Debug))]
-pub(crate) enum HTTPHeaderOption {
-    /// The alias for the header name used when making a request
-    ///
-    /// This assumes that a header exists in the original request, as it will be
-    /// renamed to the supplied value.
-    As(NodeStr),
-
-    /// The raw value to use for the HTTP header
-    Value(NodeStr),
-}
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
 
     use crate::{
         schema::ValidFederationSchema,
-        sources::connect::spec::definition::{
+        sources::connect::spec::schema::{
             CONNECT_DIRECTIVE_NAME_IN_SPEC, SOURCE_DIRECTIVE_NAME_IN_SPEC,
         },
     };
