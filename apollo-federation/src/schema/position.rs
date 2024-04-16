@@ -192,6 +192,10 @@ impl CompositeTypeDefinitionPosition {
         matches!(self, CompositeTypeDefinitionPosition::Union(_))
     }
 
+    pub(crate) fn is_abstract_type(&self) -> bool {
+        self.is_interface_type() || self.is_union_type()
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             CompositeTypeDefinitionPosition::Object(type_) => &type_.type_name,
