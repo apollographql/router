@@ -1,6 +1,10 @@
+use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use futures::future;
 use serde::Deserialize;
 use serde::Serialize;
@@ -75,6 +79,9 @@ pub(crate) struct SubscriptionNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a subscription (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
+    #[serde(skip)]
+    pub(crate) executable_document: Arc<apollo_compiler::ExecutableDocument>,
 }
 
 impl SubscriptionNode {
@@ -269,5 +276,15 @@ impl SubscriptionNode {
             .into_parts();
 
         Ok(response.errors)
+    }
+
+    pub(crate) fn parse_operation(
+        &mut self,
+        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
+    ) {
+        let schema = schemas.get(&self.service_name).unwrap();
+        let executable_document = ExecutableDocument::parse(schema, self.operation.to_string(), "")
+            .unwrap_or_else(|errors| errors.partial);
+        self.executable_document = Arc::new(executable_document);
     }
 }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Schema;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -378,6 +379,60 @@ impl PlanNode {
                 }
                 if let Some(node) = else_clause.as_mut() {
                     node.extract_authorization_metadata(schema, key);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn parse_subgraph_operations(
+        &mut self,
+        schemas: &HashMap<String, Arc<Valid<Schema>>>,
+    ) {
+        match self {
+            // Traverse the tree to get down to the leaf nodes
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => {
+                if let Some(node) = if_clause {
+                    node.parse_subgraph_operations(schemas);
+                }
+                if let Some(node) = else_clause {
+                    node.parse_subgraph_operations(schemas);
+                }
+            }
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.parse_subgraph_operations(schemas);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.parse_subgraph_operations(schemas);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Flatten(node) => node.node.parse_subgraph_operations(schemas),
+            PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    node.parse_subgraph_operations(schemas);
+                }
+            }
+            PlanNode::Sequence { nodes } => {
+                for node in nodes {
+                    node.parse_subgraph_operations(schemas);
+                }
+            }
+            // Individual leaf nodes have their operations parsed into `ExecutableDocument`
+            PlanNode::Fetch(fetch) => {
+                fetch.parse_operation(schemas);
+            }
+            PlanNode::Subscription { primary, rest } => {
+                primary.parse_operation(schemas);
+                if let Some(node) = rest {
+                    node.parse_subgraph_operations(schemas);
                 }
             }
         }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -127,6 +128,9 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    #[serde(skip)]
+    pub(crate) executable_document: Arc<apollo_compiler::ExecutableDocument>,
 }
 
 #[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
@@ -532,5 +536,15 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
+    }
+
+    pub(crate) fn parse_operation(
+        &mut self,
+        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
+    ) {
+        let schema = schemas.get(&self.service_name).unwrap();
+        let executable_document = ExecutableDocument::parse(schema, self.operation.to_string(), "")
+            .unwrap_or_else(|errors| errors.partial);
+        self.executable_document = Arc::new(executable_document);
     }
 }

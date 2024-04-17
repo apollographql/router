@@ -383,6 +383,9 @@ impl BridgeQueryPlanner {
                 plan.data
                     .query_plan
                     .extract_authorization_metadata(&self.schema.definitions, &key);
+                plan.data
+                    .query_plan
+                    .parse_subgraph_operations(&self.subgraph_schemas);
                 plan
             }
             Err(err) => {
@@ -826,6 +829,15 @@ impl QueryPlan {
     ) {
         if let Some(node) = self.node.as_mut() {
             node.extract_authorization_metadata(schema, key);
+        }
+    }
+
+    fn parse_subgraph_operations(
+        &mut self,
+        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
+    ) {
+        if let Some(node) = self.node.as_mut() {
+            node.parse_subgraph_operations(schemas);
         }
     }
 }
