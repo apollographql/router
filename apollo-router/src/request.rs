@@ -177,8 +177,8 @@ impl Request {
 
     /// Convert Bytes into a GraphQL [`Request`].
     ///
-    /// An error will be produced in the event that the query string parameters
-    /// cannot be turned into a valid GraphQL `Request`.
+    /// An error will be produced in the event that the bytes array cannot be
+    /// turned into a valid GraphQL `Request`.
     pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;

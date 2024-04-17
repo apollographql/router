@@ -10,10 +10,12 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::error::CacheResolverError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::QueryHash;
 use crate::spec::Query;
 
 /// A planner key.
@@ -190,6 +192,65 @@ impl PlanNode {
                 false
             }
         }
+    }
+
+    /// Iteratively populate a Vec of QueryHashes representing Fetches in this plan.
+    ///
+    /// Do not include any operations which contain "requires" elements.
+    ///
+    /// This function is specifically designed to be used within the context of simple batching. It
+    /// explicitly fails if nodes which should *not* be encountered within that context are
+    /// encountered. e.g.: PlanNode::Defer
+    ///
+    /// It's unlikely/impossible that PlanNode::Defer or PlanNode::Subscription will ever be
+    /// supported, but it may be that PlanNode::Condition must eventually be supported (or other
+    /// new nodes types that are introduced). Explicitly fail each type to provide extra error
+    /// details and don't use _ so that future node types must be handled here.
+    pub(crate) fn query_hashes(&self) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
+        let mut query_hashes = vec![];
+        let mut new_targets = vec![self];
+
+        loop {
+            let targets = new_targets;
+            if targets.is_empty() {
+                break;
+            }
+
+            new_targets = vec![];
+            for target in targets {
+                match target {
+                    PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                        new_targets.extend(nodes);
+                    }
+                    PlanNode::Fetch(node) => {
+                        // If requires.is_empty() we can batch it!
+                        if node.requires.is_empty() {
+                            query_hashes.push(node.schema_aware_hash.clone());
+                        }
+                    }
+                    PlanNode::Flatten(node) => new_targets.push(&node.node),
+                    PlanNode::Defer { .. } => {
+                        return Err(CacheResolverError::BatchingError(
+                            "unexpected defer node encountered during query_hash processing"
+                                .to_string(),
+                        ))
+                    }
+                    PlanNode::Subscription { .. } => {
+                        return Err(CacheResolverError::BatchingError(
+                            "unexpected subscription node encountered during query_hash processing"
+                                .to_string(),
+                        ))
+                    }
+                    PlanNode::Condition { .. } => {
+                        return Err(CacheResolverError::BatchingError(
+                            "unexpected condition node encountered during query_hash processing"
+                                .to_string(),
+                        ))
+                    }
+                }
+            }
+        }
+        Ok(query_hashes)
     }
 
     pub(crate) fn subgraph_fetches(&self) -> usize {

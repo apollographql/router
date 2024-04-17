@@ -109,7 +109,7 @@ pub(crate) fn collect_subselections(
     }
     if defer_stats.conditional_defer_variable_names.len() > MAX_DEFER_VARIABLES {
         // TODO: dedicated error variant?
-        return Err(SpecError::ParsingError(
+        return Err(SpecError::TransformError(
             "@defer conditional on too many different variables".into(),
         ));
     }
@@ -131,7 +131,7 @@ pub(crate) fn collect_subselections(
                 &FieldType::new_named((&type_name).try_into().unwrap()),
                 &operation.selection_set,
             )
-            .map_err(|err| SpecError::ParsingError(err.to_owned()))?;
+            .map_err(|err| SpecError::TransformError(err.to_owned()))?;
             debug_assert!(shared.path.is_empty());
             if !primary.is_empty() {
                 shared.subselections.insert(
