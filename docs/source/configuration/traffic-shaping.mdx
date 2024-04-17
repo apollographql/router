@@ -9,7 +9,7 @@ the traffic between the client and router and between the router and subgraphs.
 
 ## Configuration
 
-By default, the `traffic_shaping` plugin is enabled with [preset values](#link-to-default-values). To override presets, add `traffic_shaping` to your [YAML config file](./overview/#yaml-config-file) like so:
+By default, the `traffic_shaping` plugin is enabled with [preset values](#preset-values). To override presets, add `traffic_shaping` to your [YAML config file](./overview/#yaml-config-file) like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -36,6 +36,11 @@ traffic_shaping:
         retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
       experimental_http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
 ```
+
+### Preset values
+
++ `timeout`: all timeouts are set at 30 secs by default.
++ `experimental_http2`: enabled by default
 
 ## Client side traffic shaping
 
