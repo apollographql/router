@@ -518,6 +518,14 @@ impl RouterService {
                                     "failed to decode a valid GraphQL request from path {e}"
                                 ),
                             })?;
+                        if result.is_empty() {
+                            return Err(TranslateError {
+                                status: StatusCode::BAD_REQUEST,
+                                error: "failed to decode a valid GraphQL request from path",
+                                extension_code: "INVALID_GRAPHQL_REQUEST",
+                                extension_details: "failed to decode a valid GraphQL request from path: empty array ".to_string()
+                            });
+                        }
                         is_batch = true;
                     } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
                         let extension_details = if self.batching.enabled
@@ -579,6 +587,16 @@ impl RouterService {
                                 "failed to deserialize the request body into JSON: {e}"
                             ),
                         })?;
+                    if result.is_empty() {
+                        return Err(TranslateError {
+                            status: StatusCode::BAD_REQUEST,
+                            error: "failed to decode a valid GraphQL request from path",
+                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_details:
+                                "failed to decode a valid GraphQL request from path: empty array "
+                                    .to_string(),
+                        });
+                    }
                     is_batch = true;
                 } else if !bytes.is_empty() && bytes[0] == b'[' {
                     let extension_details = if self.batching.enabled
