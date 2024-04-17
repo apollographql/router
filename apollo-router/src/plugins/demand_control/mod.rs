@@ -250,9 +250,7 @@ impl Plugin for DemandControl {
                 })
                 .map_future_with_request_data(
                     |req: &subgraph::Request| {
-                        req.subgraph_request_document
-                            .clone()
-                            .expect("must have document")
+                        req.executable_document.clone().expect("must have document")
                     },
                     |req: Arc<Valid<ExecutableDocument>>, fut| async move {
                         let resp: subgraph::Response = fut.await?;
@@ -415,22 +413,17 @@ mod test {
 
         let ctx = context();
         ctx.extensions().lock().insert(strategy);
-
+        let mut req = subgraph::Request::fake_builder()
+            .subgraph_name("test")
+            .context(ctx)
+            .build();
+        req.executable_document = Some(Arc::new(Valid::assume_valid(ExecutableDocument::new())));
         let resp = plugin
-            .call_subgraph(
-                subgraph::Request::fake_builder()
-                    .subgraph_name("test")
-                    .subgraph_request_document(Arc::new(Valid::assume_valid(
-                        ExecutableDocument::new(),
-                    )))
-                    .context(ctx)
-                    .build(),
-                |req| {
-                    subgraph::Response::fake_builder()
-                        .context(req.context)
-                        .build()
-                },
-            )
+            .call_subgraph(req, |req| {
+                subgraph::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+            })
             .await
             .unwrap();
 
