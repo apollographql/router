@@ -45,7 +45,7 @@ use crate::http_ext;
 use crate::plugin::test::MockSupergraphService;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::WarmUpCachingQueryKey;
+use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::content_negotiation;
@@ -841,7 +841,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
-        self.supergraph_creator.cache_keys(count).await
+    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+        self.supergraph_creator.previous_cache()
     }
 }

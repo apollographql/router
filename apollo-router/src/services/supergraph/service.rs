@@ -27,6 +27,7 @@ use tracing_futures::Instrument;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
@@ -42,8 +43,8 @@ use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlanResult;
-use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;
@@ -470,7 +471,7 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None, None).await {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, execution_service_factory.subgraph_schemas.clone(), None, None).await {
                         Ok(plugins) => Arc::new(plugins),
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
@@ -487,6 +488,7 @@ async fn subscription_task(
 
                     execution_service_factory = ExecutionServiceFactory {
                         schema: execution_service_factory.schema.clone(),
+                        subgraph_schemas: execution_service_factory.subgraph_schemas.clone(),
                         plugins: plugins.clone(),
                         subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())),
 
@@ -598,7 +600,13 @@ async fn plan_query(
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
     if !context.extensions().lock().contains_key::<ParsedDocument>() {
-        let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
+        let doc = Query::parse_document(
+            &query_str,
+            operation_name.as_deref(),
+            &schema,
+            &Configuration::default(),
+        )
+        .map_err(QueryPlannerError::SpecError)?;
         Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
         Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
         context.extensions().lock().insert::<ParsedDocument>(doc);
@@ -801,6 +809,7 @@ impl SupergraphCreator {
             .query_planner_service(self.query_planner_service.clone())
             .execution_service_factory(ExecutionServiceFactory {
                 schema: self.schema.clone(),
+                subgraph_schemas: self.query_planner_service.subgraph_schemas(),
                 plugins: self.plugins.clone(),
                 subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
@@ -830,8 +839,8 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
-        self.query_planner_service.cache_keys(count).await
+    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+        self.query_planner_service.previous_cache()
     }
 
     pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
@@ -842,10 +851,18 @@ impl SupergraphCreator {
         &mut self,
         query_parser: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        cache_keys: Vec<WarmUpCachingQueryKey>,
+        previous_cache: InMemoryCachePlanner,
+        count: Option<usize>,
+        experimental_reuse_query_plans: bool,
     ) {
         self.query_planner_service
-            .warm_up(query_parser, persisted_query_layer, cache_keys)
+            .warm_up(
+                query_parser,
+                persisted_query_layer,
+                previous_cache,
+                count,
+                experimental_reuse_query_plans,
+            )
             .await
     }
 }
