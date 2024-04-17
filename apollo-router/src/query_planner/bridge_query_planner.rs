@@ -382,10 +382,11 @@ impl BridgeQueryPlanner {
                 plan.data.query_plan.hash_subqueries(&self.subgraph_schemas);
                 plan.data
                     .query_plan
-                    .extract_authorization_metadata(&self.schema.definitions, &key);
+                    .parse_subgraph_operations(&self.subgraph_schemas);
                 plan.data
                     .query_plan
-                    .parse_subgraph_operations(&self.subgraph_schemas);
+                    .extract_authorization_metadata(&self.schema.definitions, &key);
+
                 plan
             }
             Err(err) => {
