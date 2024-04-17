@@ -190,9 +190,9 @@ Start following the steps below to start a release PR.  The process is **not ful
 
 9. Push this commit up to the existing release PR:
 
-   ```
-   git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
-   ```
+    ```
+    git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
+    ```
 
 10. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
 
@@ -201,6 +201,14 @@ Start following the steps below to start a release PR.  The process is **not ful
     ```
     git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" -m "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" && \
       git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
+    ```
+
+11. Finally, publish the Crate from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+
+    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
+
+    ```
+    cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
 ### Preparing the final release
@@ -433,8 +441,10 @@ Start following the steps below to start a release PR.  The process is **not ful
 
 17. Finally, publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
+    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
+
     ```
-    cargo publish -p apollo-router
+    cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
 18. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
