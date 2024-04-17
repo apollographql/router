@@ -4,12 +4,21 @@ use apollo_compiler::{
     Node, NodeStr,
 };
 
-use crate::error::FederationError;
+use crate::{
+    error::FederationError,
+    sources::connect::spec::schema::{CONNECT_HTTP_ARGUMENT_NAME, CONNECT_SOURCE_ARGUMENT_NAME},
+};
 
 use super::schema::{
-    HTTPArguments, SourceDirectiveArguments, SOURCE_BASE_URL_ARGUMENT_NAME,
-    SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME, SOURCE_NAME_ARGUMENT_NAME,
+    ConnectDirectiveArguments, ConnectHTTPArguments, HTTPArguments, HTTPMethod, JSONSelection,
+    SourceDirectiveArguments, URLPathTemplate, CONNECT_BODY_ARGUMENT_NAME,
+    CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME, CONNECT_SELECTION_ARGUMENT_NAME,
+    SOURCE_BASE_URL_ARGUMENT_NAME, SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME,
+    SOURCE_NAME_ARGUMENT_NAME,
 };
+
+/// Internal representation of the object type pairs
+type ObjectNode = [(Name, Node<Value>)];
 
 impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
     type Error = FederationError;
@@ -39,6 +48,8 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
                 let http_value = HTTPArguments::try_from(http_value)?;
 
                 http = Some(http_value);
+            } else {
+                unreachable!("unknown argument in `@source` directive: {arg_name}");
             }
         }
 
@@ -50,11 +61,11 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
     }
 }
 
-impl TryFrom<&[(Name, Node<Value>)]> for HTTPArguments {
+impl TryFrom<&ObjectNode> for HTTPArguments {
     type Error = FederationError;
 
     // TODO: This does not currently do validation
-    fn try_from(values: &[(Name, Node<Value>)]) -> Result<Self, Self::Error> {
+    fn try_from(values: &ObjectNode) -> Result<Self, Self::Error> {
         // Iterate over all of the argument pairs and fill in what we need
         let mut base_url = None;
         let mut headers = None;
@@ -73,12 +84,147 @@ impl TryFrom<&[(Name, Node<Value>)]> for HTTPArguments {
                     .expect("`headers` field in `@source` directive's `http` field is not a list");
 
                 headers = Some(todo!("handle headers for @source: {:?}", headers_value));
+            } else {
+                unreachable!("unknown argument in `@source` directive's `http` field: {name}");
             }
         }
 
         Ok(Self {
             base_url: base_url
                 .expect("missing `base_url` field in `@source` directive's `http` argument"),
+            headers: headers.unwrap_or_default(),
+        })
+    }
+}
+
+// TODO: The following does not do any formal validation
+impl std::str::FromStr for JSONSelection {
+    type Err = FederationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
+    }
+}
+
+// TODO: The following does not do any formal validation
+impl std::str::FromStr for URLPathTemplate {
+    type Err = FederationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
+    }
+}
+
+impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
+    type Error = FederationError;
+
+    // TODO: This does not currently do validation
+    fn try_from(value: &Node<Directive>) -> Result<Self, Self::Error> {
+        let ref args = value.arguments;
+
+        // We'll have to iterate over the arg list and keep the properties by their name
+        let mut source = None;
+        let mut http = None;
+        let mut selection = None;
+        let mut entity = None;
+        for arg in args {
+            let arg_name = arg.name.as_str();
+
+            if arg_name == CONNECT_SOURCE_ARGUMENT_NAME.as_str() {
+                let source_value = arg
+                    .value
+                    .as_node_str()
+                    .expect("`source` field in `@source` directive is not a string");
+
+                source = Some(source_value.clone());
+            } else if arg_name == CONNECT_HTTP_ARGUMENT_NAME.as_str() {
+                let http_value = arg
+                    .value
+                    .as_object()
+                    .expect("`http` field in `@connect` directive is not an object");
+                let http_value = ConnectHTTPArguments::try_from(http_value)?;
+
+                http = Some(http_value);
+            } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
+                let selection_value = arg
+                    .value
+                    .as_node_str()
+                    .expect("`selection` field in `@connect` directive is not a string");
+                let selection_value: JSONSelection = selection_value.as_str().parse()?;
+
+                selection = Some(selection_value);
+            } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
+                let entity_value = arg
+                    .value
+                    .to_bool()
+                    .expect("`entity` field in `@connect` directive is not a boolean");
+
+                entity = Some(entity_value);
+            } else {
+                unreachable!("unknown argument in `@connect` directive: {arg_name}");
+            }
+        }
+
+        Ok(Self {
+            source,
+            http: http.expect("missing `http` field in `@connect` directive"),
+            selection,
+            entity: entity.unwrap_or_default(),
+        })
+    }
+}
+
+impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
+    type Error = FederationError;
+
+    fn try_from(values: &ObjectNode) -> Result<Self, Self::Error> {
+        // Iterate over all of the argument pairs and fill in what we need
+        let mut method_and_url = None;
+        let mut body = None;
+        let mut headers = None;
+        for (name, value) in values {
+            let name = name.as_str();
+
+            if name == CONNECT_BODY_ARGUMENT_NAME.as_str() {
+                let body_value = value
+                    .as_node_str()
+                    .expect("`body` field in `@connect` directive's `http` field is not a string");
+                let body_value: JSONSelection = body_value.as_str().parse()?;
+
+                body = Some(body_value);
+            } else if name == CONNECT_HEADERS_ARGUMENT_NAME.as_str() {
+                let headers_value = value
+                    .as_list()
+                    .expect("`headers` field in `@connect` directive's `http` field is not a list");
+
+                headers = Some(todo!("handle headers for @source: {:?}", headers_value));
+            } else {
+                // We need to (potentially) map any arbitrary keys to an HTTP verb
+                let method = match name {
+                    "GET" => HTTPMethod::Get,
+                    "POST" => HTTPMethod::Post,
+                    "PATCH" => HTTPMethod::Patch,
+                    "PUT" => HTTPMethod::Put,
+                    "DELETE" => HTTPMethod::Delete,
+                    _ => unreachable!(
+                        "unknown argument in `@source` directive's `http` field: {name}"
+                    ),
+                };
+
+                // If we have a valid verb, then we need to grab (and parse) the URL template for it
+                let url = value.as_str().expect("supplied HTTP template URL in `@connect` directive's `http` field is not a string");
+                let url: URLPathTemplate = url.parse()?;
+
+                method_and_url = Some((method, url));
+            }
+        }
+
+        let (method, url) = method_and_url
+            .expect("missing an HTTP verb and endpoint in `@connect` directive's `http` field");
+        Ok(Self {
+            method,
+            url,
+            body,
             headers: headers.unwrap_or_default(),
         })
     }
@@ -91,7 +237,8 @@ mod tests {
     use crate::{
         schema::ValidFederationSchema,
         sources::connect::spec::schema::{
-            SourceDirectiveArguments, CONNECT_DIRECTIVE_NAME_IN_SPEC, SOURCE_DIRECTIVE_NAME_IN_SPEC,
+            ConnectDirectiveArguments, SourceDirectiveArguments, CONNECT_DIRECTIVE_NAME_IN_SPEC,
+            SOURCE_DIRECTIVE_NAME_IN_SPEC,
         },
     };
 
@@ -297,6 +444,79 @@ mod tests {
         );
     }
 
+    #[test]
+    fn it_extracts_at_connect() {
+        // Convert the schema into its validated form
+        let schema_str = format!(
+            "{}\n{}\n{}",
+            SUBGRAPH_SCHEMA, TEMP_FEDERATION_DEFINITIONS, TEMP_SOURCE_DEFINITIONS
+        );
+        let schema = Schema::parse(schema_str, "schema.graphql").unwrap();
+        let schema = ValidFederationSchema::new(schema.validate().unwrap()).unwrap();
+
+        // Try to extract the source information from the valid schema
+        // TODO: This should probably be handled by the rest of the stack
+        let connects = schema
+            .referencers()
+            .get_directive(&CONNECT_DIRECTIVE_NAME_IN_SPEC)
+            .unwrap();
+
+        // Extract the connects from the schema definition and map them to their `Connect` equivalent
+        // TODO: We can safely assume that a connect can only be on object fields, right?
+        let connects: Result<Vec<_>, _> = connects
+            .object_fields
+            .iter()
+            .flat_map(|field| field.get(&schema.schema()).unwrap().directives.iter())
+            .map(ConnectDirectiveArguments::try_from)
+            .collect();
+
+        insta::assert_debug_snapshot!(
+            connects.unwrap(),
+            @r###"
+        [
+            ConnectDirectiveArguments {
+                source: Some(
+                    "json",
+                ),
+                http: ConnectHTTPArguments {
+                    method: Get,
+                    url: URLPathTemplate(
+                        "/users",
+                    ),
+                    body: None,
+                    headers: [],
+                },
+                selection: Some(
+                    JSONSelection(
+                        "id name",
+                    ),
+                ),
+                entity: false,
+            },
+            ConnectDirectiveArguments {
+                source: Some(
+                    "json",
+                ),
+                http: ConnectHTTPArguments {
+                    method: Get,
+                    url: URLPathTemplate(
+                        "/posts",
+                    ),
+                    body: None,
+                    headers: [],
+                },
+                selection: Some(
+                    JSONSelection(
+                        "id title body",
+                    ),
+                ),
+                entity: false,
+            },
+        ]
+        "###
+        );
+    }
+
     static TEMP_FEDERATION_DEFINITIONS: &str = r#"
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
         scalar link__Import
@@ -330,7 +550,7 @@ mod tests {
           """
           Defines HTTP configuration for this connector.
           """
-          http: ConnectHTTP
+          http: ConnectHTTP!
 
           """
           Uses the JSONSelection syntax to define a mapping of connector response
