@@ -194,13 +194,13 @@ Start following the steps below to start a release PR.  The process is **not ful
    git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
    ```
 
-10. Git tag & push the pre-release:
+10. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
 
     This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
 
     ```
     git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" -m "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" && \
-      git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
+      git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
 ### Preparing the final release
