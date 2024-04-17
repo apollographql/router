@@ -503,9 +503,60 @@ mod tests {
                     attributes,
                     "my message",
                 );
+
+                error!(http.method = "GET", "Hello from test");
             },
         );
 
         insta::assert_display_snapshot!(buff.to_string());
     }
+
+    #[tokio::test]
+    async fn test_json_logging_with_custom_events() {
+        let buff = LogBuffer::default();
+        let text_format = JsonFormat {
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            ..Default::default()
+        };
+        let format = Json::new(Default::default(), text_format);
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            || {
+                let test_span = info_span!(
+                    "test",
+                    first = "one",
+                    apollo_private.should_not_display = "this should be skipped"
+                );
+                test_span.set_span_dyn_attribute("another".into(), 2.into());
+                test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                let _enter = test_span.enter();
+                let mut attributes = HashMap::new();
+                attributes.insert("http.response.body.size".to_string(), "125".to_string());
+                attributes.insert(
+                    "http.response.body".to_string(),
+                    r#"{"foo": "bar"}"#.to_string(),
+                );
+                log_event(
+                    EventLevel::Info,
+                    "my_custom_event",
+                    attributes,
+                    "my message",
+                );
+
+                error!(http.method = "GET", "Hello from test");
+            },
+        );
+
+        insta::assert_display_snapshot!(buff.to_string());
+    }
+
+    // TODO add test using on_request/on_reponse/on_error
 }
