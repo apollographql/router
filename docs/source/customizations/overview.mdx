@@ -3,16 +3,18 @@ title: Apollo Router customizations
 description: Extend your router with custom functionality
 ---
 
-You can create **customizations** for the Apollo Router to add functionality that isn't available via built-in [configuration options](../configuration/overview/). For example, you can make an external call to fetch authentication data for each incoming request.
+You can create **customizations** in Rhai or any language for the Apollo Router to add functionality that isn't available via built-in [configuration options](../configuration/overview/).
+
+For example, you can make an external call to fetch authentication data for each incoming request.
 
 ## Customization types
 
 The Apollo Router supports the following customization types:
 
 - [**Rhai scripts**](./rhai/)
-    - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
+    - The [Rhai scripting language](https://rhai.rs/book/) lets you **add functionality directly to your stock router binary** by hooking into different phases of the router's request lifecycle.
 - [**External co-processing**](./coprocessor/) ([Enterprise feature](../enterprise-features/))
-    - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
+    - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can **write custom request-handling code in any language**. This code can run in the same container as your router or separately.
     - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 
 Because [Rhai scripts](./rhai/) are easier to deploy, we recommend using them if they support your use case. Use external co-processing if your customization needs to do any of the following (which Rhai scripts _don't_ support):

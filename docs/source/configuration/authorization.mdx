@@ -671,7 +671,32 @@ fn supergraph_service(service) {
 
 #### Special case for subscriptions
 
-When using subscriptions along with `@policy` authorization, subscription events restart from the execution service, which means that if the authorization status of the subscription session changed, then it cannot go through query planning again, and the session should be closed. To that end, the policies should be evaluated again at the execution service level, and if they changed, an error should be returned to stop the subscription.
+When using subscriptions with `@policy` authorization, make sure to handle the special case of restarting subscription events.
+
+Because subscription events restart from the `ExecutionService` of the router request lifecycle, if the authorization status of the subscription session changes, the session should be closed so that it doesn't go through query planning again. 
+
+To handle this case, a policy should reevaluate at the `ExecutionService` level. If a reevaluation detects a changed authorization status, a policy should throw an error to stop the subscription.
+
+##### Example with a Rhai script
+
+As an example, the Rhai script below reevaluates a policy in the `ExecutionService` level and throws an error to stop a subscription:
+
+```rhai
+fn execution_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+    const response_callback = Fn("process_response");
+    service.map_response(response_callback);
+}
+
+fn process_request(request) {
+
+}
+
+fn process_response(response) {
+
+}
+```
 
 ## Composition and federation
 
