@@ -199,19 +199,19 @@ impl BasicCostCalculator {
             PlanNode::Defer { primary, deferred } => {
                 self.summed_score_of_deferred_nodes(primary, deferred)
             }
-            PlanNode::Fetch(fetch_node) => {
-                self.estimated_cost_of_operation(&fetch_node.service_name, &fetch_node.operation)
-            }
-            PlanNode::Subscription { primary, rest: _ } => {
-                self.estimated_cost_of_operation(&primary.service_name, &primary.operation)
-            }
+            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
+                &fetch_node.service_name,
+                &fetch_node.executable_document,
+            ),
+            PlanNode::Subscription { primary, rest: _ } => self
+                .estimated_cost_of_operation(&primary.service_name, &primary.executable_document),
         }
     }
 
     fn estimated_cost_of_operation(
         &self,
         subgraph: &String,
-        operation: &String,
+        operation: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
@@ -222,9 +222,8 @@ impl BasicCostCalculator {
                     "Query planner did not provide a schema for service {}",
                     subgraph
                 )))?;
-        let query = ExecutableDocument::parse(schema, operation, "")?;
 
-        Self::estimated(&query, schema)
+        Self::estimated(operation, schema)
     }
 
     fn max_score_of_nodes(

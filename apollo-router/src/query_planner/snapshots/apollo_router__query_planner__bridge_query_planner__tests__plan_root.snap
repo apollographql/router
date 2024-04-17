@@ -23,13 +23,13 @@ Fetch(
         },
         executable_document: ExecutableDocument {
             sources: {
-                1853: SourceFile {
+                1856: SourceFile {
                     path: "",
                     source_text: "{me{name{first last}}}",
                 },
             },
             anonymous_operation: Some(
-                0..22 @1853 Operation {
+                0..22 @1856 Operation {
                     operation_type: Query,
                     name: None,
                     variables: [],
@@ -38,8 +38,8 @@ Fetch(
                         ty: "Query",
                         selections: [
                             Field(
-                                1..21 @1853 Field {
-                                    definition: 2322..2330 @1830 FieldDefinition {
+                                1..21 @1856 Field {
+                                    definition: 2322..2330 @1827 FieldDefinition {
                                         description: None,
                                         name: "me",
                                         arguments: [],
@@ -56,8 +56,8 @@ Fetch(
                                         ty: "User",
                                         selections: [
                                             Field(
-                                                4..20 @1853 Field {
-                                                    definition: 2469..2479 @1830 FieldDefinition {
+                                                4..20 @1856 Field {
+                                                    definition: 2469..2479 @1827 FieldDefinition {
                                                         description: None,
                                                         name: "name",
                                                         arguments: [],
@@ -74,8 +74,8 @@ Fetch(
                                                         ty: "Name",
                                                         selections: [
                                                             Field(
-                                                                9..14 @1853 Field {
-                                                                    definition: 2210..2223 @1830 FieldDefinition {
+                                                                9..14 @1856 Field {
+                                                                    definition: 2210..2223 @1827 FieldDefinition {
                                                                         description: None,
                                                                         name: "first",
                                                                         arguments: [],
@@ -95,8 +95,8 @@ Fetch(
                                                                 },
                                                             ),
                                                             Field(
-                                                                15..19 @1853 Field {
-                                                                    definition: 2226..2238 @1830 FieldDefinition {
+                                                                15..19 @1856 Field {
+                                                                    definition: 2226..2238 @1827 FieldDefinition {
                                                                         description: None,
                                                                         name: "last",
                                                                         arguments: [],
