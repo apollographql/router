@@ -121,10 +121,16 @@ It currently supports these algorithms: `gzip`, `br`, and `deflate`.
 ```yaml title="router.yaml"
 traffic_shaping:
   all:
-    compression: br # Enable brotli compression for all subgraphs.
+    compression: gzip # Enable gzip compression for all subgraphs.
 ```
 
 Subgraph response decompression is always supported for these algorithms: `gzip`, `br`, and `deflate`.
+
+<Note>
+
+Brotli (`br`) compression is not supported by Apollo Server, due to its underlying Express.js not supporting it out of the box. Therefore, don't configure `br` compression for traffic shaping when using Apollo Server as a subgraph server with the router. 
+
+</Note>
 
 ### Rate limiting
 
