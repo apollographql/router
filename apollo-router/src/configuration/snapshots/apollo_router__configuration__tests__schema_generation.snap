@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -743,6 +742,79 @@ expression: "&schema"
         }
       }
     },
+    "batching": {
+      "description": "Batching configuration.",
+      "default": {
+        "enabled": false,
+        "mode": "batch_http_link",
+        "subgraph": null
+      },
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Activates Batching (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "Batching mode",
+          "oneOf": [
+            {
+              "description": "batch_http_link",
+              "type": "string",
+              "enum": [
+                "batch_http_link"
+              ]
+            }
+          ]
+        },
+        "subgraph": {
+          "description": "Subgraph options for batching",
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "enabled": false
+              },
+              "type": "object",
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "Whether this batching config should be enabled",
+                  "type": "boolean"
+                }
+              }
+            },
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "description": "Common options for configuring subgraph batching",
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "description": "Whether this batching config should be enabled",
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "coprocessor": {
       "description": "Configures the externalization plugin",
       "type": "object",
@@ -1324,7 +1396,7 @@ expression: "&schema"
     },
     "experimental_api_schema_generation_mode": {
       "description": "Set the API schema generation implementation to use.",
-      "default": "legacy",
+      "default": "both",
       "oneOf": [
         {
           "description": "Use the new Rust-based implementation.",
@@ -1349,36 +1421,32 @@ expression: "&schema"
         }
       ]
     },
-    "experimental_batching": {
-      "description": "Batching configuration.",
-      "default": {
-        "enabled": false,
-        "mode": "batch_http_link"
-      },
-      "type": "object",
-      "required": [
-        "mode"
-      ],
-      "properties": {
-        "enabled": {
-          "description": "Activates Batching (disabled by default)",
-          "default": false,
-          "type": "boolean"
+    "experimental_apollo_metrics_generation_mode": {
+      "description": "Set the Apollo usage report signature and referenced field generation implementation to use.",
+      "default": "both",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "type": "string",
+          "enum": [
+            "new"
+          ]
         },
-        "mode": {
-          "description": "Batching mode",
-          "oneOf": [
-            {
-              "description": "batch_http_link",
-              "type": "string",
-              "enum": [
-                "batch_http_link"
-              ]
-            }
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "type": "string",
+          "enum": [
+            "legacy"
+          ]
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "type": "string",
+          "enum": [
+            "both"
           ]
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "experimental_chaos": {
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!",
@@ -1422,33 +1490,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "experimental_graphql_validation_mode": {
-      "description": "Set the GraphQL validation implementation to use.",
-      "default": "both",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.",
-          "type": "string",
-          "enum": [
-            "new"
-          ]
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "type": "string",
-          "enum": [
-            "legacy"
-          ]
-        },
-        {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
-          "type": "string",
-          "enum": [
-            "both"
-          ]
-        }
-      ]
     },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
@@ -2635,7 +2676,10 @@ expression: "&schema"
           "experimental_reuse_query_plans": false
         },
         "early_cancel": false,
-        "experimental_log_on_broken_pipe": false
+        "experimental_log_on_broken_pipe": false,
+        "query_planner": {
+          "experimental_parallelism": 1
+        }
       },
       "type": "object",
       "properties": {
@@ -2688,6 +2732,35 @@ expression: "&schema"
           "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
           "default": "/",
           "type": "string"
+        },
+        "query_planner": {
+          "description": "Configuration options pertaining to the query planner component.",
+          "default": {
+            "experimental_parallelism": 1
+          },
+          "type": "object",
+          "required": [
+            "experimental_parallelism"
+          ],
+          "properties": {
+            "experimental_parallelism": {
+              "description": "Set the size of a pool of workers to enable query planning parallelism. Default: 1.",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "auto"
+                  ]
+                },
+                {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 1.0
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
         },
         "query_planning": {
           "description": "Query planning options",
