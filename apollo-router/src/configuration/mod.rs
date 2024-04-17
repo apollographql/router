@@ -288,8 +288,7 @@ fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
-// This isn't dead code! we use it in buildstructor's fake_new
-#[allow(dead_code)]
+#[cfg(test)]
 fn test_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
