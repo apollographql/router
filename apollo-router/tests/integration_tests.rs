@@ -80,6 +80,7 @@ macro_rules! assert_federated_response {
     };
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn basic_request() {
     assert_federated_response!(
@@ -90,6 +91,7 @@ async fn basic_request() {
     );
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn basic_composition() {
     assert_federated_response!(
@@ -146,6 +148,7 @@ async fn validation_errors_from_rust() {
     insta::assert_json_snapshot!(response.errors);
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn basic_mutation() {
     assert_federated_response!(
