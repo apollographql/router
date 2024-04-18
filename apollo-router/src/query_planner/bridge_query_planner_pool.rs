@@ -7,7 +7,7 @@ use apollo_compiler::validation::Valid;
 use async_channel::bounded;
 use async_channel::Sender;
 use futures::future::BoxFuture;
-use opentelemetry::KeyValue;
+use opentelemetry::metrics::MeterProvider;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
@@ -18,6 +18,7 @@ use super::bridge_query_planner::BridgeQueryPlanner;
 use super::QueryPlanResult;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
+use crate::metrics::meter_provider;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
@@ -34,6 +35,7 @@ pub(crate) struct BridgeQueryPlannerPool {
     )>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    _pool_size_gauge: opentelemetry::metrics::ObservableGauge<u64>,
 }
 
 impl BridgeQueryPlannerPool {
@@ -122,22 +124,29 @@ impl BridgeQueryPlannerPool {
                     let res = svc.call(request).await;
 
                     f64_histogram!(
-                        "apollo.router.query_planner.duration",
+                        "apollo.router.query_planner.plan.duration",
                         "Duration of the query planning.",
                         start.elapsed().as_secs_f64(),
-                        [KeyValue::new("workerId", worker_id.to_string())]
+                        "workerId" = worker_id.to_string()
                     );
 
                     let _ = res_sender.send(res);
                 }
             });
         }
+        let sender_for_gauge = sender.clone();
+        let pool_size_gauge = meter_provider()
+            .meter("apollo/router")
+            .u64_observable_gauge("apollo.router.query_planner.queued")
+            .with_callback(move |m| m.observe(sender_for_gauge.len() as u64, &[]))
+            .init();
 
         Ok(Self {
             planners,
             sender,
             schema,
             subgraph_schemas,
+            _pool_size_gauge: pool_size_gauge,
         })
     }
 
@@ -184,14 +193,12 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
             let start = Instant::now();
             let _ = sender.send((req, response_sender)).await;
 
-            tracing::info!(value.apollo_router_query_planner_queue_size = sender.len());
             let res = response_receiver
                 .await
                 .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
-            tracing::info!(value.apollo_router_query_planner_queue_size = sender.len());
 
             f64_histogram!(
-                "apollo_router_query_planning_time",
+                "apollo.router.query_planner.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
                 start.elapsed().as_secs_f64(),
                 []
