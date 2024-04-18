@@ -1,16 +1,4 @@
 //! Logic for loading configuration in to an object model
-pub(crate) mod cors;
-pub(crate) mod expansion;
-mod experimental;
-pub(crate) mod metrics;
-mod persisted_queries;
-mod schema;
-pub(crate) mod subgraph;
-#[cfg(test)]
-mod tests;
-mod upgrade;
-mod yaml;
-
 use std::fmt;
 use std::io;
 use std::io::BufReader;
@@ -69,6 +57,18 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
+
+pub(crate) mod cors;
+pub(crate) mod expansion;
+mod experimental;
+pub(crate) mod metrics;
+mod persisted_queries;
+mod schema;
+pub(crate) mod subgraph;
+#[cfg(test)]
+mod tests;
+mod upgrade;
+mod yaml;
 
 // TODO: Talk it through with the teams
 #[cfg(not(test))]
@@ -307,8 +307,7 @@ fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
-// This isn't dead code! we use it in buildstructor's fake_new
-#[allow(dead_code)]
+#[cfg(test)]
 fn test_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
@@ -664,18 +663,6 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
-
-    /// Configuration options pertaining to the query planner component.
-    pub(crate) query_planner: QueryPlanner,
-}
-
-/// Configuration options pertaining to the query planner component.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct QueryPlanner {
-    /// Set the size of a pool of workers to enable query planning parallelism.
-    /// Default: 1.
-    pub(crate) experimental_parallelism: AvailableParallelism,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -697,15 +684,6 @@ impl Default for AvailableParallelism {
     }
 }
 
-impl QueryPlanner {
-    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
-        match self.experimental_parallelism {
-            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
-            AvailableParallelism::Fixed(n) => Ok(n),
-        }
-    }
-}
-
 fn default_defer_support() -> bool {
     true
 }
@@ -723,7 +701,6 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -743,7 +720,6 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -762,7 +738,6 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -782,7 +757,6 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -1003,6 +977,19 @@ pub(crate) struct QueryPlanning {
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
+
+    /// Set the size of a pool of workers to enable query planning parallelism.
+    /// Default: 1.
+    pub(crate) experimental_parallelism: AvailableParallelism,
+}
+
+impl QueryPlanning {
+    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
+        match self.experimental_parallelism {
+            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
+            AvailableParallelism::Fixed(n) => Ok(n),
+        }
+    }
 }
 
 /// Cache configuration

@@ -63,7 +63,7 @@ pub(crate) struct SubscriptionNode {
     pub(crate) variable_usages: Vec<NodeStr>,
 
     /// The GraphQL subquery that is used for the subscription.
-    pub(crate) operation: String,
+    pub(crate) operation: super::fetch::SubgraphOperation,
 
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<NodeStr>,
@@ -233,7 +233,7 @@ impl SubscriptionNode {
                     )
                     .body(
                         Request::builder()
-                            .query(operation)
+                            .query(operation.as_serialized())
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
