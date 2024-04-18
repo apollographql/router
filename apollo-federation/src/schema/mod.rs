@@ -19,6 +19,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
+pub(crate) mod argument_composition_strategies;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
@@ -36,6 +37,7 @@ fn compute_subgraph_metadata(
         },
     )
 }
+pub(crate) mod type_and_directive_specification;
 
 /// A GraphQL schema with federation data.
 #[derive(Debug)]

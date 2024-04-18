@@ -14,8 +14,12 @@ use crate::schema::position::{
     InputObjectTypeDefinitionPosition, InterfaceTypeDefinitionPosition,
     ObjectFieldDefinitionPosition, ObjectOrInterfaceFieldDefinitionPosition,
     ObjectOrInterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
-    ScalarTypeDefinitionPosition, SchemaRootDefinitionKind, SchemaRootDefinitionPosition,
-    TypeDefinitionPosition, UnionTypeDefinitionPosition,
+    SchemaRootDefinitionKind, SchemaRootDefinitionPosition, TypeDefinitionPosition,
+    UnionTypeDefinitionPosition,
+};
+use crate::schema::type_and_directive_specification::{
+    FieldSpecification, ObjectTypeSpecification, ScalarTypeSpecification,
+    TypeAndDirectiveSpecification, UnionTypeSpecification,
 };
 use crate::schema::{FederationSchema, ValidFederationSchema};
 use apollo_compiler::ast::FieldDefinition;
@@ -1604,52 +1608,37 @@ const FEDERATION_SERVICE_FIELD_NAME: Name = name!("_service");
 const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
 const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
 
-fn add_federation_operations(
-    subgraph: &mut FederationSubgraph,
-    federation_spec_definition: &'static FederationSpecDefinition,
-) -> Result<(), FederationError> {
-    // TODO: Use the JS/programmatic approach of checkOrAdd() instead of hard-coding the adds.
-    let any_type_pos = ScalarTypeDefinitionPosition {
-        type_name: FEDERATION_ANY_TYPE_NAME,
-    };
-    any_type_pos.pre_insert(&mut subgraph.schema)?;
-    any_type_pos.insert(
-        &mut subgraph.schema,
-        Node::new(ScalarType {
-            description: None,
-            name: any_type_pos.type_name.clone(),
-            directives: Default::default(),
-        }),
-    )?;
-    let mut service_fields = IndexMap::new();
-    service_fields.insert(
-        FEDERATION_SDL_FIELD_NAME,
-        Component::new(FieldDefinition {
-            description: None,
+const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
+const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
+
+const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecification {
+    name: FEDERATION_ANY_TYPE_NAME,
+};
+
+const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
+    name: FEDERATION_SERVICE_TYPE_NAME,
+    fields: |_schema| {
+        [FieldSpecification {
             name: FEDERATION_SDL_FIELD_NAME,
-            arguments: Vec::new(),
-            ty: Type::Named(name!("String")),
-            directives: Default::default(),
-        }),
-    );
-    let service_type_pos = ObjectTypeDefinitionPosition {
-        type_name: FEDERATION_SERVICE_TYPE_NAME,
-    };
-    service_type_pos.pre_insert(&mut subgraph.schema)?;
-    service_type_pos.insert(
-        &mut subgraph.schema,
-        Node::new(ObjectType {
-            description: None,
-            name: service_type_pos.type_name.clone(),
-            implements_interfaces: Default::default(),
-            directives: Default::default(),
-            fields: service_fields,
-        }),
-    )?;
-    let key_directive_definition =
-        federation_spec_definition.key_directive_definition(&subgraph.schema)?;
-    let entity_members = subgraph
-        .schema
+            ty: Type::Named(GRAPHQL_STRING_TYPE_NAME),
+            arguments: Default::default(),
+        }]
+        .into()
+    },
+};
+
+const QUERY_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
+    name: GRAPHQL_QUERY_TYPE_NAME,
+    fields: |_schema| Default::default(), // empty Query (fields should be added later)
+};
+
+// PORT_NOTE: The JS implementation gets the key directive definition from the schema,
+// but we have it as a parameter.
+fn collect_entity_members(
+    schema: &FederationSchema,
+    key_directive_definition: &Node<DirectiveDefinition>,
+) -> IndexSet<ComponentName> {
+    schema
         .schema()
         .types
         .iter()
@@ -1662,54 +1651,49 @@ fn add_federation_operations(
             }
             Some(ComponentName::from(type_name))
         })
-        .collect::<IndexSet<_>>();
-    let is_entity_type = !entity_members.is_empty();
-    if is_entity_type {
-        let entity_type_pos = UnionTypeDefinitionPosition {
-            type_name: FEDERATION_ENTITY_TYPE_NAME,
-        };
-        entity_type_pos.pre_insert(&mut subgraph.schema)?;
-        entity_type_pos.insert(
-            &mut subgraph.schema,
-            Node::new(UnionType {
-                description: None,
-                name: entity_type_pos.type_name.clone(),
-                directives: Default::default(),
-                members: entity_members,
-            }),
-        )?;
+        .collect::<IndexSet<_>>()
+}
+
+fn add_federation_operations(
+    subgraph: &mut FederationSubgraph,
+    federation_spec_definition: &'static FederationSpecDefinition,
+) -> Result<(), FederationError> {
+    // the `_Any` and `_Service` Type
+    ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+    SERVICE_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+
+    // the `_Entity` Type
+    let key_directive_definition =
+        federation_spec_definition.key_directive_definition(&subgraph.schema)?;
+    let entity_members = collect_entity_members(&subgraph.schema, key_directive_definition);
+    let has_entity_type = !entity_members.is_empty();
+    if has_entity_type {
+        UnionTypeSpecification {
+            name: FEDERATION_ENTITY_TYPE_NAME,
+            members: |_| entity_members.clone(),
+        }
+        .check_or_add(&mut subgraph.schema)?;
     }
 
+    // the `Query` Type
     let query_root_pos = SchemaRootDefinitionPosition {
         root_kind: SchemaRootDefinitionKind::Query,
     };
     if query_root_pos.try_get(subgraph.schema.schema()).is_none() {
-        let default_query_type_pos = ObjectTypeDefinitionPosition {
-            type_name: name!("Query"),
-        };
-        default_query_type_pos.pre_insert(&mut subgraph.schema)?;
-        default_query_type_pos.insert(
-            &mut subgraph.schema,
-            Node::new(ObjectType {
-                description: None,
-                name: default_query_type_pos.type_name.clone(),
-                implements_interfaces: Default::default(),
-                directives: Default::default(),
-                fields: Default::default(),
-            }),
-        )?;
+        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
         query_root_pos.insert(
             &mut subgraph.schema,
-            ComponentName::from(default_query_type_pos.type_name),
+            ComponentName::from(QUERY_TYPE_SPEC.name),
         )?;
     }
 
+    // `Query._entities` (optional)
     let query_root_type_name = query_root_pos.get(subgraph.schema.schema())?.name.clone();
     let entity_field_pos = ObjectFieldDefinitionPosition {
         type_name: query_root_type_name.clone(),
         field_name: FEDERATION_ENTITIES_FIELD_NAME,
     };
-    if is_entity_type {
+    if has_entity_type {
         entity_field_pos.insert(
             &mut subgraph.schema,
             Component::new(FieldDefinition {
@@ -1732,6 +1716,7 @@ fn add_federation_operations(
         entity_field_pos.remove(&mut subgraph.schema)?;
     }
 
+    // `Query._service`
     ObjectFieldDefinitionPosition {
         type_name: query_root_type_name.clone(),
         field_name: FEDERATION_SERVICE_FIELD_NAME,
