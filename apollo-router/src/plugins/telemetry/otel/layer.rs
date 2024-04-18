@@ -153,9 +153,6 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
     fn record_f64(&mut self, field: &field::Field, value: f64) {
         match field.name() {
             "message" => self.event_builder.name = value.to_string().into(),
-            // Skip fields that are actually log metadata that have already been handled
-            #[cfg(feature = "tracing-log")]
-            name if name.starts_with("log.") => (),
             name => {
                 self.event_builder
                     .attributes
@@ -498,6 +495,7 @@ where
     /// By default, these attributes are not recorded.
     ///
     /// [conv]: https://github.com/open-telemetry/semantic-conventions/tree/main/docs/exceptions/
+    #[allow(dead_code)]
     pub(crate) fn with_exception_fields(self, exception_fields: bool) -> Self {
         Self {
             exception_config: ExceptionFieldConfig {
@@ -521,6 +519,7 @@ where
     /// By default, these attributes are not propagated to the span.
     ///
     /// [conv]: https://github.com/open-telemetry/semantic-conventions/tree/main/docs/exceptions/
+    #[allow(dead_code)]
     pub(crate) fn with_exception_field_propagation(
         self,
         exception_field_propagation: bool,
@@ -534,22 +533,10 @@ where
         }
     }
 
-    /// Sets whether or not span and event metadata should include OpenTelemetry
-    /// attributes with location information, such as the file, module and line number.
-    ///
-    /// These attributes follow the [OpenTelemetry semantic conventions for
-    /// source locations][conv].
-    ///
-    /// By default, locations are enabled.
-    ///
-    /// [conv]: https://github.com/open-telemetry/semantic-conventions/blob/main/docs/general/attributes.md#source-code-attributes/
-    pub(crate) fn with_location(self, location: bool) -> Self {
-        Self { location, ..self }
-    }
-
     /// Sets whether or not spans metadata should include the _busy time_
     /// (total time for which it was entered), and _idle time_ (total time
     /// the span existed but was not entered).
+    #[allow(dead_code)]
     pub(crate) fn with_tracked_inactivity(self, tracked_inactivity: bool) -> Self {
         Self {
             tracked_inactivity,
@@ -564,6 +551,7 @@ where
     /// By default, thread attributes are enabled.
     ///
     /// [conv]: https://github.com/open-telemetry/semantic-conventions/blob/main/docs/general/attributes.md#general-thread-attributes/
+    #[allow(dead_code)]
     pub(crate) fn with_threads(self, threads: bool) -> Self {
         Self {
             with_threads: threads,
@@ -1253,8 +1241,7 @@ mod tests {
     #[test]
     fn includes_span_location() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()).with_location(true));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request");
@@ -1268,26 +1255,6 @@ mod tests {
         assert!(keys.contains(&"code.filepath"));
         assert!(keys.contains(&"code.namespace"));
         assert!(keys.contains(&"code.lineno"));
-    }
-
-    #[test]
-    fn excludes_span_location() {
-        let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()).with_location(false));
-
-        tracing::subscriber::with_default(subscriber, || {
-            tracing::debug_span!("request");
-        });
-
-        let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
-        let keys = attributes
-            .iter()
-            .map(|(key, _)| key.as_str())
-            .collect::<Vec<&str>>();
-        assert!(!keys.contains(&"code.filepath"));
-        assert!(!keys.contains(&"code.namespace"));
-        assert!(!keys.contains(&"code.lineno"));
     }
 
     #[test]

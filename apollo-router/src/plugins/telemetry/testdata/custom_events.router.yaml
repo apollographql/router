@@ -76,3 +76,6 @@ telemetry:
             subgraph.name: true
             response_status:
               subgraph_response_status: code
+            "my.custom.attribute":
+              subgraph_response_data: "$.*"
+              default: "missing"

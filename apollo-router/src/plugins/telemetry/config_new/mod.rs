@@ -132,8 +132,7 @@ macro_rules! impl_to_otel_value {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::String(
                                     value.iter().map(|v| v.to_string().into()).collect(),
                                 )))
-                            }
-                             else if value.iter().all(|v| v.is_string()) {
+                            } else if value.iter().all(|v| v.is_string()) {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::String(
                                     value
                                         .iter()
@@ -142,10 +141,10 @@ macro_rules! impl_to_otel_value {
                                         .collect(),
                                 )))
                             } else {
-                                None
+                                Some(serde_json::to_string(value).ok()?.into())
                             }
                         }
-                        _ => None,
+                        value => Some(serde_json::to_string(value).ok()?.into())
                     }
                 }
             }

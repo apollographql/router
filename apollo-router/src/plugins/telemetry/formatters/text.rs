@@ -457,6 +457,7 @@ impl<'a> DefaultVisitor<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn bold(&self) -> Style {
         if self.is_ansi {
             return Style::new().bold();

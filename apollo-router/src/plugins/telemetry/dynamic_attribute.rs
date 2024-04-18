@@ -1,8 +1,6 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::OrderMap;
-use tracing::field::Visit;
-use tracing::Event;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
@@ -49,20 +47,6 @@ where
         if extensions.get_mut::<LogAttributes>().is_none() {
             extensions.insert(LogAttributes::default());
         }
-    }
-
-    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        // dbg!(event);
-        // let span = ctx.event_span(event);
-        // if let Some(span) = span {
-        //     let mut extensions = span.extensions_mut();
-        //     if let Some(events) = extensions
-        //         .get_mut::<OtelData>()
-        //         .and_then(|ext| ext.builder.events.as_mut())
-        //     {
-        //         dbg!(&events.last());
-        //     }
-        // }
     }
 }
 

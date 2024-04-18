@@ -264,6 +264,8 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::MutexGuard;
 
+    use http::header::CONTENT_LENGTH;
+    use http::HeaderValue;
     use tracing::error;
     use tracing::info;
     use tracing::info_span;
@@ -271,14 +273,96 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
+    use crate::graphql;
     use crate::otel;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::events::EventLevel;
+    use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+    use crate::services::router;
+    use crate::services::subgraph;
+    use crate::services::supergraph;
+
+    const EVENT_CONFIGURATION: &str = r#"
+router:
+  # Standard events
+  request: info
+  response: info
+  error: info
+
+  # Custom events
+  my.request_event:
+    message: "my event message"
+    level: info
+    on: request
+    attributes:
+      http.request.body.size: true
+    # Only log when the x-log-request header is `log` 
+    condition:
+      eq:
+        - "log"
+        - request_header: "x-log-request"
+  my.response_event:
+    message: "my response event message"
+    level: info
+    on: response
+    attributes:
+      http.response.body.size: true
+    # Only log when the x-log-request header is `log` 
+    condition:
+      eq:
+        - "log"
+        - response_header: "x-log-request"
+supergraph:
+  # Standard events
+  request: info
+  response: warn
+  error: info
+
+  # Custom events
+  my.request.event:
+    message: "my event message"
+    level: info
+    on: request
+    # Only log when the x-log-request header is `log` 
+    condition:
+      eq:
+        - "log"
+        - request_header: "x-log-request"
+  my.response_event:
+    message: "my response event message"
+    level: warn
+    on: response
+    condition:
+      eq:
+        - "log"
+        - response_header: "x-log-request"
+subgraph:
+  # Standard events
+  request: info
+  response: warn
+  error: error
+
+  # Custom events
+  my.subgraph.request.event:
+    message: "my event message"
+    level: info
+    on: request
+  my.subgraph.response.event:
+    message: "my response event message"
+    level: error
+    on: response
+    attributes:
+      subgraph.name: true
+      response_status:
+        subgraph_response_status: code
+      "my.custom.attribute":
+        subgraph_response_data: "$.*"
+        default: "missing""#;
 
     #[derive(Default, Clone)]
     struct LogBuffer(Arc<Mutex<Vec<u8>>>);
@@ -574,8 +658,8 @@ mod tests {
             buff.clone(),
         )
         .boxed();
-        let event_config: events::Events =
-            serde_yaml::from_str(include_str!("testdata/custom_events.router.yaml")).unwrap();
+
+        let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
@@ -603,6 +687,221 @@ mod tests {
                 );
 
                 error!(http.method = "GET", "Hello from test");
+
+                let router_events = event_config.new_router_events();
+                let router_req = router::Request::fake_builder()
+                    .header(CONTENT_LENGTH, "0")
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .build()
+                    .unwrap();
+                router_events.on_request(&router_req);
+
+                let router_resp = router::Response::fake_builder()
+                    .header("custom-header", "val1")
+                    .header(CONTENT_LENGTH, "25")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json_bytes::json!({"data": "res"}))
+                    .build()
+                    .expect("expecting valid response");
+                router_events.on_response(&router_resp);
+
+                let supergraph_events = event_config.new_supergraph_events();
+                let supergraph_req = supergraph::Request::fake_builder()
+                    .query("query { foo }")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .build()
+                    .unwrap();
+                supergraph_events.on_request(&supergraph_req);
+
+                let supergraph_resp = supergraph::Response::fake_builder()
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json::json!({"data": "res"}).to_string())
+                    .build()
+                    .expect("expecting valid response");
+                supergraph_events.on_response(&supergraph_resp);
+
+                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_req = http::Request::new(
+                    graphql::Request::fake_builder()
+                        .query("query { foo }")
+                        .build(),
+                );
+                subgraph_req
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+
+                let subgraph_req = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph")
+                    .subgraph_request(subgraph_req)
+                    .build();
+                subgraph_events.on_request(&subgraph_req);
+
+                let subgraph_resp = subgraph::Response::fake2_builder()
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp);
+
+                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_req = http::Request::new(
+                    graphql::Request::fake_builder()
+                        .query("query { foo }")
+                        .build(),
+                );
+                subgraph_req
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+
+                let subgraph_req = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph_bis")
+                    .subgraph_request(subgraph_req)
+                    .build();
+                subgraph_events.on_request(&subgraph_req);
+
+                let subgraph_resp = subgraph::Response::fake2_builder()
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp);
+            },
+        );
+
+        insta::assert_display_snapshot!(buff.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_text_logging_with_custom_events_with_instrumented() {
+        let buff = LogBuffer::default();
+        let text_format = TextFormat {
+            display_span_list: true,
+            display_current_span: false,
+            display_resource: false,
+            ansi_escape_codes: false,
+            ..Default::default()
+        };
+        let format = Text::new(Default::default(), text_format);
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
+            buff.clone(),
+        )
+        .boxed();
+
+        let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            move || {
+                let test_span = info_span!(
+                    "test",
+                    first = "one",
+                    apollo_private.should_not_display = "this should be skipped"
+                );
+                test_span.set_span_dyn_attribute("another".into(), 2.into());
+                test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                let _enter = test_span.enter();
+
+                let mut attributes = HashMap::new();
+                attributes.insert("http.response.body.size".to_string(), "125".to_string());
+                attributes.insert(
+                    "http.response.body".to_string(),
+                    r#"{"foo": "bar"}"#.to_string(),
+                );
+                log_event(
+                    EventLevel::Info,
+                    "my_custom_event",
+                    attributes,
+                    "my message",
+                );
+
+                error!(http.method = "GET", "Hello from test");
+
+                let router_events = event_config.new_router_events();
+                let router_req = router::Request::fake_builder()
+                    .header(CONTENT_LENGTH, "0")
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .build()
+                    .unwrap();
+                router_events.on_request(&router_req);
+
+                let router_resp = router::Response::fake_builder()
+                    .header("custom-header", "val1")
+                    .header(CONTENT_LENGTH, "25")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json_bytes::json!({"data": "res"}))
+                    .build()
+                    .expect("expecting valid response");
+                router_events.on_response(&router_resp);
+
+                let supergraph_events = event_config.new_supergraph_events();
+                let supergraph_req = supergraph::Request::fake_builder()
+                    .query("query { foo }")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .build()
+                    .unwrap();
+                supergraph_events.on_request(&supergraph_req);
+
+                let supergraph_resp = supergraph::Response::fake_builder()
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json::json!({"data": "res"}).to_string())
+                    .build()
+                    .expect("expecting valid response");
+                supergraph_events.on_response(&supergraph_resp);
+
+                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_req = http::Request::new(
+                    graphql::Request::fake_builder()
+                        .query("query { foo }")
+                        .build(),
+                );
+                subgraph_req
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+
+                let subgraph_req = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph")
+                    .subgraph_request(subgraph_req)
+                    .build();
+                subgraph_events.on_request(&subgraph_req);
+
+                let subgraph_resp = subgraph::Response::fake2_builder()
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp);
+
+                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_req = http::Request::new(
+                    graphql::Request::fake_builder()
+                        .query("query { foo }")
+                        .build(),
+                );
+                subgraph_req
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+
+                let subgraph_req = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph_bis")
+                    .subgraph_request(subgraph_req)
+                    .build();
+                subgraph_events.on_request(&subgraph_req);
+
+                let subgraph_resp = subgraph::Response::fake2_builder()
+                    .header("custom-header", "val1")
+                    .header("x-log-request", HeaderValue::from_static("log"))
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp);
             },
         );
 
