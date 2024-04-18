@@ -125,6 +125,7 @@ use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
+pub(crate) mod apollo_otlp_exporter;
 pub(crate) mod config;
 mod config_new;
 pub(crate) mod dynamic_attribute;

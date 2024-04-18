@@ -54,6 +54,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
@@ -173,6 +174,7 @@ pub(crate) struct Exporter {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
     #[derivative(Debug = "ignore")]
     report_exporter: Arc<ApolloExporter>,
+    otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
@@ -208,6 +210,7 @@ impl Exporter {
     #[builder]
     pub(crate) fn new<'a>(
         endpoint: &'a Url,
+        otlp_endpoint: Option<&'a Url>,
         apollo_key: &'a str,
         apollo_graph_ref: &'a str,
         schema_id: &'a str,
@@ -218,6 +221,7 @@ impl Exporter {
         use_legacy_request_span: Option<bool>,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
+        
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
             report_exporter: Arc::new(ApolloExporter::new(
@@ -227,7 +231,16 @@ impl Exporter {
                 apollo_graph_ref,
                 schema_id,
             )?),
-
+            otlp_exporter: match otlp_endpoint {
+                Some(otlp_endpoint) =>  Some(Arc::new(ApolloOtlpExporter::new(
+                    otlp_endpoint,
+                    batch_config,
+                    apollo_key,
+                    apollo_graph_ref,
+                    schema_id,
+                )?)),
+                None => None,
+            },
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
@@ -327,6 +340,33 @@ impl Exporter {
             }
         }
         Ok(results)
+    }
+
+    // TBD(tim): Likely need to revisit this, handle errors, deal with the unknown spans more carefully, etc.
+    fn collect_spans_for_tree(&mut self, root_span: &LightSpanData) -> Vec<LightSpanData> {
+        // iterate over all children and recursively collect the entire subtree
+        let child_spans = match self.spans_by_parent_id.pop_entry(&root_span.span_id) {
+            Some((_, spans)) => 
+                spans
+                .into_iter()
+                .flat_map(|(_, span)| {
+                    self.collect_spans_for_tree(&span)
+                }),
+            None => Vec::new(),
+        };
+        let unknown = self.include_span_names.contains(root_span.name.as_ref());
+        // if we're known, add ourselves to the list, otherwise don't.
+        let spans_for_tree = match unknown {
+            true => Vec::new(),
+            false => vec![root_span],
+        };
+        return spans_for_tree.append(child_spans);
+    }
+
+    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
+        // TBD(tim): this could alternatively use the same algorithm in `groupbytrace` processor, which
+        // groups based on trace ID instead of connecting recursively by parent ID.
+        return self.collect_spans_for_tree(&span);
     }
 
     fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
@@ -777,6 +817,8 @@ impl SpanExporter for Exporter {
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
+        let mut otlp_trace_spans: Vec<Vec<LightSpanData>> = Vec::new();
+        
         for span in batch {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
@@ -800,6 +842,11 @@ impl SpanExporter for Exporter {
                     Err(error) => {
                         tracing::error!("failed to construct trace: {}, skipping", error);
                     }
+                }
+
+                if self.otlp_exporter.is_some() {
+                    let grouped_trace_spans = self.group_by_trace(span.into());
+                    otlp_trace_spans.push(grouped_trace_spans);
                 }
             } else if span.parent_span_id != SpanId::INVALID {
                 // Not a root span, we may need it later so stash it.
@@ -828,6 +875,12 @@ impl SpanExporter for Exporter {
                 .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                 .await
         };
+        if self.otlp_exporter.is_some() {
+            let exporter = self.otlp_exporter.clone();
+            let fut = async move {
+                exporter.export(batch)
+            };
+        }
         fut.boxed()
     }
 }
