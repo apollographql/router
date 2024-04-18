@@ -94,15 +94,17 @@ Logs can be consumed by [logging exporters](./exporters/logging/overview) and as
 
 ### Metrics and instruments
 
-Metrics monitor aggregate information about the Apollo Router. Metrics include histograms, gauges, and counts. An individual metric is called an **instrument**. Examples of instruments include:
+Metrics are measurements of the router's behavior that can be exported and monitored. Different kinds of metrics include histograms, gauges, and counts. 
+
+Metrics can be consumed by _exporters_. See [Metrics exporters](./exporters/metrics/overview) for an overview of supported exporters.
+
+An individual metric is called an _instrument_. Example instruments of the router include:
 
 * Number of received requests 
 * Histogram of request durations
 * Number of in-flight requests
 
-You can find a full list of instruments in the [instrument documentation](./instrumentation/standard-instruments).
-
-Metrics can be consumed via [metrics exporters](./exporters/metrics/overview).
+See [Instruments](./instrumentation/instruments) for an overview of available instruments and a guide for configuring and customizing instruments.
 
 ### Traces and spans
 
