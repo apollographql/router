@@ -1197,6 +1197,43 @@ async fn test_operation_arg_always_commas() {
 }
 
 #[test(tokio::test)]
+async fn test_comma_edge_case() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = r#"query QueryCommaEdgeCase {
+        enumInputQuery (anotherStr:"",enumInput:SOME_VALUE_1,stringInput:"") {
+          enumResponse
+        }
+      }"#;
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_usage_reporting(&doc, &doc, &Some("QueryCommaEdgeCase".into()), &schema);
+
+    let expected_sig = "# QueryCommaEdgeCase\nquery QueryCommaEdgeCase{enumInputQuery(anotherStr:\"\",enumInput:SOME_VALUE_1,stringInput:\"\"){enumResponse}}";
+    let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        (
+            "Query".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["enumInputQuery".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "EverythingResponse".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["enumResponse".into()],
+                is_interface: false,
+            },
+        ),
+    ]);
+
+    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+#[test(tokio::test)]
 async fn test_compare() {
     let source = ComparableUsageReporting {
         result: UsageReporting {
