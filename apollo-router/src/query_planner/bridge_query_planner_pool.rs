@@ -124,7 +124,7 @@ impl BridgeQueryPlannerPool {
                     let res = svc.call(request).await;
 
                     f64_histogram!(
-                        "apollo.router.query_planner.plan.duration",
+                        "apollo.router.query_planning.plan.duration",
                         "Duration of the query planning.",
                         start.elapsed().as_secs_f64(),
                         "workerId" = worker_id.to_string()
@@ -137,7 +137,7 @@ impl BridgeQueryPlannerPool {
         let sender_for_gauge = sender.clone();
         let pool_size_gauge = meter_provider()
             .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.query_planner.queued")
+            .u64_observable_gauge("apollo.router.query_planning.queued")
             .with_callback(move |m| m.observe(sender_for_gauge.len() as u64, &[]))
             .init();
 
@@ -198,7 +198,7 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
                 .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
 
             f64_histogram!(
-                "apollo.router.query_planner.total.duration",
+                "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
                 start.elapsed().as_secs_f64(),
                 []
