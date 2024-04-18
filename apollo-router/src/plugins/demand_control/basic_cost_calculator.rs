@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast::NamedType;
@@ -20,13 +19,15 @@ use super::schema_aware_response::TypedValue;
 use super::CostCalculator;
 use super::DemandControlError;
 use crate::graphql::Response;
+use crate::query_planner::fetch::SubgraphOperation;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 
 pub(crate) struct BasicCostCalculator {
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
 }
 
 impl BasicCostCalculator {
@@ -199,31 +200,30 @@ impl BasicCostCalculator {
             PlanNode::Defer { primary, deferred } => {
                 self.summed_score_of_deferred_nodes(primary, deferred)
             }
-            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
-                &fetch_node.service_name,
-                &fetch_node.executable_document,
-            ),
-            PlanNode::Subscription { primary, rest: _ } => self
-                .estimated_cost_of_operation(&primary.service_name, &primary.executable_document),
+            PlanNode::Fetch(fetch_node) => {
+                self.estimated_cost_of_operation(&fetch_node.service_name, &fetch_node.operation)
+            }
+            PlanNode::Subscription { primary, rest: _ } => {
+                self.estimated_cost_of_operation(&primary.service_name, &primary.operation)
+            }
         }
     }
 
     fn estimated_cost_of_operation(
         &self,
         subgraph: &String,
-        operation: &ExecutableDocument,
+        operation: &SubgraphOperation,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
-        let schema =
-            self.subgraph_schemas
-                .get(subgraph)
-                .ok_or(DemandControlError::QueryParseFailure(format!(
-                    "Query planner did not provide a schema for service {}",
-                    subgraph
-                )))?;
+        let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Query planner did not provide a schema for service {}",
+                subgraph
+            ))
+        })?;
 
-        Self::estimated(operation, schema)
+        Self::estimated(operation.as_parsed(schema), schema)
     }
 
     fn max_score_of_nodes(

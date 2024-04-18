@@ -42,6 +42,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::query_planner::fetch::QueryHash;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -382,10 +383,7 @@ impl BridgeQueryPlanner {
                 plan.data.query_plan.hash_subqueries(&self.subgraph_schemas);
                 plan.data
                     .query_plan
-                    .parse_subgraph_operations(&self.subgraph_schemas);
-                plan.data
-                    .query_plan
-                    .extract_authorization_metadata(&self.schema.definitions, &key);
+                    .extract_authorization_metadata(&self.subgraph_schemas, &key);
 
                 plan
             }
@@ -817,28 +815,19 @@ struct QueryPlan {
 }
 
 impl QueryPlan {
-    fn hash_subqueries(&mut self, schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>) {
+    fn hash_subqueries(&mut self, subgraph_schemas: &SubgraphSchemas) {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(schemas);
+            node.hash_subqueries(subgraph_schemas);
         }
     }
 
     fn extract_authorization_metadata(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        subgraph_schemas: &SubgraphSchemas,
         key: &CacheKeyMetadata,
     ) {
         if let Some(node) = self.node.as_mut() {
-            node.extract_authorization_metadata(schema, key);
-        }
-    }
-
-    fn parse_subgraph_operations(
-        &mut self,
-        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
-    ) {
-        if let Some(node) = self.node.as_mut() {
-            node.parse_subgraph_operations(schemas);
+            node.extract_authorization_metadata(subgraph_schemas, key);
         }
     }
 }

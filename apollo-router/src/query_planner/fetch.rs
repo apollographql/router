@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
@@ -87,6 +88,8 @@ impl From<apollo_compiler::ast::OperationType> for OperationKind {
     }
 }
 
+pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Schema>>>;
+
 /// A fetch node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,7 +106,7 @@ pub(crate) struct FetchNode {
     pub(crate) variable_usages: Vec<String>,
 
     /// The GraphQL subquery that is used for the fetch.
-    pub(crate) operation: String,
+    pub(crate) operation: SubgraphOperation,
 
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<String>,
@@ -128,9 +131,92 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+}
 
-    #[serde(skip)]
-    pub(crate) executable_document: Arc<apollo_compiler::ExecutableDocument>,
+#[derive(Clone)]
+pub(crate) struct SubgraphOperation {
+    // At least one of these two must be initialized
+    serialized: OnceLock<String>,
+    parsed: OnceLock<Arc<ExecutableDocument>>,
+}
+
+impl SubgraphOperation {
+    pub(crate) fn from_string(serialized: impl Into<String>) -> Self {
+        Self {
+            serialized: OnceLock::from(serialized.into()),
+            parsed: OnceLock::new(),
+        }
+    }
+
+    // TODO: remove the _ prefix when the Rust query planner starts using this
+    pub(crate) fn _from_parsed(parsed: impl Into<Arc<ExecutableDocument>>) -> Self {
+        Self {
+            serialized: OnceLock::new(),
+            parsed: OnceLock::from(parsed.into()),
+        }
+    }
+
+    pub(crate) fn as_serialized(&self) -> &str {
+        self.serialized.get_or_init(|| {
+            self.parsed
+                .get()
+                .expect("SubgraphOperation has neither representation initialized")
+                .to_string()
+        })
+    }
+
+    pub(crate) fn as_parsed(
+        &self,
+        subgraph_schema: &Valid<apollo_compiler::Schema>,
+    ) -> &Arc<ExecutableDocument> {
+        self.parsed.get_or_init(|| {
+            let serialized = self
+                .serialized
+                .get()
+                .expect("SubgraphOperation has neither representation initialized");
+            Arc::new(
+                ExecutableDocument::parse(subgraph_schema, serialized, "operation.graphql")
+                    .map_err(|e| e.errors)
+                    .expect("Subgraph operation should be valid"),
+            )
+        })
+    }
+}
+
+impl Serialize for SubgraphOperation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.as_serialized().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SubgraphOperation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::from_string(String::deserialize(deserializer)?))
+    }
+}
+
+impl PartialEq for SubgraphOperation {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_serialized() == other.as_serialized()
+    }
+}
+
+impl std::fmt::Debug for SubgraphOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.as_serialized(), f)
+    }
+}
+
+impl std::fmt::Display for SubgraphOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self.as_serialized(), f)
+    }
 }
 
 #[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
@@ -240,6 +326,14 @@ impl Variables {
 }
 
 impl FetchNode {
+    pub(crate) fn parsed_operation(
+        &self,
+        subgraph_schemas: &SubgraphSchemas,
+    ) -> &Arc<ExecutableDocument> {
+        self.operation
+            .as_parsed(&subgraph_schemas[&self.service_name])
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fetch_node<'a>(
         &'a self,
@@ -292,7 +386,7 @@ impl FetchNode {
                     )
                     .body(
                         Request::builder()
-                            .query(operation)
+                            .query(operation.as_serialized())
                             .and_operation_name(operation_name.clone())
                             .variables(variables.clone())
                             .build(),
@@ -344,7 +438,12 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(service_name, operation, &variables, &response);
+        super::log::trace_subfetch(
+            service_name,
+            operation.as_serialized(),
+            &variables,
+            &response,
+        );
 
         if !response.is_primary() {
             return (
@@ -501,11 +600,11 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, schema: &Valid<apollo_compiler::Schema>) {
-        let doc = ExecutableDocument::parse(schema, &self.operation, "query.graphql")
-            .expect("subgraph queries should be valid");
+    pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas) {
+        let doc = self.parsed_operation(subgraph_schemas);
+        let schema = &subgraph_schemas[&self.service_name];
 
-        if let Ok(hash) = QueryHashVisitor::hash_query(schema, &doc, self.operation_name.as_deref())
+        if let Ok(hash) = QueryHashVisitor::hash_query(schema, doc, self.operation_name.as_deref())
         {
             self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
@@ -513,11 +612,13 @@ impl FetchNode {
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        subgraph_schemas: &SubgraphSchemas,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
+        let doc = self.parsed_operation(subgraph_schemas);
+        let schema = &subgraph_schemas[&self.service_name];
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
-            &self.executable_document,
+            doc,
             self.operation_name.as_deref(),
             schema,
             !self.requires.is_empty(),
@@ -529,15 +630,5 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
-    }
-
-    pub(crate) fn parse_operation(
-        &mut self,
-        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
-    ) {
-        let schema = schemas.get(&self.service_name).unwrap();
-        let executable_document = ExecutableDocument::parse(schema, self.operation.to_string(), "")
-            .unwrap_or_else(|errors| errors.partial);
-        self.executable_document = Arc::new(executable_document);
     }
 }
