@@ -23,6 +23,7 @@ use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
@@ -259,7 +260,7 @@ async fn defer() {
                         service_name: "X".to_string(),
                         requires: vec![],
                         variable_usages: vec![],
-                        operation: "{ t { id __typename x } }".to_string(),
+                        operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
                         operation_name: Some("t".to_string()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".to_string()),
@@ -303,7 +304,9 @@ async fn defer() {
                                 },
                             )],
                             variable_usages: vec![],
-                            operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}".to_string(),
+                            operation: SubgraphOperation::from_string(
+                                "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
+                            ),
                             operation_name: None,
                             operation_kind: OperationKind::Query,
                             id: Some("fetch2".to_string()),
