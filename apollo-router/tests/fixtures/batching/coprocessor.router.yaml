@@ -1,0 +1,19 @@
+# Simple config to enable batching and a coprocessor for testing killed requests
+
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    all:
+      enabled: true
+
+coprocessor:
+  url: http://127.0.0.1:REPLACEME # Will be overwritten by the test
+  subgraph:
+    all:
+      request:
+        service_name: true
+        body: true
+
+include_subgraph_errors:
+  all: true
