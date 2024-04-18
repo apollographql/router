@@ -1209,7 +1209,8 @@ async fn test_comma_edge_case() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("QueryCommaEdgeCase".into()), &schema);
+    let generated =
+        generate_usage_reporting(&doc, &doc, &Some("QueryCommaEdgeCase".into()), &schema);
 
     let expected_sig = "# QueryCommaEdgeCase\nquery QueryCommaEdgeCase{enumInputQuery(anotherStr:\"\",enumInput:SOME_VALUE_1,stringInput:\"\"){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
