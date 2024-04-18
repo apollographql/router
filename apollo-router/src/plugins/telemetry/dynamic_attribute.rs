@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::OrderMap;

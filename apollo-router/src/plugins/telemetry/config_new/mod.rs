@@ -128,7 +128,12 @@ macro_rules! impl_to_otel_value {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
                                     value.iter().filter_map(|v| v.as_bool()).collect(),
                                 )))
-                            } else if value.iter().all(|v| v.is_string()) {
+                            } else if value.iter().all(|v| v.is_object()) {
+                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                                    value.iter().map(|v| v.to_string().into()).collect(),
+                                )))
+                            }
+                             else if value.iter().all(|v| v.is_string()) {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::String(
                                     value
                                         .iter()
