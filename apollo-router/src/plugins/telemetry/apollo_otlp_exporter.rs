@@ -1,8 +1,11 @@
+use std::borrow::Cow;
+
 use futures::future::BoxFuture;
+use itertools::Itertools;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
-use opentelemetry::{sdk::{export::trace::{ExportResult, SpanData, SpanExporter}, Resource}, InstrumentationLibrary, KeyValue};
+use opentelemetry::{sdk::{export::trace::{ExportResult, SpanData, SpanExporter}, trace::EvictedQueue, Resource}, trace::{SpanContext, Status, TraceFlags, TraceState}, InstrumentationLibrary, KeyValue};
 use url::Url;
 use uuid::Uuid;
 use crate::plugins::telemetry::{apollo_exporter::get_uname, metrics::apollo::ROUTER_ID, tracing::BatchProcessorConfig, GLOBAL_TRACER_NAME};
@@ -64,25 +67,31 @@ impl ApolloOtlpExporter {
       });
   }
 
-  pub(crate) fn submit_trace_batch(&self, traces: Vec<Vec<LightSpanData>>) -> BoxFuture<'static, ExportResult> {
+  pub(crate) async fn submit_trace_batch(&mut self, traces: Vec<Vec<LightSpanData>>) -> BoxFuture<'static, ExportResult> {
     let spans = traces.into_iter().flat_map(|t| {
       t.into_iter().map(|s| {
         SpanData {
-          span_context: None,
+          span_context: SpanContext::new(
+            s.trace_id,
+            s.span_id,
+            TraceFlags::default().with_sampled(true),
+            true,
+            TraceState::default(),
+          ),
           parent_span_id: s.parent_span_id,
           span_kind: s.span_kind,
           name: s.name,
           start_time: s.start_time,
           end_time: s.end_time,
           attributes: s.attributes,
-          events: None,
-          links: None,
-          status: s.status,
-          resource: self.resource_template, // Hooray, Cows!  Hopefully this is fine, it should never change.
-          instrumentation_lib: self.intrumentation_library,
+          events: EvictedQueue::new(0),
+          links: EvictedQueue::new(0),
+          status: Status::Unset,
+          resource: Cow::Owned(self.resource_template.to_owned()), // Hooray, Cows!  This might need a look.
+          instrumentation_lib: self.intrumentation_library.clone(),
         }
-      });
-    });
-    return self.otlp_exporter.export(spans.into());
+      })
+    }).collect_vec();
+    self.otlp_exporter.export(spans)
   }
 }

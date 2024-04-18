@@ -23,6 +23,7 @@ use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceError;
+use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry::Value;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
@@ -141,6 +142,7 @@ pub(crate) enum Error {
 // Also, maybe we can just use the actual SpanData instead of the light one?
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LightSpanData {
+    pub trace_id: TraceId,
     pub span_id: SpanId,
     pub parent_span_id: SpanId,
     pub span_kind: SpanKind,
@@ -153,6 +155,7 @@ pub(crate) struct LightSpanData {
 impl From<SpanData> for LightSpanData {
     fn from(value: SpanData) -> Self {
         Self {
+            trace_id: value.span_context.trace_id(),
             span_id: value.span_context.span_id(),
             parent_span_id: value.parent_span_id,
             span_kind: value.span_kind,
@@ -360,13 +363,13 @@ impl Exporter {
             true => Vec::new(),
             false => vec![root_span],
         };
-        return spans_for_tree.append(child_spans);
+        spans_for_tree.append(child_spans)
     }
 
     fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
         // TBD(tim): this could alternatively use the same algorithm in `groupbytrace` processor, which
         // groups based on trace ID instead of connecting recursively by parent ID.
-        return self.collect_spans_for_tree(&span);
+        self.collect_spans_for_tree(&span)
     }
 
     fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
@@ -878,7 +881,7 @@ impl SpanExporter for Exporter {
         if self.otlp_exporter.is_some() {
             let exporter = self.otlp_exporter.clone();
             let fut = async move {
-                exporter.export(batch)
+                exporter.export(otlp_trace_spans)
             };
         }
         fut.boxed()
