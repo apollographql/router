@@ -21,6 +21,7 @@ use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
+use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
@@ -135,19 +136,25 @@ pub(crate) enum Error {
     SystemTime(#[from] SystemTimeError),
 }
 
+// TBD(tim): maybe we should move this?
+// Also, maybe we can just use the actual SpanData instead of the light one?
 #[derive(Debug, Clone, PartialEq)]
-struct LightSpanData {
-    span_id: SpanId,
-    name: Cow<'static, str>,
-    start_time: SystemTime,
-    end_time: SystemTime,
-    attributes: EvictedHashMap,
+pub(crate) struct LightSpanData {
+    pub span_id: SpanId,
+    pub parent_span_id: SpanId,
+    pub span_kind: SpanKind,
+    pub name: Cow<'static, str>,
+    pub start_time: SystemTime,
+    pub end_time: SystemTime,
+    pub attributes: EvictedHashMap,
 }
 
 impl From<SpanData> for LightSpanData {
     fn from(value: SpanData) -> Self {
         Self {
             span_id: value.span_context.span_id(),
+            parent_span_id: value.parent_span_id,
+            span_kind: value.span_kind,
             name: value.name,
             start_time: value.start_time,
             end_time: value.end_time,

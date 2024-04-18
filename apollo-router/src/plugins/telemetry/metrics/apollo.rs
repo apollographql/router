@@ -36,7 +36,8 @@ fn default_buckets() -> Vec<f64> {
 }
 
 // Random unique UUID for the Router. This doesn't actually identify the router, it just allows disambiguation between multiple routers with the same metadata.
-static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
+// TBD(tim): maybe this needs to move somewhere else now that we're exporting it?
+pub(crate) static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
 
 impl MetricsConfigurator for Config {
     fn enabled(&self) -> bool {
