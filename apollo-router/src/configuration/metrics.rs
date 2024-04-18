@@ -436,7 +436,7 @@ impl InstrumentData {
     ) {
         let query_planner_parallelism_config = configuration
             .supergraph
-            .query_planner
+            .query_planning
             .experimental_parallelism;
 
         if query_planner_parallelism_config != Default::default() {
@@ -451,11 +451,11 @@ impl InstrumentData {
                 .into(),
             );
             self.data.insert(
-                "apollo.router.config.query_planner.parallelism".to_string(),
+                "apollo.router.config.query_planning.parallelism".to_string(),
                 (
                     configuration
                         .supergraph
-                        .query_planner
+                        .query_planning
                         .experimental_query_planner_parallelism()
                         .map(|n| {
                             #[cfg(test)]
