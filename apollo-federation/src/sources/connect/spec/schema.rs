@@ -17,6 +17,10 @@ pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const CONNECT_HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
+pub(crate) const HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME: Name = name!("name");
+pub(crate) const HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME: Name = name!("as");
+pub(crate) const HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME: Name = name!("value");
+
 /// A directive to model an upstream HTTP data source
 ///
 /// A source describes an HTTP endpoint that contains data that can be scraped

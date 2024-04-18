@@ -10,9 +10,11 @@ use crate::{
 };
 
 use super::schema::{
-    ConnectDirectiveArguments, ConnectHTTPArguments, Connector, HTTPArguments, HTTPMethod,
-    JSONSelection, SourceDirectiveArguments, URLPathTemplate, CONNECT_BODY_ARGUMENT_NAME,
-    CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME, CONNECT_SELECTION_ARGUMENT_NAME,
+    ConnectDirectiveArguments, ConnectHTTPArguments, Connector, HTTPArguments, HTTPHeaderMapping,
+    HTTPHeaderOption, HTTPMethod, JSONSelection, SourceDirectiveArguments, URLPathTemplate,
+    CONNECT_BODY_ARGUMENT_NAME, CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME,
+    CONNECT_SELECTION_ARGUMENT_NAME, HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME,
+    HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME, HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME,
     SOURCE_BASE_URL_ARGUMENT_NAME, SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME,
     SOURCE_NAME_ARGUMENT_NAME,
 };
@@ -82,8 +84,12 @@ impl TryFrom<&ObjectNode> for HTTPArguments {
                 let headers_value = value
                     .as_list()
                     .expect("`headers` field in `@source` directive's `http` field is not a list");
+                let headers_value = headers_value
+                    .iter()
+                    .map(HTTPHeaderMapping::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                headers = Some(todo!("handle headers for @source: {:?}", headers_value));
+                headers = Some(headers_value);
             } else {
                 unreachable!("unknown argument in `@source` directive's `http` field: {name}");
             }
@@ -93,6 +99,50 @@ impl TryFrom<&ObjectNode> for HTTPArguments {
             base_url: base_url
                 .expect("missing `base_url` field in `@source` directive's `http` argument"),
             headers: headers.unwrap_or_default(),
+        })
+    }
+}
+
+// TODO: The following does not do any formal validation
+impl TryFrom<&Node<Value>> for HTTPHeaderMapping {
+    type Error = FederationError;
+
+    fn try_from(value: &Node<Value>) -> Result<Self, Self::Error> {
+        // The mapping should be an object
+        let mappings = value.as_object().unwrap();
+
+        // Extract the known configuration options
+        let mut name = None;
+        let mut option = None;
+        for (field, mapping) in mappings {
+            let field = field.as_str();
+
+            if field == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.as_str() {
+                let name_value = mapping
+                    .as_node_str()
+                    .expect("`name` field in HTTP header mapping is not a string");
+
+                name = Some(name_value.clone());
+            } else if field == HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.as_str() {
+                let as_value = mapping
+                    .as_node_str()
+                    .expect("`as` field in HTTP header mapping is not a string");
+
+                option = Some(HTTPHeaderOption::As(as_value.clone()));
+            } else if field == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.as_str() {
+                let value_value = mapping
+                    .as_node_str()
+                    .expect("`value` field in HTTP header mapping is not a string");
+
+                option = Some(HTTPHeaderOption::Value(value_value.clone()));
+            } else {
+                unreachable!("unknown argument for HTTP header mapping: {field}")
+            }
+        }
+
+        Ok(Self {
+            name: name.expect("HTTP header mapping is missing a `name`"),
+            option,
         })
     }
 }
@@ -201,8 +251,12 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                 let headers_value = value
                     .as_list()
                     .expect("`headers` field in `@connect` directive's `http` field is not a list");
+                let headers_value = headers_value
+                    .iter()
+                    .map(HTTPHeaderMapping::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                headers = Some(todo!("handle headers for @source: {:?}", headers_value));
+                headers = Some(headers_value);
             } else {
                 // We need to (potentially) map any arbitrary keys to an HTTP verb
                 let method = match name {
@@ -252,7 +306,20 @@ mod tests {
          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
          @source(
            name: "json"
-           http: { baseURL: "https://jsonplaceholder.typicode.com/" }
+           http: {
+             baseURL: "https://jsonplaceholder.typicode.com/",
+             headers: [
+               {
+                 name: "X-Auth-Token",
+                 as: "AuthToken"
+               },
+               {
+                 name: "user-agent",
+                 value: "Firefox"
+               },
+               { name: "X-From-Env" }
+             ]
+           }
          )
 
         type Query {
@@ -436,16 +503,37 @@ mod tests {
         insta::assert_debug_snapshot!(
             sources.unwrap(),
             @r###"
-                [
-                    SourceDirectiveArguments {
-                        name: "json",
-                        http: HTTPArguments {
-                            base_url: "https://jsonplaceholder.typicode.com/",
-                            headers: [],
+        [
+            SourceDirectiveArguments {
+                name: "json",
+                http: HTTPArguments {
+                    base_url: "https://jsonplaceholder.typicode.com/",
+                    headers: [
+                        HTTPHeaderMapping {
+                            name: "X-Auth-Token",
+                            option: Some(
+                                As(
+                                    "AuthToken",
+                                ),
+                            ),
                         },
-                    },
-                ]
-            "###
+                        HTTPHeaderMapping {
+                            name: "user-agent",
+                            option: Some(
+                                Value(
+                                    "Firefox",
+                                ),
+                            ),
+                        },
+                        HTTPHeaderMapping {
+                            name: "X-From-Env",
+                            option: None,
+                        },
+                    ],
+                },
+            },
+        ]
+        "###
         );
     }
 
