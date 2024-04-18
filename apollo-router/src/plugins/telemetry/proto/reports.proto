@@ -516,12 +516,10 @@ message TracesAndStats {
   // (as FieldStats will include the concrete object type for fields referenced
   // via an interface type).
   map<string, ReferencedFieldsForType> referenced_fields_by_type = 4;
-  // This field is used to validate that the algorithm used to construct `stats_with_context`
-  // matches similar algorithms in Apollo's servers. It is otherwise ignored and should not
-  // be included in reports.
-  repeated Trace internal_traces_contributing_to_stats = 3 [(js_preEncoded) = true];
 
   // This is an optional field that is used to provide more context to the key of this object within the
   // traces_per_query map. If it's omitted, we assume the key is a standard operation name and signature key.
   QueryMetadata query_metadata = 5;
+
+  reserved 3;
 }
