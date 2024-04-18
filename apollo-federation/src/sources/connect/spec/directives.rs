@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::schema::{
-    ConnectDirectiveArguments, ConnectHTTPArguments, HTTPArguments, HTTPMethod, JSONSelection,
-    SourceDirectiveArguments, URLPathTemplate, CONNECT_BODY_ARGUMENT_NAME,
+    ConnectDirectiveArguments, ConnectHTTPArguments, Connector, HTTPArguments, HTTPMethod,
+    JSONSelection, SourceDirectiveArguments, URLPathTemplate, CONNECT_BODY_ARGUMENT_NAME,
     CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME, CONNECT_SELECTION_ARGUMENT_NAME,
     SOURCE_BASE_URL_ARGUMENT_NAME, SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME,
     SOURCE_NAME_ARGUMENT_NAME,
@@ -124,7 +124,7 @@ impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut source = None;
-        let mut http = None;
+        let mut connector = None;
         let mut selection = None;
         let mut entity = None;
         for arg in args {
@@ -138,13 +138,18 @@ impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
 
                 source = Some(source_value.clone());
             } else if arg_name == CONNECT_HTTP_ARGUMENT_NAME.as_str() {
+                // Make sure that we haven't seen a connector already
+                if connector.is_some() {
+                    panic!("`@source` directive has multiple connectors specified");
+                }
+
                 let http_value = arg
                     .value
                     .as_object()
                     .expect("`http` field in `@connect` directive is not an object");
                 let http_value = ConnectHTTPArguments::try_from(http_value)?;
 
-                http = Some(http_value);
+                connector = Some(Connector::Http(http_value));
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg
                     .value
@@ -167,7 +172,7 @@ impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
 
         Ok(Self {
             source,
-            http: http.expect("missing `http` field in `@connect` directive"),
+            connector: connector.expect("`@connect` directive is missing a connector"),
             selection,
             entity: entity.unwrap_or_default(),
         })
@@ -478,14 +483,16 @@ mod tests {
                 source: Some(
                     "json",
                 ),
-                http: ConnectHTTPArguments {
-                    method: Get,
-                    url: URLPathTemplate(
-                        "/users",
-                    ),
-                    body: None,
-                    headers: [],
-                },
+                connector: Http(
+                    ConnectHTTPArguments {
+                        method: Get,
+                        url: URLPathTemplate(
+                            "/users",
+                        ),
+                        body: None,
+                        headers: [],
+                    },
+                ),
                 selection: Some(
                     JSONSelection(
                         "id name",
@@ -497,14 +504,16 @@ mod tests {
                 source: Some(
                     "json",
                 ),
-                http: ConnectHTTPArguments {
-                    method: Get,
-                    url: URLPathTemplate(
-                        "/posts",
-                    ),
-                    body: None,
-                    headers: [],
-                },
+                connector: Http(
+                    ConnectHTTPArguments {
+                        method: Get,
+                        url: URLPathTemplate(
+                            "/posts",
+                        ),
+                        body: None,
+                        headers: [],
+                    },
+                ),
                 selection: Some(
                     JSONSelection(
                         "id title body",
@@ -550,7 +559,7 @@ mod tests {
           """
           Defines HTTP configuration for this connector.
           """
-          http: ConnectHTTP!
+          http: ConnectHTTP
 
           """
           Uses the JSONSelection syntax to define a mapping of connector response

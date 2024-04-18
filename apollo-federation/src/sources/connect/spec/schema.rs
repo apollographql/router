@@ -108,8 +108,8 @@ pub(crate) struct ConnectDirectiveArguments {
     /// Must match the `name` argument of a @source directive in this schema.
     pub(crate) source: Option<NodeStr>,
 
-    /// HTTP configuration for the actual request
-    pub(crate) http: ConnectHTTPArguments,
+    /// Upstream protocol configuration for this request
+    pub(crate) connector: Connector,
 
     /// Fields to extract from the upstream JSON response.
     ///
@@ -123,6 +123,13 @@ pub(crate) struct ConnectDirectiveArguments {
     /// identified domain model.) If true, the connector must be defined on a field
     /// of the Query type.
     pub(crate) entity: bool,
+}
+
+/// The type of connector to use when making the upstream request
+#[cfg_attr(test, derive(Debug))]
+pub(crate) enum Connector {
+    /// HTTP REST endpoint
+    Http(ConnectHTTPArguments),
 }
 
 /// The HTTP arguments needed for a connect request
