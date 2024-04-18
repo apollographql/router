@@ -4,6 +4,7 @@ use apollo_compiler::executable;
 use apollo_federation::query_plan as next;
 
 use crate::query_planner::bridge_query_planner as bridge;
+use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::plan;
 use crate::query_planner::rewrites;
 use crate::query_planner::selection;
@@ -70,7 +71,8 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
             service_name: subgraph_name.clone(),
             requires: vec(requires),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            operation: operation_document.to_string(), // TODO: store as-is instead of a string
+            // TODO: use Arc in apollo_federation to avoid this clone
+            operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
             operation_name: operation_name.clone(),
             operation_kind: (*operation_kind).into(),
             id: id.clone(),
@@ -147,7 +149,8 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
         Self {
             service_name: subgraph_name.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            operation: operation_document.to_string(),
+            // TODO: use Arc in apollo_federation to avoid this clone
+            operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
             operation_name: operation_name.clone(),
             operation_kind: (*operation_kind).into(),
             input_rewrites: option_vec(input_rewrites),

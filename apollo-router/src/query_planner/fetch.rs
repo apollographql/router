@@ -138,7 +138,7 @@ pub(crate) struct FetchNode {
 pub(crate) struct SubgraphOperation {
     // At least one of these two must be initialized
     serialized: OnceLock<String>,
-    parsed: OnceLock<Arc<ExecutableDocument>>,
+    parsed: OnceLock<Arc<Valid<ExecutableDocument>>>,
 }
 
 impl SubgraphOperation {
@@ -149,8 +149,7 @@ impl SubgraphOperation {
         }
     }
 
-    // TODO: remove the _ prefix when the Rust query planner starts using this
-    pub(crate) fn _from_parsed(parsed: impl Into<Arc<ExecutableDocument>>) -> Self {
+    pub(crate) fn from_parsed(parsed: impl Into<Arc<Valid<ExecutableDocument>>>) -> Self {
         Self {
             serialized: OnceLock::new(),
             parsed: OnceLock::from(parsed.into()),
@@ -169,16 +168,20 @@ impl SubgraphOperation {
     pub(crate) fn as_parsed(
         &self,
         subgraph_schema: &Valid<apollo_compiler::Schema>,
-    ) -> &Arc<ExecutableDocument> {
+    ) -> &Arc<Valid<ExecutableDocument>> {
         self.parsed.get_or_init(|| {
             let serialized = self
                 .serialized
                 .get()
                 .expect("SubgraphOperation has neither representation initialized");
             Arc::new(
-                ExecutableDocument::parse(subgraph_schema, serialized, "operation.graphql")
-                    .map_err(|e| e.errors)
-                    .expect("Subgraph operation should be valid"),
+                ExecutableDocument::parse_and_validate(
+                    subgraph_schema,
+                    serialized,
+                    "operation.graphql",
+                )
+                .map_err(|e| e.errors)
+                .expect("Subgraph operation should be valid"),
             )
         })
     }
@@ -330,9 +333,9 @@ impl FetchNode {
     pub(crate) fn parsed_operation(
         &self,
         subgraph_schemas: &SubgraphSchemas,
-    ) -> &Arc<ExecutableDocument> {
+    ) -> &Arc<Valid<ExecutableDocument>> {
         self.operation
-            .as_parsed(&subgraph_schemas[&self.service_name])
+            .as_parsed(&subgraph_schemas[self.service_name.as_str()])
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -603,7 +606,7 @@ impl FetchNode {
 
     pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas) {
         let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[&self.service_name];
+        let schema = &subgraph_schemas[self.service_name.as_str()];
 
         if let Ok(hash) = QueryHashVisitor::hash_query(schema, doc, self.operation_name.as_deref())
         {
@@ -617,7 +620,7 @@ impl FetchNode {
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
         let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[&self.service_name];
+        let schema = &subgraph_schemas[self.service_name.as_str()];
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
             doc,
             self.operation_name.as_deref(),
