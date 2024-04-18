@@ -267,7 +267,13 @@ mod test {
         );
 
         // Arrays must be uniform
-        assert!(json!(["1", 1]).maybe_to_otel_value().is_none());
-        assert!(json!([1.0, 1]).maybe_to_otel_value().is_none());
+        assert_eq!(
+            json!(["1", 1]).maybe_to_otel_value(),
+            Some(r#"["1",1]"#.to_string().into())
+        );
+        assert_eq!(
+            json!([1.0, 1]).maybe_to_otel_value(),
+            Some(r#"[1.0,1]"#.to_string().into())
+        );
     }
 }
