@@ -408,7 +408,7 @@ commands:
             # Create list of kube versions
             CURRENT_KUBE_VERSIONS=$(curl -s -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
               | yq -o json '.' \
-              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[].release')
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | select(.previousPatches != null) | .previousPatches[].release')
 
             TEMPLATE_DIR=$(mktemp -d)
             MINOR_VERSION="${kube_version%.*}"
