@@ -1,7 +1,7 @@
 use apollo_compiler::{
     ast::{Directive, Name, Value},
     schema::Component,
-    Node, NodeStr,
+    Node,
 };
 
 use crate::{
@@ -25,7 +25,7 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
 
     // TODO: This currently does not handle validation
     fn try_from(value: &Component<Directive>) -> Result<Self, Self::Error> {
-        let ref args = value.arguments;
+        let args = &value.arguments;
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut name = None;
@@ -120,7 +120,7 @@ impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
 
     // TODO: This does not currently do validation
     fn try_from(value: &Node<Directive>) -> Result<Self, Self::Error> {
-        let ref args = value.arguments;
+        let args = &value.arguments;
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut source = None;
@@ -296,7 +296,7 @@ mod tests {
         let actual_definition = schema
             .get_directive_definition(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
             .unwrap()
-            .get(&schema.schema())
+            .get(schema.schema())
             .unwrap();
 
         insta::assert_snapshot!(
@@ -352,7 +352,7 @@ mod tests {
         let actual_definition = schema
             .get_directive_definition(&CONNECT_DIRECTIVE_NAME_IN_SPEC)
             .unwrap()
-            .get(&schema.schema())
+            .get(schema.schema())
             .unwrap();
 
         insta::assert_snapshot!(
@@ -392,7 +392,7 @@ mod tests {
             .unwrap()
             .object_fields
             .iter()
-            .map(|f| f.get(&schema.schema()).unwrap().to_string())
+            .map(|f| f.get(schema.schema()).unwrap().to_string())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -471,7 +471,7 @@ mod tests {
         let connects: Result<Vec<_>, _> = connects
             .object_fields
             .iter()
-            .flat_map(|field| field.get(&schema.schema()).unwrap().directives.iter())
+            .flat_map(|field| field.get(schema.schema()).unwrap().directives.iter())
             .map(ConnectDirectiveArguments::try_from)
             .collect();
 
