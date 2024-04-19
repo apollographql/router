@@ -226,14 +226,11 @@ where
         .build();
 
     if request_config.asynchronous {
-        let context = request.context.clone();
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
-            let guard = context.enter_active_request();
             let start = Instant::now();
             let _ = payload.call(http_client, &coprocessor_url).await;
             let duration = start.elapsed().as_secs_f64();
-            drop(guard);
             tracing::info!(
                 histogram.apollo.router.operations.coprocessor.duration = duration,
                 coprocessor.stage = %PipelineStep::SupergraphRequest,
@@ -390,16 +387,13 @@ where
         .build();
 
     if response_config.asynchronous {
-        let context = response.context.clone();
         let http_client2 = http_client.clone();
         let coprocessor_url2 = coprocessor_url.clone();
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
-            let guard = context.enter_active_request();
             let start = Instant::now();
             let _ = payload.call(http_client, &coprocessor_url).await;
             let duration = start.elapsed().as_secs_f64();
-            drop(guard);
             tracing::info!(
                 histogram.apollo.router.operations.coprocessor.duration = duration,
                 coprocessor.stage = %PipelineStep::SupergraphResponse,
@@ -436,13 +430,11 @@ where
             tokio::task::spawn(async move {
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let guard = generator_map_context.enter_active_request();
                 let start = Instant::now();
                 let _ = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
                 let duration = start.elapsed().as_secs_f64();
-                drop(guard);
                 tracing::info!(
                     histogram.apollo.router.operations.coprocessor.duration = duration,
                     coprocessor.stage = %PipelineStep::SupergraphResponse,
