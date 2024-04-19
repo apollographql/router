@@ -250,8 +250,7 @@ async fn service_call(
                     *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                     return Ok(response);
                 }
-                // This is the correct place to perform query batch analysis
-                // XXX: Migrated here from plan_query.
+                // Now perform query batch analysis
                 let batching = context.extensions().lock().get::<BatchQuery>().cloned();
                 if let Some(batch_query) = batching {
                     let query_hashes = plan.query_hashes(operation_name.as_deref(), &variables)?;
