@@ -1,6 +1,8 @@
 ### Add support for SHA256 hashing in Rhai ([Issue #4939](https://github.com/apollographql/router/issues/4939))
 
-This adds a new `sha256` module to create SHA256 hashes within Rhai scripts. An example looks like: 
+The router supports a new `sha256` module to create SHA256 hashes in Rhai scripts. The module supports the `sha256::digest` function.
+
+An example script that uses the module: 
 
 ```rs
 fn supergraph_service(service){
@@ -12,6 +14,5 @@ fn supergraph_service(service){
 }
 ```
 
-The only function currently is `digest`. 
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4940

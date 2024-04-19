@@ -26,7 +26,7 @@ batching:
     # Disable batching on all subgraphs
     all:
       enabled: false
-    # Configure(over-ride) batching support per subgraph
+    # Configure (override) batching support per subgraph
     subgraphs:
       subgraph_1:
         enabled: true
@@ -34,7 +34,7 @@ batching:
         enabled: true
 ```
 
-Note: `all` may be over-ridden by `subgraphs`. This applies in general for all router subgraph configuration options.
+Note: `all` can be overridden by `subgraphs`. This applies in general for all router subgraph configuration options.
 
 To learn more, see [query batching in Apollo docs](https://www.apollographql.com/docs/router/executing-operations/query-batching/).
 
