@@ -248,8 +248,7 @@ impl Context {
 
     /// Time actually spent working on this request
     ///
-    /// This is the request duration without the time spent waiting for other
-    /// concurrent requests to be handled, and without external calls
+    /// This is the request duration without the time spent waiting for external calls
     /// (coprocessor and subgraph requests). This metric is an approximation of
     /// the time spent, because in the case of parallel subgraph calls, some
     /// router processing time could happen during a network call (and so would
