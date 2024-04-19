@@ -38,6 +38,8 @@ use serde::Serialize;
 use tower::BoxError;
 use tracing::Span;
 
+use super::conditions::Condition;
+use super::Selector;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -51,9 +53,6 @@ use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
 use crate::services::supergraph;
-
-use super::conditions::Condition;
-use super::Selector;
 
 pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
 pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");

@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::attributes::ConditionAttribute;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -12,8 +13,6 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::span_factory::SpanMode;
-
-use super::attributes::ConditionAttribute;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
