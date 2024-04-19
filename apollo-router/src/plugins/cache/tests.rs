@@ -14,9 +14,7 @@ use tower::ServiceExt;
 
 use super::entity::EntityCache;
 use crate::cache::redis::RedisCacheStorage;
-use crate::json_ext::Object;
 use crate::plugin::test::MockSubgraph;
-use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::Subgraph;
 use crate::services::supergraph;
 use crate::Context;
@@ -90,6 +88,7 @@ impl Mocks for MockStore {
             "GET" => {
                 if let Some(RedisValue::Bytes(b)) = command.args.first() {
                     if let Some(bytes) = self.map.lock().get(b) {
+                        println!("-> returning {:?}", std::str::from_utf8(&bytes));
                         return Ok(RedisValue::Bytes(bytes.clone()));
                     }
                 }
@@ -336,14 +335,24 @@ async fn private() {
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
-    let map = [(
-        "orga".to_string(),
-        Subgraph {
-            private_id: Some("sub".to_string()),
-            enabled: Some(true),
-            ttl: None,
-        },
-    )]
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                private_id: Some("sub".to_string()),
+                enabled: Some(true),
+                ttl: None,
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                private_id: Some("sub".to_string()),
+                enabled: Some(true),
+                ttl: None,
+            },
+        ),
+    ]
     .into_iter()
     .collect();
     let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
@@ -391,6 +400,7 @@ async fn private() {
 
     let context = Context::new();
     context.insert_json_value("sub", "1234".into());
+
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(context)
