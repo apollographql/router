@@ -35,6 +35,7 @@ use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
+use crate::executable::USING_CATCH_UNWIND;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
@@ -260,7 +261,31 @@ impl PlannerMode {
                 )
                 .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
 
-                let rust_result = rust.build_query_plan(&document, operation.as_deref());
+                // TODO: once the Rust query planner does not use `todo!()` anymore,
+                // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
+                let rust_result = std::panic::catch_unwind(|| {
+                    USING_CATCH_UNWIND.set(true);
+                    let result = rust.build_query_plan(&document, operation.as_deref());
+                    USING_CATCH_UNWIND.set(false);
+                    result
+                })
+                .unwrap_or_else(|panic| {
+                    USING_CATCH_UNWIND.set(false);
+                    Err(
+                        apollo_federation::error::FederationError::SingleFederationError(
+                            apollo_federation::error::SingleFederationError::Internal {
+                                message: format!(
+                                    "query planner panicked: {}",
+                                    panic
+                                        .downcast_ref::<String>()
+                                        .map(|s| s.as_str())
+                                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                                        .unwrap_or_default()
+                                ),
+                            },
+                        ),
+                    )
+                });
 
                 let js_result = js
                     .plan(filtered_query, operation, plan_options)
