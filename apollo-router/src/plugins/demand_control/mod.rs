@@ -9,6 +9,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use displaydoc::Display;
+use futures::future::Either;
 use futures::stream;
 use futures::StreamExt;
 use schemars::JsonSchema;
@@ -187,8 +188,8 @@ impl Plugin for DemandControl {
                         // When we terminate the stream we still want to emit a graphql error, so the error response is emitted first before a termination error.
                         resp.flat_map(move |resp| {
                             match strategy.on_execution_response(req.as_ref(), &resp) {
-                                Ok(_) => stream::iter(vec![Ok(resp)]),
-                                Err(err) => stream::iter(vec![
+                                Ok(_) => Either::Left(stream::once(future::ready(Ok(resp)))),
+                                Err(err) => Either::Right(stream::iter(vec![
                                     // This is the error we are returning to the user
                                     Ok(graphql::Response::builder()
                                         .errors(
@@ -199,7 +200,7 @@ impl Plugin for DemandControl {
                                         .build()),
                                     // This will terminate the stream
                                     Err(()),
-                                ]),
+                                ])),
                             }
                         })
                         // Terminate the stream on error
