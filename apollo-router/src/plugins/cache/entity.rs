@@ -36,7 +36,6 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
@@ -87,7 +86,11 @@ pub(crate) struct Subgraph {
 
     /// activates caching for this subgraph, overrides the global configuration
     #[serde(default)]
-    enabled: Option<bool>,
+    pub(crate) enabled: Option<bool>,
+
+    /// Context key used to separate cache sections per user
+    #[serde(default)]
+    pub(crate) private_id: Option<String>,
 }
 
 /// Per subgraph configuration for entity caching
@@ -184,14 +187,16 @@ impl Plugin for EntityCache {
             None => return service,
         };
 
-        let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
-            (
-                config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
-                config.enabled.or(self.enabled).unwrap_or(false),
-            )
-        } else {
-            (storage.ttl(), self.enabled.unwrap_or(false))
-        };
+        let (subgraph_ttl, subgraph_enabled, private_id) =
+            if let Some(config) = self.subgraphs.get(name) {
+                (
+                    config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
+                    config.enabled.or(self.enabled).unwrap_or(false),
+                    config.private_id.clone(),
+                )
+            } else {
+                (storage.ttl(), self.enabled.unwrap_or(false), None)
+            };
         let name = name.to_string();
 
         if self.metrics.enabled {
@@ -211,6 +216,7 @@ impl Plugin for EntityCache {
                 storage,
                 subgraph_ttl,
                 private_queries,
+                private_id,
             })))
         } else {
             service
@@ -244,6 +250,7 @@ struct InnerCacheService {
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     private_queries: Arc<RwLock<HashSet<String>>>,
+    private_id: Option<String>,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -282,7 +289,7 @@ impl InnerCacheService {
             .unwrap_or_default();
 
         let is_known_private = { self.private_queries.read().await.contains(&query) };
-        let private_id = get_private_id(&request.context);
+        let private_id = self.get_private_id(&request.context);
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
@@ -390,6 +397,18 @@ impl InnerCacheService {
                 }
             }
         }
+    }
+
+    fn get_private_id(&self, context: &Context) -> Option<String> {
+        self.private_id.as_ref().and_then(|key| {
+            context.get_json_value(key).and_then(|value| {
+                value.as_str().map(|s| {
+                    let mut digest = Sha256::new();
+                    digest.update(s);
+                    hex::encode(digest.finalize().as_slice())
+                })
+            })
+        })
     }
 }
 
@@ -956,21 +975,6 @@ async fn insert_entities_in_result(
     Ok((new_entities, new_errors))
 }
 
-fn get_private_id(context: &Context) -> Option<String> {
-    context
-        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-        .and_then(|value| {
-            value.as_object().and_then(|object| {
-                object.get("sub").and_then(|v| {
-                    v.as_str().map(|s| {
-                        let mut digest = Sha256::new();
-                        digest.update(s);
-                        hex::encode(digest.finalize().as_slice())
-                    })
-                })
-            })
-        })
-}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Key {
     #[serde(rename = "type")]

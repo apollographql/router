@@ -17,6 +17,7 @@ use crate::cache::redis::RedisCacheStorage;
 use crate::json_ext::Object;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::cache::entity::Subgraph;
 use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;
@@ -335,7 +336,17 @@ async fn private() {
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
+    let map = [(
+        "orga".to_string(),
+        Subgraph {
+            private_id: Some("sub".to_string()),
+            enabled: Some(true),
+            ttl: None,
+        },
+    )]
+    .into_iter()
+    .collect();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
         .await
         .unwrap();
 
@@ -349,10 +360,8 @@ async fn private() {
         .await
         .unwrap();
 
-    let mut claims = Object::new();
-    claims.insert("sub", "1234".into());
     let context = Context::new();
-    context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, claims.into());
+    context.insert_json_value("sub", "1234".into());
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -380,10 +389,8 @@ async fn private() {
         .await
         .unwrap();
 
-    let mut claims = Object::new();
-    claims.insert("sub", "1234".into());
     let context = Context::new();
-    context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, claims.into());
+    context.insert_json_value("sub", "1234".into());
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(context)
@@ -402,10 +409,8 @@ async fn private() {
 
     println!("\nNOW WITH DIFFERENT SUB\n");
 
-    let mut claims = Object::new();
-    claims.insert("sub", "5678".into());
     let context = Context::new();
-    context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, claims.into());
+    context.insert_json_value("sub", "5678".into());
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(context)
