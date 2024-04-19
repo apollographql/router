@@ -3,6 +3,7 @@ use apollo_compiler::{name, NodeStr};
 
 use crate::link::spec::{Url, Version};
 use crate::sources::connect::selection_parser::Selection;
+use crate::sources::connect::url_path_template::URLPathTemplate;
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
@@ -120,7 +121,7 @@ pub(crate) struct ConnectDirectiveArguments {
     ///
     /// Uses the JSONSelection syntax to define a mapping of connector response to
     /// GraphQL schema.
-    pub(crate) selection: Option<JSONSelection>,
+    pub(crate) selection: Option<Selection>,
 
     /// Entity resolver marker
     ///
@@ -154,7 +155,7 @@ pub(crate) struct ConnectHTTPArguments {
     /// Define a request body using JSONSelection. Selections can include values from
     /// field arguments using `$args.argName` and from fields on the parent type using
     /// `$this.fieldName`.
-    pub(crate) body: Option<JSONSelection>,
+    pub(crate) body: Option<Selection>,
 
     /// Configuration for headers to attach to the request.
     ///
@@ -173,21 +174,3 @@ pub(crate) enum HTTPMethod {
     Put,
     Delete,
 }
-
-/// A JSON selection set
-///
-/// A string containing a "JSON Selection", which defines a mapping from one JSON-like
-/// shape to another JSON-like shape.
-///
-/// Example: ".data { id: user_id name account: { id: account_id } }"
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct JSONSelection(pub(crate) Selection);
-
-/// A URL with template parameters
-///
-/// A string that declares a URL path with values interpolated inside `{}`.
-///
-/// Example: "/product/{$this.id}/reviews?count={$args.count}"
-// TODO: This should probably be broken out into an actual struct with useful fields.
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct URLPathTemplate(pub(crate) String);

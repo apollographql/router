@@ -9,17 +9,17 @@ use crate::{
     sources::connect::{
         selection_parser::Selection,
         spec::schema::{CONNECT_HTTP_ARGUMENT_NAME, CONNECT_SOURCE_ARGUMENT_NAME},
+        url_path_template::URLPathTemplate,
     },
 };
 
 use super::schema::{
     ConnectDirectiveArguments, ConnectHTTPArguments, Connector, HTTPArguments, HTTPHeaderMapping,
-    HTTPHeaderOption, HTTPMethod, JSONSelection, SourceDirectiveArguments, URLPathTemplate,
-    CONNECT_BODY_ARGUMENT_NAME, CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME,
-    CONNECT_SELECTION_ARGUMENT_NAME, HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME,
-    HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME, HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME,
-    SOURCE_BASE_URL_ARGUMENT_NAME, SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME,
-    SOURCE_NAME_ARGUMENT_NAME,
+    HTTPHeaderOption, HTTPMethod, SourceDirectiveArguments, CONNECT_BODY_ARGUMENT_NAME,
+    CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME, CONNECT_SELECTION_ARGUMENT_NAME,
+    HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME, HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME,
+    HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME, SOURCE_BASE_URL_ARGUMENT_NAME,
+    SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME, SOURCE_NAME_ARGUMENT_NAME,
 };
 
 /// Internal representation of the object type pairs
@@ -150,29 +150,6 @@ impl TryFrom<&Node<Value>> for HTTPHeaderMapping {
     }
 }
 
-// TODO: The following does not do any formal validation
-impl std::str::FromStr for JSONSelection {
-    type Err = FederationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (remainder, selection) = Selection::parse(s).expect("invalid JSON selection");
-        if !remainder.is_empty() {
-            panic!("could not fully parse JSON selection: {remainder}");
-        }
-
-        Ok(Self(selection))
-    }
-}
-
-// TODO: The following does not do any formal validation
-impl std::str::FromStr for URLPathTemplate {
-    type Err = FederationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
-    }
-}
-
 impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
     type Error = FederationError;
 
@@ -213,7 +190,11 @@ impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
                     .value
                     .as_node_str()
                     .expect("`selection` field in `@connect` directive is not a string");
-                let selection_value: JSONSelection = selection_value.as_str().parse()?;
+                let (remainder, selection_value) =
+                    Selection::parse(selection_value.as_str()).expect("invalid JSON selection");
+                if !remainder.is_empty() {
+                    panic!("`selection` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}");
+                }
 
                 selection = Some(selection_value);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
@@ -252,7 +233,11 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                 let body_value = value
                     .as_node_str()
                     .expect("`body` field in `@connect` directive's `http` field is not a string");
-                let body_value: JSONSelection = body_value.as_str().parse()?;
+                let (remainder, body_value) =
+                    Selection::parse(body_value.as_str()).expect("invalid JSON selection");
+                if !remainder.is_empty() {
+                    panic!("`body` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}");
+                }
 
                 body = Some(body_value);
             } else if name == CONNECT_HEADERS_ARGUMENT_NAME.as_str() {
@@ -280,7 +265,7 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
 
                 // If we have a valid verb, then we need to grab (and parse) the URL template for it
                 let url = value.as_str().expect("supplied HTTP template URL in `@connect` directive's `http` field is not a string");
-                let url: URLPathTemplate = url.parse()?;
+                let url = URLPathTemplate::parse(url).expect("supplied HTTP template URL in `@connect` directive's `http` field is not valid");
 
                 method_and_url = Some((method, url));
             }
@@ -582,32 +567,39 @@ mod tests {
                 connector: Http(
                     ConnectHTTPArguments {
                         method: Get,
-                        url: URLPathTemplate(
-                            "/users",
-                        ),
+                        url: URLPathTemplate {
+                            path: [
+                                ParameterValue {
+                                    parts: [
+                                        Text(
+                                            "users",
+                                        ),
+                                    ],
+                                },
+                            ],
+                            query: {},
+                        },
                         body: None,
                         headers: [],
                     },
                 ),
                 selection: Some(
-                    JSONSelection(
-                        Named(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        "id",
-                                        None,
-                                    ),
-                                    Field(
-                                        None,
-                                        "name",
-                                        None,
-                                    ),
-                                ],
-                                star: None,
-                            },
-                        ),
+                    Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    "id",
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    "name",
+                                    None,
+                                ),
+                            ],
+                            star: None,
+                        },
                     ),
                 ),
                 entity: false,
@@ -619,37 +611,44 @@ mod tests {
                 connector: Http(
                     ConnectHTTPArguments {
                         method: Get,
-                        url: URLPathTemplate(
-                            "/posts",
-                        ),
+                        url: URLPathTemplate {
+                            path: [
+                                ParameterValue {
+                                    parts: [
+                                        Text(
+                                            "posts",
+                                        ),
+                                    ],
+                                },
+                            ],
+                            query: {},
+                        },
                         body: None,
                         headers: [],
                     },
                 ),
                 selection: Some(
-                    JSONSelection(
-                        Named(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        "id",
-                                        None,
-                                    ),
-                                    Field(
-                                        None,
-                                        "title",
-                                        None,
-                                    ),
-                                    Field(
-                                        None,
-                                        "body",
-                                        None,
-                                    ),
-                                ],
-                                star: None,
-                            },
-                        ),
+                    Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    "id",
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    "title",
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    "body",
+                                    None,
+                                ),
+                            ],
+                            star: None,
+                        },
                     ),
                 ),
                 entity: false,
