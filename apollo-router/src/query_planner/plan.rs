@@ -1,7 +1,5 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -16,6 +14,7 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::spec::Query;
 
 /// A planner key.
@@ -312,43 +311,38 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn hash_subqueries(
-        &mut self,
-        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
-    ) {
+    pub(crate) fn hash_subqueries(&mut self, subgraph_schemas: &SubgraphSchemas) {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                if let Some(schema) = schemas.get(&fetch_node.service_name) {
-                    fetch_node.hash_subquery(schema);
-                }
+                fetch_node.hash_subquery(subgraph_schemas);
             }
 
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(subgraph_schemas);
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(subgraph_schemas);
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(schemas),
+            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(subgraph_schemas),
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(subgraph_schemas);
                 }
                 for deferred_node in deferred {
                     if let Some(node) = deferred_node.node.take() {
                         let mut new_node = (*node).clone();
-                        new_node.hash_subqueries(schemas);
+                        new_node.hash_subqueries(subgraph_schemas);
                         deferred_node.node = Some(Arc::new(new_node));
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(subgraph_schemas);
                 }
             }
             PlanNode::Condition {
@@ -357,10 +351,10 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(subgraph_schemas);
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(subgraph_schemas);
                 }
             }
         }
@@ -417,40 +411,42 @@ impl PlanNode {
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        subgraph_schemas: &SubgraphSchemas,
         key: &CacheKeyMetadata,
     ) {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.extract_authorization_metadata(schema, key);
+                fetch_node.extract_authorization_metadata(subgraph_schemas, key);
             }
 
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(subgraph_schemas, key);
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(subgraph_schemas, key);
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.extract_authorization_metadata(schema, key),
+            PlanNode::Flatten(flatten) => flatten
+                .node
+                .extract_authorization_metadata(subgraph_schemas, key),
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(subgraph_schemas, key);
                 }
                 for deferred_node in deferred {
                     if let Some(node) = deferred_node.node.take() {
                         let mut new_node = (*node).clone();
-                        new_node.extract_authorization_metadata(schema, key);
+                        new_node.extract_authorization_metadata(subgraph_schemas, key);
                         deferred_node.node = Some(Arc::new(new_node));
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(subgraph_schemas, key);
                 }
             }
             PlanNode::Condition {
@@ -459,10 +455,10 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(subgraph_schemas, key);
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(subgraph_schemas, key);
                 }
             }
         }
