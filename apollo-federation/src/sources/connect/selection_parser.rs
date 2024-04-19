@@ -349,7 +349,7 @@ pub(crate) trait ApplyTo {
     // element of the array, producing a new array.
     fn apply_to_array(
         &self,
-        data_array: &Vec<JSON>,
+        data_array: &[JSON],
         input_path: &mut Vec<Property>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
@@ -736,13 +736,8 @@ fn json_type_name(v: &JSON) -> &str {
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection as GraphQLSelection;
 
+#[derive(Default)]
 struct GraphQLSelections(Vec<Result<GraphQLSelection, String>>);
-
-impl Default for GraphQLSelections {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
 
 impl GraphQLSelections {
     fn valid_selections(self) -> Vec<GraphQLSelection> {
@@ -752,7 +747,7 @@ impl GraphQLSelections {
 
 impl From<Vec<GraphQLSelection>> for GraphQLSelections {
     fn from(val: Vec<GraphQLSelection>) -> Self {
-        Self(val.into_iter().map(|i| Ok(i)).collect())
+        Self(val.into_iter().map(Ok).collect())
     }
 }
 
@@ -792,7 +787,7 @@ impl From<NamedSelection> for Vec<GraphQLSelection> {
             NamedSelection::Quoted(alias, _name, selection) => {
                 vec![new_field(
                     alias.name,
-                    selection.map(|s| GraphQLSelections::from(s)),
+                    selection.map(GraphQLSelections::from),
                 )]
             }
             NamedSelection::Path(alias, path_selection) => {

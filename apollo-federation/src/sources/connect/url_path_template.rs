@@ -549,7 +549,6 @@ impl Display for VariableExpression {
 
 fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
     recognize(alt((tag("$this"), nom_parse_identifier)))(input)
-        .map(|(input, output)| (input, output))
 }
 
 fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
@@ -559,7 +558,6 @@ fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
         )),
     ))(input)
-    .map(|(input, output)| (input, output))
 }
 
 fn nom_parse_identifier_path(input: &str) -> IResult<&str, String> {
