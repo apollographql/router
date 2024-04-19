@@ -144,7 +144,8 @@ macro_rules! impl_to_otel_value {
                                 Some(serde_json::to_string(value).ok()?.into())
                             }
                         }
-                        value => Some(serde_json::to_string(value).ok()?.into())
+                        $type::Object(value) => Some(serde_json::to_string(value).ok()?.into()),
+                        _ => None
                     }
                 }
             }

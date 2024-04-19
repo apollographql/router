@@ -274,7 +274,6 @@ mod tests {
 
     use super::*;
     use crate::graphql;
-    use crate::otel;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::events::EventLevel;
@@ -283,6 +282,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+    use crate::plugins::telemetry::otel;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;

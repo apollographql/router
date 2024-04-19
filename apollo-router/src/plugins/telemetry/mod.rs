@@ -137,7 +137,7 @@ pub(crate) mod formatters;
 mod logging;
 pub(crate) mod metrics;
 /// Opentelemetry utils
-pub mod otel;
+pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
 mod resource;

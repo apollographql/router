@@ -7,7 +7,7 @@ use opentelemetry::{trace::SpanContext, Context, Key, KeyValue, Value};
 /// [`Span`]: tracing::Span
 /// [OpenTelemetry]: https://opentelemetry.io
 /// [`Context`]: opentelemetry::Context
-pub trait OpenTelemetrySpanExt {
+pub(crate) trait OpenTelemetrySpanExt {
     /// Associates `self` with a given OpenTelemetry trace, using the provided
     /// parent [`Context`].
     ///
