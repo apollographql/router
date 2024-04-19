@@ -46,14 +46,9 @@ use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
-#[cfg(not(test))]
-use crate::notification::RouterBroadcasts;
 use crate::plugin::plugins;
-#[cfg(not(test))]
 use crate::plugins::subscription::SubscriptionConfig;
-#[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-#[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
@@ -71,7 +66,6 @@ mod upgrade;
 mod yaml;
 
 // TODO: Talk it through with the teams
-#[cfg(not(test))]
 static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
 
 static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -269,35 +263,45 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             tls: Tls,
             apq: Apq,
             persisted_queries: PersistedQueries,
-            #[serde(skip)]
-            uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
             batching: Batching,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
+            experimental_api_schema_generation_mode: ApiSchemaMode,
+            experimental_query_planner_mode: QueryPlannerMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
-        Configuration::builder()
-            .health_check(ad_hoc.health_check)
-            .sandbox(ad_hoc.sandbox)
-            .homepage(ad_hoc.homepage)
-            .supergraph(ad_hoc.supergraph)
-            .cors(ad_hoc.cors)
-            .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
-            .apollo_plugins(ad_hoc.apollo_plugins.plugins)
-            .tls(ad_hoc.tls)
-            .apq(ad_hoc.apq)
-            .persisted_query(ad_hoc.persisted_queries)
-            .operation_limits(ad_hoc.limits)
-            .chaos(ad_hoc.experimental_chaos)
-            .uplink(ad_hoc.uplink)
-            .batching(ad_hoc.batching)
-            .experimental_apollo_metrics_generation_mode(
-                ad_hoc.experimental_apollo_metrics_generation_mode,
-            )
-            .build()
-            .map_err(|e| serde::de::Error::custom(e.to_string()))
+        let notify = Configuration::notify(&ad_hoc.apollo_plugins.plugins)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+
+        // Use a struct literal instead of a builder to ensure this is exhaustive
+        Configuration {
+            health_check: ad_hoc.health_check,
+            sandbox: ad_hoc.sandbox,
+            homepage: ad_hoc.homepage,
+            supergraph: ad_hoc.supergraph,
+            cors: ad_hoc.cors,
+            tls: ad_hoc.tls,
+            apq: ad_hoc.apq,
+            persisted_queries: ad_hoc.persisted_queries,
+            limits: ad_hoc.limits,
+            experimental_chaos: ad_hoc.experimental_chaos,
+            experimental_api_schema_generation_mode: ad_hoc.experimental_api_schema_generation_mode,
+            experimental_apollo_metrics_generation_mode: ad_hoc
+                .experimental_apollo_metrics_generation_mode,
+            experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
+            plugins: ad_hoc.plugins,
+            apollo_plugins: ad_hoc.apollo_plugins,
+            batching: ad_hoc.batching,
+
+            // serde(skip)
+            notify,
+            uplink: None,
+            validated_yaml: None,
+        }
+        .validate()
+        .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }
 
@@ -312,6 +316,7 @@ fn test_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
 
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
@@ -324,7 +329,6 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
-        notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<Limits>,
@@ -335,18 +339,7 @@ impl Configuration {
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
-        #[cfg(not(test))]
-        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
-            Some(plugin_conf) => {
-                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
-                    .map_err(|err| ConfigurationError::PluginConfiguration {
-                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
-                        error: format!("{err:?}"),
-                    })?;
-                conf.queue_capacity
-            }
-            None => None,
-        };
+        let notify = Self::notify(&apollo_plugins)?;
 
         let conf = Self {
             validated_yaml: Default::default(),
@@ -359,8 +352,10 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
-            experimental_apollo_metrics_generation_mode:  experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
+                .unwrap_or_default(),
+            experimental_apollo_metrics_generation_mode:
+                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -371,14 +366,44 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
-            #[cfg(test)]
-            notify: notify.unwrap_or_default(),
-            #[cfg(not(test))]
-            notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
-                .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
+            notify,
         };
 
         conf.validate()
+    }
+}
+
+impl Configuration {
+    fn notify(
+        apollo_plugins: &Map<String, Value>,
+    ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
+        if cfg!(test) {
+            return Ok(Notify::for_tests());
+        }
+        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
+            Some(plugin_conf) => {
+                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
+                    .map_err(|err| ConfigurationError::PluginConfiguration {
+                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
+                        error: format!("{err:?}"),
+                    })?;
+                conf.queue_capacity
+            }
+            None => None,
+        };
+        Ok(Notify::builder()
+            .and_queue_size(notify_queue_cap)
+            .ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS))
+            .heartbeat_error_message(
+                graphql::Response::builder()
+                .errors(vec![
+                    graphql::Error::builder()
+                    .message("the connection has been closed because it hasn't heartbeat for a while")
+                    .extension_code("SUBSCRIPTION_HEARTBEAT_ERROR")
+                    .build()
+                ])
+                .build()
+            ).build())
     }
 }
 
