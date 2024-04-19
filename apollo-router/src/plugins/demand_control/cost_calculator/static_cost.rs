@@ -16,7 +16,6 @@ use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::schema_aware_response::SchemaAwareResponse;
 use super::schema_aware_response::TypedValue;
-use super::CostCalculator;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::query_planner::fetch::SubgraphOperation;
@@ -26,11 +25,15 @@ use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 
-pub(crate) struct BasicCostCalculator {
+pub(crate) struct StaticCostCalculator {
     subgraph_schemas: Arc<SubgraphSchemas>,
 }
 
-impl BasicCostCalculator {
+impl StaticCostCalculator {
+    pub(crate) fn new(subgraph_schemas: Arc<SubgraphSchemas>) -> Self {
+        Self { subgraph_schemas }
+    }
+
     /// Scores a field within a GraphQL operation, handling some expected cases where
     /// directives change how the query is fetched. In the case of the federation
     /// directive `@requires`, the cost of the required selection is added to the
@@ -54,7 +57,7 @@ impl BasicCostCalculator {
         parent_type_name: &NamedType,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
-        if BasicCostCalculator::skipped_by_directives(field) {
+        if StaticCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
         }
 
@@ -76,7 +79,7 @@ impl BasicCostCalculator {
         } else {
             0.0
         };
-        type_cost += BasicCostCalculator::score_selection_set(
+        type_cost += StaticCostCalculator::score_selection_set(
             &field.selection_set,
             field.ty().inner_named_type(),
             schema,
@@ -89,7 +92,7 @@ impl BasicCostCalculator {
             RequiresDirective::from_field(field, parent_type_name, schema)?.map(|d| d.fields);
         let requirements_cost = match requirements {
             Some(selection_set) => {
-                BasicCostCalculator::score_selection_set(&selection_set, parent_type_name, schema)?
+                StaticCostCalculator::score_selection_set(&selection_set, parent_type_name, schema)?
             }
             None => 0.0,
         };
@@ -116,7 +119,7 @@ impl BasicCostCalculator {
         parent_type: &NamedType,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
-        BasicCostCalculator::score_selection_set(
+        StaticCostCalculator::score_selection_set(
             &inline_fragment.selection_set,
             parent_type,
             schema,
@@ -136,7 +139,7 @@ impl BasicCostCalculator {
             )));
         };
 
-        cost += BasicCostCalculator::score_selection_set(
+        cost += StaticCostCalculator::score_selection_set(
             &operation.selection_set,
             root_type_name,
             schema,
@@ -151,9 +154,9 @@ impl BasicCostCalculator {
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         match selection {
-            Selection::Field(f) => BasicCostCalculator::score_field(f, parent_type, schema),
-            Selection::FragmentSpread(s) => BasicCostCalculator::score_fragment_spread(s),
-            Selection::InlineFragment(i) => BasicCostCalculator::score_inline_fragment(
+            Selection::Field(f) => StaticCostCalculator::score_field(f, parent_type, schema),
+            Selection::FragmentSpread(s) => StaticCostCalculator::score_fragment_spread(s),
+            Selection::InlineFragment(i) => StaticCostCalculator::score_inline_fragment(
                 i,
                 i.type_condition.as_ref().unwrap_or(parent_type),
                 schema,
@@ -168,7 +171,7 @@ impl BasicCostCalculator {
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
-            cost += BasicCostCalculator::score_selection(selection, parent_type_name, schema)?;
+            cost += StaticCostCalculator::score_selection(selection, parent_type_name, schema)?;
         }
         Ok(cost)
     }
@@ -223,7 +226,7 @@ impl BasicCostCalculator {
             ))
         })?;
 
-        Self::estimated(operation.as_parsed(schema), schema)
+        self.estimated(operation.as_parsed(schema), schema)
     }
 
     fn max_score_of_nodes(
@@ -292,28 +295,28 @@ impl BasicCostCalculator {
         }
         Ok(score)
     }
-}
 
-impl CostCalculator for BasicCostCalculator {
-    fn estimated(
+    pub(crate) fn estimated(
+        &self,
         query: &ExecutableDocument,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         if let Some(op) = &query.anonymous_operation {
-            cost += BasicCostCalculator::score_operation(op, schema)?;
+            cost += StaticCostCalculator::score_operation(op, schema)?;
         }
         for (_name, op) in query.named_operations.iter() {
-            cost += BasicCostCalculator::score_operation(op, schema)?;
+            cost += StaticCostCalculator::score_operation(op, schema)?;
         }
         Ok(cost)
     }
 
-    fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
+    pub(crate) fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
         self.score_plan_node(&query_plan.root)
     }
 
-    fn actual(
+    pub(crate) fn actual(
+        &self,
         request: &ExecutableDocument,
         response: &Response,
     ) -> Result<f64, DemandControlError> {
@@ -354,7 +357,9 @@ mod tests {
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        BasicCostCalculator::estimated(&query.executable, &schema.definitions).unwrap()
+        StaticCostCalculator::new(Default::default())
+            .estimated(&query.executable, &schema.definitions)
+            .unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.
@@ -367,7 +372,9 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        BasicCostCalculator::estimated(&query, &schema).unwrap()
+        StaticCostCalculator::new(Default::default())
+            .estimated(&query, &schema)
+            .unwrap()
     }
 
     async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
@@ -390,7 +397,7 @@ mod tests {
             _ => panic!("Query planner returned unexpected non-plan content"),
         };
 
-        let calculator = BasicCostCalculator {
+        let calculator = StaticCostCalculator {
             subgraph_schemas: planner.subgraph_schemas(),
         };
 
@@ -401,7 +408,9 @@ mod tests {
         let (_schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
-        BasicCostCalculator::actual(&query.executable, &response).unwrap()
+        StaticCostCalculator::new(Default::default())
+            .actual(&query.executable, &response)
+            .unwrap()
     }
 
     #[test]
