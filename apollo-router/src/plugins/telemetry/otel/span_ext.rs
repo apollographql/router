@@ -1,6 +1,10 @@
-use super::layer::WithContext;
-use opentelemetry::{trace::SpanContext, Context, Key, KeyValue, Value};
+use opentelemetry::trace::SpanContext;
+use opentelemetry::Context;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 
+use super::layer::WithContext;
 /// Utility functions to allow tracing [`Span`]s to accept and return
 /// [OpenTelemetry] [`Context`]s.
 ///
