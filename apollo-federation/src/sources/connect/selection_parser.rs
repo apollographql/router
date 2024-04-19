@@ -2398,43 +2398,43 @@ mod tests {
     #[test]
     fn into_selection_set() {
         let selection = selection!("f");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "f");
 
         let selection = selection!("f f2 f3");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "f f2 f3");
 
         let selection = selection!("f { f2 f3 }");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "f {\n  f2\n  f3\n}");
 
         let selection = selection!("a: f { b: f2 }");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "a {\n  b\n}");
 
         let selection = selection!(".a { b c }");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "b c");
 
         let selection = selection!(".a.b { c: .d e }");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "c e");
 
         let selection = selection!("a: { b c }");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "a {\n  b\n  c\n}");
 
         let selection = selection!("a: 'quoted'");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "a");
 
         let selection = selection!("a b: *");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "a b");
 
         let selection = selection!("a *");
-        let set: Vec<GraphQLSelection> = selection.try_into().unwrap();
+        let set: Vec<GraphQLSelection> = selection.into();
         assert_eq!(print_set(&set), "a");
     }
 }
