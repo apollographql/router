@@ -6,7 +6,10 @@ use apollo_compiler::{
 
 use crate::{
     error::FederationError,
-    sources::connect::spec::schema::{CONNECT_HTTP_ARGUMENT_NAME, CONNECT_SOURCE_ARGUMENT_NAME},
+    sources::connect::{
+        selection_parser::Selection,
+        spec::schema::{CONNECT_HTTP_ARGUMENT_NAME, CONNECT_SOURCE_ARGUMENT_NAME},
+    },
 };
 
 use super::schema::{
@@ -152,7 +155,12 @@ impl std::str::FromStr for JSONSelection {
     type Err = FederationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
+        let (remainder, selection) = Selection::parse(s).expect("invalid JSON selection");
+        if !remainder.is_empty() {
+            panic!("could not fully parse JSON selection: {remainder}");
+        }
+
+        Ok(Self(selection))
     }
 }
 
@@ -583,7 +591,23 @@ mod tests {
                 ),
                 selection: Some(
                     JSONSelection(
-                        "id name",
+                        Named(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        "id",
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        "name",
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                            },
+                        ),
                     ),
                 ),
                 entity: false,
@@ -604,7 +628,28 @@ mod tests {
                 ),
                 selection: Some(
                     JSONSelection(
-                        "id title body",
+                        Named(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        "id",
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        "title",
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        "body",
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                            },
+                        ),
                     ),
                 ),
                 entity: false,

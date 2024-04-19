@@ -2,6 +2,7 @@ use apollo_compiler::schema::Name;
 use apollo_compiler::{name, NodeStr};
 
 use crate::link::spec::{Url, Version};
+use crate::sources::connect::selection_parser::Selection;
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
@@ -179,9 +180,8 @@ pub(crate) enum HTTPMethod {
 /// shape to another JSON-like shape.
 ///
 /// Example: ".data { id: user_id name account: { id: account_id } }"
-// TODO: This should probably be broken out into an actual struct with useful fields.
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct JSONSelection(pub(crate) String);
+pub(crate) struct JSONSelection(pub(crate) Selection);
 
 /// A URL with template parameters
 ///
