@@ -183,7 +183,7 @@ impl Plugin for DemandControl {
                         .clone();
                     resp.response = resp.response.map(move |resp| {
                         // Here we are going to abort the stream if the cost is too high
-                        // First we map based on cost, then we use take while to abort the stream if an error is emmitted.
+                        // First we map based on cost, then we use take while to abort the stream if an error is emitted.
                         // When we terminate the stream we still want to emit a graphql error, so the error response is emitted first before a termination error.
                         resp.flat_map(move |resp| {
                             match strategy.on_execution_response(req.as_ref(), &resp) {
