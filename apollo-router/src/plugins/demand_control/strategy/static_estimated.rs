@@ -20,7 +20,10 @@ impl StrategyImpl for StaticEstimated {
             .planned(&request.query_plan)
             .and_then(|cost| {
                 if cost > self.max {
-                    Err(DemandControlError::EstimatedCostTooExpensive)
+                    Err(DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost,
+                        max_cost: self.max,
+                    })
                 } else {
                     Ok(())
                 }

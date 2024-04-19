@@ -22,6 +22,7 @@ use tower::ServiceExt;
 use crate::error::Error;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
+use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -87,11 +88,21 @@ pub(crate) struct DemandControlConfig {
 
 #[derive(Debug, Display, Error)]
 pub(crate) enum DemandControlError {
-    /// Query estimated cost exceeded configured maximum
-    EstimatedCostTooExpensive,
-    /// Query actual cost exceeded configured maximum
+    /// query estimated cost {estimated_cost} exceeded configured maximum {max_cost}
+    EstimatedCostTooExpensive {
+        /// The estimated cost of the query
+        estimated_cost: f64,
+        /// The maximum cost of the query
+        max_cost: f64,
+    },
+    /// auery actual cost {actual_cost} exceeded configured maximum {max_cost}
     #[allow(dead_code)]
-    ActualCostTooExpensive,
+    ActualCostTooExpensive {
+        /// The actual cost of the query
+        actual_cost: f64,
+        /// The maximum cost of the query
+        max_cost: f64,
+    },
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
     /// The response body could not be properly matched with its query's structure: {0}
@@ -101,14 +112,32 @@ pub(crate) enum DemandControlError {
 impl IntoGraphQLErrors for DemandControlError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            DemandControlError::EstimatedCostTooExpensive => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_ESTIMATED_TOO_EXPENSIVE")
-                .message(self.to_string())
-                .build()]),
-            DemandControlError::ActualCostTooExpensive => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_ACTUAL_TOO_EXPENSIVE")
-                .message(self.to_string())
-                .build()]),
+            DemandControlError::EstimatedCostTooExpensive {
+                estimated_cost,
+                max_cost,
+            } => {
+                let mut extensions = Object::new();
+                extensions.insert("cost.estimated", estimated_cost.into());
+                extensions.insert("cost.max", max_cost.into());
+                Ok(vec![graphql::Error::builder()
+                    .extension_code("COST_ESTIMATED_TOO_EXPENSIVE")
+                    .extensions(extensions)
+                    .message(self.to_string())
+                    .build()])
+            }
+            DemandControlError::ActualCostTooExpensive {
+                actual_cost,
+                max_cost,
+            } => {
+                let mut extensions = Object::new();
+                extensions.insert("cost.actual", actual_cost.into());
+                extensions.insert("cost.max", max_cost.into());
+                Ok(vec![graphql::Error::builder()
+                    .extension_code("COST_ACTUAL_TOO_EXPENSIVE")
+                    .extensions(extensions)
+                    .message(self.to_string())
+                    .build()])
+            }
             DemandControlError::QueryParseFailure(_) => Ok(vec![graphql::Error::builder()
                 .extension_code("COST_QUERY_PARSE_FAILURE")
                 .message(self.to_string())
@@ -464,10 +493,16 @@ mod test {
         fn from(value: &TestError) -> Self {
             match value {
                 TestError::EstimatedCostTooExpensive => {
-                    DemandControlError::EstimatedCostTooExpensive
+                    DemandControlError::EstimatedCostTooExpensive {
+                        max_cost: 1.0,
+                        estimated_cost: 1.0,
+                    }
                 }
 
-                TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive,
+                TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive {
+                    actual_cost: 1.0,
+                    max_cost: 1.0,
+                },
             }
         }
     }

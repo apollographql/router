@@ -15,6 +15,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+mod cost;
 mod conditional;
 pub(crate) mod events;
 mod experimental_when_header;
