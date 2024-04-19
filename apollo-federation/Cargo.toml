@@ -16,6 +16,11 @@ autotests = false                                               # Integration te
 apollo-compiler = "=1.0.0-beta.16"
 
 [dependencies]
+serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
+# todo: remove this dependency once serde_json_bytes enables it
+serde_json = { version = "1.0.116", features = ["preserve_order"] }
+strum = "0.26.0"
+strum_macros = "0.26.0"
 apollo-compiler.workspace = true
 time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
@@ -24,11 +29,11 @@ derive_more = "0.99.17"
 indexmap = "2.1.0"
 lazy_static = "1.4.0"
 petgraph = "0.6.4"
-serde_json_bytes = "0.2.2"
-strum = "0.26.0"
-strum_macros = "0.26.0"
 thiserror = "1.0"
 url = "2"
+nom = "7.1.3"
+serde = "1.0.198"
+itertools = "0.12.1"
 
 [dev-dependencies]
 insta = { version = "1.36.0", features = ["yaml"] }
