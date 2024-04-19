@@ -265,24 +265,10 @@ impl PlanNode {
                             .unwrap_or(true)
                         {
                             if let Some(node) = if_clause {
-                                todo!()
-                                /*
-                                // If requires.is_empty() we can batch it!
-                                if let PlanNode::Fetch(fetch_node) = node {
-                                    if fetch_node.requires.is_empty() {
-                                        query_hashes.push(fetch_node.schema_aware_hash.clone());
-                                    }
-                                }
-                                    */
+                                new_targets.push(node);
                             }
                         } else if let Some(node) = else_clause {
-                            todo!()
-                            /*
-                            // If requires.is_empty() we can batch it!
-                            if node.requires.is_empty() {
-                                query_hashes.push(node.schema_aware_hash.clone());
-                            }
-                                    */
+                            new_targets.push(node);
                         }
                     }
                 }
