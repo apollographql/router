@@ -1,0 +1,15 @@
+# Simple config to enable batching and rhai scripts for testing
+
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    all:
+      enabled: true
+
+rhai:
+  scripts: ./tests/fixtures/batching
+  main: block_request.rhai
+
+include_subgraph_errors:
+  all: true

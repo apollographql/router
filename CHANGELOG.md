@@ -132,7 +132,7 @@ Additionally, the router now verifies that a TTL is configured for all subgraphs
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4882
 
-### Helm: include all standard labels in pod spec but complete sentence that stands on its own ([PR #4862](https://github.com/apollographql/router/pull/4862))
+### Helm: include all standard labels in pod spec ([PR #4862](https://github.com/apollographql/router/pull/4862))
 
 The templates for the router's Helm chart have been updated so that the  `helm.sh/chart`, `app.kubernetes.io/version`, and `app.kubernetes.io/managed-by` labels are now included on pods, as they already were for all other resources created by the Helm chart.
 
@@ -140,7 +140,7 @@ The specific change to the template is that the pod spec template now uses the `
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4862
 
-### Persisted queries return 4xx errors ([PR #4887](https://github.com/apollographql/router/pull/4887)
+### Persisted queries return 4xx errors ([PR #4887](https://github.com/apollographql/router/pull/4887))
 
 Previously, sending an invalid persisted query request could return a 200 status code to the client when they should have returned errors. These requests now return errors as 4xx status codes:
 

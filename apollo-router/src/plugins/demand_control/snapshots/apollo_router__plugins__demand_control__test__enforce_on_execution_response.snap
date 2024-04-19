@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/plugins/demand_control/mod.rs
+expression: body
+---
+- errors:
+    - message: Query estimated cost exceeded configured maximum
+      extensions:
+        code: COST_ESTIMATED_TOO_EXPENSIVE

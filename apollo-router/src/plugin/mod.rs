@@ -44,6 +44,7 @@ use tower::ServiceBuilder;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -71,7 +72,7 @@ pub struct PluginInit<T> {
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
 }
@@ -164,7 +165,7 @@ where
         config: T,
         supergraph_sdl: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
+        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
@@ -185,7 +186,7 @@ where
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
+        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -204,7 +205,7 @@ where
         config: T,
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
-        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
+        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
         PluginInit {
