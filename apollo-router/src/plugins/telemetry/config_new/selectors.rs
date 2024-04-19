@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
@@ -142,6 +143,10 @@ pub(crate) enum RouterSelector {
         default: Option<String>,
     },
     Static(String),
+    OnGraphQLError {
+        /// Boolean set to true if the reponse body contains graphql error
+        on_graphql_error: bool,
+    },
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -519,15 +524,22 @@ impl Selector for RouterSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -647,9 +659,7 @@ impl Selector for SupergraphSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
@@ -885,9 +895,7 @@ impl Selector for SubgraphSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
