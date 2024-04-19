@@ -294,46 +294,36 @@ impl PlannerMode {
                     .into_result()
                     .map_err(PlanErrors::from);
 
+                let is_matched;
                 match (&js_result, &rust_result) {
                     (Err(js_error), Ok(_)) => {
                         tracing::warn!("JS query planner error: {}", js_error);
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.lifecycle.query_planner = 1u64,
-                            generation.is_matched = false,
-                            "Query plan mismatch: JS returns error but Rust does not"
-                        );
+                        is_matched = false;
                     }
                     (Ok(_), Err(rust_error)) => {
                         tracing::warn!("Rust query planner error: {}", rust_error);
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.lifecycle.query_planner = 1u64,
-                            generation.is_matched = false,
-                            "Query plan mismatch: Rust returns error but JS does not"
-                        );
+                        is_matched = false;
                     }
                     (Err(_), Err(_)) => {
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.lifecycle.query_planner = 1u64,
-                            generation.is_matched = true,
-                        );
+                        is_matched = true;
                     }
 
                     (Ok(js_plan), Ok(rust_plan)) => {
-                        if js_plan.data.query_plan == rust_plan.into() {
-                            tracing::warn!(
-                                monotonic_counter.apollo.router.lifecycle.query_planner = 1u64,
-                                generation.is_matched = true,
-                            );
-                        } else {
-                            tracing::warn!(
-                                monotonic_counter.apollo.router.lifecycle.query_planner = 1u64,
-                                generation.is_matched = false,
-                                "Query plan mismatch: apollo-federation and router-bridge build different plans"
-                            );
+                        is_matched = js_plan.data.query_plan == rust_plan.into();
+                        if !is_matched {
                             // TODO: tracing::debug!(diff)
                         }
                     }
                 }
+
+                u64_counter!(
+                    "apollo.router.operations.query_planner.both",
+                    "Comparing JS v.s. Rust query plans",
+                    1,
+                    "generation.is_matched" = is_matched,
+                    "generation.js_error" = js_result.is_err(),
+                    "generation.rust_error" = rust_result.is_err()
+                );
 
                 Ok(js_result?)
             }
@@ -385,69 +375,61 @@ impl BridgeQueryPlanner {
             crate::configuration::ApiSchemaMode::New => schema.create_api_schema(&configuration)?,
 
             crate::configuration::ApiSchemaMode::Both => {
-                let api_schema = planner
+                let js_result = planner
                     .js_for_api_schema_and_introspection_and_operation_signature()
                     .api_schema()
                     .await
                     .map(|api_schema| api_schema.schema);
-                let new_api_schema = schema.create_api_schema(&configuration);
+                let rust_result = schema.create_api_schema(&configuration);
 
-                match (&api_schema, &new_api_schema) {
+                let is_matched;
+                match (&js_result, &rust_result) {
                     (Err(js_error), Ok(_)) => {
                         tracing::warn!("JS API schema error: {}", js_error);
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                            generation.is_matched = false,
-                            "API schema generation mismatch: JS returns error but Rust does not"
-                        );
+                        is_matched = false;
                     }
                     (Ok(_), Err(rs_error)) => {
                         tracing::warn!("Rust API schema error: {}", rs_error);
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                            generation.is_matched = false,
-                            "API schema generation mismatch: JS returns API schema but Rust errors out"
-                        );
+                        is_matched = false;
                     }
                     (Ok(left), Ok(right)) => {
                         // To compare results, we re-parse, standardize, and print with apollo-rs,
                         // so the formatting is identical.
-                        if let (Ok(left), Ok(right)) = (
+                        let (left, right) = if let (Ok(parsed_left), Ok(parsed_right)) = (
                             apollo_compiler::Schema::parse(left, "js.graphql"),
                             apollo_compiler::Schema::parse(right, "rust.graphql"),
                         ) {
-                            let left = standardize_schema(left).to_string();
-                            let right = standardize_schema(right).to_string();
-
-                            if left == right {
-                                tracing::warn!(
-                                    monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                                    generation.is_matched = true,
-                                );
-                            } else {
-                                tracing::warn!(
-                                    monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                                    generation.is_matched = false,
-                                    "API schema generation mismatch: apollo-federation and router-bridge write different schema"
-                                );
-
-                                let differences = diff::lines(&left, &right);
-                                tracing::debug!(
-                                    "different API schema between apollo-federation and router-bridge:\n{}",
-                                    render_diff(&differences),
-                                );
-                            }
+                            (
+                                standardize_schema(parsed_left).to_string(),
+                                standardize_schema(parsed_right).to_string(),
+                            )
+                        } else {
+                            (left.clone(), right.clone())
+                        };
+                        is_matched = left == right;
+                        if !is_matched {
+                            let differences = diff::lines(&left, &right);
+                            tracing::debug!(
+                                "different API schema between apollo-federation and router-bridge:\n{}",
+                                render_diff(&differences),
+                            );
                         }
                     }
                     (Err(_), Err(_)) => {
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
-                            generation.is_matched = true,
-                        );
+                        is_matched = true;
                     }
                 }
 
-                api_schema?
+                u64_counter!(
+                    "apollo.router.lifecycle.api_schema",
+                    "Comparing JS v.s. Rust API schema generation",
+                    1,
+                    "generation.is_matched" = is_matched,
+                    "generation.js_error" = js_result.is_err(),
+                    "generation.rust_error" = rust_result.is_err()
+                );
+
+                js_result?
             }
         };
         let api_schema = Schema::parse_compiler_schema(&api_schema_string)?;
@@ -721,61 +703,49 @@ impl BridgeQueryPlanner {
                     if !is_empty_operation_name && is_in_both_metrics_mode {
                         let comparison_result = generated_usage_reporting.compare(&usage_reporting);
 
+                        let signature_is_matched;
                         if matches!(
                             comparison_result,
                             UsageReportingComparisonResult::StatsReportKeyNotEqual
                                 | UsageReportingComparisonResult::BothNotEqual
                         ) {
-                            tracing::warn!(
-                                monotonic_counter.apollo.router.operations.telemetry.studio.signature = 1u64,
-                                generation.is_matched = false,
-                                "Mismatch between the Apollo usage reporting signature generated in router and router-bridge"
-                            );
+                            signature_is_matched = false;
                             tracing::debug!(
                                 "Different signatures generated between router and router-bridge:\n{}\n{}",
                                 generated_usage_reporting.result.stats_report_key,
                                 usage_reporting.stats_report_key,
                             );
                         } else {
-                            tracing::info!(
-                                monotonic_counter
-                                    .apollo
-                                    .router
-                                    .operations
-                                    .telemetry
-                                    .studio
-                                    .signature = 1u64,
-                                generation.is_matched = true,
-                            );
+                            signature_is_matched = true;
                         }
+                        u64_counter!(
+                            "apollo.router.operations.telemetry.studio.signature",
+                            "Comparing Apollo usage reporting signature generated in router v.s. in router-bridge",
+                            1,
+                            "generation.is_matched" = signature_is_matched
+                        );
 
+                        let references_is_matched;
                         if matches!(
                             comparison_result,
                             UsageReportingComparisonResult::ReferencedFieldsNotEqual
                                 | UsageReportingComparisonResult::BothNotEqual
                         ) {
-                            tracing::warn!(
-                                monotonic_counter.apollo.router.operations.telemetry.studio.references = 1u64,
-                                generation.is_matched = false,
-                                "Mismatch between the Apollo usage report referenced fields generated in router and router-bridge"
-                            );
+                            references_is_matched = false;
                             tracing::debug!(
                                 "Different referenced fields generated between router and router-bridge:\n{:?}\n{:?}",
                                 generated_usage_reporting.result.referenced_fields_by_type,
                                 usage_reporting.referenced_fields_by_type,
                             );
                         } else {
-                            tracing::info!(
-                                monotonic_counter
-                                    .apollo
-                                    .router
-                                    .operations
-                                    .telemetry
-                                    .studio
-                                    .references = 1u64,
-                                generation.is_matched = true,
-                            );
+                            references_is_matched = true;
                         }
+                        u64_counter!(
+                            "apollo.router.operations.telemetry.studio.references",
+                            "Comparing Apollo usage report referenced fields generated in router v.s. in router-bridge",
+                            1,
+                            "generation.is_matched" = references_is_matched
+                        );
                     } else if matches!(
                         self.configuration
                             .experimental_apollo_metrics_generation_mode,
@@ -1255,9 +1225,12 @@ mod tests {
 
     use serde_json::json;
     use test_log::test;
+    use tower::Service;
+    use tower::ServiceExt;
 
     use super::*;
     use crate::metrics::FutureMetricsExt as _;
+    use crate::services::supergraph;
     use crate::spec::query::subselections::SubSelectionKey;
     use crate::spec::query::subselections::SubSelectionValue;
 
@@ -1769,5 +1742,57 @@ mod tests {
             router_bridge_version.contains('='),
             "router-bridge in Cargo.toml is not pinned with a '=' prefix"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_both_mode_metrics() {
+        let mut harness = crate::TestHarness::builder()
+            // auth is not relevant here, but supergraph.graphql uses join/v0.1
+            // which is not supported by the Rust query planner
+            .schema(include_str!("../../tests/fixtures/supergraph-auth.graphql"))
+            .configuration_json(serde_json::json!({
+                "experimental_query_planner_mode": "both",
+            }))
+            .unwrap()
+            .build_supergraph()
+            .await
+            .unwrap();
+        async move {
+            // TODO: this should change to true once the Rust planner makes some more progress
+            let expect_is_matched = false;
+
+            // Counter is zero:
+            assert!(crate::metrics::collect_metrics()
+                .find("apollo.router.operations.query_planner.both")
+                .is_none());
+
+            let request = supergraph::Request::fake_builder()
+                .query("{ topProducts { name }}")
+                .build()
+                .unwrap();
+            let response = harness.ready().await.unwrap().call(request).await.unwrap();
+            assert!(response.response.status().is_success());
+
+            // Counter is 1:
+            assert_counter!(
+                "apollo.router.operations.query_planner.both",
+                1 // "generation.is_matched" = expect_is_matched
+            );
+
+            let request = supergraph::Request::fake_builder()
+                .query("{ topProducts { name }}")
+                .build()
+                .unwrap();
+            let response = harness.ready().await.unwrap().call(request).await.unwrap();
+            assert!(response.response.status().is_success());
+
+            // Counter unchanged as the query plan is reused from cache
+            assert_counter!(
+                "apollo.router.operations.query_planner.both",
+                1 // "generation.is_matched" = expect_is_matched
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
