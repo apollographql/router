@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -12,6 +13,7 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
 use crate::services::subgraph;
@@ -149,6 +151,20 @@ impl<T: Plugin> PluginTestHarness<T> {
     }
 
     #[allow(dead_code)]
+    pub(crate) async fn call_execution(
+        &self,
+        request: execution::Request,
+        response_fn: fn(execution::Request) -> execution::Response,
+    ) -> Result<execution::Response, BoxError> {
+        let service: execution::BoxService = execution::BoxService::new(
+            ServiceBuilder::new()
+                .service_fn(move |req: execution::Request| async move { Ok((response_fn)(req)) }),
+        );
+
+        self.plugin.execution_service(service).call(request).await
+    }
+
+    #[allow(dead_code)]
     pub(crate) async fn call_subgraph(
         &self,
         request: subgraph::Request,
@@ -181,5 +197,19 @@ impl<T: Plugin> PluginTestHarness<T> {
             .http_client_service(subgraph_name, service)
             .call(request)
             .await
+    }
+}
+
+impl<T> Deref for PluginTestHarness<T>
+where
+    T: Plugin,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.plugin
+            .as_any()
+            .downcast_ref()
+            .expect("plugin should be of type T")
     }
 }
