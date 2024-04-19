@@ -250,6 +250,16 @@ async fn service_call(
                     *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                     return Ok(response);
                 }
+                // Now perform query batch analysis
+                let batching = context.extensions().lock().get::<BatchQuery>().cloned();
+                if let Some(batch_query) = batching {
+                    let query_hashes = plan.query_hashes(operation_name.as_deref(), &variables)?;
+                    batch_query
+                        .set_query_hashes(query_hashes)
+                        .await
+                        .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
+                    tracing::debug!("batch registered: {}", batch_query);
+                }
             }
 
             let ClientRequestAccepts {
@@ -631,18 +641,6 @@ async fn plan_query(
             "otel.kind" = "INTERNAL"
         ))
         .await?;
-
-    let batching = context.extensions().lock().get::<BatchQuery>().cloned();
-    if let Some(batch_query) = batching {
-        if let Some(QueryPlannerContent::Plan { plan, .. }) = &qpr.content {
-            let query_hashes = plan.root.query_hashes()?;
-            batch_query
-                .set_query_hashes(query_hashes)
-                .await
-                .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
-            tracing::debug!("batch registered: {}", batch_query);
-        }
-    }
 
     Ok(qpr)
 }
