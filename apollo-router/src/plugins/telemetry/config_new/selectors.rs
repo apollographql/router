@@ -143,6 +143,10 @@ pub(crate) enum RouterSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
     OnGraphQLError {
         /// Boolean set to true if the reponse body contains graphql error
         on_graphql_error: bool,
@@ -257,6 +261,10 @@ pub(crate) enum SupergraphSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -453,6 +461,10 @@ pub(crate) enum SubgraphSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
 }
 
 impl Selector for RouterSelector {
@@ -491,6 +503,7 @@ impl Selector for RouterSelector {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // Related to Response
             _ => None,
         }
@@ -540,6 +553,7 @@ impl Selector for RouterSelector {
                     None
                 }
             }
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -625,6 +639,7 @@ impl Selector for SupergraphSelector {
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For response
             _ => None,
         }
@@ -663,6 +678,7 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
         }
@@ -804,6 +820,7 @@ impl Selector for SubgraphSelector {
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
 
             // For response
             _ => None,
@@ -899,6 +916,7 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
         }

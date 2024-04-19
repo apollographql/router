@@ -7345,6 +7345,19 @@ expression: "&schema"
                             {
                               "type": "object",
                               "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
                                 "on_graphql_error"
                               ],
                               "properties": {
@@ -7822,6 +7835,19 @@ expression: "&schema"
                                         {
                                           "type": "object",
                                           "required": [
+                                            "static"
+                                          ],
+                                          "properties": {
+                                            "static": {
+                                              "description": "A static string value",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
                                             "on_graphql_error"
                                           ],
                                           "properties": {
@@ -8236,6 +8262,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   },
                                   {
                                     "type": "object",
@@ -9273,6 +9312,19 @@ expression: "&schema"
                             },
                             {
                               "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         }
@@ -10191,6 +10243,19 @@ expression: "&schema"
                                         },
                                         {
                                           "type": "string"
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "static"
+                                          ],
+                                          "properties": {
+                                            "static": {
+                                              "description": "A static string value",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       ]
                                     }
@@ -11050,6 +11115,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 ]
                               }
@@ -11682,6 +11760,19 @@ expression: "&schema"
                             },
                             {
                               "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         }
@@ -12214,6 +12305,19 @@ expression: "&schema"
                                         },
                                         {
                                           "type": "string"
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "static"
+                                          ],
+                                          "properties": {
+                                            "static": {
+                                              "description": "A static string value",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       ]
                                     }
@@ -12687,6 +12791,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 ]
                               }
@@ -13425,6 +13542,19 @@ expression: "&schema"
                                   {
                                     "type": "object",
                                     "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
                                       "on_graphql_error"
                                     ],
                                     "properties": {
@@ -13988,6 +14118,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   },
                                   {
                                     "type": "object",
@@ -14559,6 +14702,19 @@ expression: "&schema"
                                   {
                                     "type": "object",
                                     "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
                                       "on_graphql_error"
                                     ],
                                     "properties": {
@@ -15121,6 +15277,19 @@ expression: "&schema"
                             {
                               "type": "object",
                               "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
                                 "on_graphql_error"
                               ],
                               "properties": {
@@ -15598,6 +15767,19 @@ expression: "&schema"
                                         {
                                           "type": "object",
                                           "required": [
+                                            "static"
+                                          ],
+                                          "properties": {
+                                            "static": {
+                                              "description": "A static string value",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
                                             "on_graphql_error"
                                           ],
                                           "properties": {
@@ -16012,6 +16194,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   },
                                   {
                                     "type": "object",
@@ -16516,6 +16711,19 @@ expression: "&schema"
                               },
                               {
                                 "type": "string"
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "static"
+                                ],
+                                "properties": {
+                                  "static": {
+                                    "description": "A static string value",
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
                               },
                               {
                                 "type": "object",
@@ -17425,6 +17633,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 ]
                               }
@@ -18318,6 +18539,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 ]
                               }
@@ -19211,6 +19445,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 ]
                               }
@@ -20100,6 +20347,19 @@ expression: "&schema"
                             },
                             {
                               "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         }
@@ -21018,6 +21278,19 @@ expression: "&schema"
                                         },
                                         {
                                           "type": "string"
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "static"
+                                          ],
+                                          "properties": {
+                                            "static": {
+                                              "description": "A static string value",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       ]
                                     }
@@ -21877,6 +22150,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 ]
                               }
@@ -22822,6 +23108,19 @@ expression: "&schema"
                               },
                               {
                                 "type": "string"
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "static"
+                                ],
+                                "properties": {
+                                  "static": {
+                                    "description": "A static string value",
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
                               }
                             ]
                           }
@@ -23320,6 +23619,19 @@ expression: "&schema"
                             },
                             {
                               "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         }
@@ -23852,6 +24164,19 @@ expression: "&schema"
                                         },
                                         {
                                           "type": "string"
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "static"
+                                          ],
+                                          "properties": {
+                                            "static": {
+                                              "description": "A static string value",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       ]
                                     }
@@ -24325,6 +24650,19 @@ expression: "&schema"
                                   },
                                   {
                                     "type": "string"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "static"
+                                    ],
+                                    "properties": {
+                                      "static": {
+                                        "description": "A static string value",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 ]
                               }
@@ -24884,6 +25222,19 @@ expression: "&schema"
                               },
                               {
                                 "type": "string"
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "static"
+                                ],
+                                "properties": {
+                                  "static": {
+                                    "description": "A static string value",
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
                               }
                             ]
                           }
@@ -25483,6 +25834,19 @@ expression: "&schema"
                           {
                             "type": "object",
                             "required": [
+                              "static"
+                            ],
+                            "properties": {
+                              "static": {
+                                "description": "A static string value",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
                               "on_graphql_error"
                             ],
                             "properties": {
@@ -25958,6 +26322,19 @@ expression: "&schema"
                                             {
                                               "type": "object",
                                               "required": [
+                                                "static"
+                                              ],
+                                              "properties": {
+                                                "static": {
+                                                  "description": "A static string value",
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "required": [
                                                 "on_graphql_error"
                                               ],
                                               "properties": {
@@ -26372,6 +26749,19 @@ expression: "&schema"
                                       },
                                       {
                                         "type": "string"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": [
+                                          "static"
+                                        ],
+                                        "properties": {
+                                          "static": {
+                                            "description": "A static string value",
+                                            "type": "string"
+                                          }
+                                        },
+                                        "additionalProperties": false
                                       },
                                       {
                                         "type": "object",
@@ -27335,6 +27725,19 @@ expression: "&schema"
                           },
                           {
                             "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "static"
+                            ],
+                            "properties": {
+                              "static": {
+                                "description": "A static string value",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         ],
                         "properties": {
@@ -28251,6 +28654,19 @@ expression: "&schema"
                                             },
                                             {
                                               "type": "string"
+                                            },
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "static"
+                                              ],
+                                              "properties": {
+                                                "static": {
+                                                  "description": "A static string value",
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
                                             }
                                           ]
                                         }
@@ -29110,6 +29526,19 @@ expression: "&schema"
                                       },
                                       {
                                         "type": "string"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": [
+                                          "static"
+                                        ],
+                                        "properties": {
+                                          "static": {
+                                            "description": "A static string value",
+                                            "type": "string"
+                                          }
+                                        },
+                                        "additionalProperties": false
                                       }
                                     ]
                                   }
@@ -29668,6 +30097,19 @@ expression: "&schema"
                           },
                           {
                             "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "static"
+                            ],
+                            "properties": {
+                              "static": {
+                                "description": "A static string value",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         ],
                         "properties": {
@@ -30198,6 +30640,19 @@ expression: "&schema"
                                             },
                                             {
                                               "type": "string"
+                                            },
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "static"
+                                              ],
+                                              "properties": {
+                                                "static": {
+                                                  "description": "A static string value",
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
                                             }
                                           ]
                                         }
@@ -30671,6 +31126,19 @@ expression: "&schema"
                                       },
                                       {
                                         "type": "string"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": [
+                                          "static"
+                                        ],
+                                        "properties": {
+                                          "static": {
+                                            "description": "A static string value",
+                                            "type": "string"
+                                          }
+                                        },
+                                        "additionalProperties": false
                                       }
                                     ]
                                   }
@@ -31675,6 +32143,19 @@ expression: "&schema"
                       {
                         "type": "object",
                         "required": [
+                          "static"
+                        ],
+                        "properties": {
+                          "static": {
+                            "description": "A static string value",
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
                           "on_graphql_error"
                         ],
                         "properties": {
@@ -32089,6 +32570,19 @@ expression: "&schema"
                 },
                 {
                   "type": "string"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "static"
+                  ],
+                  "properties": {
+                    "static": {
+                      "description": "A static string value",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -33082,6 +33576,19 @@ expression: "&schema"
                       },
                       {
                         "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "static"
+                        ],
+                        "properties": {
+                          "static": {
+                            "description": "A static string value",
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -33941,6 +34448,19 @@ expression: "&schema"
                 },
                 {
                   "type": "string"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "static"
+                  ],
+                  "properties": {
+                    "static": {
+                      "description": "A static string value",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               ]
             }
@@ -34535,6 +35055,19 @@ expression: "&schema"
                       },
                       {
                         "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "static"
+                        ],
+                        "properties": {
+                          "static": {
+                            "description": "A static string value",
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -35008,6 +35541,19 @@ expression: "&schema"
                 },
                 {
                   "type": "string"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "static"
+                  ],
+                  "properties": {
+                    "static": {
+                      "description": "A static string value",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               ]
             }

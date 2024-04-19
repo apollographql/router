@@ -342,6 +342,38 @@ mod test {
     }
 
     #[test]
+    fn test_router_request_static_custom_attribute_on_graphql_error() {
+        let mut spans = RouterSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            ConditionAttribute {
+                selector: RouterSelector::StaticField {
+                    r#static: "my-static-value".to_string(),
+                },
+                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                    SelectorOrValue::Value(AttributeValue::Bool(true)),
+                    SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
+                        on_graphql_error: true,
+                    }),
+                ])))),
+            },
+        );
+        let context = Context::new();
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        let values = spans.attributes.on_response(
+            &router::Response::fake_builder()
+                .header("my-header", "test_val")
+                .context(context)
+                .build()
+                .unwrap(),
+        );
+        assert!(values.iter().any(|key_val| key_val.key
+            == opentelemetry::Key::from_static_str("test")
+            && key_val.value
+                == opentelemetry::Value::String("my-static-value".to_string().into())));
+    }
+
+    #[test]
     fn test_router_request_custom_attribute_on_graphql_error() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
