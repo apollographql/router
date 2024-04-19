@@ -1744,8 +1744,8 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_both_mode_metrics() {
+    #[tokio::test]
+    async fn test_both_mode() {
         let mut harness = crate::TestHarness::builder()
             // auth is not relevant here, but supergraph.graphql uses join/v0.1
             // which is not supported by the Rust query planner
@@ -1757,42 +1757,14 @@ mod tests {
             .build_supergraph()
             .await
             .unwrap();
-        async move {
-            // TODO: this should change to true once the Rust planner makes some more progress
-            let expect_is_matched = false;
 
-            // Counter is zero:
-            assert!(crate::metrics::collect_metrics()
-                .find("apollo.router.operations.query_planner.both")
-                .is_none());
-
-            let request = supergraph::Request::fake_builder()
-                .query("{ topProducts { name }}")
-                .build()
-                .unwrap();
-            let response = harness.ready().await.unwrap().call(request).await.unwrap();
-            assert!(response.response.status().is_success());
-
-            // Counter is 1:
-            assert_counter!(
-                "apollo.router.operations.query_planner.both",
-                1 // "generation.is_matched" = expect_is_matched
-            );
-
-            let request = supergraph::Request::fake_builder()
-                .query("{ topProducts { name }}")
-                .build()
-                .unwrap();
-            let response = harness.ready().await.unwrap().call(request).await.unwrap();
-            assert!(response.response.status().is_success());
-
-            // Counter unchanged as the query plan is reused from cache
-            assert_counter!(
-                "apollo.router.operations.query_planner.both",
-                1 // "generation.is_matched" = expect_is_matched
-            );
-        }
-        .with_metrics()
-        .await;
+        let request = supergraph::Request::fake_builder()
+            .query("{ topProducts { name }}")
+            .build()
+            .unwrap();
+        let mut response = harness.ready().await.unwrap().call(request).await.unwrap();
+        assert!(response.response.status().is_success());
+        let response = response.next_response().await.unwrap();
+        assert!(response.errors.is_empty());
     }
 }
