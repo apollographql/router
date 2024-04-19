@@ -4,6 +4,7 @@ use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
 use tower::BoxError;
 
+use crate::plugins::telemetry::apollo::ApolloTracingProtocol;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
@@ -26,9 +27,9 @@ impl TracingConfigurator for Config {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)
-            .otlp_endpoint(match self.experimental_tracing_protocol {
-                Apollo => None,
-                ApolloAndOtlp => Some(&self.experimental_otlp_endpoint),
+            .and_otlp_endpoint(match &self.experimental_tracing_protocol {
+                ApolloTracingProtocol::Apollo => None,
+                ApolloTracingProtocol::ApolloAndOtlp => Some(&self.experimental_otlp_endpoint),
             })
             .apollo_key(
                 self.apollo_key

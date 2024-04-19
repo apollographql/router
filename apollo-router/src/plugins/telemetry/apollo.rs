@@ -70,8 +70,8 @@ pub(crate) struct Config {
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// The protocol used for sending traces to Apollo Studio.
-    pub(crate) experimental_tracing_protocol: ApolloTracingProtocol, 
-    
+    pub(crate) experimental_tracing_protocol: ApolloTracingProtocol,
+
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
     /// To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio
@@ -186,7 +186,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Copy)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ApolloTracingProtocol {
     // Use only the Apollo usage reporting protobuf over http

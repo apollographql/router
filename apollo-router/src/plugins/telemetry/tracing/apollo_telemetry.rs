@@ -224,7 +224,7 @@ impl Exporter {
         use_legacy_request_span: Option<bool>,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
-        
+
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
             report_exporter: Arc::new(ApolloExporter::new(
@@ -235,7 +235,7 @@ impl Exporter {
                 schema_id,
             )?),
             otlp_exporter: match otlp_endpoint {
-                Some(otlp_endpoint) =>  Some(Arc::new(ApolloOtlpExporter::new(
+                Some(otlp_endpoint) => Some(Arc::new(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     batch_config,
                     apollo_key,
@@ -348,22 +348,24 @@ impl Exporter {
     // TBD(tim): Likely need to revisit this, handle errors, deal with the unknown spans more carefully, etc.
     fn collect_spans_for_tree(&mut self, root_span: &LightSpanData) -> Vec<LightSpanData> {
         // iterate over all children and recursively collect the entire subtree
-        let child_spans = match self.spans_by_parent_id.pop_entry(&root_span.span_id) {
-            Some((_, spans)) => 
-                spans
+        let mut child_spans = match self.spans_by_parent_id.pop_entry(&root_span.span_id) {
+            Some((_, spans)) => spans
                 .into_iter()
-                .flat_map(|(_, span)| {
-                    self.collect_spans_for_tree(&span)
-                }),
+                .flat_map(|(_, span)| self.collect_spans_for_tree(&span))
+                .collect(),
             None => Vec::new(),
         };
         let unknown = self.include_span_names.contains(root_span.name.as_ref());
         // if we're known, add ourselves to the list, otherwise don't.
-        let spans_for_tree = match unknown {
-            true => Vec::new(),
-            false => vec![root_span],
+        let mut spans_for_tree = if unknown {
+            Vec::new()
+        } else {
+            vec![root_span.clone()]
         };
-        spans_for_tree.append(child_spans)
+
+        spans_for_tree.append(&mut child_spans);
+
+        spans_for_tree
     }
 
     fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
@@ -821,12 +823,13 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         let mut otlp_trace_spans: Vec<Vec<LightSpanData>> = Vec::new();
-        
+
         for span in batch {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
-                match self.extract_traces(span.into()) {
+                // TODO if else to avoid cloning the span
+                match self.extract_traces(span.clone().into()) {
                     Ok(extracted_traces) => {
                         for mut trace in extracted_traces {
                             let mut operation_signature = Default::default();
@@ -878,11 +881,10 @@ impl SpanExporter for Exporter {
                 .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                 .await
         };
-        if self.otlp_exporter.is_some() {
-            let exporter = self.otlp_exporter.clone();
-            let fut = async move {
-                exporter.export(otlp_trace_spans)
-            };
+        if let Some(otlp_exporter) = &self.otlp_exporter {
+            let exporter = otlp_exporter.clone();
+            // TODO this won't work because to call export you need a mutable ref to exporter and you can't have it from an Arc
+            let fut = async move { exporter.export(otlp_trace_spans) };
         }
         fut.boxed()
     }
