@@ -79,7 +79,7 @@
       "Query batching": [
         "/executing-operations/query-batching",
         [
-          "experimental"
+          "enterprise"
         ]
       ],
       "GraphQL Subscriptions": {

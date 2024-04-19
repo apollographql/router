@@ -1,0 +1,14 @@
+# Batching config with short timeouts for testing
+
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    all:
+      enabled: true
+traffic_shaping:
+  all:
+    timeout: 1s
+
+include_subgraph_errors:
+  all: true
