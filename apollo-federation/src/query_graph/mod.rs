@@ -47,6 +47,12 @@ pub(crate) struct QueryGraphNode {
     pub(crate) root_kind: Option<SchemaRootDefinitionKind>,
 }
 
+impl QueryGraphNode {
+    pub fn is_root_node(&self) -> bool {
+        matches!(self.type_, QueryGraphNodeType::FederatedRootType(_))
+    }
+}
+
 impl Display for QueryGraphNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}({})", self.type_, self.source)?;

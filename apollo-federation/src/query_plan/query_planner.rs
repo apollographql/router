@@ -509,6 +509,8 @@ fn compute_root_parallel_best_plan(
         has_defers,
         parameters.operation.root_kind,
         FetchDependencyGraphToCostProcessor,
+        /*excluded_destinations*/ &Default::default(),
+        /*excluded_conditions*/ &Default::default(),
     );
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),

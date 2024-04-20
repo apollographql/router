@@ -2992,6 +2992,7 @@ impl NamedFragments {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct RebasedFragments {
     original_fragments: NamedFragments,
     // JS PORT NOTE: In JS implementation values were optional

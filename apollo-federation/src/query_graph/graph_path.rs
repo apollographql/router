@@ -312,6 +312,10 @@ impl OpGraphPathContext {
         }
         Ok(new_context)
     }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.conditionals.is_empty()
+    }
 }
 
 impl Display for OpGraphPathContext {
@@ -356,6 +360,13 @@ pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
 #[derive(Debug, Clone)]
 pub(crate) struct ExcludedDestinations(Arc<Vec<Name>>);
 
+impl PartialEq for ExcludedDestinations {
+    /// See if two `ExcludedDestinations` have the same set of values, regardless of their ordering.
+    fn eq(&self, other: &ExcludedDestinations) -> bool {
+        self.0.len() == other.0.len() && self.0.iter().all(|x| other.0.contains(x))
+    }
+}
+
 impl Default for ExcludedDestinations {
     fn default() -> Self {
         ExcludedDestinations(Arc::new(vec![]))
@@ -364,6 +375,19 @@ impl Default for ExcludedDestinations {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExcludedConditions(Arc<Vec<Arc<NormalizedSelectionSet>>>);
+
+impl ExcludedConditions {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Immutable version of `push`.
+    pub(crate) fn add_item(&self, value: &NormalizedSelectionSet) -> ExcludedConditions {
+        let mut result = self.0.as_ref().clone();
+        result.push(value.clone().into());
+        ExcludedConditions(Arc::new(result))
+    }
+}
 
 impl Default for ExcludedConditions {
     fn default() -> Self {

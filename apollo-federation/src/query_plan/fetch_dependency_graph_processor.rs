@@ -42,6 +42,7 @@ const FETCH_COST: QueryPlanCost = 1000;
 /// The exact number is a tad  arbitrary however.
 const PIPELINING_COST: QueryPlanCost = 100;
 
+#[derive(Clone)]
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     config: Arc<QueryPlannerConfig>,
     variable_definitions: Vec<Node<VariableDefinition>>,
@@ -73,6 +74,7 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
 ///    it assumes that the networking and other query processing costs are much higher than
 ///    the cost of resolving a single field. Or to put it more concretely, it assumes that
 ///    a fetch of 5 fields is probably not too different from than of 2 fields.
+#[derive(Clone, Copy)]
 pub(crate) struct FetchDependencyGraphToCostProcessor;
 
 /// Generic interface for "processing" a (reduced) dependency graph of fetch dependency nodes
