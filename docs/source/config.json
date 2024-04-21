@@ -129,6 +129,7 @@
       },
       "Instrumentation": {
         "Instruments": "/configuration/telemetry/instrumentation/instruments",
+        "Events": "/configuration/telemetry/instrumentation/events",
         "Spans": "/configuration/telemetry/instrumentation/spans",
         "Selectors": "/configuration/telemetry/instrumentation/selectors",
         "Standard attributes": "/configuration/telemetry/instrumentation/standard-attributes",
