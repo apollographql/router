@@ -40,11 +40,11 @@ async fn test_type_conditions_enabled() {
         &[
             (
                 "searchSubgraph",
-                include_str!("../fixtures/type_conditions/search.json"),
+                include_str!("fixtures/type_conditions/search.json"),
             ),
             (
                 "artworkSubgraph",
-                include_str!("../fixtures/type_conditions/artwork.json"),
+                include_str!("fixtures/type_conditions/artwork.json"),
             ),
         ],
     );
@@ -89,11 +89,11 @@ async fn test_type_conditions_enabled_generate_query_fragments() {
         &[
             (
                 "searchSubgraph",
-                include_str!("../fixtures/type_conditions/search_query_fragments_enabled.json"),
+                include_str!("fixtures/type_conditions/search_query_fragments_enabled.json"),
             ),
             (
                 "artworkSubgraph",
-                include_str!("../fixtures/type_conditions/artwork_query_fragments_enabled.json"),
+                include_str!("fixtures/type_conditions/artwork_query_fragments_enabled.json"),
             ),
         ],
     );
@@ -135,11 +135,11 @@ async fn test_type_conditions_enabled_list_of_list() {
         &[
             (
                 "searchSubgraph",
-                include_str!("../fixtures/type_conditions/search_list_of_list.json"),
+                include_str!("fixtures/type_conditions/search_list_of_list.json"),
             ),
             (
                 "artworkSubgraph",
-                include_str!("../fixtures/type_conditions/artwork.json"),
+                include_str!("fixtures/type_conditions/artwork.json"),
             ),
         ],
     );
@@ -182,11 +182,11 @@ async fn test_type_conditions_enabled_list_of_list_of_list() {
         &[
             (
                 "searchSubgraph",
-                include_str!("../fixtures/type_conditions/search_list_of_list_of_list.json"),
+                include_str!("fixtures/type_conditions/search_list_of_list_of_list.json"),
             ),
             (
                 "artworkSubgraph",
-                include_str!("../fixtures/type_conditions/artwork.json"),
+                include_str!("fixtures/type_conditions/artwork.json"),
             ),
         ],
     );
@@ -228,11 +228,11 @@ async fn test_type_conditions_disabled() {
         &[
             (
                 "searchSubgraph",
-                include_str!("../fixtures/type_conditions/search.json"),
+                include_str!("fixtures/type_conditions/search.json"),
             ),
             (
                 "artworkSubgraph",
-                include_str!("../fixtures/type_conditions/artwork_disabled.json"),
+                include_str!("fixtures/type_conditions/artwork_disabled.json"),
             ),
         ],
     );
@@ -273,11 +273,11 @@ async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
         &[
             (
                 "searchSubgraph",
-                include_str!("../fixtures/type_conditions/search_no_articles.json"),
+                include_str!("fixtures/type_conditions/search_no_articles.json"),
             ),
             (
                 "artworkSubgraph",
-                include_str!("../fixtures/type_conditions/artwork_no_articles.json"),
+                include_str!("fixtures/type_conditions/artwork_no_articles.json"),
             ),
         ],
     );
@@ -324,7 +324,7 @@ fn setup_from_mocks(
         mocked_subgraphs.insert(name, builder.build());
     }
 
-    let schema = include_str!("../fixtures/type_conditions/type_conditions.graphql");
+    let schema = include_str!("fixtures/type_conditions/type_conditions.graphql");
     TestHarness::builder()
         .try_log_level("info")
         .configuration_json(configuration)
