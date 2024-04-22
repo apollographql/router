@@ -565,7 +565,6 @@ impl FetchNode {
 
             (Value::Null, errors)
         } else {
-            // TODO[igni]: type_conditions
             let current_slice =
                 if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
                     &current_dir.0[..current_dir.0.len() - 1]

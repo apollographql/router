@@ -265,7 +265,6 @@ impl Selection {
                     false
                 }
             }
-            // TODO
             (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten(_)), _) => {
                 self.contains_error_path(&path[1..], fragments)
             }
