@@ -339,6 +339,76 @@ mod test {
     }
 
     #[test]
+    fn test_response_condition_from_request_fail() {
+        let config = r#"
+            response_status: code
+            condition:
+              any:
+              - eq:
+                - request_header: head
+                - 999
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
+        assert!(result.is_none());
+    }
+    #[test]
+    fn test_response_condition_from_response_fail() {
+        let config = r#"
+            response_status: code
+            condition:
+              any:
+              - eq:
+                - response_status: code
+                - 999
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_request_condition_from_request_fail() {
+        let config = r#"
+            request_header: head
+            condition:
+              any:
+              - eq:
+                - request_header: head
+                - 999
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
+        assert!(result.is_none());
+    }
+    #[test]
+    fn test_request_condition_from_response_fail() {
+        let config = r#"
+            request_header: head
+            condition:
+              any:
+              - eq:
+                - response_status: code
+                - 999
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn test_deserialization() {
         let config = r#"
             static: "there was an error"
