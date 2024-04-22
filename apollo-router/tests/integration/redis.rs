@@ -1,4 +1,4 @@
-// #[cfg(all(target_os = "linux", target_arch = "x86_64", test))]
+#[cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 mod test {
     use apollo_router::plugin::test::MockSubgraph;
     use apollo_router::services::execution::QueryPlan;
@@ -856,7 +856,7 @@ mod test {
             .unwrap_err();
         assert_eq!(
             e.to_string(),
-            "couldn't build Router service: IO Error: Os { code: 61, kind: ConnectionRefused, message: \"Connection refused\" }"
+            "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
         );
     }
 }
