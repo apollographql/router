@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::attributes::ConditionAttribute;
+use super::conditional::ConditionAttribute;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -120,9 +120,9 @@ mod test {
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::attributes::ConditionAttribute;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
+    use crate::plugins::telemetry::config_new::conditional::ConditionAttribute;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
