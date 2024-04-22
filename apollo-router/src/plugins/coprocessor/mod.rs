@@ -872,7 +872,6 @@ where
 
         // Create our response stream which consists of the bytes from our first body chained with the
         // rest of the responses in our mapped stream.
-        //let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
         let final_stream = once(ready(Ok(bytes))).chain(mapped_stream).boxed();
 
         response.response = http::Response::from_parts(parts, Body::wrap_stream(final_stream));
