@@ -1197,6 +1197,91 @@ async fn test_operation_arg_always_commas() {
 }
 
 #[test(tokio::test)]
+async fn test_nested_fragments() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      fragment UnionType1Fragment on UnionType1 {
+        unionType1Field
+      }
+      
+      fragment ObjectResponseFragment on ObjectTypeResponse {
+        intField
+      }
+      
+      fragment EverythingResponseFragment on EverythingResponse {
+        listOfObjects {
+          ...ObjectResponseFragment
+          ... on ObjectTypeResponse {
+            stringField
+          }
+        }
+      }
+      
+      query NestedFragmentQuery {
+        noInputQuery {
+          ...EverythingResponseFragment
+          ... on EverythingResponse {
+            listOfUnions {
+              ...UnionType1Fragment
+              ... on UnionType2 {
+                unionType2Field
+              }
+            }
+          }
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_usage_reporting(&doc, &doc, &Some("NestedFragmentQuery".into()), &schema);
+
+    let expected_sig = "# NestedFragmentQuery\nfragment EverythingResponseFragment on EverythingResponse{listOfObjects{...ObjectResponseFragment...on ObjectTypeResponse{stringField}}}fragment ObjectResponseFragment on ObjectTypeResponse{intField}fragment UnionType1Fragment on UnionType1{unionType1Field}query NestedFragmentQuery{noInputQuery{...EverythingResponseFragment...on EverythingResponse{listOfUnions{...UnionType1Fragment...on UnionType2{unionType2Field}}}}}";
+    let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        (
+            "Query".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["noInputQuery".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "EverythingResponse".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["listOfObjects".into(), "listOfUnions".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "ObjectTypeResponse".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["intField".into(), "stringField".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "UnionType1".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["unionType1Field".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "UnionType2".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["unionType2Field".into()],
+                is_interface: false,
+            },
+        ),
+    ]);
+
+    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+#[test(tokio::test)]
 async fn test_compare() {
     let source = ComparableUsageReporting {
         result: UsageReporting {

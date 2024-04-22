@@ -167,6 +167,7 @@ impl UsageReportingGenerator<'_> {
                             .get(&fragment_node.fragment_name)
                         {
                             e.insert(fragment.clone());
+                            self.extract_signature_fragments(&fragment.selection_set);
                         }
                     }
                 }

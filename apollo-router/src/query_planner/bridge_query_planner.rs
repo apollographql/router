@@ -472,7 +472,8 @@ impl BridgeQueryPlanner {
                                 "Mismatch between the Apollo usage reporting signature generated in router and router-bridge"
                             );
                             tracing::debug!(
-                                "Different signatures generated between router and router-bridge:\n{}\n{}",
+                                "Different signatures generated between router and router-bridge.\nQuery:\n{}\nRouter:\n{}\nRouter Bridge:\n{}",
+                                filtered_query,
                                 generated_usage_reporting.result.stats_report_key,
                                 usage_reporting.stats_report_key,
                             );
@@ -500,7 +501,8 @@ impl BridgeQueryPlanner {
                                 "Mismatch between the Apollo usage report referenced fields generated in router and router-bridge"
                             );
                             tracing::debug!(
-                                "Different referenced fields generated between router and router-bridge:\n{:?}\n{:?}",
+                                "Different referenced fields generated between router and router-bridge.\nQuery:\n{}\nRouter:\n{:?}\nRouter Bridge:\n{:?}",
+                                filtered_query,
                                 generated_usage_reporting.result.referenced_fields_by_type,
                                 usage_reporting.referenced_fields_by_type,
                             );
