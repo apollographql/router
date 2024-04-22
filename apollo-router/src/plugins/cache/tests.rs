@@ -88,7 +88,7 @@ impl Mocks for MockStore {
             "GET" => {
                 if let Some(RedisValue::Bytes(b)) = command.args.first() {
                     if let Some(bytes) = self.map.lock().get(b) {
-                        println!("-> returning {:?}", std::str::from_utf8(&bytes));
+                        println!("-> returning {:?}", std::str::from_utf8(bytes));
                         return Ok(RedisValue::Bytes(bytes.clone()));
                     }
                 }
