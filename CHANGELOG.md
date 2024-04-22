@@ -22,7 +22,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 The router supports a new `sha256` module to create SHA256 hashes in Rhai scripts. The module supports the `sha256::digest` function.
 
-An example script that uses the module: 
+An example script that uses the module:
 
 ```rs
 fn supergraph_service(service){
@@ -108,9 +108,9 @@ By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollo
 
 ### Fix compatibility of coprocessor metric creation ([PR #4930](https://github.com/apollographql/router/pull/4930))
 
-Previously, the router's execution stage created coprocessor metrics differently than other stages. This produced metrics with slight incompatibilities. 
+Previously, the router's execution stage created coprocessor metrics differently than other stages. This produced metrics with slight incompatibilities.
 
-This release fixes the issue by creating coprocessor metrics in the same way as all other stages.  
+This release fixes the issue by creating coprocessor metrics in the same way as all other stages.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4930
 
@@ -120,8 +120,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 Router documentation has been updated for a couple topics:
 - [Performance improvements vs. stability concerns](https://www.apollographql.com/docs/router/configuration/in-memory-caching#performance-improvements-vs-stability) when using the router's operation cache
-- [Overview of standard and custom metrics instruments](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/instruments) 
- 
+- [Overview of standard and custom metrics instruments](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/instruments)
 
 By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/4872
 
@@ -136,27 +135,22 @@ You can configure query planner pools with the `supergraph.query_planning.experi
 ```yaml
 supergraph:
   query_planning:
-    experimental_parallelism: auto # number of available cpus
+    experimental_parallelism: auto # number of available CPUs
 ```
 
-Its value is the number of query planners that run in parallel, and its default value is `1`. You can set it to the
-special value `auto` to automatically set it equal to the number of available CPUs.
+Its value is the number of query planners that run in parallel, and its default value is `1`. You can set it to the special value `auto` to automatically set it equal to the number of available CPUs.
 
-You can discuss and comment about query planner pools in
-this [GitHub discussion](https://github.com/apollographql/router/discussions/4917).
+You can discuss and comment about query planner pools in this [GitHub discussion](https://github.com/apollographql/router/discussions/4917).
 
-By [@xuorig](https://github.com/xuorig) and [@o0Ignition0o](https://github.com/o0Ignition0o)
-in https://github.com/apollographql/router/pull/4897
+By [@xuorig](https://github.com/xuorig) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/4897
 
 ### Experimental: Rust implementation of Apollo usage report field generation ([PR 4796](https://github.com/apollographql/router/pull/4796))
 
-The router supports a new experimental Rust implementation for generating the stats report keys and referenced fields that are sent in Apollo usage reports. This implementation is one part of the effort to replace the router-bridge with native Rust code. 
+The router supports a new experimental Rust implementation for generating the stats report keys and referenced fields that are sent in Apollo usage reports. This implementation is one part of the effort to replace the router-bridge with native Rust code.
 
 The feature is configured with the `experimental_apollo_metrics_generation_mode` setting. We recommend that you use its default value, so we can verify that it generates the same payloads as the previous implementation.
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4796
-
-
 
 # [1.44.0] - 2024-04-12
 
