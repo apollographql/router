@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::{Schema, SchemaObject, SubschemaValidation};
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
 use serde::de::Error;
 use serde::de::MapAccess;
@@ -59,6 +61,7 @@ where
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        // Add the condition and also allow string as a fallback.
         let mut selector = gen.subschema_for::<HashMap<String, T>>();
         if let Schema::Object(schema) = &mut selector {
             if let Some(object) = &mut schema.object {
@@ -74,25 +77,6 @@ where
             })),
             ..Default::default()
         })
-        // let mut selector = gen.subschema_for::<HashMap<String, T>>();
-        // if let Schema::Object(schema) = &mut selector {
-        //
-        //     let subschema = SubschemaValidation {
-        //         one_of: Some(vec![
-        //             schema.object.take()
-        //         ]),
-        //         ..Default::default()
-        //     };
-        //     schema.subschemas = Some(Box::new(subschema));
-        //
-        //     if let Some(object) = &mut schema.object {
-        //         object
-        //             .properties
-        //             .insert("condition".to_string(), gen.subschema_for::<Condition<T>>());
-        //     }
-        // }
-        //
-        // selector
     }
 }
 
