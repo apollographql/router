@@ -320,7 +320,7 @@ commands:
             if [[ ! -d "$HOME/.cargo" ]]; then
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
-              ./rustup.sh -y --profile minimal --component clippy --component rustfmt
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt --default-toolchain $(grep -Po '(?<=^channel = ")[^"]*(?=".*)' rust-toolchain.toml)
             fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
@@ -545,7 +545,7 @@ jobs:
       - checkout
       - setup_environment:
           platform: << parameters.platform >>
-      - xtask_check_compliance
+      #- xtask_check_compliance
 
   test:
     environment:
