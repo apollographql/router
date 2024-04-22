@@ -19,11 +19,11 @@ use tokio::task::JoinHandle;
 use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
+use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;

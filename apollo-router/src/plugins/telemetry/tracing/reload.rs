@@ -4,7 +4,9 @@ use std::sync::RwLock;
 
 use opentelemetry::trace::SpanBuilder;
 use opentelemetry::trace::Tracer;
-use tracing_opentelemetry::PreSampledTracer;
+
+use crate::plugins::telemetry::otel::OtelData;
+use crate::plugins::telemetry::otel::PreSampledTracer;
 
 #[derive(Clone)]
 pub(crate) struct ReloadTracer<S> {
@@ -12,10 +14,7 @@ pub(crate) struct ReloadTracer<S> {
 }
 
 impl<S: PreSampledTracer> PreSampledTracer for ReloadTracer<S> {
-    fn sampled_context(
-        &self,
-        data: &mut tracing_opentelemetry::OtelData,
-    ) -> opentelemetry::Context {
+    fn sampled_context(&self, data: &mut OtelData) -> opentelemetry::Context {
         self.parent
             .read()
             .expect("parent tracer must be available")

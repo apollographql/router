@@ -35,7 +35,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
@@ -44,6 +43,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::Request;
@@ -1009,13 +1009,14 @@ mod test {
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_TYPE;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
     use crate::plugins::telemetry::config_new::Selectors;
+    use crate::plugins::telemetry::otel;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
     #[test]
     fn test_router_trace_attributes() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
