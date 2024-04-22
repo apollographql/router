@@ -301,7 +301,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 }
             }
             if self.selection_set_is_fully_local_from_all_nodes(selection_set, &all_tail_nodes)?
-                && !selection.has_defer()?
+                && !selection.has_defer()
             {
                 // We known the rest of the selection is local to whichever subgraph the current
                 // options are in, and so we're going to keep that selection around and add it
