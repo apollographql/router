@@ -7410,7 +7410,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "on_graphql_error": {
-                                  "description": "Boolean set to true if the reponse body contains graphql error",
+                                  "description": "Boolean set to true if the response body contains graphql error",
                                   "type": "boolean"
                                 }
                               },
@@ -7900,7 +7900,7 @@ expression: "&schema"
                                           ],
                                           "properties": {
                                             "on_graphql_error": {
-                                              "description": "Boolean set to true if the reponse body contains graphql error",
+                                              "description": "Boolean set to true if the response body contains graphql error",
                                               "type": "boolean"
                                             }
                                           },
@@ -8331,7 +8331,7 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "on_graphql_error": {
-                                        "description": "Boolean set to true if the reponse body contains graphql error",
+                                        "description": "Boolean set to true if the response body contains graphql error",
                                         "type": "boolean"
                                       }
                                     },
@@ -13607,7 +13607,7 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "on_graphql_error": {
-                                        "description": "Boolean set to true if the reponse body contains graphql error",
+                                        "description": "Boolean set to true if the response body contains graphql error",
                                         "type": "boolean"
                                       }
                                     },
@@ -14187,7 +14187,7 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "on_graphql_error": {
-                                        "description": "Boolean set to true if the reponse body contains graphql error",
+                                        "description": "Boolean set to true if the response body contains graphql error",
                                         "type": "boolean"
                                       }
                                     },
@@ -14767,7 +14767,7 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "on_graphql_error": {
-                                        "description": "Boolean set to true if the reponse body contains graphql error",
+                                        "description": "Boolean set to true if the response body contains graphql error",
                                         "type": "boolean"
                                       }
                                     },
@@ -15342,7 +15342,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "on_graphql_error": {
-                                  "description": "Boolean set to true if the reponse body contains graphql error",
+                                  "description": "Boolean set to true if the response body contains graphql error",
                                   "type": "boolean"
                                 }
                               },
@@ -15832,7 +15832,7 @@ expression: "&schema"
                                           ],
                                           "properties": {
                                             "on_graphql_error": {
-                                              "description": "Boolean set to true if the reponse body contains graphql error",
+                                              "description": "Boolean set to true if the response body contains graphql error",
                                               "type": "boolean"
                                             }
                                           },
@@ -16263,7 +16263,7 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "on_graphql_error": {
-                                        "description": "Boolean set to true if the reponse body contains graphql error",
+                                        "description": "Boolean set to true if the response body contains graphql error",
                                         "type": "boolean"
                                       }
                                     },
@@ -16780,7 +16780,7 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "on_graphql_error": {
-                                    "description": "Boolean set to true if the reponse body contains graphql error",
+                                    "description": "Boolean set to true if the response body contains graphql error",
                                     "type": "boolean"
                                   }
                                 },
@@ -25492,420 +25492,6 @@ expression: "&schema"
                       },
                       "additionalProperties": {
                         "type": "object",
-                        "anyOf": [
-                          {
-                            "description": "A header from the request",
-                            "type": "object",
-                            "required": [
-                              "request_header"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "request_header": {
-                                "description": "The name of the request header.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "The request method.",
-                            "type": "object",
-                            "required": [
-                              "request_method"
-                            ],
-                            "properties": {
-                              "request_method": {
-                                "description": "The request method enabled or not",
-                                "type": "boolean"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "A header from the response",
-                            "type": "object",
-                            "required": [
-                              "response_header"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "response_header": {
-                                "description": "The name of the request header.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "A status from the response",
-                            "type": "object",
-                            "required": [
-                              "response_status"
-                            ],
-                            "properties": {
-                              "response_status": {
-                                "description": "The http response status code.",
-                                "oneOf": [
-                                  {
-                                    "description": "The http status code.",
-                                    "type": "string",
-                                    "enum": [
-                                      "code"
-                                    ]
-                                  },
-                                  {
-                                    "description": "The http status reason.",
-                                    "type": "string",
-                                    "enum": [
-                                      "reason"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "The trace ID of the request.",
-                            "type": "object",
-                            "required": [
-                              "trace_id"
-                            ],
-                            "properties": {
-                              "trace_id": {
-                                "description": "The format of the trace ID.",
-                                "oneOf": [
-                                  {
-                                    "description": "Open Telemetry trace ID, a hex string.",
-                                    "type": "string",
-                                    "enum": [
-                                      "open_telemetry"
-                                    ]
-                                  },
-                                  {
-                                    "description": "Datadog trace ID, a u64.",
-                                    "type": "string",
-                                    "enum": [
-                                      "datadog"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "A value from context.",
-                            "type": "object",
-                            "required": [
-                              "response_context"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "response_context": {
-                                "description": "The response context key.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "A value from baggage.",
-                            "type": "object",
-                            "required": [
-                              "baggage"
-                            ],
-                            "properties": {
-                              "baggage": {
-                                "description": "The name of the baggage item.",
-                                "type": "string"
-                              },
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "A value from an environment variable.",
-                            "type": "object",
-                            "required": [
-                              "env"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "env": {
-                                "description": "The name of the environment variable",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "static"
-                            ],
-                            "properties": {
-                              "static": {
-                                "description": "A static string value",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "on_graphql_error"
-                            ],
-                            "properties": {
-                              "on_graphql_error": {
-                                "description": "Boolean set to true if the reponse body contains graphql error",
-                                "type": "boolean"
-                              }
-                            },
-                            "additionalProperties": false
-                          }
-                        ],
                         "properties": {
                           "condition": {
                             "oneOf": [
@@ -26387,7 +25973,7 @@ expression: "&schema"
                                               ],
                                               "properties": {
                                                 "on_graphql_error": {
-                                                  "description": "Boolean set to true if the reponse body contains graphql error",
+                                                  "description": "Boolean set to true if the response body contains graphql error",
                                                   "type": "boolean"
                                                 }
                                               },
@@ -26818,7 +26404,7 @@ expression: "&schema"
                                         ],
                                         "properties": {
                                           "on_graphql_error": {
-                                            "description": "Boolean set to true if the reponse body contains graphql error",
+                                            "description": "Boolean set to true if the response body contains graphql error",
                                             "type": "boolean"
                                           }
                                         },
@@ -26888,11 +26474,425 @@ expression: "&schema"
                                   "false"
                                 ]
                               }
-                            ],
-                            "nullable": true
+                            ]
                           }
                         },
-                        "additionalProperties": false
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "description": "A header from the request",
+                              "type": "object",
+                              "required": [
+                                "request_header"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "request_header": {
+                                  "description": "The name of the request header.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "The request method.",
+                              "type": "object",
+                              "required": [
+                                "request_method"
+                              ],
+                              "properties": {
+                                "request_method": {
+                                  "description": "The request method enabled or not",
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "A header from the response",
+                              "type": "object",
+                              "required": [
+                                "response_header"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "response_header": {
+                                  "description": "The name of the request header.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "A status from the response",
+                              "type": "object",
+                              "required": [
+                                "response_status"
+                              ],
+                              "properties": {
+                                "response_status": {
+                                  "description": "The http response status code.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The http status code.",
+                                      "type": "string",
+                                      "enum": [
+                                        "code"
+                                      ]
+                                    },
+                                    {
+                                      "description": "The http status reason.",
+                                      "type": "string",
+                                      "enum": [
+                                        "reason"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "The trace ID of the request.",
+                              "type": "object",
+                              "required": [
+                                "trace_id"
+                              ],
+                              "properties": {
+                                "trace_id": {
+                                  "description": "The format of the trace ID.",
+                                  "oneOf": [
+                                    {
+                                      "description": "Open Telemetry trace ID, a hex string.",
+                                      "type": "string",
+                                      "enum": [
+                                        "open_telemetry"
+                                      ]
+                                    },
+                                    {
+                                      "description": "Datadog trace ID, a u64.",
+                                      "type": "string",
+                                      "enum": [
+                                        "datadog"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "A value from context.",
+                              "type": "object",
+                              "required": [
+                                "response_context"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "response_context": {
+                                  "description": "The response context key.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "A value from baggage.",
+                              "type": "object",
+                              "required": [
+                                "baggage"
+                              ],
+                              "properties": {
+                                "baggage": {
+                                  "description": "The name of the baggage item.",
+                                  "type": "string"
+                                },
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "A value from an environment variable.",
+                              "type": "object",
+                              "required": [
+                                "env"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "env": {
+                                  "description": "The name of the environment variable",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "on_graphql_error"
+                              ],
+                              "properties": {
+                                "on_graphql_error": {
+                                  "description": "Boolean set to true if the response body contains graphql error",
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
                       }
                     }
                   },
@@ -26933,861 +26933,6 @@ expression: "&schema"
                       },
                       "additionalProperties": {
                         "type": "object",
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_operation_name"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "subgraph_operation_name": {
-                                "description": "The operation name from the subgraph query.",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw operation name.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  },
-                                  {
-                                    "description": "A hash of the operation name.",
-                                    "type": "string",
-                                    "enum": [
-                                      "hash"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_operation_kind"
-                            ],
-                            "properties": {
-                              "subgraph_operation_kind": {
-                                "description": "The kind of the subgraph operation (query|mutation|subscription).",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw operation kind.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_query"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "subgraph_query": {
-                                "description": "The graphql query to the subgraph.",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw query kind.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_query_variable"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "subgraph_query_variable": {
-                                "description": "The name of a subgraph query variable.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "Deprecated, use SubgraphResponseData and SubgraphResponseError instead",
-                            "type": "object",
-                            "required": [
-                              "subgraph_response_body"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "subgraph_response_body": {
-                                "description": "The subgraph response body json path.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_response_data"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "subgraph_response_data": {
-                                "description": "The subgraph response body json path.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_response_errors"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "subgraph_response_errors": {
-                                "description": "The subgraph response body json path.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_request_header"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "subgraph_request_header": {
-                                "description": "The name of a subgraph request header.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_response_header"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "subgraph_response_header": {
-                                "description": "The name of a subgraph response header.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "subgraph_response_status"
-                            ],
-                            "properties": {
-                              "subgraph_response_status": {
-                                "description": "The subgraph http response status code.",
-                                "oneOf": [
-                                  {
-                                    "description": "The http status code.",
-                                    "type": "string",
-                                    "enum": [
-                                      "code"
-                                    ]
-                                  },
-                                  {
-                                    "description": "The http status reason.",
-                                    "type": "string",
-                                    "enum": [
-                                      "reason"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "supergraph_operation_name"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "supergraph_operation_name": {
-                                "description": "The supergraph query operation name.",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw operation name.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  },
-                                  {
-                                    "description": "A hash of the operation name.",
-                                    "type": "string",
-                                    "enum": [
-                                      "hash"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "supergraph_operation_kind"
-                            ],
-                            "properties": {
-                              "supergraph_operation_kind": {
-                                "description": "The supergraph query operation kind (query|mutation|subscription).",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw operation kind.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "supergraph_query"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "supergraph_query": {
-                                "description": "The supergraph query to the subgraph.",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw query kind.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "supergraph_query_variable"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "supergraph_query_variable": {
-                                "description": "The supergraph query variable name.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "supergraph_request_header"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "supergraph_request_header": {
-                                "description": "The supergraph request header name.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "request_context"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "request_context": {
-                                "description": "The request context key.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "response_context"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "response_context": {
-                                "description": "The response context key.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "baggage"
-                            ],
-                            "properties": {
-                              "baggage": {
-                                "description": "The name of the baggage item.",
-                                "type": "string"
-                              },
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "env"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "env": {
-                                "description": "The name of the environment variable",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "static"
-                            ],
-                            "properties": {
-                              "static": {
-                                "description": "A static string value",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          }
-                        ],
                         "properties": {
                           "condition": {
                             "oneOf": [
@@ -29652,11 +28797,866 @@ expression: "&schema"
                                   "false"
                                 ]
                               }
-                            ],
-                            "nullable": true
+                            ]
                           }
                         },
-                        "additionalProperties": false
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_operation_name"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "subgraph_operation_name": {
+                                  "description": "The operation name from the subgraph query.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw operation name.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    },
+                                    {
+                                      "description": "A hash of the operation name.",
+                                      "type": "string",
+                                      "enum": [
+                                        "hash"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_operation_kind"
+                              ],
+                              "properties": {
+                                "subgraph_operation_kind": {
+                                  "description": "The kind of the subgraph operation (query|mutation|subscription).",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw operation kind.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_query"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "subgraph_query": {
+                                  "description": "The graphql query to the subgraph.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw query kind.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_query_variable"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "subgraph_query_variable": {
+                                  "description": "The name of a subgraph query variable.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Deprecated, use SubgraphResponseData and SubgraphResponseError instead",
+                              "type": "object",
+                              "required": [
+                                "subgraph_response_body"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "subgraph_response_body": {
+                                  "description": "The subgraph response body json path.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_response_data"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "subgraph_response_data": {
+                                  "description": "The subgraph response body json path.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_response_errors"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "subgraph_response_errors": {
+                                  "description": "The subgraph response body json path.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_request_header"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "subgraph_request_header": {
+                                  "description": "The name of a subgraph request header.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_response_header"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "subgraph_response_header": {
+                                  "description": "The name of a subgraph response header.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "subgraph_response_status"
+                              ],
+                              "properties": {
+                                "subgraph_response_status": {
+                                  "description": "The subgraph http response status code.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The http status code.",
+                                      "type": "string",
+                                      "enum": [
+                                        "code"
+                                      ]
+                                    },
+                                    {
+                                      "description": "The http status reason.",
+                                      "type": "string",
+                                      "enum": [
+                                        "reason"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "supergraph_operation_name"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "supergraph_operation_name": {
+                                  "description": "The supergraph query operation name.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw operation name.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    },
+                                    {
+                                      "description": "A hash of the operation name.",
+                                      "type": "string",
+                                      "enum": [
+                                        "hash"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "supergraph_operation_kind"
+                              ],
+                              "properties": {
+                                "supergraph_operation_kind": {
+                                  "description": "The supergraph query operation kind (query|mutation|subscription).",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw operation kind.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "supergraph_query"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "supergraph_query": {
+                                  "description": "The supergraph query to the subgraph.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw query kind.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "supergraph_query_variable"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "supergraph_query_variable": {
+                                  "description": "The supergraph query variable name.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "supergraph_request_header"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "supergraph_request_header": {
+                                  "description": "The supergraph request header name.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "request_context"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "request_context": {
+                                  "description": "The request context key.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "response_context"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "response_context": {
+                                  "description": "The response context key.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "baggage"
+                              ],
+                              "properties": {
+                                "baggage": {
+                                  "description": "The name of the baggage item.",
+                                  "type": "string"
+                                },
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "env"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "env": {
+                                  "description": "The name of the environment variable",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
                       }
                     }
                   },
@@ -29691,475 +29691,6 @@ expression: "&schema"
                       },
                       "additionalProperties": {
                         "type": "object",
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "required": [
-                              "operation_name"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "operation_name": {
-                                "description": "The operation name from the query.",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw operation name.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  },
-                                  {
-                                    "description": "A hash of the operation name.",
-                                    "type": "string",
-                                    "enum": [
-                                      "hash"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "operation_kind"
-                            ],
-                            "properties": {
-                              "operation_kind": {
-                                "description": "The operation kind from the query (query|mutation|subscription).",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw operation kind.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "query"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "query": {
-                                "description": "The graphql query.",
-                                "oneOf": [
-                                  {
-                                    "description": "The raw query kind.",
-                                    "type": "string",
-                                    "enum": [
-                                      "string"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "query_variable"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "query_variable": {
-                                "description": "The name of a graphql query variable.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "request_header"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "request_header": {
-                                "description": "The name of the request header.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "response_header"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "response_header": {
-                                "description": "The name of the response header.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "description": "A status from the response",
-                            "type": "object",
-                            "required": [
-                              "response_status"
-                            ],
-                            "properties": {
-                              "response_status": {
-                                "description": "The http response status code.",
-                                "oneOf": [
-                                  {
-                                    "description": "The http status code.",
-                                    "type": "string",
-                                    "enum": [
-                                      "code"
-                                    ]
-                                  },
-                                  {
-                                    "description": "The http status reason.",
-                                    "type": "string",
-                                    "enum": [
-                                      "reason"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "request_context"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "request_context": {
-                                "description": "The request context key.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "response_context"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              },
-                              "response_context": {
-                                "description": "The response context key.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "baggage"
-                            ],
-                            "properties": {
-                              "baggage": {
-                                "description": "The name of the baggage item.",
-                                "type": "string"
-                              },
-                              "default": {
-                                "description": "Optional default value.",
-                                "anyOf": [
-                                  {
-                                    "description": "bool values",
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "description": "i64 values",
-                                    "type": "integer",
-                                    "format": "int64"
-                                  },
-                                  {
-                                    "description": "f64 values",
-                                    "type": "number",
-                                    "format": "double"
-                                  },
-                                  {
-                                    "description": "String values",
-                                    "type": "string"
-                                  },
-                                  {
-                                    "description": "Array of homogeneous values",
-                                    "anyOf": [
-                                      {
-                                        "description": "Array of bools",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of integers",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "integer",
-                                          "format": "int64"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of floats",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      {
-                                        "description": "Array of strings",
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    ]
-                                  }
-                                ],
-                                "nullable": true
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "env"
-                            ],
-                            "properties": {
-                              "default": {
-                                "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "env": {
-                                "description": "The name of the environment variable",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "static"
-                            ],
-                            "properties": {
-                              "static": {
-                                "description": "A static string value",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          }
-                        ],
                         "properties": {
                           "condition": {
                             "oneOf": [
@@ -31252,11 +30783,480 @@ expression: "&schema"
                                   "false"
                                 ]
                               }
-                            ],
-                            "nullable": true
+                            ]
                           }
                         },
-                        "additionalProperties": false
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "operation_name"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "operation_name": {
+                                  "description": "The operation name from the query.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw operation name.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    },
+                                    {
+                                      "description": "A hash of the operation name.",
+                                      "type": "string",
+                                      "enum": [
+                                        "hash"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "operation_kind"
+                              ],
+                              "properties": {
+                                "operation_kind": {
+                                  "description": "The operation kind from the query (query|mutation|subscription).",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw operation kind.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "query"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "query": {
+                                  "description": "The graphql query.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The raw query kind.",
+                                      "type": "string",
+                                      "enum": [
+                                        "string"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "query_variable"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "query_variable": {
+                                  "description": "The name of a graphql query variable.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "request_header"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "request_header": {
+                                  "description": "The name of the request header.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "response_header"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "response_header": {
+                                  "description": "The name of the response header.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "A status from the response",
+                              "type": "object",
+                              "required": [
+                                "response_status"
+                              ],
+                              "properties": {
+                                "response_status": {
+                                  "description": "The http response status code.",
+                                  "oneOf": [
+                                    {
+                                      "description": "The http status code.",
+                                      "type": "string",
+                                      "enum": [
+                                        "code"
+                                      ]
+                                    },
+                                    {
+                                      "description": "The http status reason.",
+                                      "type": "string",
+                                      "enum": [
+                                        "reason"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "request_context"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "request_context": {
+                                  "description": "The request context key.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "response_context"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                },
+                                "response_context": {
+                                  "description": "The response context key.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "baggage"
+                              ],
+                              "properties": {
+                                "baggage": {
+                                  "description": "The name of the baggage item.",
+                                  "type": "string"
+                                },
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "anyOf": [
+                                    {
+                                      "description": "bool values",
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "description": "i64 values",
+                                      "type": "integer",
+                                      "format": "int64"
+                                    },
+                                    {
+                                      "description": "f64 values",
+                                      "type": "number",
+                                      "format": "double"
+                                    },
+                                    {
+                                      "description": "String values",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "description": "Array of homogeneous values",
+                                      "anyOf": [
+                                        {
+                                          "description": "Array of bools",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of integers",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "integer",
+                                            "format": "int64"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of floats",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "number",
+                                            "format": "double"
+                                          }
+                                        },
+                                        {
+                                          "description": "Array of strings",
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "env"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "description": "Optional default value.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "env": {
+                                  "description": "The name of the environment variable",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "static"
+                              ],
+                              "properties": {
+                                "static": {
+                                  "description": "A static string value",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
                       }
                     }
                   },
@@ -32208,7 +32208,7 @@ expression: "&schema"
                         ],
                         "properties": {
                           "on_graphql_error": {
-                            "description": "Boolean set to true if the reponse body contains graphql error",
+                            "description": "Boolean set to true if the response body contains graphql error",
                             "type": "boolean"
                           }
                         },
@@ -32639,7 +32639,7 @@ expression: "&schema"
                   ],
                   "properties": {
                     "on_graphql_error": {
-                      "description": "Boolean set to true if the reponse body contains graphql error",
+                      "description": "Boolean set to true if the response body contains graphql error",
                       "type": "boolean"
                     }
                   },
