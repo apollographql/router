@@ -60,7 +60,7 @@ reqwest = { version = "0.11.24", default-features = false, features = [
 ] }
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.19+v2.7.3"
+router-bridge = "=0.5.20+v2.7.4"
 
 schemars = { version = "0.8.16", features = ["url"] }
 serde = { version = "1.0.197", features = ["derive", "rc"] }
