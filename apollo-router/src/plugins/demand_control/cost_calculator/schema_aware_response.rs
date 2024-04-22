@@ -137,13 +137,13 @@ mod tests {
     use bytes::Bytes;
 
     use crate::graphql::Response;
-    use crate::plugins::demand_control::schema_aware_response::SchemaAwareResponse;
+    use crate::plugins::demand_control::cost_calculator::schema_aware_response::SchemaAwareResponse;
 
     #[test]
     fn response_zipper() {
-        let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
-        let query_str = include_str!("./fixtures/federated_ships_required_query.graphql");
-        let response_bytes = include_bytes!("./fixtures/federated_ships_required_response.json");
+        let schema_str = include_str!("fixtures/federated_ships_schema.graphql");
+        let query_str = include_str!("fixtures/federated_ships_required_query.graphql");
+        let response_bytes = include_bytes!("fixtures/federated_ships_required_response.json");
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
@@ -155,9 +155,9 @@ mod tests {
 
     #[test]
     fn fragment_response_zipper() {
-        let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
-        let query_str = include_str!("./fixtures/federated_ships_fragment_query.graphql");
-        let response_bytes = include_bytes!("./fixtures/federated_ships_fragment_response.json");
+        let schema_str = include_str!("fixtures/federated_ships_schema.graphql");
+        let query_str = include_str!("fixtures/federated_ships_fragment_query.graphql");
+        let response_bytes = include_bytes!("fixtures/federated_ships_fragment_response.json");
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
@@ -169,9 +169,9 @@ mod tests {
 
     #[test]
     fn inline_fragment_zipper() {
-        let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
-        let query_str = include_str!("./fixtures/federated_ships_inline_fragment_query.graphql");
-        let response_bytes = include_bytes!("./fixtures/federated_ships_fragment_response.json");
+        let schema_str = include_str!("fixtures/federated_ships_schema.graphql");
+        let query_str = include_str!("fixtures/federated_ships_inline_fragment_query.graphql");
+        let response_bytes = include_bytes!("fixtures/federated_ships_fragment_response.json");
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
@@ -183,9 +183,9 @@ mod tests {
 
     #[test]
     fn named_operation_zipper() {
-        let schema_str = include_str!("./fixtures/federated_ships_schema.graphql");
-        let query_str = include_str!("./fixtures/federated_ships_named_query.graphql");
-        let response_bytes = include_bytes!("./fixtures/federated_ships_named_response.json");
+        let schema_str = include_str!("fixtures/federated_ships_schema.graphql");
+        let query_str = include_str!("fixtures/federated_ships_named_query.graphql");
+        let response_bytes = include_bytes!("fixtures/federated_ships_named_response.json");
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();

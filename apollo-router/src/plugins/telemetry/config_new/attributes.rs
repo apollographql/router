@@ -31,6 +31,8 @@ use opentelemetry_semantic_conventions::trace::URL_QUERY;
 use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
 use parking_lot::Mutex;
+use schemars::gen::SchemaGenerator;
+use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[cfg(test)]

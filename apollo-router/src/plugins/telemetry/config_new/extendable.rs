@@ -57,7 +57,7 @@ impl Extendable<(), ()> {
     }
 }
 
-/// Custom Deserializer for attributes that will deserializse into a custom field if possible, but otherwise into one of the pre-defined attributes.
+/// Custom Deserializer for attributes that will deserialize into a custom field if possible, but otherwise into one of the pre-defined attributes.
 impl<'de, Att, Ext> Deserialize<'de> for Extendable<Att, Ext>
 where
     Att: Default + Deserialize<'de> + Debug + Sized,
