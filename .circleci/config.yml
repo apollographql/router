@@ -545,7 +545,7 @@ jobs:
       - checkout
       - setup_environment:
           platform: << parameters.platform >>
-      #- xtask_check_compliance
+      - xtask_check_compliance
 
   test:
     environment:
