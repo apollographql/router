@@ -339,7 +339,9 @@ commands:
           name: Install cargo deny, about, edit
           command: |
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked cargo-deny cargo-about cargo-edit
+              cargo install --locked cargo-deny --version 0.13.9
+              cargo install --locked cargo-about --version 0.5.5
+              cargo install --locked cargo-edit --version 0.11.9
             fi
 
   fetch_dependencies:
