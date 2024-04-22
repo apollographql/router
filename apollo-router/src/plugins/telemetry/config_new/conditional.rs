@@ -1,6 +1,7 @@
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::mem;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -20,6 +21,25 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+
+/// The state of the conditional.
+#[derive(Debug, Default)]
+pub(crate) enum State<T> {
+    /// The conditional has not been evaluated yet or no value has been set via selector.
+    #[default]
+    Pending,
+    /// The conditional has been evaluated and the value has been obtained.
+    Value(T),
+    /// The conditional has been evaluated and the value has been returned, no further processing should take place.
+    Returned,
+}
+
+impl<T> From<T> for State<T> {
+    fn from(value: T) -> Self {
+        State::Value(value)
+    }
+}
+
 /// Conditional is a stateful structure that may be called multiple times during the course of a request/response cycle.
 /// As each callback is called the underlying condition is updated. If the condition can eventually be evaluated then it returns
 /// Some(true|false) otherwise it returns None.
@@ -27,7 +47,7 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 pub(crate) struct Conditional<Att> {
     pub(crate) selector: Att,
     pub(crate) condition: Option<Arc<Mutex<Condition<Att>>>>,
-    pub(crate) value: Arc<Mutex<Option<opentelemetry::Value>>>,
+    pub(crate) value: Arc<Mutex<State<opentelemetry::Value>>>,
 }
 
 impl<T> JsonSchema for Conditional<T>
@@ -73,34 +93,70 @@ where
     type Response = Response;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
-        *self.value.lock() = self.selector.on_request(request);
         match &self.condition {
-            Some(condition) => {
-                if condition.lock().evaluate_request(request) == Some(true) {
-                    self.value.lock().clone()
-                } else {
+            Some(condition) => match condition.lock().evaluate_request(request) {
+                None => {
+                    if let Some(value) = self.selector.on_request(request) {
+                        *self.value.lock() = value.into();
+                    }
                     None
                 }
+                Some(true) => {
+                    // The condition evaluated to true, so we can just return the value but may need to try again on the response.
+                    match self.selector.on_request(request) {
+                        None => None,
+                        Some(value) => {
+                            *self.value.lock() = State::Returned;
+                            Some(value)
+                        }
+                    }
+                }
+                Some(false) => {
+                    // The condition has been evaluated to false, so we can return None. it will never return true.
+                    *self.value.lock() = State::Returned;
+                    None
+                }
+            },
+            None => {
+                // There is no condition to evaluate, so we can just return the value.
+                match self.selector.on_request(request) {
+                    None => None,
+                    Some(value) => {
+                        *self.value.lock() = State::Returned;
+                        Some(value)
+                    }
+                }
             }
-            None => self.selector.on_request(request),
         }
     }
 
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
-        let mut value = self.value.lock().take();
-        if value.is_none() {
-            value = self.selector.on_response(response);
-        }
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
 
-        match &self.condition {
-            Some(condition) => {
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
                 if condition.lock().evaluate_response(response) {
-                    value
+                    *self.value.lock() = State::Returned;
+                    Some(value)
                 } else {
                     None
                 }
             }
-            None => self.selector.on_response(response),
+            (State::Pending, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the response if the condition was evaluated to true.
+                if condition.lock().evaluate_response(response) {
+                    self.selector.on_response(response)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector.on_response(response)
+            }
+            _ => None,
         }
     }
 }
@@ -202,7 +258,6 @@ mod test {
                 .build()
                 .expect("req"),
         );
-        //TODO, none always get returned.
         assert_eq!(
             result.expect("expected result"),
             Value::String("there was an error".into())
