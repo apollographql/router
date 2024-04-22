@@ -11,4 +11,5 @@ mod redis;
 mod rhai;
 mod subscription;
 mod telemetry;
+mod type_conditions;
 mod validation;

@@ -1,5 +1,0 @@
----
-source: apollo-router/tests/integration/redis.rs
-expression: s.unwrap()
----
-"{ topProducts { name name2:name } }"
