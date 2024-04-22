@@ -4,6 +4,154 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.45.0] - 2024-04-22
+
+## 🚀 Features
+
+### Query validation process with Rust ([PR #4551](https://github.com/apollographql/router/pull/4551))
+
+The router has been updated with a new Rust-based query validation process using `apollo-compiler` from the `apollo-rs` project. It replaces the Javascript implementation in the query planner. It improves query planner performance by moving the validation out of the query planner and into the router service, which frees up space in the query planner cache. 
+
+Because validation now happens earlier in the router service and not in the query planner, error paths in the query planner are no longer encountered. Some messages in error responses returned from invalid queries should now be more clear.
+
+We've tested the new validation process by running it for months in production, concurrently with the JavaScript implementation, and have now completely transitioned to the Rust-based implementation.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4551
+
+### Add support for SHA256 hashing in Rhai ([Issue #4939](https://github.com/apollographql/router/issues/4939))
+
+The router supports a new `sha256` module to create SHA256 hashes in Rhai scripts. The module supports the `sha256::digest` function.
+
+An example script that uses the module:
+
+```rs
+fn supergraph_service(service){
+    service.map_request(|request|{
+        log_info("hello world");
+        let sha = sha256::digest("hello world");
+        log_info(sha);
+    });
+}
+```
+
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4940
+
+### Subgraph support for query batching ([Issue #2002](https://github.com/apollographql/router/issues/2002))
+
+As an extension to the ongoing work to support [client-side query batching in the router](https://github.com/apollographql/router/issues/126), the router now supports batching of subgraph requests. Each subgraph batch request retains the same external format as a client batch request. This optimization reduces the number of round-trip requests from the router to subgraphs.
+
+Also, batching in the router is now a generally available feature: the `experimental_batching` router configuration option has been deprecated and is replaced by the `batching` option.
+
+Previously, the router preserved the concept of a batch until a `RouterRequest` finished processing. From that point, the router converted each batch request item into a separate `SupergraphRequest`, and the router planned and executed those requests concurrently within the router, then reassembled them into a batch of `RouterResponse` to return to the client. Now with the implementation in this release, the concept of a batch is extended so that batches are issued to configured subgraphs (all or named). Each batch request item is planned and executed separately, but the queries issued to subgraphs are optimally assembled into batches which observe the query constraints of the various batch items.
+
+To configure subgraph batching, you can enable `batching.subgraph.all` for all subgraphs. You can also enable batching per subgraph with `batching.subgraph.subgraphs.*`. For example:
+
+```yaml
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Enable batching on all subgraphs
+    all:
+      enabled: true
+```
+
+```yaml
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Disable batching on all subgraphs
+    all:
+      enabled: false
+    # Configure (override) batching support per subgraph
+    subgraphs:
+      subgraph_1:
+        enabled: true
+      subgraph_2:
+        enabled: true
+```
+
+Note: `all` can be overridden by `subgraphs`. This applies in general for all router subgraph configuration options.
+
+To learn more, see [query batching in Apollo docs](https://www.apollographql.com/docs/router/executing-operations/query-batching/).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4661
+
+## 🐛 Fixes
+
+### Update `rustls` to v0.21.11, the latest v0.21.x patch ([PR #4993](https://github.com/apollographql/router/pull/4993))
+
+While the Router **does** use `rustls`, [RUSTSEC-2024-0336] (also known as [CVE-2024-32650] and [GHSA-6g7w-8wpp-frhj]) **DOES NOT affect the Router** since it uses `tokio-rustls` which is specifically called out in the advisory as **unaffected**.
+
+Despite the lack of impact, we update `rustls` version v0.21.10 to [rustls v0.21.11] which includes a patch.
+
+[RUSTSEC-2024-0336]: https://rustsec.org/advisories/RUSTSEC-2024-0336.html
+[CVE-2024-32650]: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-32650
+[GHSA-6g7w-8wpp-frhj]: https://github.com/advisories/GHSA-6g7w-8wpp-frhj
+[rustls v0.21.11]: https://github.com/rustls/rustls/releases/tag/v%2F0.21.11
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/4993
+
+### Performance improvements for Apollo usage report field generation ([PR 4951](https://github.com/apollographql/router/pull/4951))
+
+The performance of generating Apollo usage report signatures, stats keys, and referenced fields has been improved.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4951
+
+### Apply alias rewrites to arrays ([PR #4958](https://github.com/apollographql/router/pull/4958))
+
+The automatic aliasing rules introduced in [#2489](https://github.com/apollographql/router/pull/2489) to support `@interfaceObject` are now properly applied to lists.
+
+By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/4958
+
+### Fix compatibility of coprocessor metric creation ([PR #4930](https://github.com/apollographql/router/pull/4930))
+
+Previously, the router's execution stage created coprocessor metrics differently than other stages. This produced metrics with slight incompatibilities.
+
+This release fixes the issue by creating coprocessor metrics in the same way as all other stages.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4930
+
+## 📚 Documentation
+
+### Documentation updates for caching and metrics instruments ([PR #4872](https://github.com/apollographql/router/pull/4872))
+
+Router documentation has been updated for a couple topics:
+- [Performance improvements vs. stability concerns](https://www.apollographql.com/docs/router/configuration/in-memory-caching#performance-improvements-vs-stability) when using the router's operation cache
+- [Overview of standard and custom metrics instruments](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/instruments)
+
+By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/4872
+
+## 🧪 Experimental
+
+### Experimental: Introduce a pool of query planners ([PR #4897](https://github.com/apollographql/router/pull/4897))
+
+The router supports a new experimental feature: a pool of query planners to parallelize query planning.
+
+You can configure query planner pools with the `supergraph.query_planning.experimental_parallelism` option:
+
+```yaml
+supergraph:
+  query_planning:
+    experimental_parallelism: auto # number of available CPUs
+```
+
+Its value is the number of query planners that run in parallel, and its default value is `1`. You can set it to the special value `auto` to automatically set it equal to the number of available CPUs.
+
+You can discuss and comment about query planner pools in this [GitHub discussion](https://github.com/apollographql/router/discussions/4917).
+
+By [@xuorig](https://github.com/xuorig) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/4897
+
+### Experimental: Rust implementation of Apollo usage report field generation ([PR 4796](https://github.com/apollographql/router/pull/4796))
+
+The router supports a new experimental Rust implementation for generating the stats report keys and referenced fields that are sent in Apollo usage reports. This implementation is one part of the effort to replace the router-bridge with native Rust code.
+
+The feature is configured with the `experimental_apollo_metrics_generation_mode` setting. We recommend that you use its default value, so we can verify that it generates the same payloads as the previous implementation.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4796
+
 # [1.44.0] - 2024-04-12
 
 ## 🚀 Features
@@ -132,7 +280,7 @@ Additionally, the router now verifies that a TTL is configured for all subgraphs
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4882
 
-### Helm: include all standard labels in pod spec but complete sentence that stands on its own ([PR #4862](https://github.com/apollographql/router/pull/4862))
+### Helm: include all standard labels in pod spec ([PR #4862](https://github.com/apollographql/router/pull/4862))
 
 The templates for the router's Helm chart have been updated so that the  `helm.sh/chart`, `app.kubernetes.io/version`, and `app.kubernetes.io/managed-by` labels are now included on pods, as they already were for all other resources created by the Helm chart.
 
@@ -140,7 +288,7 @@ The specific change to the template is that the pod spec template now uses the `
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4862
 
-### Persisted queries return 4xx errors ([PR #4887](https://github.com/apollographql/router/pull/4887)
+### Persisted queries return 4xx errors ([PR #4887](https://github.com/apollographql/router/pull/4887))
 
 Previously, sending an invalid persisted query request could return a 200 status code to the client when they should have returned errors. These requests now return errors as 4xx status codes:
 

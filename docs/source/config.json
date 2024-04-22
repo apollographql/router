@@ -55,7 +55,7 @@
           [
             "enterprise"
           ]
-        ],      
+        ],
         "Subgraph Authentication": "/configuration/authn-subgraph",
         "Operation limits": [
           "/configuration/operation-limits",
@@ -77,10 +77,10 @@
       "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests",
       "Query batching": [
-          "/executing-operations/query-batching",
-          [
-            "experimental"
-          ]
+        "/executing-operations/query-batching",
+        [
+          "enterprise"
+        ]
       ],
       "GraphQL Subscriptions": {
         "Subscriptions setup": [

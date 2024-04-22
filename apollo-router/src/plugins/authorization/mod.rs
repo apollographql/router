@@ -39,10 +39,10 @@ use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::register_plugin;
 use crate::services::execution;
+use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -175,14 +175,11 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn query_analysis(
-        query: &str,
+        doc: &ParsedDocumentInner,
         operation_name: Option<&str>,
         schema: &Schema,
-        configuration: &Configuration,
         context: &Context,
-    ) -> Result<(), SpecError> {
-        let doc = Query::parse_document(query, operation_name, schema, configuration)?;
-
+    ) {
         let CacheKeyMetadata {
             is_authenticated,
             scopes,
@@ -206,8 +203,6 @@ impl AuthorizationPlugin {
                 policies.into_iter().map(|policy| (policy, None)).collect();
             context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
         }
-
-        Ok(())
     }
 
     pub(crate) fn generate_cache_metadata(
@@ -442,7 +437,7 @@ impl AuthorizationPlugin {
             AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map, dry_run)
         {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_authentication {
                 if is_authenticated {
@@ -481,7 +476,7 @@ impl AuthorizationPlugin {
             dry_run,
         ) {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
             if visitor.query_requires_scopes {
                 tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
@@ -516,7 +511,7 @@ impl AuthorizationPlugin {
             dry_run,
         ) {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_policies {
                 tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",

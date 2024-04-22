@@ -24,10 +24,10 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
-use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
@@ -41,7 +41,7 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlanResult;
@@ -51,7 +51,6 @@ use crate::services::execution::QueryPlan;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
@@ -67,7 +66,6 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -82,7 +80,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
     execution_service_factory: ExecutionServiceFactory,
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+    query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
     schema: Arc<Schema>,
     notify: Notify<String, graphql::Response>,
 }
@@ -91,7 +89,7 @@ pub(crate) struct SupergraphService {
 impl SupergraphService {
     #[builder]
     pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+        query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
@@ -156,7 +154,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 }
 
 async fn service_call(
-    planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    planning: CachingQueryPlanner<BridgeQueryPlannerPool>,
     execution_service_factory: ExecutionServiceFactory,
     schema: Arc<Schema>,
     req: SupergraphRequest,
@@ -227,7 +225,11 @@ async fn service_call(
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
 
-            if let Some(batching) = context.extensions().lock().get::<Batching>() {
+            if let Some(batching) = {
+                let lock = context.extensions().lock();
+                let batching = lock.get::<Batching>();
+                batching.cloned()
+            } {
                 if batching.enabled && (is_deferred || is_subscription) {
                     let message = if is_deferred {
                         "BATCHING_DEFER_UNSUPPORTED"
@@ -247,6 +249,16 @@ async fn service_call(
                         );
                     *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                     return Ok(response);
+                }
+                // Now perform query batch analysis
+                let batching = context.extensions().lock().get::<BatchQuery>().cloned();
+                if let Some(batch_query) = batching {
+                    let query_hashes = plan.query_hashes(operation_name.as_deref(), &variables)?;
+                    batch_query
+                        .set_query_hashes(query_hashes)
+                        .await
+                        .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
+                    tracing::debug!("batch registered: {}", batch_query);
                 }
             }
 
@@ -586,7 +598,7 @@ async fn dispatch_event(
 }
 
 async fn plan_query(
-    mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    mut planning: CachingQueryPlanner<BridgeQueryPlannerPool>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
@@ -599,32 +611,38 @@ async fn plan_query(
     // tests will pass.
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
-    if !context.extensions().lock().contains_key::<ParsedDocument>() {
-        let doc = Query::parse_document(
+    if !{
+        let lock = context.extensions().lock();
+        lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
+    } {
+        let doc = crate::spec::Query::parse_document(
             &query_str,
             operation_name.as_deref(),
             &schema,
             &Configuration::default(),
         )
-        .map_err(QueryPlannerError::SpecError)?;
-        Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
-        Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().lock().insert::<ParsedDocument>(doc);
+        .map_err(crate::error::QueryPlannerError::from)?;
+        context
+            .extensions()
+            .lock()
+            .insert::<crate::services::layers::query_analysis::ParsedDocument>(doc);
     }
 
-    planning
+    let qpr = planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context)
+                .context(context.clone())
                 .build(),
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
             "otel.kind" = "INTERNAL"
         ))
-        .await
+        .await?;
+
+    Ok(qpr)
 }
 
 fn clone_supergraph_request(
@@ -661,11 +679,11 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
-    planner: BridgeQueryPlanner,
+    planner: BridgeQueryPlannerPool,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(planner: BridgeQueryPlanner) -> Self {
+    pub(crate) fn new(planner: BridgeQueryPlannerPool) -> Self {
         Self {
             plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
@@ -752,7 +770,7 @@ impl PluggableSupergraphServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+    query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
     config: Arc<Configuration>,
@@ -843,8 +861,8 @@ impl SupergraphCreator {
         self.query_planner_service.previous_cache()
     }
 
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.query_planner_service.planner()
+    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.query_planner_service.planners()
     }
 
     pub(crate) async fn warm_up_query_planner(
