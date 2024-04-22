@@ -7,7 +7,8 @@ use opentelemetry::trace::TraceContextExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 
 /// Trace ID
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -59,6 +60,7 @@ mod test {
     use tracing_subscriber::Registry;
 
     use super::TraceId;
+    use crate::plugins::telemetry::otel;
 
     // If we try to run more than one test concurrently which relies on the existence of a pipeline,
     // then the tests will fail due to manipulation of global state in the opentelemetry crates.
@@ -101,7 +103,7 @@ mod test {
             .build();
         let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
 
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let telemetry = otel::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);
@@ -125,7 +127,7 @@ mod test {
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
         let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let telemetry = otel::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);
@@ -150,7 +152,7 @@ mod test {
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
         let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let telemetry = otel::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);
