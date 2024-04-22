@@ -328,9 +328,11 @@ impl InnerCacheService {
 
                         update_cache_control(&response.context, &cache_control);
 
-                        // we did not know in advance that this was a query with a private scope, so we update the cache key
-                        if !is_known_private && cache_control.private() {
-                            self.private_queries.write().await.insert(query.to_string());
+                        if cache_control.private() {
+                            // we did not know in advance that this was a query with a private scope, so we update the cache key
+                            if !is_known_private {
+                                self.private_queries.write().await.insert(query.to_string());
+                            }
 
                             if let Some(s) = private_id.as_ref() {
                                 root_cache_key = format!("{root_cache_key}:{s}");
@@ -912,44 +914,42 @@ async fn insert_entities_in_result(
                             reason: "invalid number of entities".to_string(),
                         })?;
 
-                if cache_control.should_store() {
-                    *inserted_types.entry(typename).or_default() += 1;
+                *inserted_types.entry(typename).or_default() += 1;
 
-                    if let Some(ref id) = update_key_private {
-                        key = format!("{key}:{id}");
+                if let Some(ref id) = update_key_private {
+                    key = format!("{key}:{id}");
+                }
+
+                let mut has_errors = false;
+                for error in errors.iter().filter(|e| {
+                    e.path
+                        .as_ref()
+                        .map(|path| {
+                            path.starts_with(&Path(vec![
+                                PathElement::Key(ENTITIES.to_string()),
+                                PathElement::Index(entity_idx),
+                            ]))
+                        })
+                        .unwrap_or(false)
+                }) {
+                    // update the entity index, because it does not match with the original one
+                    let mut e = error.clone();
+                    if let Some(path) = e.path.as_mut() {
+                        path.0[1] = PathElement::Index(new_entity_idx);
                     }
 
-                    let mut has_errors = false;
-                    for error in errors.iter().filter(|e| {
-                        e.path
-                            .as_ref()
-                            .map(|path| {
-                                path.starts_with(&Path(vec![
-                                    PathElement::Key(ENTITIES.to_string()),
-                                    PathElement::Index(entity_idx),
-                                ]))
-                            })
-                            .unwrap_or(false)
-                    }) {
-                        // update the entity index, because it does not match with the original one
-                        let mut e = error.clone();
-                        if let Some(path) = e.path.as_mut() {
-                            path.0[1] = PathElement::Index(new_entity_idx);
-                        }
+                    new_errors.push(e);
+                    has_errors = true;
+                }
 
-                        new_errors.push(e);
-                        has_errors = true;
-                    }
-
-                    if !has_errors && should_cache_private {
-                        to_insert.push((
-                            RedisKey(key),
-                            RedisValue(CacheEntry {
-                                control: cache_control.clone(),
-                                data: value.clone(),
-                            }),
-                        ));
-                    }
+                if !has_errors && cache_control.should_store() && should_cache_private {
+                    to_insert.push((
+                        RedisKey(key),
+                        RedisValue(CacheEntry {
+                            control: cache_control.clone(),
+                            data: value.clone(),
+                        }),
+                    ));
                 }
 
                 new_entities.push(value);
