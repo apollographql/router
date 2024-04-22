@@ -1,3 +1,5 @@
+use std::any::type_name;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -83,13 +85,33 @@ pub(crate) enum DefaultAttributeRequirementLevel {
     Recommended,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
+#[derive(Deserialize, Clone, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConditionAttribute<T> {
-    #[serde(flatten)]
     pub(crate) selector: T,
-    #[schemars(with = "Option<Condition<T>>", default)]
     pub(crate) condition: Option<Arc<Mutex<Condition<T>>>>,
+}
+
+impl<T> JsonSchema for ConditionAttribute<T>
+where
+    T: JsonSchema,
+{
+    fn schema_name() -> String {
+        format!("conditional_attribute_{}", type_name::<T>())
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        let mut selector = gen.subschema_for::<HashMap<String, T>>();
+        if let Schema::Object(schema) = &mut selector {
+            if let Some(object) = &mut schema.object {
+                object
+                    .properties
+                    .insert("condition".to_string(), gen.subschema_for::<Condition<T>>());
+            }
+        }
+
+        selector
+    }
 }
 
 impl<T> DefaultForLevel for ConditionAttribute<T>
