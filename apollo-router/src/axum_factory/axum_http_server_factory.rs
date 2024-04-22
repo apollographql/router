@@ -656,7 +656,6 @@ async fn handle_graphql(
     let dur = context.busy_time();
     let processing_seconds = dur.as_secs_f64();
 
-    tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
     f64_histogram!(
         "apollo.router.processing.time",
         "Time spent by the router actually working on the request, not waiting for its network calls or other queries being processed",
