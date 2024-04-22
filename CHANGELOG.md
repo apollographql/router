@@ -12,7 +12,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 The router has been updated with a new Rust-based query validation process using `apollo-compiler` from the `apollo-rs` project. It replaces the Javascript implementation in the query planner. It improves query planner performance by moving the validation out of the query planner and into the router service, which frees up space in the query planner cache. 
 
-Because validation now happens earlier in the router service and not in the query planner, error paths in the query planner are no longer encountered. The new error messages should be clearer.
+Because validation now happens earlier in the router service and not in the query planner, error paths in the query planner are no longer encountered. Some messages in error responses returned from invalid queries should now be more clear.
 
 We've tested the new validation process by running it for months in production, concurrently with the JavaScript implementation, and have now completely transitioned to the Rust-based implementation.
 
@@ -81,7 +81,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
-### Update `rustls` to v0.21.11 to latest v0.21.x patch ([PR #4993](https://github.com/apollographql/router/pull/4993))
+### Update `rustls` to v0.21.11, the latest v0.21.x patch ([PR #4993](https://github.com/apollographql/router/pull/4993))
 
 While the Router **does** use `rustls`, [RUSTSEC-2024-0336] (also known as [CVE-2024-32650] and [GHSA-6g7w-8wpp-frhj]) **DOES NOT affect the Router** since it uses `tokio-rustls` which is specifically called out in the advisory as **unaffected**.
 
@@ -100,7 +100,7 @@ The performance of generating Apollo usage report signatures, stats keys, and re
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4951
 
-### Apply alias rewrites to arrays ([PR #TODO](https://github.com/apollographql/router/pull/4958))
+### Apply alias rewrites to arrays ([PR #4958](https://github.com/apollographql/router/pull/4958))
 
 The automatic aliasing rules introduced in [#2489](https://github.com/apollographql/router/pull/2489) to support `@interfaceObject` are now properly applied to lists.
 
