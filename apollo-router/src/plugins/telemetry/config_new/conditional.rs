@@ -13,12 +13,12 @@ use std::sync::Arc;
 
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ConditionAttribute<T> {
+pub(crate) struct Conditional<T> {
     pub(crate) selector: T,
     pub(crate) condition: Option<Arc<Mutex<Condition<T>>>>,
 }
 
-impl<T> JsonSchema for ConditionAttribute<T>
+impl<T> JsonSchema for Conditional<T>
 where
     T: JsonSchema,
 {
@@ -40,7 +40,7 @@ where
     }
 }
 
-impl<T> DefaultForLevel for ConditionAttribute<T>
+impl<T> DefaultForLevel for Conditional<T>
 where
     T: DefaultForLevel,
 {
@@ -53,7 +53,7 @@ where
     }
 }
 
-impl<T, Request, Response> Selector for ConditionAttribute<T>
+impl<T, Request, Response> Selector for Conditional<T>
 where
     T: Selector<Request = Request, Response = Response>,
 {
