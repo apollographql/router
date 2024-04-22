@@ -1015,6 +1015,72 @@ impl NormalizedFragmentSpreadSelection {
     pub(crate) fn has_defer(&self) -> bool {
         self.spread.data.directives.has("defer") || self.selection_set.has_defer()
     }
+
+    /// Copies fragment spread selection and assigns it a new unique selection ID.
+    pub(crate) fn with_unique_id(&self) -> Self {
+        let mut data = self.spread.data().clone();
+        data.selection_id = SelectionId::new();
+        Self {
+            spread: NormalizedFragmentSpread::new(data),
+            selection_set: self.selection_set.clone(),
+        }
+    }
+
+    /// Normalize this fragment spread into a "normalized" spread representation with following
+    /// modifications
+    /// - Stores the schema (may be useful for directives).
+    /// - Encloses list of directives in `Arc`s to facilitate cheaper cloning.
+    /// - Stores unique selection ID (used for deferred fragments)
+    pub(crate) fn from_fragment_spread(
+        fragment_spread: &FragmentSpread,
+        fragment: &Node<NormalizedFragment>,
+    ) -> Result<NormalizedFragmentSpreadSelection, FederationError> {
+        let spread_data =
+            NormalizedFragmentSpreadData::from_fragment(fragment, &fragment_spread.directives);
+        Ok(NormalizedFragmentSpreadSelection {
+            spread: NormalizedFragmentSpread::new(spread_data),
+            selection_set: fragment.selection_set.clone(),
+        })
+    }
+
+    pub(crate) fn normalize(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        named_fragments: &NamedFragments,
+        schema: &ValidFederationSchema,
+    ) -> Result<Option<NormalizedSelectionOrSet>, FederationError> {
+        let this_condition = self.spread.data().type_condition_position.clone();
+        // This method assumes by contract that `parent_type` runtimes intersects `self.inline_fragment.data().parent_type_position`'s,
+        // but `parent_type` runtimes may be a subset. So first check if the selection should not be discarded on that account (that
+        // is, we should not keep the selection if its condition runtimes don't intersect at all with those of
+        // `parent_type` as that would ultimately make an invalid selection set).
+        if (self.spread.data().schema != *schema || this_condition != *parent_type)
+            && !runtime_types_intersect(&this_condition, parent_type, schema)
+        {
+            return Ok(None);
+        }
+
+        // We must update the spread parent type if necessary since we're not going deeper,
+        // or we'll be fundamentally losing context.
+        if self.spread.data.schema != *schema {
+            return Err(FederationError::internal(
+                "Should not try to normalize using a type from another schema",
+            ));
+        }
+
+        if let Some(rebased_fragment_spread) = self.rebase_on(
+            parent_type,
+            named_fragments,
+            schema,
+            RebaseErrorHandlingOption::ThrowError,
+        )? {
+            Ok(Some(NormalizedSelectionOrSet::Selection(
+                rebased_fragment_spread,
+            )))
+        } else {
+            unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
+        }
+    }
 }
 
 impl NormalizedFragmentSpreadData {
@@ -2181,74 +2247,6 @@ impl NormalizedField {
     pub(crate) fn has_defer(&self) -> bool {
         // @defer cannot be on field at the moment
         false
-    }
-}
-
-impl NormalizedFragmentSpreadSelection {
-    /// Copies fragment spread selection and assigns it a new unique selection ID.
-    pub(crate) fn with_unique_id(&self) -> Self {
-        let mut data = self.spread.data().clone();
-        data.selection_id = SelectionId::new();
-        Self {
-            spread: NormalizedFragmentSpread::new(data),
-            selection_set: self.selection_set.clone(),
-        }
-    }
-
-    /// Normalize this fragment spread into a "normalized" spread representation with following
-    /// modifications
-    /// - Stores the schema (may be useful for directives).
-    /// - Encloses list of directives in `Arc`s to facilitate cheaper cloning.
-    /// - Stores unique selection ID (used for deferred fragments)
-    pub(crate) fn from_fragment_spread(
-        fragment_spread: &FragmentSpread,
-        fragment: &Node<NormalizedFragment>,
-    ) -> Result<NormalizedFragmentSpreadSelection, FederationError> {
-        let spread_data =
-            NormalizedFragmentSpreadData::from_fragment(fragment, &fragment_spread.directives);
-        Ok(NormalizedFragmentSpreadSelection {
-            spread: NormalizedFragmentSpread::new(spread_data),
-            selection_set: fragment.selection_set.clone(),
-        })
-    }
-
-    pub(crate) fn normalize(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-    ) -> Result<Option<NormalizedSelectionOrSet>, FederationError> {
-        let this_condition = self.spread.data().type_condition_position.clone();
-        // This method assumes by contract that `parent_type` runtimes intersects `self.inline_fragment.data().parent_type_position`'s,
-        // but `parent_type` runtimes may be a subset. So first check if the selection should not be discarded on that account (that
-        // is, we should not keep the selection if its condition runtimes don't intersect at all with those of
-        // `parent_type` as that would ultimately make an invalid selection set).
-        if (self.spread.data().schema != *schema || this_condition != *parent_type)
-            && !runtime_types_intersect(&this_condition, parent_type, schema)
-        {
-            return Ok(None);
-        }
-
-        // We must update the spread parent type if necessary since we're not going deeper,
-        // or we'll be fundamentally losing context.
-        if self.spread.data.schema != *schema {
-            return Err(FederationError::internal(
-                "Should not try to normalize using a type from another schema",
-            ));
-        }
-
-        if let Some(rebased_fragment_spread) = self.rebase_on(
-            parent_type,
-            named_fragments,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )? {
-            Ok(Some(NormalizedSelectionOrSet::Selection(
-                rebased_fragment_spread,
-            )))
-        } else {
-            unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
-        }
     }
 }
 
