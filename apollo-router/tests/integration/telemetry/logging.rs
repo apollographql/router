@@ -21,6 +21,7 @@ async fn test_json() -> Result<(), BoxError> {
     router.execute_query(&query).await;
     router.assert_log_contains("span_id").await;
     router.graceful_shutdown().await;
+
     Ok(())
 }
 
