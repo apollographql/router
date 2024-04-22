@@ -237,11 +237,109 @@ mod test {
     use http::StatusCode;
     use opentelemetry_api::Value;
 
+    use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::Selector;
 
+    fn on_response(conditional: Conditional<RouterSelector>) -> Option<Value> {
+        conditional.on_response(
+            &crate::services::router::Response::fake_builder()
+                .status_code(StatusCode::from_u16(201).unwrap())
+                .build()
+                .expect("resp"),
+        )
+    }
+
+    fn on_request(conditional: &Conditional<RouterSelector>) -> Option<Value> {
+        conditional.on_request(
+            &crate::services::router::Request::fake_builder()
+                .header("head", "val")
+                .build()
+                .expect("req"),
+        )
+    }
+
     #[test]
-    fn test_deserialization_ok_() {
+    fn test_value_from_response_condition_from_request() {
+        let config = r#"
+            response_status: code
+            condition:
+              any:
+              - eq:
+                - request_header: head
+                - "val"
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
+        assert_eq!(result.expect("expected result"), Value::I64(201));
+    }
+
+    #[test]
+    fn test_value_from_request_condition_from_response() {
+        let config = r#"
+            request_header: head
+            condition:
+              any:
+              - eq:
+                - response_status: code
+                - 201
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
+        assert_eq!(
+            result.expect("expected result"),
+            Value::String("val".into())
+        );
+    }
+
+    #[test]
+    fn test_value_from_request_condition_from_request() {
+        let config = r#"
+            request_header: head
+            condition:
+              any:
+              - eq:
+                - request_header: head
+                - val
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert_eq!(
+            result.expect("expected result"),
+            Value::String("val".into())
+        );
+
+        let result = on_response(conditional);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_value_from_response_condition_from_response() {
+        let config = r#"
+            response_status: code
+            condition:
+              any:
+              - eq:
+                - response_status: code
+                - 201
+        "#;
+
+        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
+        assert_eq!(result.expect("expected result"), Value::I64(201));
+    }
+
+    #[test]
+    fn test_deserialization() {
         let config = r#"
             static: "there was an error"
             condition:
