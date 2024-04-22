@@ -1,0 +1,21 @@
+---
+source: apollo-router/tests/integration/redis.rs
+expression: query_plan
+---
+{
+  "kind": "Fetch",
+  "serviceName": "products",
+  "variableUsages": [],
+  "operation": "{topProducts{name name2:name}}",
+  "operationName": null,
+  "operationKind": "query",
+  "id": null,
+  "inputRewrites": null,
+  "outputRewrites": null,
+  "schemaAwareHash": "af1ee357bc75cfbbcc6adda41089a56e7d1d52f6d44c049739dde2c259314f58",
+  "authorization": {
+    "is_authenticated": false,
+    "scopes": [],
+    "policies": []
+  }
+}
