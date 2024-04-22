@@ -27,6 +27,7 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 pub(crate) struct Conditional<Att> {
     pub(crate) selector: Att,
     pub(crate) condition: Option<Arc<Mutex<Condition<Att>>>>,
+    pub(crate) value: Arc<Mutex<Option<opentelemetry::Value>>>,
 }
 
 impl<T> JsonSchema for Conditional<T>
@@ -72,10 +73,11 @@ where
     type Response = Response;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
+        *self.value.lock() = self.selector.on_request(request);
         match &self.condition {
             Some(condition) => {
                 if condition.lock().evaluate_request(request) == Some(true) {
-                    self.selector.on_request(request)
+                    self.value.lock().clone()
                 } else {
                     None
                 }
@@ -85,10 +87,15 @@ where
     }
 
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
+        let mut value = self.value.lock().take();
+        if value.is_none() {
+            value = self.selector.on_response(response);
+        }
+
         match &self.condition {
             Some(condition) => {
                 if condition.lock().evaluate_response(response) {
-                    self.selector.on_response(response)
+                    value
                 } else {
                     None
                 }
@@ -147,6 +154,7 @@ where
                 Ok(Conditional {
                     selector: selector.expect("selector is required"),
                     condition: condition.map(|c| Arc::new(Mutex::new(c))),
+                    value: Arc::new(Default::default()),
                 })
             }
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -157,6 +165,7 @@ where
                     selector: Att::deserialize(Value::String(v.to_string()))
                         .map_err(|e| Error::custom(e.to_string()))?,
                     condition: None,
+                    value: Arc::new(Default::default()),
                 })
             }
         }

@@ -355,6 +355,7 @@ mod test {
                         on_graphql_error: true,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let context = Context::new();
@@ -389,6 +390,7 @@ mod test {
                         on_graphql_error: true,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let context = Context::new();
@@ -422,6 +424,7 @@ mod test {
                         on_graphql_error: true,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let context = Context::new();
@@ -454,6 +457,7 @@ mod test {
                     SelectorOrValue::Value(AttributeValue::String("test_val".to_string())),
                     SelectorOrValue::Selector(selector),
                 ])))),
+                value: Default::default(),
             },
         );
         let values = spans.attributes.on_request(
@@ -484,6 +488,7 @@ mod test {
                     SelectorOrValue::Value(AttributeValue::String("test_val".to_string())),
                     SelectorOrValue::Selector(selector),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -510,6 +515,7 @@ mod test {
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -536,6 +542,7 @@ mod test {
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -561,6 +568,7 @@ mod test {
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -587,6 +595,7 @@ mod test {
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -612,6 +621,7 @@ mod test {
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -646,6 +656,7 @@ mod test {
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -676,6 +687,7 @@ mod test {
                         subgraph_response_status: ResponseStatus::Code,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -707,6 +719,7 @@ mod test {
                         subgraph_response_status: ResponseStatus::Code,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
