@@ -148,7 +148,7 @@ pub(crate) enum RouterSelector {
         r#static: String,
     },
     OnGraphQLError {
-        /// Boolean set to true if the reponse body contains graphql error
+        /// Boolean set to true if the response body contains graphql error
         on_graphql_error: bool,
     },
 }
