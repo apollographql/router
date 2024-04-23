@@ -1,7 +1,7 @@
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSubgraph;
 use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
@@ -18,16 +18,25 @@ use crate::query_plan::operation::normalized_selection_map::{
     Entry, NormalizedFieldSelectionValue, NormalizedFragmentSpreadSelectionValue,
     NormalizedInlineFragmentSelectionValue, NormalizedSelectionMap, NormalizedSelectionValue,
 };
+use crate::query_plan::FetchDataKeyRenamer;
+use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::FetchDataRewrite;
+use crate::schema::definitions::is_composite_type;
+use crate::schema::definitions::types_can_be_merged;
+use crate::schema::definitions::AbstractType;
 use crate::schema::position::{
     CompositeTypeDefinitionPosition, InterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
     SchemaRootDefinitionKind,
 };
 use crate::schema::ValidFederationSchema;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::{Argument, Directive, DirectiveList, Name, OperationType, Value};
+use apollo_compiler::executable;
 use apollo_compiler::executable::{
     Field, Fragment, FragmentSpread, InlineFragment, Operation, Selection, SelectionSet,
     VariableDefinition,
 };
+use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
 use apollo_compiler::{name, Node};
 use indexmap::{IndexMap, IndexSet};
@@ -126,7 +135,6 @@ pub(crate) mod normalized_selection_map {
         NormalizedSelectionSet,
     };
     use apollo_compiler::ast::Name;
-    use derive_more::DerefMut;
     use indexmap::IndexMap;
     use std::borrow::{Borrow, Cow};
     use std::hash::Hash;
@@ -144,7 +152,7 @@ pub(crate) mod normalized_selection_map {
     /// `IndexSet` since key computation is expensive (it involves sorting). This type is in its own
     /// module to prevent code from accidentally mutating the underlying map outside the mutation
     /// API.
-    #[derive(Debug, Clone, PartialEq, Eq, Default, DerefMut)]
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
     pub(crate) struct NormalizedSelectionMap(IndexMap<NormalizedSelectionKey, NormalizedSelection>);
 
     impl Deref for NormalizedSelectionMap {
@@ -177,6 +185,13 @@ pub(crate) mod normalized_selection_map {
             self.0.shift_remove(key)
         }
 
+        pub(crate) fn retain(
+            &mut self,
+            mut predicate: impl FnMut(&NormalizedSelectionKey, &NormalizedSelection) -> bool,
+        ) {
+            self.0.retain(|k, v| predicate(k, v))
+        }
+
         pub(crate) fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<NormalizedSelectionValue>
         where
             NormalizedSelectionKey: Borrow<Q>,
@@ -196,6 +211,15 @@ pub(crate) mod normalized_selection_map {
                 indexmap::map::Entry::Occupied(entry) => Entry::Occupied(OccupiedEntry(entry)),
                 indexmap::map::Entry::Vacant(entry) => Entry::Vacant(VacantEntry(entry)),
             }
+        }
+
+        pub(crate) fn extend(&mut self, other: NormalizedSelectionMap) {
+            self.0.extend(other.0)
+        }
+
+        pub(crate) fn extend_ref(&mut self, other: &NormalizedSelectionMap) {
+            self.0
+                .extend(other.iter().map(|(k, v)| (k.clone(), v.clone())))
         }
 
         /// Returns the selection set resulting from "recursively" filtering any selection
@@ -571,6 +595,21 @@ impl NormalizedSelection {
         }
     }
 
+    pub(crate) fn collect_variables<'selection>(
+        &'selection self,
+        variables: &mut HashSet<&'selection Name>,
+    ) -> Result<(), FederationError> {
+        match self {
+            NormalizedSelection::Field(field) => field.collect_variables(variables),
+            NormalizedSelection::InlineFragment(inline_fragment) => {
+                inline_fragment.collect_variables(variables)
+            }
+            NormalizedSelection::FragmentSpread(_) => {
+                Err(FederationError::internal("unexpected fragment spread"))
+            }
+        }
+    }
+
     pub(crate) fn has_defer(&self) -> bool {
         match self {
             NormalizedSelection::Field(field_selection) => field_selection.has_defer(),
@@ -638,6 +677,25 @@ impl NormalizedSelection {
             }
             NormalizedSelection::InlineFragment(inline) => {
                 inline.normalize(parent_type, named_fragments, schema, option)
+            }
+        }
+    }
+
+    pub(crate) fn with_updated_selection_set(
+        &self,
+        selection_set: Option<NormalizedSelectionSet>,
+    ) -> Result<Self, FederationError> {
+        match self {
+            NormalizedSelection::Field(field) => Ok(NormalizedSelection::Field(Arc::new(
+                field.with_updated_selection_set(selection_set),
+            ))),
+            NormalizedSelection::InlineFragment(inline_fragment) => {
+                Ok(NormalizedSelection::InlineFragment(Arc::new(
+                    inline_fragment.with_updated_selection_set(selection_set),
+                )))
+            }
+            NormalizedSelection::FragmentSpread(_) => {
+                Err(FederationError::internal("unexpected fragment spread"))
             }
         }
     }
@@ -716,14 +774,17 @@ impl NormalizedFragment {
 
 pub(crate) mod normalized_field_selection {
     use crate::error::FederationError;
+    use crate::query_graph::graph_path::OpPathElement;
     use crate::query_plan::operation::{
         directives_with_sorted_arguments, HasNormalizedSelectionKey, NormalizedSelectionKey,
         NormalizedSelectionSet,
     };
+    use crate::query_plan::FetchDataPathElement;
     use crate::schema::position::{FieldDefinitionPosition, TypeDefinitionPosition};
     use crate::schema::ValidFederationSchema;
-    use apollo_compiler::ast::{Argument, DirectiveList, Name};
+    use apollo_compiler::ast::{Argument, Directive, DirectiveList, Name};
     use apollo_compiler::Node;
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     /// An analogue of the apollo-compiler type `Field` with these changes:
@@ -744,6 +805,39 @@ pub(crate) mod normalized_field_selection {
     impl HasNormalizedSelectionKey for NormalizedFieldSelection {
         fn key(&self) -> NormalizedSelectionKey {
             self.field.key()
+        }
+    }
+
+    impl NormalizedFieldSelection {
+        pub(crate) fn with_updated_selection_set(
+            &self,
+            selection_set: Option<NormalizedSelectionSet>,
+        ) -> Self {
+            Self {
+                field: self.field.clone(),
+                selection_set,
+            }
+        }
+
+        pub(crate) fn element(&self) -> OpPathElement {
+            OpPathElement::Field(self.field.clone())
+        }
+
+        pub(crate) fn with_updated_alias(&self, alias: Name) -> NormalizedField {
+            let mut data = self.field.data().clone();
+            data.alias = Some(alias);
+            NormalizedField::new(data)
+        }
+
+        pub(crate) fn collect_variables<'selection>(
+            &'selection self,
+            variables: &mut HashSet<&'selection Name>,
+        ) -> Result<(), FederationError> {
+            self.field.collect_variables(variables);
+            if let Some(set) = &self.selection_set {
+                set.collect_variables(variables)?
+            }
+            Ok(())
         }
     }
 
@@ -773,6 +867,46 @@ pub(crate) mod normalized_field_selection {
 
         pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<Name> {
             &mut self.data.sibling_typename
+        }
+
+        pub(crate) fn with_updated_directives(&self, directives: DirectiveList) -> NormalizedField {
+            let mut data = self.data.clone();
+            data.directives = Arc::new(directives);
+            Self::new(data)
+        }
+
+        pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
+            FetchDataPathElement::Key(self.data().response_name().into())
+        }
+
+        pub(crate) fn collect_variables<'selection>(
+            &'selection self,
+            variables: &mut HashSet<&'selection Name>,
+        ) {
+            for arg in self.data().arguments.iter() {
+                collect_variables_from_argument(arg, variables)
+            }
+            for dir in self.data().directives.iter() {
+                collect_variables_from_directive(dir, variables)
+            }
+        }
+    }
+
+    pub(crate) fn collect_variables_from_argument<'selection>(
+        argument: &'selection Argument,
+        variables: &mut HashSet<&'selection Name>,
+    ) {
+        if let Some(v) = argument.value.as_variable() {
+            variables.insert(v);
+        }
+    }
+
+    pub(crate) fn collect_variables_from_directive<'selection>(
+        directive: &'selection Directive,
+        variables: &mut HashSet<&'selection Name>,
+    ) {
+        for arg in directive.arguments.iter() {
+            collect_variables_from_argument(arg, variables)
         }
     }
 
@@ -1106,10 +1240,14 @@ pub(crate) mod normalized_inline_fragment_selection {
         directives_with_sorted_arguments, is_deferred_selection, HasNormalizedSelectionKey,
         NormalizedSelectionKey, NormalizedSelectionSet, SelectionId,
     };
+    use crate::query_plan::FetchDataPathElement;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
-    use apollo_compiler::ast::DirectiveList;
+    use apollo_compiler::ast::{DirectiveList, Name};
     use std::sync::Arc;
+
+    use super::normalized_field_selection::collect_variables_from_directive;
+    use std::collections::HashSet;
 
     /// An analogue of the apollo-compiler type `InlineFragment` with these changes:
     /// - Stores the inline fragment data (other than the selection set) in `NormalizedInlineFragment`,
@@ -1123,6 +1261,27 @@ pub(crate) mod normalized_inline_fragment_selection {
     pub(crate) struct NormalizedInlineFragmentSelection {
         pub(crate) inline_fragment: NormalizedInlineFragment,
         pub(crate) selection_set: NormalizedSelectionSet,
+    }
+
+    impl NormalizedInlineFragmentSelection {
+        pub(crate) fn with_updated_selection_set(
+            &self,
+            selection_set: Option<NormalizedSelectionSet>,
+        ) -> Self {
+            Self {
+                inline_fragment: self.inline_fragment.clone(),
+                //FIXME
+                selection_set: selection_set.unwrap(),
+            }
+        }
+
+        pub(crate) fn collect_variables<'selection>(
+            &'selection self,
+            variables: &mut HashSet<&'selection Name>,
+        ) -> Result<(), FederationError> {
+            self.inline_fragment.collect_variables(variables);
+            self.selection_set.collect_variables(variables)
+        }
     }
 
     impl HasNormalizedSelectionKey for NormalizedInlineFragmentSelection {
@@ -1158,6 +1317,32 @@ pub(crate) mod normalized_inline_fragment_selection {
             let mut data = self.data().clone();
             data.type_condition_position = new;
             Self::new(data)
+        }
+
+        pub(crate) fn with_updated_directives(
+            &self,
+            directives: DirectiveList,
+        ) -> NormalizedInlineFragment {
+            let mut data = self.data().clone();
+            data.directives = Arc::new(directives);
+            Self::new(data)
+        }
+
+        pub(crate) fn as_path_element(&self) -> Option<FetchDataPathElement> {
+            let condition = self.data().type_condition_position.clone()?;
+
+            Some(FetchDataPathElement::TypenameEquals(
+                condition.type_name().clone().into(),
+            ))
+        }
+
+        pub(crate) fn collect_variables<'selection>(
+            &'selection self,
+            variables: &mut HashSet<&'selection Name>,
+        ) {
+            for dir in self.data.directives.iter() {
+                collect_variables_from_directive(dir, variables)
+            }
         }
     }
 
@@ -1204,6 +1389,26 @@ pub(crate) mod normalized_inline_fragment_selection {
                 }
             }
         }
+    }
+}
+
+impl NormalizedOperation {
+    pub(crate) fn optimize(
+        &mut self,
+        fragments: Option<&NamedFragments>,
+        min_usages_to_optimize: Option<u32>,
+    ) {
+        let min_usages_to_optimize = min_usages_to_optimize.unwrap_or(2);
+        let Some(fragments) = fragments else { return };
+        if fragments.is_empty() {
+            return;
+        }
+        assert!(
+            min_usages_to_optimize >= 1,
+            "Expected 'min_usages_to_optimize' to be at least 1, but got {min_usages_to_optimize}"
+        );
+
+        todo!(); // TODO: port JS `Operation.optimize` from `operations.ts`
     }
 }
 
@@ -1727,7 +1932,52 @@ impl NormalizedSelectionSet {
 
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
+        parent_type_if_abstract: Option<AbstractType>,
+        fragments: &Option<&mut RebasedFragments>,
     ) -> Result<NormalizedSelectionSet, FederationError> {
+        let mut selection_map = NormalizedSelectionMap::new();
+        if let Some(parent) = parent_type_if_abstract {
+            if !self.has_top_level_typename_field() {
+                let field_position = parent.introspection_typename_field();
+                let typename_selection = NormalizedFieldSelection {
+                    field: NormalizedField::new(NormalizedFieldData {
+                        schema: self.schema.clone(),
+                        field_position,
+                        alias: None,
+                        arguments: Default::default(),
+                        directives: Default::default(),
+                        sibling_typename: None,
+                    }),
+                    selection_set: None,
+                };
+                selection_map.insert(NormalizedSelection::Field(Arc::new(typename_selection)));
+            }
+        }
+        for selection in self.selections.values() {
+            selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
+                let type_if_abstract =
+                    subselection_type_if_abstract(selection, &self.schema, fragments);
+                let updated_selection_set = selection_set
+                    .add_typename_field_for_abstract_types(type_if_abstract, fragments)?;
+
+                if updated_selection_set == *selection_set {
+                    selection.clone()
+                } else {
+                    selection.with_updated_selection_set(Some(updated_selection_set))?
+                }
+            } else {
+                selection.clone()
+            });
+        }
+
+        Ok(NormalizedSelectionSet {
+            schema: self.schema.clone(),
+            type_position: self.type_position.clone(),
+            selections: Arc::new(selection_map),
+        })
+    }
+
+    fn has_top_level_typename_field(&self) -> bool {
         todo!()
     }
 
@@ -1864,12 +2114,7 @@ impl NormalizedSelectionSet {
                         normalized_selection_map.insert(normalized_selection);
                     }
                     NormalizedSelectionOrSet::SelectionSet(normalized_set) => {
-                        normalized_selection_map.extend(
-                            normalized_set
-                                .selections
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone())),
-                        );
+                        normalized_selection_map.extend_ref(&normalized_set.selections);
                     }
                 }
             }
@@ -1884,6 +2129,434 @@ impl NormalizedSelectionSet {
 
     fn has_defer(&self) -> bool {
         self.selections.values().any(|s| s.has_defer())
+    }
+
+    pub(crate) fn add_aliases_for_non_merging_fields(
+        &self,
+    ) -> Result<(NormalizedSelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
+        let mut aliases = Vec::new();
+        compute_aliases_for_non_merging_fields(
+            vec![SelectionSetAtPath {
+                path: Vec::new(),
+                selections: Some(self.clone()),
+            }],
+            &mut aliases,
+            &self.schema,
+        )?;
+
+        let updated = self.with_field_aliased(&aliases)?;
+        let output_rewrites = aliases
+            .into_iter()
+            .map(
+                |FieldToAlias {
+                     mut path,
+                     response_name,
+                     alias,
+                 }| {
+                    path.push(FetchDataPathElement::Key(alias.into()));
+                    Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+                        path,
+                        rename_key_to: response_name,
+                    }))
+                },
+            )
+            .collect::<Vec<_>>();
+
+        Ok((updated, output_rewrites))
+    }
+
+    pub(crate) fn with_field_aliased(
+        &self,
+        aliases: &[FieldToAlias],
+    ) -> Result<NormalizedSelectionSet, FederationError> {
+        if aliases.is_empty() {
+            return Ok(self.clone());
+        }
+
+        let mut at_current_level: HashMap<FetchDataPathElement, &FieldToAlias> = HashMap::new();
+        let mut remaining: Vec<&FieldToAlias> = Vec::new();
+
+        for alias in aliases {
+            if !alias.path.is_empty() {
+                remaining.push(alias);
+            } else {
+                at_current_level.insert(
+                    FetchDataPathElement::Key(alias.response_name.clone()),
+                    alias,
+                );
+            }
+        }
+
+        let mut selection_map = NormalizedSelectionMap::new();
+        for selection in self.selections.values() {
+            let path_element = selection.element()?.as_path_element();
+            let subselection_aliases = remaining
+                .iter()
+                .filter_map(|alias| {
+                    if alias.path.first() == path_element.as_ref() {
+                        Some(FieldToAlias {
+                            path: alias.path[1..].to_vec(),
+                            response_name: alias.response_name.clone(),
+                            alias: alias.alias.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let selection_set = selection.selection_set()?;
+            let updated_selection_set = selection_set
+                .map(|selection_set| selection_set.with_field_aliased(&subselection_aliases))
+                .transpose()?;
+
+            match selection {
+                NormalizedSelection::Field(field) => {
+                    let alias = path_element.and_then(|elem| at_current_level.get(&elem));
+                    if alias.is_none() && selection_set == updated_selection_set.as_ref() {
+                        selection_map.insert(selection.clone());
+                    } else {
+                        let sel = NormalizedFieldSelection {
+                            field: match alias {
+                                Some(alias) => field.with_updated_alias(alias.alias.clone()),
+                                None => field.field.clone(),
+                            },
+                            selection_set: updated_selection_set,
+                        };
+                        selection_map.insert(NormalizedSelection::Field(Arc::new(sel)));
+                    }
+                }
+                NormalizedSelection::InlineFragment(_) => {
+                    if selection_set == updated_selection_set.as_ref() {
+                        selection_map.insert(selection.clone());
+                    } else {
+                        selection_map
+                            .insert(selection.with_updated_selection_set(updated_selection_set)?);
+                    }
+                }
+                NormalizedSelection::FragmentSpread(_) => {
+                    return Err(FederationError::internal("unexpected fragment spread"))
+                }
+            }
+        }
+
+        Ok(NormalizedSelectionSet {
+            schema: self.schema.clone(),
+            type_position: self.type_position.clone(),
+            selections: Arc::new(selection_map),
+        })
+    }
+
+    pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
+        let mut fields = Vec::new();
+
+        for (_key, selection) in self.selections.iter() {
+            match selection {
+                NormalizedSelection::Field(field) => fields.push(CollectedFieldInSet {
+                    path: Vec::new(),
+                    field: field.clone(),
+                }),
+                NormalizedSelection::FragmentSpread(_fragment) => {
+                    todo!()
+                }
+                NormalizedSelection::InlineFragment(inline_fragment) => {
+                    let condition = inline_fragment
+                        .inline_fragment
+                        .data()
+                        .type_condition_position
+                        .as_ref();
+                    let header = match condition {
+                        Some(cond) => vec![FetchDataPathElement::TypenameEquals(
+                            cond.type_name().clone().into(),
+                        )],
+                        None => vec![],
+                    };
+                    for CollectedFieldInSet { path, field } in
+                        inline_fragment.selection_set.fields_in_set().into_iter()
+                    {
+                        let mut new_path = header.clone();
+                        new_path.extend(path);
+                        fields.push(CollectedFieldInSet {
+                            path: new_path,
+                            field,
+                        })
+                    }
+                }
+            }
+        }
+        fields
+    }
+
+    pub(crate) fn used_variables(&self) -> Result<Vec<Name>, FederationError> {
+        let mut variables = HashSet::new();
+        self.collect_variables(&mut variables)?;
+        let mut res: Vec<Name> = variables.into_iter().cloned().collect();
+        res.sort();
+        Ok(res)
+    }
+
+    pub(crate) fn collect_variables<'selection>(
+        &'selection self,
+        variables: &mut HashSet<&'selection Name>,
+    ) -> Result<(), FederationError> {
+        for selection in self.selections.values() {
+            selection.collect_variables(variables)?
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate(
+        &self,
+        _variable_definitions: &[Node<VariableDefinition>],
+    ) -> Result<(), FederationError> {
+        if self.selections.is_empty() {
+            Err(SingleFederationError::Internal {
+                message: "Invalid empty selection set".to_string(),
+            }
+            .into())
+        } else {
+            for selection in self.selections.values() {
+                if let Some(s) = selection.selection_set()? {
+                    s.validate(_variable_definitions)?;
+                }
+            }
+
+            Ok(())
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SelectionSetAtPath {
+    path: Vec<FetchDataPathElement>,
+    selections: Option<NormalizedSelectionSet>,
+}
+
+pub(crate) struct FieldToAlias {
+    path: Vec<FetchDataPathElement>,
+    response_name: NodeStr,
+    alias: Name,
+}
+
+pub(crate) struct SeenResponseName {
+    field_name: Name,
+    field_type: Type,
+    selections: Option<Vec<SelectionSetAtPath>>,
+}
+
+pub(crate) struct CollectedFieldInSet {
+    path: Vec<FetchDataPathElement>,
+    field: Arc<NormalizedFieldSelection>,
+}
+
+struct FieldInPath {
+    path: Vec<FetchDataPathElement>,
+    field: Arc<NormalizedFieldSelection>,
+}
+
+fn compute_aliases_for_non_merging_fields(
+    selections: Vec<SelectionSetAtPath>,
+    alias_collector: &mut Vec<FieldToAlias>,
+    schema: &ValidFederationSchema,
+) -> Result<(), FederationError> {
+    let mut seen_response_names: HashMap<Name, SeenResponseName> = HashMap::new();
+
+    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
+        s.selections.iter().flat_map(|s2| {
+            s2.fields_in_set()
+                .into_iter()
+                .map(|CollectedFieldInSet { path, field }| {
+                    let mut new_path = s.path.clone();
+                    new_path.extend(path);
+                    FieldInPath {
+                        path: new_path,
+                        field,
+                    }
+                })
+        })
+    }
+
+    for FieldInPath { mut path, field } in selections.iter().flat_map(rebased_fields_in_set) {
+        let field_name = field.field.data().name();
+        let response_name = field.field.data().response_name();
+        let field_type = &field.field.data().field_position.get(schema.schema())?.ty;
+
+        match seen_response_names.get(&response_name) {
+            Some(previous) => {
+                if &previous.field_name == field_name
+                    && types_can_be_merged(&previous.field_type, field_type, schema.schema())?
+                {
+                    // If the type is non-composite, then we're all set. But if it is composite, we need to record the sub-selection to that response name
+                    // as we need to "recurse" on the merged of both the previous and this new field.
+                    if is_composite_type(field_type.inner_named_type(), schema.schema())? {
+                        match &previous.selections {
+                            None => {
+                                return Err(SingleFederationError::Internal {
+                                    message: format!(
+                                        "Should have added selections for `'{:?}\'",
+                                        previous.field_type
+                                    ),
+                                }
+                                .into());
+                            }
+                            Some(s) => {
+                                let mut selections = s.clone();
+                                let mut p = path.clone();
+                                p.push(FetchDataPathElement::Key(response_name.clone().into()));
+                                selections.push(SelectionSetAtPath {
+                                    path: p,
+                                    selections: field.selection_set.clone(),
+                                });
+                                seen_response_names.insert(
+                                    response_name,
+                                    SeenResponseName {
+                                        field_name: previous.field_name.clone(),
+                                        field_type: previous.field_type.clone(),
+                                        selections: Some(selections),
+                                    },
+                                )
+                            }
+                        };
+                    }
+                } else {
+                    // We need to alias the new occurence.
+                    let alias = gen_alias_name(&response_name, &seen_response_names);
+
+                    // Given how we generate aliases, it's is very unlikely that the generated alias will conflict with any of the other response name
+                    // at the level, but it's theoretically possible. By adding the alias to the seen names, we ensure that in the remote change that
+                    // this ever happen, we'll avoid the conflict by giving another alias to the followup occurence.
+                    let selections = match field.selection_set.as_ref() {
+                        Some(s) => {
+                            let mut p = path.clone();
+                            p.push(FetchDataPathElement::Key(alias.clone().into()));
+                            Some(vec![SelectionSetAtPath {
+                                path: p,
+                                selections: Some(s.clone()),
+                            }])
+                        }
+                        None => None,
+                    };
+
+                    seen_response_names.insert(
+                        alias.clone(),
+                        SeenResponseName {
+                            field_name: field_name.clone(),
+                            field_type: field_type.clone(),
+                            selections,
+                        },
+                    );
+
+                    // Lastly, we record that the added alias need to be rewritten back to the proper response name post query.
+
+                    alias_collector.push(FieldToAlias {
+                        path,
+                        response_name: response_name.into(),
+                        alias,
+                    })
+                }
+            }
+            None => {
+                let selections: Option<Vec<SelectionSetAtPath>> = match field.selection_set.as_ref()
+                {
+                    Some(s) => {
+                        path.push(FetchDataPathElement::Key(response_name.clone().into()));
+                        Some(vec![SelectionSetAtPath {
+                            path,
+                            selections: Some(s.clone()),
+                        }])
+                    }
+                    None => None,
+                };
+                seen_response_names.insert(
+                    response_name,
+                    SeenResponseName {
+                        field_name: field_name.clone(),
+                        field_type: field_type.clone(),
+                        selections,
+                    },
+                );
+            }
+        }
+    }
+
+    for selections in seen_response_names.into_values() {
+        if let Some(selections) = selections.selections {
+            compute_aliases_for_non_merging_fields(selections, alias_collector, schema)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenResponseName>) -> Name {
+    let mut counter = 0usize;
+    loop {
+        if let Ok(name) = Name::try_from(NodeStr::new(&format!("{base_name}__alias_{counter}"))) {
+            if !unavailable_names.contains_key(&name) {
+                return name;
+            }
+        }
+        counter += 1;
+    }
+}
+
+pub(crate) fn subselection_type_if_abstract(
+    selection: &NormalizedSelection,
+    schema: &ValidFederationSchema,
+    fragments: &Option<&mut RebasedFragments>,
+) -> Option<AbstractType> {
+    match selection {
+        NormalizedSelection::Field(field) => {
+            match schema
+                .get_type(field.field.data().field_position.type_name().clone())
+                .ok()?
+            {
+                crate::schema::position::TypeDefinitionPosition::Interface(i) => {
+                    Some(AbstractType::Interface(i))
+                }
+                crate::schema::position::TypeDefinitionPosition::Union(u) => {
+                    Some(AbstractType::Union(u))
+                }
+                _ => None,
+            }
+        }
+        NormalizedSelection::FragmentSpread(fragment_spread) => {
+            let fragment = fragments
+                .as_ref()
+                .and_then(|r| {
+                    r.original_fragments
+                        .get(&fragment_spread.spread.data().fragment_name)
+                })
+                .ok_or(FederationError::SingleFederationError(
+                    crate::error::SingleFederationError::InvalidGraphQL {
+                        message: "missing fragment".to_string(),
+                    },
+                ))
+                //FIXME: return error
+                .ok()?;
+            match fragment.type_condition_position.clone() {
+                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
+                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
+                CompositeTypeDefinitionPosition::Object(_) => None,
+            }
+        }
+        NormalizedSelection::InlineFragment(inline_fragment) => {
+            match inline_fragment
+                .inline_fragment
+                .data()
+                .type_condition_position
+                .clone()?
+            {
+                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
+                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
+                CompositeTypeDefinitionPosition::Object(_) => None,
+            }
+        }
+    }
+}
+
+impl From<NormalizedSelectionSet> for executable::SelectionSet {
+    fn from(_value: NormalizedSelectionSet) -> Self {
+        todo!()
     }
 }
 
@@ -2781,17 +3454,9 @@ pub(crate) enum NormalizeSelectionOption {
 /// However a cloned `NamedFragments` still behaves like a deep copy:
 /// unlike in JS where we can have multiple references to a mutable map,
 /// here modifying a cloned map will leave the original unchanged.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub(crate) struct NamedFragments {
     fragments: Arc<IndexMap<Name, Node<NormalizedFragment>>>,
-}
-
-impl Default for NamedFragments {
-    fn default() -> Self {
-        NamedFragments {
-            fragments: Arc::new(IndexMap::new()),
-        }
-    }
 }
 
 impl NamedFragments {
@@ -3000,10 +3665,10 @@ impl NamedFragments {
 
 #[derive(Clone)]
 pub(crate) struct RebasedFragments {
-    original_fragments: NamedFragments,
+    pub(crate) original_fragments: NamedFragments,
     // JS PORT NOTE: In JS implementation values were optional
     /// Map key: subgraph name
-    rebased_fragments: Arc<HashMap<String, NamedFragments>>,
+    rebased_fragments: Arc<HashMap<NodeStr, NamedFragments>>,
 }
 
 impl RebasedFragments {
@@ -3014,15 +3679,18 @@ impl RebasedFragments {
         }
     }
 
-    pub(crate) fn for_subgraph(&mut self, subgraph: &ValidFederationSubgraph) -> NamedFragments {
+    pub(crate) fn for_subgraph(
+        &mut self,
+        subgraph_name: impl Into<NodeStr>,
+        subgraph_schema: &ValidFederationSchema,
+    ) -> &NamedFragments {
         Arc::make_mut(&mut self.rebased_fragments)
-            .entry(subgraph.name.clone())
+            .entry(subgraph_name.into())
             .or_insert_with(|| {
                 self.original_fragments
-                    .rebase_on(&subgraph.schema)
+                    .rebase_on(subgraph_schema)
                     .unwrap_or_default()
             })
-            .clone()
     }
 }
 
@@ -3183,6 +3851,14 @@ impl From<&NormalizedFragmentSpreadSelection> for FragmentSpread {
                 .deref()
                 .to_owned(),
         }
+    }
+}
+
+impl TryFrom<NormalizedOperation> for Valid<executable::ExecutableDocument> {
+    type Error = FederationError;
+
+    fn try_from(_value: NormalizedOperation) -> Result<Self, Self::Error> {
+        todo!()
     }
 }
 

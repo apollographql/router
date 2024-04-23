@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 pub(crate) mod argument_composition_strategies;
+pub(crate) mod definitions;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
@@ -222,6 +223,10 @@ impl ValidFederationSchema {
         Self::new_assume_valid(schema).map_err(|(_schema, error)| error)
     }
 
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.schema, &other.schema)
+    }
+
     /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
     fn new_assume_valid(
         mut schema: FederationSchema,
@@ -253,6 +258,23 @@ impl ValidFederationSchema {
     /// Returns `None` for supergraph schemas.
     pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
         self.schema.subgraph_metadata.as_deref()
+    }
+
+    pub(crate) fn federation_type_name_in_schema(
+        &self,
+        name: Name,
+    ) -> Result<Name, FederationError> {
+        // Currently, the types used to define the federation operations, that is _Any, _Entity and _Service,
+        // are not considered part of the federation spec, and are instead hardcoded to the names above.
+        // The reason being that there is no way to maintain backward compatbility with fed2 if we were to add
+        // those to the federation spec without requiring users to add those types to their @link `import`,
+        // and that wouldn't be a good user experience (because most users don't really know what those types
+        // are/do). And so we special case it.
+        if name.starts_with('_') {
+            return Ok(name);
+        }
+
+        todo!()
     }
 }
 

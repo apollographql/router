@@ -120,9 +120,11 @@ impl FetchNode {
         state.write(") {")?;
         state.indent()?;
 
-        if !requires.is_empty() {
-            write_selections(state, requires)?;
-            state.write(" => ")?;
+        if let Some(v) = requires.as_ref() {
+            if !v.is_empty() {
+                write_selections(state, v)?;
+                state.write(" => ")?;
+            }
         }
         write_operation(state, operation_document)?;
 

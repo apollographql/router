@@ -4,6 +4,7 @@ use apollo_compiler::executable::{
 };
 use apollo_compiler::validation::Valid;
 use apollo_compiler::{ExecutableDocument, NodeStr};
+use std::sync::Arc;
 
 pub(crate) mod conditions;
 mod display;
@@ -59,14 +60,14 @@ pub struct FetchNode {
     pub subgraph_name: NodeStr,
     /// Optional identifier for the fetch for defer support. All fetches of a given plan will be
     /// guaranteed to have a unique `id`.
-    pub id: Option<NodeStr>,
+    pub id: Option<u64>,
     pub variable_usages: Vec<Name>,
     /// `Selection`s in apollo-rs _can_ have a `FragmentSpread`, but this `Selection` is
     /// specifically typing the `requires` key in a built query plan, where there can't be
     /// `FragmentSpread`.
     // PORT_NOTE: This was its own type in the JS codebase, but it's likely simpler to just have the
     // constraint be implicit for router instead of creating a new type.
-    pub requires: Vec<Selection>,
+    pub requires: Option<Vec<Selection>>,
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.
@@ -78,10 +79,10 @@ pub struct FetchNode {
     /// inputs of the fetch they are applied to (meaning that, as those inputs are collected from
     /// the current in-memory result, the rewrite should _not_ impact said in-memory results, only
     /// what is sent in the fetch).
-    pub input_rewrites: Vec<FetchDataRewrite>,
+    pub input_rewrites: Arc<Vec<Arc<FetchDataRewrite>>>,
     /// Similar to `input_rewrites`, but for optional "rewrites" to apply to the data that is
     /// received from a fetch (and before it is applied to the current in-memory results).
-    pub output_rewrites: Vec<FetchDataRewrite>,
+    pub output_rewrites: Vec<Arc<FetchDataRewrite>>,
 }
 
 #[derive(Debug, Clone)]
@@ -223,7 +224,7 @@ pub struct FetchDataKeyRenamer {
 /// Note that the `@` is currently optional in some contexts, as query plan execution may assume
 /// upon encountering array data in a path that it should match the remaining path to the array's
 /// elements.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FetchDataPathElement {
     Key(NodeStr),
     AnyIndex,

@@ -9,13 +9,13 @@ use crate::query_graph::condition_resolver::{
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition, QueryGraphNodeType};
 use crate::query_plan::operation::normalized_field_selection::{
-    NormalizedField, NormalizedFieldData,
+    NormalizedField, NormalizedFieldData, NormalizedFieldSelection,
 };
 use crate::query_plan::operation::normalized_inline_fragment_selection::{
-    NormalizedInlineFragment, NormalizedInlineFragmentData,
+    NormalizedInlineFragment, NormalizedInlineFragmentData, NormalizedInlineFragmentSelection,
 };
-use crate::query_plan::operation::{NormalizedSelectionSet, SelectionId};
-use crate::query_plan::{QueryPathElement, QueryPlanCost};
+use crate::query_plan::operation::{NormalizedSelection, NormalizedSelectionSet, SelectionId};
+use crate::query_plan::{FetchDataPathElement, QueryPathElement, QueryPlanCost};
 use crate::schema::position::{
     AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition,
     InterfaceFieldDefinitionPosition, ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition,
@@ -262,6 +262,47 @@ impl OpPathElement {
         }
         Ok(conditionals)
     }
+
+    pub(crate) fn with_updated_directives(&self, directives: DirectiveList) -> OpPathElement {
+        match self {
+            OpPathElement::Field(field) => {
+                OpPathElement::Field(field.with_updated_directives(directives))
+            }
+            OpPathElement::InlineFragment(inline_fragment) => {
+                OpPathElement::InlineFragment(inline_fragment.with_updated_directives(directives))
+            }
+        }
+    }
+
+    pub(crate) fn as_path_element(&self) -> Option<FetchDataPathElement> {
+        match self {
+            OpPathElement::Field(field) => Some(field.as_path_element()),
+            OpPathElement::InlineFragment(inline_fragment) => inline_fragment.as_path_element(),
+        }
+    }
+}
+
+pub(crate) fn selection_of_element(
+    element: OpPathElement,
+    sub_selection: Option<NormalizedSelectionSet>,
+) -> Result<NormalizedSelection, FederationError> {
+    // TODO: validate that the subSelection is ok for the element
+    Ok(match element {
+        OpPathElement::Field(field) => {
+            NormalizedSelection::Field(Arc::new(NormalizedFieldSelection {
+                field,
+                selection_set: sub_selection,
+            }))
+        }
+        OpPathElement::InlineFragment(inline_fragment) => {
+            NormalizedSelection::InlineFragment(Arc::new(NormalizedInlineFragmentSelection {
+                inline_fragment,
+                selection_set: sub_selection.ok_or_else(|| {
+                    FederationError::internal("Expected a selection set for an inline fragment")
+                })?,
+            }))
+        }
+    })
 }
 
 impl Display for OpPathElement {

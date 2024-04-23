@@ -1606,7 +1606,8 @@ const FEDERATION_SDL_FIELD_NAME: Name = name!("sdl");
 const FEDERATION_ENTITY_TYPE_NAME: Name = name!("_Entity");
 const FEDERATION_SERVICE_FIELD_NAME: Name = name!("_service");
 const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
-const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
+pub(crate) const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
+pub(crate) const FEDERATION_REPRESENTATIONS_VAR_NAME: Name = name!("representations");
 
 const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
 const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");

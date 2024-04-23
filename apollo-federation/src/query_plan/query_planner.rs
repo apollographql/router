@@ -403,7 +403,6 @@ impl QueryPlanner {
         };
 
         let processor = FetchDependencyGraphToQueryPlanProcessor::new(
-            Arc::new(self.config.clone()),
             operation.variables.clone(),
             Some(RebasedFragments::new(&normalized_operation.named_fragments)),
             operation_name.clone(),
