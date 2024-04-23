@@ -113,8 +113,10 @@ impl Schema {
             }
         }
 
-        tracing::info!(
-            histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
+        f64_histogram!(
+            "apollo.router.schema.load.duration",
+            "Time spent loading the supergraph schema.",
+            start.elapsed().as_secs_f64()
         );
 
         let implementers_map = definitions.implementers_map();
