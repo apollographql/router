@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.44.0"
+version = "1.45.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.44.0"
+version = "1.45.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.44.0"
+version = "1.45.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -3960,6 +3960,7 @@ checksum = "c1cc9717a20b1bb222f333e6a92fd32f7d8a18ddc5a3191a11af45dcbf4dcd16"
 dependencies = [
  "autocfg",
  "scopeguard",
+ "serde",
 ]
 
 [[package]]
