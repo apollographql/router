@@ -3,6 +3,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
 use multimap::MultiMap;
@@ -58,6 +59,8 @@ pub struct Request {
 
     // authorization metadata for this request
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    pub(crate) executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
 }
 
 #[buildstructor::buildstructor]
@@ -85,6 +88,7 @@ impl Request {
             connection_closed_signal,
             query_hash: Default::default(),
             authorization: Default::default(),
+            executable_document: None,
         }
     }
 
@@ -148,6 +152,7 @@ impl Clone for Request {
                 .map(|s| s.resubscribe()),
             query_hash: self.query_hash.clone(),
             authorization: self.authorization.clone(),
+            executable_document: self.executable_document.clone(),
         }
     }
 }

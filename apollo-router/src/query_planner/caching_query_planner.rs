@@ -238,7 +238,7 @@ where
                     }
                 };
 
-                let schema = &self.schema.api_schema().definitions;
+                let schema = self.schema.api_schema();
                 if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
                     query = modified_query.to_string();
                 }
@@ -367,10 +367,11 @@ where
         let doc = match request.context.extensions().lock().get::<ParsedDocument>() {
             None => {
                 return Err(CacheResolverError::RetrievalError(Arc::new(
-                    QueryPlannerError::SpecError(SpecError::ParsingError(
+                    // TODO: dedicated error variant?
+                    QueryPlannerError::SpecError(SpecError::TransformError(
                         "missing parsed document".to_string(),
                     )),
-                )))
+                )));
             }
             Some(d) => d.clone(),
         };
@@ -398,7 +399,7 @@ where
                 context,
             } = request;
 
-            let schema = &self.schema.api_schema().definitions;
+            let schema = self.schema.api_schema();
             if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
                 query = modified_query.to_string();
             }
@@ -635,16 +636,15 @@ mod tests {
         });
 
         let configuration = Arc::new(crate::Configuration::default());
-        let schema = Arc::new(Schema::parse(include_str!("testdata/schema.graphql")).unwrap());
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse_test(schema, &configuration).unwrap());
 
         let mut planner =
-            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new())
+            CachingQueryPlanner::new(delegate, schema.clone(), &configuration, IndexMap::new())
                 .await
                 .unwrap();
 
         let configuration = Configuration::default();
-
-        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc1 = Query::parse_document(
             "query Me { me { username } }",
@@ -724,7 +724,8 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
+        let schema =
+            Schema::parse_test(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let doc = Query::parse_document(
             "query Me { me { username } }",

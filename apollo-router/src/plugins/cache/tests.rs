@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use super::entity::EntityCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::cache::entity::Subgraph;
 use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;
@@ -81,12 +82,13 @@ impl MockStore {
 
 impl Mocks for MockStore {
     fn process_command(&self, command: MockCommand) -> Result<RedisValue, RedisError> {
-        println!("mock2 received redis command: {command:?}");
+        println!("mock received redis command: {command:?}");
 
         match &*command.cmd {
             "GET" => {
                 if let Some(RedisValue::Bytes(b)) = command.args.first() {
                     if let Some(bytes) = self.map.lock().get(b) {
+                        println!("-> returning {:?}", std::str::from_utf8(bytes));
                         return Ok(RedisValue::Bytes(bytes.clone()));
                     }
                 }
@@ -114,6 +116,7 @@ impl Mocks for MockStore {
         Err(RedisError::new(RedisErrorKind::NotFound, "mock not found"))
     }
 }
+
 #[tokio::test]
 async fn insert() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
@@ -290,6 +293,147 @@ async fn no_cache_control() {
 
     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
     let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn private() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {
+                    "__typename": "Organization",
+                    "id": "1"
+                } }}}}
+            ).with_header(CACHE_CONTROL, HeaderValue::from_static("private"))
+            .build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{creatorUser{__typename id}}}}",
+            "variables": {
+                "representations": [
+                    {
+                        "id": "1",
+                        "__typename": "Organization",
+                    }
+                ]
+            }}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }]
+            }}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("private")).build())
+    ].into_iter().collect());
+
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        .await
+        .unwrap();
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                private_id: Some("sub".to_string()),
+                enabled: Some(true),
+                ttl: None,
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                private_id: Some("sub".to_string()),
+                enabled: Some(true),
+                ttl: None,
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+        .await
+        .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache.clone())
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context.insert_json_value("sub", "1234".into());
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    println!("\nNOW WITHOUT SUBGRAPHS\n");
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context.insert_json_value("sub", "1234".into());
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .build()
+        .unwrap();
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    println!("\nNOW WITH DIFFERENT SUB\n");
+
+    let context = Context::new();
+    context.insert_json_value("sub", "5678".into());
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .build()
+        .unwrap();
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
 
     insta::assert_json_snapshot!(response);
 }

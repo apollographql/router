@@ -286,7 +286,7 @@ impl YamlRouterFactory {
                         configuration.clone(),
                         configuration
                             .supergraph
-                            .query_planner
+                            .query_planning
                             .experimental_query_planner_parallelism()?,
                     )
                     .instrument(query_planner_span)
@@ -299,7 +299,7 @@ impl YamlRouterFactory {
                         configuration.clone(),
                         configuration
                             .supergraph
-                            .query_planner
+                            .query_planning
                             .experimental_query_planner_parallelism()?,
                     )
                     .instrument(query_planner_span)
@@ -518,7 +518,7 @@ pub(crate) async fn create_plugins(
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
-    let supergraph_schema = Arc::new(schema.definitions.clone());
+    let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -742,7 +742,6 @@ mod test {
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
-    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -869,18 +868,16 @@ mod test {
 
     #[test]
     fn test_inject_schema_id() {
-        let schema = include_str!("testdata/starstuff@current.graphql");
         let mut config = json!({ "apollo": {} });
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         inject_schema_id(
-            Some(&Schema::schema_id(&schema.api_schema().raw_sdl)),
+            Some("8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"),
             &mut config,
         );
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
             &config.apollo.schema_id,
-            "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318"
+            "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
         );
     }
 }
