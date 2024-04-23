@@ -55,7 +55,7 @@ impl Default for CostResult {
 
 impl CostResult {
     pub(crate) fn delta(&self) -> f64 {
-        self.actual - self.estimated
+        self.estimated - self.actual
     }
 
     pub(crate) fn result(&mut self, error: DemandControlError) -> DemandControlError {
