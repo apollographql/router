@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::attributes::ConditionAttribute;
+use super::conditional::Conditional;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -59,7 +59,7 @@ impl Spans {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterSpans {
     /// Custom attributes that are attached to the router span.
-    pub(crate) attributes: Extendable<RouterAttributes, ConditionAttribute<RouterSelector>>,
+    pub(crate) attributes: Extendable<RouterAttributes, Conditional<RouterSelector>>,
 }
 
 impl DefaultForLevel for RouterSpans {
@@ -76,7 +76,7 @@ impl DefaultForLevel for RouterSpans {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphSpans {
     /// Custom attributes that are attached to the supergraph span.
-    pub(crate) attributes: Extendable<SupergraphAttributes, ConditionAttribute<SupergraphSelector>>,
+    pub(crate) attributes: Extendable<SupergraphAttributes, Conditional<SupergraphSelector>>,
 }
 impl DefaultForLevel for SupergraphSpans {
     fn defaults_for_level(
@@ -92,7 +92,7 @@ impl DefaultForLevel for SupergraphSpans {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphSpans {
     /// Custom attributes that are attached to the subgraph span.
-    pub(crate) attributes: Extendable<SubgraphAttributes, ConditionAttribute<SubgraphSelector>>,
+    pub(crate) attributes: Extendable<SubgraphAttributes, Conditional<SubgraphSelector>>,
 }
 
 impl DefaultForLevel for SubgraphSpans {
@@ -120,9 +120,9 @@ mod test {
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::attributes::ConditionAttribute;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
+    use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
@@ -345,7 +345,7 @@ mod test {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: RouterSelector::StaticField {
                     r#static: "my-static-value".to_string(),
                 },
@@ -355,6 +355,7 @@ mod test {
                         on_graphql_error: true,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let context = Context::new();
@@ -377,7 +378,7 @@ mod test {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: RouterSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
                     redact: None,
@@ -389,6 +390,7 @@ mod test {
                         on_graphql_error: true,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let context = Context::new();
@@ -410,7 +412,7 @@ mod test {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: RouterSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
                     redact: None,
@@ -422,6 +424,7 @@ mod test {
                         on_graphql_error: true,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let context = Context::new();
@@ -448,12 +451,13 @@ mod test {
         };
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: selector.clone(),
                 condition: Some(Arc::new(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::String("test_val".to_string())),
                     SelectorOrValue::Selector(selector),
                 ])))),
+                value: Default::default(),
             },
         );
         let values = spans.attributes.on_request(
@@ -478,12 +482,13 @@ mod test {
         };
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: selector.clone(),
                 condition: Some(Arc::new(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::String("test_val".to_string())),
                     SelectorOrValue::Selector(selector),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -503,13 +508,14 @@ mod test {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: RouterSelector::RequestHeader {
                     request_header: "my-header".to_string(),
                     redact: None,
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -529,13 +535,14 @@ mod test {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: RouterSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
                     redact: None,
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -554,13 +561,14 @@ mod test {
         let mut spans = SupergraphSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: SupergraphSelector::RequestHeader {
                     request_header: "my-header".to_string(),
                     redact: None,
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -580,13 +588,14 @@ mod test {
         let mut spans = SupergraphSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: SupergraphSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
                     redact: None,
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -605,13 +614,14 @@ mod test {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: SubgraphSelector::SubgraphRequestHeader {
                     subgraph_request_header: "my-header".to_string(),
                     redact: None,
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_request(
@@ -639,13 +649,14 @@ mod test {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: SubgraphSelector::SubgraphResponseHeader {
                     subgraph_response_header: "my-header".to_string(),
                     redact: None,
                     default: None,
                 },
                 condition: None,
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -664,7 +675,7 @@ mod test {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: SubgraphSelector::SubgraphResponseHeader {
                     subgraph_response_header: "my-header".to_string(),
                     redact: None,
@@ -676,6 +687,7 @@ mod test {
                         subgraph_response_status: ResponseStatus::Code,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(
@@ -695,7 +707,7 @@ mod test {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
-            ConditionAttribute {
+            Conditional {
                 selector: SubgraphSelector::SubgraphResponseHeader {
                     subgraph_response_header: "my-header".to_string(),
                     redact: None,
@@ -707,6 +719,7 @@ mod test {
                         subgraph_response_status: ResponseStatus::Code,
                     }),
                 ])))),
+                value: Arc::new(Default::default()),
             },
         );
         let values = spans.attributes.on_response(

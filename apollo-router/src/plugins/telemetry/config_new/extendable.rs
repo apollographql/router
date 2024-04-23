@@ -12,8 +12,6 @@ use serde::de::MapAccess;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Deserializer;
-#[cfg(test)]
-use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
@@ -26,7 +24,6 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
 pub(crate) struct Extendable<Att, Ext>
 where
     Att: Default,
@@ -57,7 +54,7 @@ impl Extendable<(), ()> {
     }
 }
 
-/// Custom Deserializer for attributes that will deserializse into a custom field if possible, but otherwise into one of the pre-defined attributes.
+/// Custom Deserializer for attributes that will deserialize into a custom field if possible, but otherwise into one of the pre-defined attributes.
 impl<'de, Att, Ext> Deserialize<'de> for Extendable<Att, Ext>
 where
     Att: Default + Deserialize<'de> + Debug + Sized,
@@ -84,7 +81,7 @@ where
             where
                 A: MapAccess<'de>,
             {
-                let mut attributes: Map<String, Value> = Map::new();
+                let mut attributes = Map::new();
                 let mut custom: HashMap<String, Ext> = HashMap::new();
                 while let Some(key) = map.next_key()? {
                     let value: Value = map.next_value()?;
@@ -94,6 +91,15 @@ where
                         }
                         Err(_err) => {
                             // We didn't manage to deserialize as a custom attribute, so stash the value and we'll try again later
+                            // but let's try and deserialize it now so that we get a decent error message rather than 'unknown field'
+                            let mut temp_attributes: Map<String, Value> = Map::new();
+                            temp_attributes.insert(key.clone(), value.clone());
+                            Att::deserialize(Value::Object(temp_attributes)).map_err(|e| {
+                                A::Error::custom(format!(
+                                    "failed to parse attribute '{}': {}",
+                                    key, e
+                                ))
+                            })?;
                             attributes.insert(key, value);
                         }
                     }
@@ -190,10 +196,13 @@ where
 
 #[cfg(test)]
 mod test {
-    use insta::assert_yaml_snapshot;
+    use insta::assert_debug_snapshot;
 
+    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+    use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::extendable::Extendable;
+    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 
     #[test]
@@ -214,7 +223,7 @@ mod test {
                 }),
             )
             .unwrap();
-            assert_yaml_snapshot!(o);
+            assert_debug_snapshot!(o);
         });
     }
 
@@ -233,5 +242,29 @@ mod test {
             }),
         )
         .expect_err("Should have errored");
+    }
+
+    #[test]
+    fn test_extendable_serde_conditional() {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.bind(|| {
+            let o = serde_json::from_value::<
+                Extendable<RouterAttributes, Conditional<RouterSelector>>,
+            >(serde_json::json!({
+            "http.request.method": true,
+            "http.response.status_code": true,
+            "url.path": true,
+              "http.request.header.x-my-header": {
+              "request_header": "x-my-header"
+            },
+            "http.request.header.x-not-present": {
+              "request_header": "x-not-present",
+              "default": "nope"
+            }
+            }))
+            .unwrap();
+            assert_debug_snapshot!(o);
+        });
     }
 }

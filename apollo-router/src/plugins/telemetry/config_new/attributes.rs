@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use http::header::CONTENT_LENGTH;
 use http::header::FORWARDED;
@@ -30,7 +29,6 @@ use opentelemetry_semantic_conventions::trace::URL_PATH;
 use opentelemetry_semantic_conventions::trace::URL_QUERY;
 use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[cfg(test)]
@@ -38,8 +36,6 @@ use serde::Serialize;
 use tower::BoxError;
 use tracing::Span;
 
-use super::conditions::Condition;
-use super::Selector;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -79,62 +75,6 @@ pub(crate) enum DefaultAttributeRequirementLevel {
     Required,
     /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
     Recommended,
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ConditionAttribute<T> {
-    #[serde(flatten)]
-    pub(crate) selector: T,
-    #[schemars(with = "Option<Condition<T>>", default)]
-    pub(crate) condition: Option<Arc<Mutex<Condition<T>>>>,
-}
-
-impl<T> DefaultForLevel for ConditionAttribute<T>
-where
-    T: DefaultForLevel,
-{
-    fn defaults_for_level(
-        &mut self,
-        requirement_level: DefaultAttributeRequirementLevel,
-        kind: TelemetryDataKind,
-    ) {
-        self.selector.defaults_for_level(requirement_level, kind);
-    }
-}
-
-impl<T, Request, Response> Selector for ConditionAttribute<T>
-where
-    T: Selector<Request = Request, Response = Response>,
-{
-    type Request = Request;
-    type Response = Response;
-
-    fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
-        match &self.condition {
-            Some(condition) => {
-                if condition.lock().evaluate_request(request) == Some(true) {
-                    self.selector.on_request(request)
-                } else {
-                    None
-                }
-            }
-            None => self.selector.on_request(request),
-        }
-    }
-
-    fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
-        match &self.condition {
-            Some(condition) => {
-                if condition.lock().evaluate_response(response) {
-                    self.selector.on_response(response)
-                } else {
-                    None
-                }
-            }
-            None => self.selector.on_response(response),
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
