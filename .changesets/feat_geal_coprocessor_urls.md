@@ -12,7 +12,7 @@ coprocessor:
       headers: true
   supergraph::
     request:
-      body; true
+      body: true
       url: http://127.0.0.1:8082
 ```
 
