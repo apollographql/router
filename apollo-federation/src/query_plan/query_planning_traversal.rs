@@ -185,28 +185,33 @@ impl<'a> QueryPlanningTraversal<'a> {
             .federated_query_graph
             .node_weight(initial_path.tail)?;
 
-        let initial_options = create_initial_options(
-            initial_path,
-            &tail.type_,
-            initial_context,
-            excluded_destinations,
-            excluded_conditions,
-        )?;
-
-        let open_branches = map_options_to_selections(selection_set, initial_options);
-
-        Ok(Self {
+        // Two-step initialization: initializing open_branches requires a condition resolver,
+        // which `QueryPlanningTraversal` is.
+        let mut traversal = Self {
             parameters,
             root_kind,
             has_defers,
             starting_id_generation,
             cost_processor,
             is_top_level,
-            open_branches,
+            open_branches: Default::default(),
             closed_branches: Default::default(),
             best_plan: None,
             resolver_cache: ConditionResolverCache::new(),
-        })
+        };
+
+        let initial_options = create_initial_options(
+            initial_path,
+            &tail.type_,
+            initial_context,
+            &mut traversal,
+            excluded_destinations,
+            excluded_conditions,
+        )?;
+
+        traversal.open_branches = map_options_to_selections(selection_set, initial_options);
+
+        Ok(traversal)
     }
 
     // PORT_NOTE: In JS, the traversal is still usable after finding the best plan. Here we consume

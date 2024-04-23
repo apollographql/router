@@ -24,6 +24,11 @@ pub(crate) mod graph_path;
 pub mod output;
 pub(crate) mod path_tree;
 
+use crate::query_graph::condition_resolver::{ConditionResolution, ConditionResolver};
+use crate::query_graph::graph_path::{
+    ExcludedConditions, ExcludedDestinations, OpGraphPathContext, OpGraphPathTrigger, OpPathElement,
+};
+use crate::query_plan::QueryPlanCost;
 pub use build_query_graph::build_federated_query_graph;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -389,6 +394,20 @@ impl QueryGraph {
             })
     }
 
+    pub(crate) fn root_kinds_to_nodes_by_source(
+        &self,
+        source: &str,
+    ) -> Result<&IndexMap<SchemaRootDefinitionKind, NodeIndex>, FederationError> {
+        self.root_kinds_to_nodes_by_source
+            .get(source)
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: "Root-kinds-to-nodes map unexpectedly missing".to_owned(),
+                }
+                .into()
+            })
+    }
+
     fn root_kinds_to_nodes_mut(
         &mut self,
     ) -> Result<&mut IndexMap<SchemaRootDefinitionKind, NodeIndex>, FederationError> {
@@ -432,6 +451,63 @@ impl QueryGraph {
                             | QueryGraphEdgeTransition::RootTypeResolution { .. }
                     ))
             })
+    }
+
+    pub(crate) fn is_self_key_or_root_edge(
+        &self,
+        edge: EdgeIndex,
+    ) -> Result<bool, FederationError> {
+        let edge_weight = self.edge_weight(edge)?;
+        let (head, tail) = self.edge_endpoints(edge)?;
+        let head_weight = self.node_weight(head)?;
+        let tail_weight = self.node_weight(tail)?;
+        Ok(head_weight.source == tail_weight.source
+            && matches!(
+                edge_weight.transition,
+                QueryGraphEdgeTransition::KeyResolution
+                    | QueryGraphEdgeTransition::RootTypeResolution { .. }
+            ))
+    }
+
+    // PORT_NOTE: In the JS codebase, this was named `hasValidDirectKeyEdge`.
+    pub(crate) fn has_satisfiable_direct_key_edge(
+        &self,
+        from_node: NodeIndex,
+        to_subgraph: &str,
+        condition_resolver: &mut impl ConditionResolver,
+        max_cost: QueryPlanCost,
+    ) -> Result<bool, FederationError> {
+        for edge_ref in self.out_edges(from_node) {
+            let edge_weight = edge_ref.weight();
+            if !matches!(
+                edge_weight.transition,
+                QueryGraphEdgeTransition::KeyResolution
+            ) {
+                continue;
+            }
+
+            let tail = edge_ref.target();
+            let tail_weight = self.node_weight(tail)?;
+            if tail_weight.source != to_subgraph {
+                continue;
+            }
+
+            let condition_resolution = condition_resolver.resolve(
+                edge_ref.id(),
+                &OpGraphPathContext::default(),
+                &ExcludedDestinations::default(),
+                &ExcludedConditions::default(),
+            )?;
+            let ConditionResolution::Satisfied { cost, .. } = condition_resolution else {
+                continue;
+            };
+
+            // During composition validation, we consider all conditions to have cost 1.
+            if cost <= max_cost {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn edge_for_field(
@@ -507,6 +583,27 @@ impl QueryGraph {
             Some(candidate)
         } else {
             None
+        }
+    }
+
+    pub(crate) fn edge_for_op_graph_path_trigger(
+        &self,
+        node: NodeIndex,
+        op_graph_path_trigger: &OpGraphPathTrigger,
+    ) -> Option<Option<EdgeIndex>> {
+        let OpGraphPathTrigger::OpPathElement(op_path_element) = op_graph_path_trigger else {
+            return None;
+        };
+        match op_path_element {
+            OpPathElement::Field(field) => self.edge_for_field(node, field).map(Some),
+            OpPathElement::InlineFragment(inline_fragment) => {
+                if inline_fragment.data().type_condition_position.is_some() {
+                    self.edge_for_inline_fragment(node, inline_fragment)
+                        .map(Some)
+                } else {
+                    Some(None)
+                }
+            }
         }
     }
 
