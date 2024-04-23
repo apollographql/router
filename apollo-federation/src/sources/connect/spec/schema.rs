@@ -1,5 +1,6 @@
 use apollo_compiler::schema::Name;
 use apollo_compiler::{name, NodeStr};
+use indexmap::IndexMap;
 
 use crate::link::spec::{Url, Version};
 use crate::sources::connect::selection_parser::Selection;
@@ -58,21 +59,15 @@ pub(crate) struct HTTPArguments {
     /// The base URL containing all sub API endpoints
     pub(crate) base_url: NodeStr,
 
-    /// HTTP headers used when requesting resources from the upstream source
-    // TODO: The spec says that this is nullable, so should we encode this as
-    // an `Option` or do we not care if null maps to an empty list?
-    pub(crate) headers: Vec<HTTPHeaderMapping>,
+    /// HTTP headers used when requesting resources from the upstream source.
+    /// Can be overridden by name with headers in a @connect directive.
+    pub(crate) headers: HTTPHeaderMappings,
 }
 
-/// Pairs of HTTP header names to configuration options
+/// Map of HTTP header names to configuration options
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct HTTPHeaderMapping {
-    /// The HTTP header name to propagate
-    pub(crate) name: NodeStr,
-
-    /// Configuration option for the HTTP header name supplied above
-    pub(crate) option: Option<HTTPHeaderOption>,
-}
+#[derive(derive_more::Deref, Default)]
+pub(crate) struct HTTPHeaderMappings(pub(super) IndexMap<NodeStr, Option<HTTPHeaderOption>>);
 
 /// Configuration option for an HTTP header
 #[cfg_attr(test, derive(Debug))]
@@ -83,8 +78,8 @@ pub(crate) enum HTTPHeaderOption {
     /// renamed to the supplied value.
     As(NodeStr),
 
-    /// The raw value to use for the HTTP header
-    Value(NodeStr),
+    /// The raw values to use for the HTTP header
+    Value(Vec<NodeStr>),
 }
 
 /// A directive to model an upstream HTTP data type
@@ -159,10 +154,8 @@ pub(crate) struct ConnectHTTPArguments {
 
     /// Configuration for headers to attach to the request.
     ///
-    /// Takes precedence over headers defined on the associated @source.
-    // TODO: The spec says that this is nullable, so should we encode this as
-    // an `Option` or do we not care if null maps to an empty list?
-    pub(crate) headers: Vec<HTTPHeaderMapping>,
+    /// Overrides headers from the associated @source by name.
+    pub(crate) headers: HTTPHeaderMappings,
 }
 
 /// The HTTP arguments needed for a connect request
