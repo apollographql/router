@@ -29,6 +29,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use url::Url;
 
 use crate::error::Error;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
@@ -229,7 +230,8 @@ pub(super) struct RouterRequestConf {
     /// Handles the request without waiting for the coprocessor to respond
     pub(super) detached: bool,
     /// The url you'd like to offload processing to
-    pub(super) url: Option<String>,
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a router request/response stage
@@ -249,7 +251,8 @@ pub(super) struct RouterResponseConf {
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
     /// The url you'd like to offload processing to
-    pub(super) url: Option<String>,
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -271,7 +274,8 @@ pub(super) struct SubgraphRequestConf {
     /// Handles the request without waiting for the coprocessor to respond
     pub(super) detached: bool,
     /// The url you'd like to offload processing to
-    pub(super) url: Option<String>,
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -291,7 +295,8 @@ pub(super) struct SubgraphResponseConf {
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
     /// The url you'd like to offload processing to
-    pub(super) url: Option<String>,
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// Configures the externalization plugin
@@ -299,7 +304,8 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
-    url: String,
+    #[schemars(with = "String")]
+    url: Url,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
@@ -337,7 +343,7 @@ impl RouterStage {
         &self,
         http_client: C,
         service: router::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         sdl: Arc<String>,
     ) -> router::BoxService
     where
@@ -478,7 +484,7 @@ impl SubgraphStage {
         &self,
         http_client: C,
         service: subgraph::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         service_name: String,
     ) -> subgraph::BoxService
     where
@@ -597,7 +603,7 @@ impl SubgraphStage {
 // -----------------------------------------------------------------------------------------
 async fn process_router_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: router::Request,
     request_config: RouterRequestConf,
@@ -766,7 +772,7 @@ where
 
 async fn process_router_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut response: router::Response,
     response_config: RouterResponseConf,
@@ -1029,7 +1035,7 @@ where
 
 async fn process_subgraph_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut request: subgraph::Request,
     request_config: SubgraphRequestConf,
@@ -1190,7 +1196,7 @@ where
 
 async fn process_subgraph_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,

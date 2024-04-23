@@ -899,8 +899,7 @@ expression: "&schema"
                 "url": {
                   "description": "The url you'd like to offload processing to",
                   "default": null,
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -951,8 +950,7 @@ expression: "&schema"
                 "url": {
                   "description": "The url you'd like to offload processing to",
                   "default": null,
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -1036,8 +1034,7 @@ expression: "&schema"
                 "url": {
                   "description": "The url you'd like to offload processing to",
                   "default": null,
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -1088,8 +1085,7 @@ expression: "&schema"
                 "url": {
                   "description": "The url you'd like to offload processing to",
                   "default": null,
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -1200,8 +1196,7 @@ expression: "&schema"
                     "url": {
                       "description": "The url you'd like to offload processing to",
                       "default": null,
-                      "type": "string",
-                      "nullable": true
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
@@ -1252,8 +1247,7 @@ expression: "&schema"
                     "url": {
                       "description": "The url you'd like to offload processing to",
                       "default": null,
-                      "type": "string",
-                      "nullable": true
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
@@ -1334,8 +1328,7 @@ expression: "&schema"
                 "url": {
                   "description": "The url you'd like to offload processing to",
                   "default": null,
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -1386,8 +1379,7 @@ expression: "&schema"
                 "url": {
                   "description": "The url you'd like to offload processing to",
                   "default": null,
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 }
               },
               "additionalProperties": false

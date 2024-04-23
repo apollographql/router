@@ -16,6 +16,7 @@ mod tests {
     use serde_json::json;
     use tower::BoxError;
     use tower::ServiceExt;
+    use url::Url;
 
     use super::super::*;
     use crate::plugin::test::MockHttpClientService;
@@ -131,7 +132,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -189,7 +190,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -246,7 +247,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -300,7 +301,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -426,7 +427,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -488,7 +489,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -542,7 +543,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -599,7 +600,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -697,7 +698,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -759,7 +760,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -883,7 +884,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1009,7 +1010,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1080,7 +1081,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1159,7 +1160,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1200,7 +1201,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                url: Some("http://example.com".to_string()),
+                url: Some(Url::parse("http://example.com").unwrap()),
                 ..Default::default()
             },
             response: Default::default(),
@@ -1302,7 +1303,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1406,7 +1407,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1466,7 +1467,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1502,7 +1503,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 

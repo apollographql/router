@@ -9,6 +9,7 @@ use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
+use url::Url;
 
 use super::externalize_header_map;
 use super::*;
@@ -38,7 +39,8 @@ pub(super) struct ExecutionRequestConf {
     /// Handles the request without waiting for the coprocessor to respond
     pub(super) detached: bool,
     /// The url you'd like to offload processing to
-    pub(super) url: Option<String>,
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a router request/response stage
@@ -58,7 +60,8 @@ pub(super) struct ExecutionResponseConf {
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
     /// The url you'd like to offload processing to
-    pub(super) url: Option<String>,
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -75,7 +78,7 @@ impl ExecutionStage {
         &self,
         http_client: C,
         service: execution::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         sdl: Arc<String>,
     ) -> execution::BoxService
     where
@@ -196,7 +199,7 @@ impl ExecutionStage {
 
 async fn process_execution_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: execution::Request,
     request_config: ExecutionRequestConf,
@@ -354,7 +357,7 @@ where
 
 async fn process_execution_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut response: execution::Response,
     response_config: ExecutionResponseConf,
@@ -804,7 +807,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -869,7 +872,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -926,7 +929,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1048,7 +1051,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1159,7 +1162,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1222,7 +1225,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
