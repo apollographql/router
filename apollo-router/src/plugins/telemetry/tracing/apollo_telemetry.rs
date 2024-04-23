@@ -144,14 +144,14 @@ pub(crate) enum Error {
 // Also, maybe we can just use the actual SpanData instead of the light one?
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LightSpanData {
-    pub trace_id: TraceId,
-    pub span_id: SpanId,
-    pub parent_span_id: SpanId,
-    pub span_kind: SpanKind,
-    pub name: Cow<'static, str>,
-    pub start_time: SystemTime,
-    pub end_time: SystemTime,
-    pub attributes: EvictedHashMap,
+    pub(crate) trace_id: TraceId,
+    pub(crate) span_id: SpanId,
+    pub(crate) parent_span_id: SpanId,
+    pub(crate) span_kind: SpanKind,
+    pub(crate) name: Cow<'static, str>,
+    pub(crate) start_time: SystemTime,
+    pub(crate) end_time: SystemTime,
+    pub(crate) attributes: EvictedHashMap,
 }
 
 impl From<SpanData> for LightSpanData {
@@ -179,7 +179,7 @@ pub(crate) struct Exporter {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
     #[derivative(Debug = "ignore")]
     report_exporter: Arc<ApolloExporter>,
-    otlp_exporter: Option<ApolloOtlpExporter>,
+    otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
@@ -237,13 +237,13 @@ impl Exporter {
                 schema_id,
             )?),
             otlp_exporter: match otlp_endpoint {
-                Some(otlp_endpoint) => Some(ApolloOtlpExporter::new(
+                Some(otlp_endpoint) => Some(Arc::new(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     batch_config,
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
-                )?),
+                )?)),
                 None => None,
             },
             field_execution_weight: match field_execution_sampler {
@@ -877,6 +877,13 @@ impl SpanExporter for Exporter {
         let mut report = telemetry::apollo::Report::default();
         report += SingleReport::Traces(TracesReport { traces });
         let apollo_exporter = self.report_exporter.clone();
+        let otlp_exporter = if let Some(exporter) = self.otlp_exporter.clone() { 
+            Some(exporter)
+        } else {
+            None
+        };
+
+
         let fut = async move {
             let apollo_result = 
                 apollo_exporter
@@ -884,13 +891,13 @@ impl SpanExporter for Exporter {
                 .map_err(|e| TraceError::ExportFailed(Box::new(e))).boxed();
             
             // ideally we get something like this working but some problem with lifetimes (see below)
-            let otlp_result = if let Some(otlp_exporter) = &mut self.otlp_exporter { 
-                otlp_exporter
-                .export(otlp_exporter.span_data_from_traces(otlp_trace_spans))
-            } else {
-                // if there is no otlp_exporter available, this is a no-op
-                future::ready(Ok(())).boxed()
+            let otlp_result = match otlp_exporter {
+                Some(exporter) => exporter.export(exporter.span_data_from_traces(otlp_trace_spans)),
+                None => 
+                    // if there is no otlp_exporter available, this is a no-op
+                    future::ready(Ok(())).boxed()
             };
+                
             // The following line works without issue, however with the code above (`let otlp_result =`) we get
             // an error like "lifetime may not live long enough"
             // let otlp_result = future::ready(Ok(())).boxed();
@@ -900,7 +907,7 @@ impl SpanExporter for Exporter {
                 Err(e) => Err(e)
             }
         };
-        fut.boxed() // causes lifetime issue here
+        fut.boxed()
     }
 }
 

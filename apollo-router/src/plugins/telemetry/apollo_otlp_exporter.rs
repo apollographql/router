@@ -1,5 +1,5 @@
-use std::borrow::Cow;
-use async_trait::async_trait;
+use std::{borrow::Cow, sync::Mutex};
+use std::sync::Arc;
 use crate::plugins::telemetry::{
     apollo_exporter::get_uname, metrics::apollo::ROUTER_ID, tracing::BatchProcessorConfig,
     GLOBAL_TRACER_NAME,
@@ -26,7 +26,7 @@ use uuid::Uuid;
 use super::tracing::apollo_telemetry::LightSpanData;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub(crate) struct ApolloOtlpExporter {
     batch_config: BatchProcessorConfig,
@@ -35,7 +35,7 @@ pub(crate) struct ApolloOtlpExporter {
     resource_template: Resource,
     intrumentation_library: InstrumentationLibrary,
     #[derivative(Debug = "ignore")]
-    otlp_exporter: Box<dyn SpanExporter + Sync>,
+    otlp_exporter: Arc<Mutex<opentelemetry_otlp::SpanExporter>>,
 }
 
 impl ApolloOtlpExporter {
@@ -74,7 +74,7 @@ impl ApolloOtlpExporter {
                 KeyValue::new("apollo.client.uname", get_uname()?),
             ]),
             intrumentation_library: InstrumentationLibrary::new(
-                GLOBAL_TRACER_NAME.clone(), // can this be .to_string()?  what's the difference?
+                GLOBAL_TRACER_NAME,
                 Some(format!(
                     "{}@{}",
                     std::env!("CARGO_PKG_NAME"),
@@ -83,7 +83,7 @@ impl ApolloOtlpExporter {
                 Option::<String>::None,
                 None,
             ),
-            otlp_exporter: Box::new(
+            otlp_exporter: Arc::new(Mutex::new(
                 SpanExporterBuilder::from(
                     opentelemetry_otlp::new_exporter()
                         .tonic()
@@ -92,8 +92,8 @@ impl ApolloOtlpExporter {
                         .with_metadata(metadata)
                         .with_compression(opentelemetry_otlp::Compression::Gzip),
                 )
-                .build_span_exporter()?,
-            ),
+                .build_span_exporter()?
+            )),
             // TBD(tim): do we need another batch processor for this?
             // Seems like we've already set up a batcher earlier in the pipe but not quite sure.
         });
@@ -128,14 +128,9 @@ impl ApolloOtlpExporter {
         })
         .collect_vec()
     }
-  }
 
-#[async_trait]
-impl SpanExporter for ApolloOtlpExporter {
-    fn export(
-        &mut self,
-        spans: Vec<SpanData>,
-    ) -> BoxFuture<'static, ExportResult> {
-        self.otlp_exporter.export(spans)
+    pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+        let mut exporter = self.otlp_exporter.lock().unwrap();
+        exporter.export(spans)
     }
-}
+  }
