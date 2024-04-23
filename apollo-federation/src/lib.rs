@@ -8,8 +8,8 @@ pub mod merge;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
-mod sources;
 pub mod subgraph;
+pub mod sources;
 
 pub use crate::api_schema::ApiSchemaOptions;
 use crate::error::FederationError;

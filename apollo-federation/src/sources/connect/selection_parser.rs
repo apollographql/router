@@ -45,7 +45,7 @@ fn spaces_or_comments(input: &str) -> IResult<&str, &str> {
 // Selection ::= NamedSelection* StarSelection? | PathSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub(super) enum Selection {
+pub enum Selection {
     // Although we reuse the SubSelection type for the Selection::Named case, we
     // parse it as a sequence of NamedSelection items without the {...} curly
     // braces that SubSelection::parse expects.
@@ -54,7 +54,7 @@ pub(super) enum Selection {
 }
 
 impl Selection {
-    pub(super) fn parse(input: &str) -> IResult<&str, Self> {
+    pub fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             all_consuming(map(
                 tuple((
@@ -80,7 +80,7 @@ impl Selection {
 //     | Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-enum NamedSelection {
+pub enum NamedSelection {
     Field(Option<Alias>, String, Option<SubSelection>),
     Quoted(Alias, String, Option<SubSelection>),
     Path(Alias, PathSelection),
@@ -141,7 +141,7 @@ impl NamedSelection {
 // PathSelection ::= ("." Property)+ SubSelection?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub(super) enum PathSelection {
+pub enum PathSelection {
     // We use a recursive structure here instead of a Vec<Property> to make
     // applying the selection to a JSON value easier.
     Path(Property, Box<PathSelection>),
@@ -173,7 +173,7 @@ impl PathSelection {
 // SubSelection ::= "{" NamedSelection* StarSelection? "}"
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub(super) struct SubSelection {
+pub struct SubSelection {
     selections: Vec<NamedSelection>,
     star: Option<StarSelection>,
 }
@@ -200,7 +200,7 @@ impl SubSelection {
 // StarSelection ::= Alias? "*" SubSelection?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-struct StarSelection(Option<Alias>, Option<Box<SubSelection>>);
+pub struct StarSelection(Option<Alias>, Option<Box<SubSelection>>);
 
 impl StarSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
@@ -223,7 +223,7 @@ impl StarSelection {
 // Alias ::= Identifier ":"
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-struct Alias {
+pub struct Alias {
     name: String,
 }
 
@@ -237,7 +237,7 @@ impl Alias {
 // Property ::= Identifier | StringLiteral
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub(super) enum Property {
+pub enum Property {
     Field(String),
     Quoted(String),
     Index(usize),
@@ -322,7 +322,7 @@ fn parse_string_literal(input: &str) -> IResult<&str, String> {
 /// ApplyTo is a trait for applying a Selection to a JSON value, collecting
 /// any/all errors encountered in the process.
 
-pub(crate) trait ApplyTo {
+pub trait ApplyTo {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
     // as an Option to allow for undefined/missing values (which JSON does not
@@ -370,7 +370,7 @@ pub(crate) trait ApplyTo {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub(super) struct ApplyToError(JSON);
+pub struct ApplyToError(JSON);
 
 impl Hash for ApplyToError {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
@@ -419,14 +419,14 @@ impl ApplyToError {
         panic!("invalid ApplyToError JSON: {:?}", json);
     }
 
-    pub(super) fn message(&self) -> Option<&str> {
+    pub fn message(&self) -> Option<&str> {
         self.0
             .as_object()
             .and_then(|v| v.get("message"))
             .and_then(|s| s.as_str())
     }
 
-    pub(super) fn path(&self) -> Option<String> {
+    pub fn path(&self) -> Option<String> {
         self.0
             .as_object()
             .and_then(|v| v.get("path"))

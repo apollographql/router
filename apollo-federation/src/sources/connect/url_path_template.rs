@@ -24,13 +24,13 @@ use serde_json_bytes::Value as JSON;
 /// values from concrete URL paths.
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub(super) struct URLPathTemplate {
+pub struct URLPathTemplate {
     path: Vec<ParameterValue>,
     query: IndexMap<String, ParameterValue>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-struct ParameterValue {
+pub struct ParameterValue {
     // The ParameterValue struct represents both path parameter values and query
     // parameter values, allowing zero or more variable expressions separated by
     // nonempty constant text.
@@ -38,13 +38,13 @@ struct ParameterValue {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum ValuePart {
+pub enum ValuePart {
     Text(String),
     Var(VariableExpression),
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
-struct VariableExpression {
+pub struct VariableExpression {
     // Variable paths are often a single identifier, but may also consist of a
     // sequence of identifiers joined with the . character. We represent dotted
     // paths as a single string, rather than a Vec<String>, and these dotted
@@ -66,7 +66,7 @@ struct VariableExpression {
 
 impl URLPathTemplate {
     // Top-level parsing entry point for URLPathTemplate syntax.
-    pub(super) fn parse(input: &str) -> Result<URLPathTemplate, String> {
+    pub fn parse(input: &str) -> Result<URLPathTemplate, String> {
         let mut prefix_suffix = input.splitn(2, '?');
         let path_prefix = prefix_suffix.next();
         let query_suffix = prefix_suffix.next();
@@ -97,7 +97,7 @@ impl URLPathTemplate {
     // into its {...} expressions, generate a new URL path String.
     // Guaranteed to return a "/"-prefixed string to make appending to the
     // base url easier.
-    pub(super) fn generate_path(&self, vars: &JSON) -> Result<String, String> {
+    pub fn generate_path(&self, vars: &JSON) -> Result<String, String> {
         let mut path = String::new();
         if let Some(var_map) = vars.as_object() {
             for (path_position, param_value) in self.path.iter().enumerate() {
@@ -187,7 +187,7 @@ impl URLPathTemplate {
         Ok(JSON::Object(var_map))
     }
 
-    pub(super) fn required_parameters(&self) -> Vec<String> {
+    pub fn required_parameters(&self) -> Vec<String> {
         let mut parameters = HashSet::new();
         for param_value in &self.path {
             parameters.extend(param_value.required_parameters());
