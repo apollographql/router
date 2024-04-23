@@ -26,6 +26,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
@@ -129,6 +130,7 @@ impl<T> From<WithErrors<T>> for DemandControlError {
 pub(crate) struct DemandControl {
     config: DemandControlConfig,
     strategy_factory: StrategyFactory,
+    subgraph_schemas: Arc<SubgraphSchemas>,
 }
 
 #[async_trait::async_trait]
@@ -143,6 +145,7 @@ impl Plugin for DemandControl {
                 init.subgraph_schemas.clone(),
             ),
             config: init.config,
+            subgraph_schemas: init.subgraph_schemas.clone(),
         })
     }
 
@@ -223,6 +226,8 @@ impl Plugin for DemandControl {
         if !self.config.enabled {
             service
         } else {
+            let subgraph_schemas = self.subgraph_schemas.clone();
+
             ServiceBuilder::new()
                 .checkpoint(move |req: subgraph::Request| {
                     let strategy = req
@@ -249,8 +254,12 @@ impl Plugin for DemandControl {
                     })
                 })
                 .map_future_with_request_data(
-                    |req: &subgraph::Request| {
-                        req.executable_document.clone().expect("must have document")
+                    move |req: &subgraph::Request| {
+                        req.fetch_node
+                            .clone()
+                            .expect("must have fetch node")
+                            .parsed_operation(&subgraph_schemas)
+                            .clone()
                     },
                     |req: Arc<ExecutableDocument>, fut| async move {
                         let resp: subgraph::Response = fut.await?;
@@ -298,7 +307,9 @@ mod test {
     use crate::plugins::demand_control::DemandControl;
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
+    use crate::query_planner::fetch::FetchNode;
     use crate::query_planner::fetch::QueryHash;
+    use crate::query_planner::fetch::SubgraphOperation;
     use crate::services::execution;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -407,6 +418,7 @@ mod test {
     async fn test_on_subgraph(config: &'static str) -> Response {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
+            .schema(include_str!("fixtures/test_schema.graphql"))
             .build()
             .await;
         let strategy = plugin.strategy_factory.create();
@@ -417,7 +429,12 @@ mod test {
             .subgraph_name("test")
             .context(ctx)
             .build();
-        req.executable_document = Some(Arc::new(ExecutableDocument::new()));
+        req.fetch_node = Some(Arc::new(
+            FetchNode::fake_builder()
+                .service_name("test")
+                .operation(SubgraphOperation::_from_parsed(ExecutableDocument::new()))
+                .build(),
+        ));
         let resp = plugin
             .call_subgraph(req, |req| {
                 subgraph::Response::fake_builder()

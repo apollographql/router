@@ -133,7 +133,7 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct SubgraphOperation {
     // At least one of these two must be initialized
     serialized: OnceLock<String>,
@@ -400,11 +400,7 @@ impl FetchNode {
             .build();
         subgraph_request.query_hash = self.schema_aware_hash.clone();
         subgraph_request.authorization = self.authorization.clone();
-        // TODO: This is where we need to set the document, but it makes the tests fail because the
-        // subgraph schemas are set to defauilt. We either need to add valid subgraph schemas for all
-        // the QP tests, or find a way to pass this lazily
-        // subgraph_request.executable_document =
-        //    Some(self.parsed_operation(parameters.subgraph_schemas).clone());
+        subgraph_request.fetch_node = Some(Arc::new(self.clone()));
 
         let service = parameters
             .service_factory
@@ -635,5 +631,38 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl FetchNode {
+    #[builder]
+    pub(crate) fn fake_new(
+        service_name: Option<String>,
+        requires: Option<Vec<Selection>>,
+        variable_usages: Option<Vec<String>>,
+        operation: Option<SubgraphOperation>,
+        operation_name: Option<String>,
+        operation_kind: Option<OperationKind>,
+        id: Option<String>,
+        input_rewrites: Option<Vec<rewrites::DataRewrite>>,
+        output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+        schema_aware_hash: Option<Arc<QueryHash>>,
+        authorization: Option<Arc<CacheKeyMetadata>>,
+    ) -> Self {
+        Self {
+            service_name: service_name.unwrap_or_default(),
+            requires: requires.unwrap_or_default(),
+            variable_usages: variable_usages.unwrap_or_default(),
+            operation: operation.unwrap_or_default(),
+            operation_name,
+            operation_kind: operation_kind.unwrap_or_default(),
+            id,
+            input_rewrites,
+            output_rewrites,
+            schema_aware_hash: schema_aware_hash.unwrap_or_default(),
+            authorization: authorization.unwrap_or_default(),
+        }
     }
 }

@@ -296,7 +296,7 @@ impl PlanNode {
                                         context: parameters.context,
                                         service_factory: parameters.service_factory,
                                         schema: parameters.schema,
-                                        subgraph_schemas: &parameters.subgraph_schemas,
+                                        subgraph_schemas: parameters.subgraph_schemas,
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
                                         query: parameters.query,

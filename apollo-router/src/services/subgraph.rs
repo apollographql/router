@@ -26,6 +26,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::QueryHash;
 use crate::Context;
@@ -59,7 +60,7 @@ pub struct Request {
     // authorization metadata for this request
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 
-    pub(crate) executable_document: Option<Arc<apollo_compiler::ExecutableDocument>>,
+    pub(crate) fetch_node: Option<Arc<FetchNode>>,
 }
 
 #[buildstructor::buildstructor]
@@ -87,7 +88,7 @@ impl Request {
             connection_closed_signal,
             query_hash: Default::default(),
             authorization: Default::default(),
-            executable_document: None,
+            fetch_node: None,
         }
     }
 
@@ -151,7 +152,7 @@ impl Clone for Request {
                 .map(|s| s.resubscribe()),
             query_hash: self.query_hash.clone(),
             authorization: self.authorization.clone(),
-            executable_document: self.executable_document.clone(),
+            fetch_node: self.fetch_node.clone(),
         }
     }
 }
