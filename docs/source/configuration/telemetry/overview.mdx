@@ -4,6 +4,8 @@ subtitle: Collect observable data to monitor your router and supergraph
 description: Observe and monitor the health and performance of the Apollo Router and the supergraph by collecting and exporting telemetry logs, metrics, and traces
 ---
 
+import TelemetryPerformanceNote from '../../../shared/telemetry-performance.mdx';
+
 In this overview, learn about:
 - How Apollo Router telemetry enables supergraph observability and debuggability
 - What data is captured in the router's logs, metrics, and traces
@@ -148,3 +150,9 @@ You can use [standard attributes](./instrumentation/standard-attributes) or [sel
 [Custom attributes for spans](./instrumentation/spans/#attributes) require a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
 
 </PremiumFeature>
+
+## Best practices
+
+### Balancing telemetry and router performance
+
+<TelemetryPerformanceNote/>
