@@ -196,35 +196,63 @@ where
 
 #[cfg(test)]
 mod test {
-    use insta::assert_debug_snapshot;
+    use std::sync::Arc;
 
+    use parking_lot::Mutex;
+
+    use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
+    use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
     use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
+    use crate::plugins::telemetry::config_new::conditions::Condition;
+    use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::extendable::Extendable;
+    use crate::plugins::telemetry::config_new::selectors::OperationName;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 
     #[test]
     fn test_extendable_serde() {
-        let mut settings = insta::Settings::clone_current();
-        settings.set_sort_maps(true);
-        settings.bind(|| {
-            let o = serde_json::from_value::<Extendable<SupergraphAttributes, SupergraphSelector>>(
-                serde_json::json!({
-                        "graphql.operation.name": true,
-                        "graphql.operation.type": true,
-                        "custom_1": {
-                            "operation_name": "string"
-                        },
-                        "custom_2": {
-                            "operation_name": "string"
-                        }
-                }),
-            )
-            .unwrap();
-            assert_debug_snapshot!(o);
-        });
+        let extendable_conf = serde_json::from_value::<
+            Extendable<SupergraphAttributes, SupergraphSelector>,
+        >(serde_json::json!({
+                "graphql.operation.name": true,
+                "graphql.operation.type": true,
+                "custom_1": {
+                    "operation_name": "string"
+                },
+                "custom_2": {
+                    "operation_name": "string"
+                }
+        }))
+        .unwrap();
+        assert_eq!(
+            extendable_conf.attributes,
+            SupergraphAttributes {
+                graphql_document: None,
+                graphql_operation_name: Some(true),
+                graphql_operation_type: Some(true)
+            }
+        );
+        assert_eq!(
+            extendable_conf.custom.get("custom_1"),
+            Some(&SupergraphSelector::OperationName {
+                operation_name: OperationName::String,
+                redact: None,
+                default: None
+            })
+        );
+        assert_eq!(
+            extendable_conf.custom.get("custom_2"),
+            Some(&SupergraphSelector::OperationName {
+                operation_name: OperationName::String,
+                redact: None,
+                default: None
+            })
+        );
     }
 
     #[test]
@@ -246,25 +274,78 @@ mod test {
 
     #[test]
     fn test_extendable_serde_conditional() {
-        let mut settings = insta::Settings::clone_current();
-        settings.set_sort_maps(true);
-        settings.bind(|| {
-            let o = serde_json::from_value::<
-                Extendable<RouterAttributes, Conditional<RouterSelector>>,
-            >(serde_json::json!({
-            "http.request.method": true,
-            "http.response.status_code": true,
-            "url.path": true,
-              "http.request.header.x-my-header": {
-              "request_header": "x-my-header"
-            },
-            "http.request.header.x-not-present": {
-              "request_header": "x-not-present",
-              "default": "nope"
+        let extendable_conf = serde_json::from_value::<
+            Extendable<RouterAttributes, Conditional<RouterSelector>>,
+        >(serde_json::json!({
+        "http.request.method": true,
+        "http.response.status_code": true,
+        "url.path": true,
+        "http.request.header.x-my-header": {
+          "request_header": "x-my-header",
+          "condition": {
+            "eq": [
+                200,
+                {
+                    "response_status": "code"
+                }
+            ]
+          }
+        },
+        "http.request.header.x-not-present": {
+          "request_header": "x-not-present",
+          "default": "nope"
+        }
+        }))
+        .unwrap();
+        assert_eq!(
+            extendable_conf.attributes,
+            RouterAttributes {
+                datadog_trace_id: None,
+                trace_id: None,
+                baggage: None,
+                common: HttpCommonAttributes {
+                    http_request_method: Some(true),
+                    http_response_status_code: Some(true),
+                    ..Default::default()
+                },
+                server: HttpServerAttributes {
+                    url_path: Some(true),
+                    ..Default::default()
+                }
             }
-            }))
-            .unwrap();
-            assert_debug_snapshot!(o);
-        });
+        );
+        assert_eq!(
+            extendable_conf
+                .custom
+                .get("http.request.header.x-my-header"),
+            Some(&Conditional {
+                selector: RouterSelector::RequestHeader {
+                    request_header: String::from("x-my-header"),
+                    redact: None,
+                    default: None
+                },
+                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                    SelectorOrValue::Value(200.into()),
+                    SelectorOrValue::Selector(RouterSelector::ResponseStatus {
+                        response_status: ResponseStatus::Code
+                    })
+                ])))),
+                value: Default::default(),
+            })
+        );
+        assert_eq!(
+            extendable_conf
+                .custom
+                .get("http.request.header.x-not-present"),
+            Some(&Conditional {
+                selector: RouterSelector::RequestHeader {
+                    request_header: String::from("x-not-present"),
+                    redact: None,
+                    default: Some(AttributeValue::String("nope".to_string()))
+                },
+                condition: None,
+                value: Default::default(),
+            })
+        );
     }
 }

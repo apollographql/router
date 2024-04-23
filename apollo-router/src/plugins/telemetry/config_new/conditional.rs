@@ -26,6 +26,7 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 /// The state of the conditional.
 #[derive(Debug, Default)]
+#[cfg_attr(test, derive(PartialEq))]
 pub(crate) enum State<T> {
     /// The conditional has not been evaluated yet or no value has been set via selector.
     #[default]
@@ -50,6 +51,22 @@ pub(crate) struct Conditional<Att> {
     pub(crate) selector: Att,
     pub(crate) condition: Option<Arc<Mutex<Condition<Att>>>>,
     pub(crate) value: Arc<Mutex<State<opentelemetry::Value>>>,
+}
+
+#[cfg(test)]
+impl<Att> PartialEq for Conditional<Att>
+where
+    Att: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        let condition_eq = match (&self.condition, &other.condition) {
+            (Some(l), Some(r)) => *(l.lock()) == *(r.lock()),
+            (None, None) => true,
+            _ => false,
+        };
+        let value_eq = *(self.value.lock()) == *(other.value.lock());
+        self.selector == other.selector && value_eq && condition_eq
+    }
 }
 
 impl<T> JsonSchema for Conditional<T>
