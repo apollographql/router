@@ -133,7 +133,6 @@ struct JWTConf {
     /// Header value prefix
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
-
     /// Alternative sources to extract the JWT
     #[serde(default)]
     sources: Vec<Source>,
@@ -706,10 +705,7 @@ fn extract_jwt<'a, 'b: 'a>(
             if jwt_value.len() < prefix_len
                 || !&jwt_value[..prefix_len].eq_ignore_ascii_case(value_prefix)
             {
-                return Some(Err(AuthenticationError::InvalidPrefix(
-                    jwt_value_untrimmed,
-                    value_prefix,
-                )));
+                return None;
             }
             // If there's no header prefix, we need to avoid splitting the header
             let jwt = if value_prefix.is_empty() {

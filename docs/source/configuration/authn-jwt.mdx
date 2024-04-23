@@ -139,7 +139,7 @@ The default value is `Authorization`.
 
 The string that will always precede the JWT in the header value corresponding to [`header_name`](#header_name). This value must not include whitespace.
 
-The default value is `Bearer`.
+The default value is `Bearer`. If the router encounters authorization headers with a different prefix, it will ignore them.
 
 </td>
 </tr>
