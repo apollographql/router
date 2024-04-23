@@ -160,7 +160,7 @@ impl PlannerMode {
             debug: Default::default(),
         };
         Ok(Arc::new(QueryPlanner::new(
-            &schema.federation_supergraph,
+            schema.federation_supergraph(),
             config,
         )?))
     }
@@ -361,7 +361,7 @@ impl BridgeQueryPlanner {
         sdl: String,
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
-        let schema = Schema::parse(&sdl)?;
+        let schema = Schema::parse(&sdl, &configuration)?;
         let planner = PlannerMode::new(&schema, &configuration).await?;
 
         let api_schema_string = match configuration.experimental_api_schema_generation_mode {
@@ -502,7 +502,7 @@ impl BridgeQueryPlanner {
 
         let api_schema = planner.api_schema().await?;
         let api_schema = Schema::parse_compiler_schema(&api_schema.schema)?;
-        let schema = Arc::new(Schema::parse(&schema)?.with_api_schema(api_schema));
+        let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let mut subgraph_schemas: HashMap<String, Arc<Valid<apollo_compiler::Schema>>> =
             HashMap::new();
