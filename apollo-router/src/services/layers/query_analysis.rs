@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
@@ -34,7 +35,14 @@ use crate::Context;
 pub(crate) struct QueryAnalysisLayer {
     pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
+    cache: Arc<
+        Mutex<
+            LruCache<
+                QueryAnalysisKey,
+                Result<(Context, ParsedDocument, Option<String>), SpecError>,
+            >,
+        >,
+    >,
     enable_authorization_directives: bool,
 }
 
@@ -160,7 +168,7 @@ impl QueryAnalysisLayer {
                         }
 
                         context
-                            .insert(OPERATION_NAME, operation_name)
+                            .insert(OPERATION_NAME, operation_name.clone())
                             .expect("cannot insert operation name into context; this is a bug");
                         let operation_kind =
                             operation.map(|op| OperationKind::from(op.operation_type));
@@ -173,10 +181,10 @@ impl QueryAnalysisLayer {
                                 query,
                                 operation_name: op_name,
                             },
-                            Ok((context.clone(), doc.clone())),
+                            Ok((context.clone(), doc.clone(), operation_name.clone())),
                         );
 
-                        Ok((context, doc))
+                        Ok((context, doc, operation_name))
                     }
                 }
             }
@@ -184,7 +192,16 @@ impl QueryAnalysisLayer {
         };
 
         match res {
-            Ok((context, doc)) => {
+            Ok((context, doc, operation_name)) => {
+                // Normalize request by adding operation name if it is missing
+                // Note: if request's operationName was invalid we would fail earlier.
+                // So this code will never change validity of client request.
+                let supergraph_request =
+                    request.supergraph_request.map(|graphql| graphql::Request {
+                        operation_name: graphql.operation_name.or(operation_name),
+                        ..graphql
+                    });
+
                 request.context.extend(&context);
                 request
                     .context
@@ -192,7 +209,7 @@ impl QueryAnalysisLayer {
                     .lock()
                     .insert::<ParsedDocument>(doc);
                 Ok(SupergraphRequest {
-                    supergraph_request: request.supergraph_request,
+                    supergraph_request,
                     context: request.context,
                 })
             }
