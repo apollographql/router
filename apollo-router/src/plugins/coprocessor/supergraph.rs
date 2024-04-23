@@ -34,7 +34,7 @@ pub(super) struct SupergraphRequestConf {
     /// Send the method
     pub(super) method: bool,
     /// Handles the request without waiting for the coprocessor to respond
-    pub(super) asynchronous: bool,
+    pub(super) detached: bool,
 }
 
 /// What information is passed to a router request/response stage
@@ -52,7 +52,7 @@ pub(super) struct SupergraphResponseConf {
     /// Send the HTTP status
     pub(super) status_code: bool,
     /// Handles the response without waiting for the coprocessor to respond
-    pub(super) asynchronous: bool,
+    pub(super) detached: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -225,7 +225,7 @@ where
         .and_sdl(sdl_to_send)
         .build();
 
-    if request_config.asynchronous {
+    if request_config.detached {
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
             let start = Instant::now();
@@ -386,7 +386,7 @@ where
         .and_has_next(first.has_next)
         .build();
 
-    if response_config.asynchronous {
+    if response_config.detached {
         let http_client2 = http_client.clone();
         let coprocessor_url2 = coprocessor_url.clone();
         tokio::task::spawn(async move {
@@ -627,7 +627,7 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn mock_with_asynchronous_response_callback(
+    pub(crate) fn mock_with_detached_response_callback(
         callback: fn(
             hyper::Request<Body>,
         ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
@@ -685,7 +685,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -819,7 +819,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -891,7 +891,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                asynchronous: false,
+                detached: false,
             },
             request: Default::default(),
         };
@@ -1023,7 +1023,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                asynchronous: false,
+                detached: false,
             },
             request: Default::default(),
         };
@@ -1127,7 +1127,7 @@ mod tests {
     async fn external_plugin_supergraph_request_async() {
         let supergraph_stage = SupergraphStage {
             request: SupergraphRequestConf {
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
             response: SupergraphResponseConf::default(),
@@ -1184,7 +1184,7 @@ mod tests {
         let supergraph_stage = SupergraphStage {
             request: SupergraphRequestConf::default(),
             response: SupergraphResponseConf {
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
         };
@@ -1205,7 +1205,7 @@ mod tests {
             });
 
         let mock_http_client =
-            mock_with_asynchronous_response_callback(move |_: hyper::Request<Body>| {
+            mock_with_detached_response_callback(move |_: hyper::Request<Body>| {
                 Box::pin(async { panic!() })
             });
 

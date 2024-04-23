@@ -36,7 +36,7 @@ pub(super) struct ExecutionRequestConf {
     /// Send the query plan
     pub(super) query_plan: bool,
     /// Handles the request without waiting for the coprocessor to respond
-    pub(super) asynchronous: bool,
+    pub(super) detached: bool,
 }
 
 /// What information is passed to a router request/response stage
@@ -54,7 +54,7 @@ pub(super) struct ExecutionResponseConf {
     /// Send the HTTP status
     pub(super) status_code: bool,
     /// Handles the response without waiting for the coprocessor to respond
-    pub(super) asynchronous: bool,
+    pub(super) detached: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -233,7 +233,7 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    if request_config.asynchronous {
+    if request_config.detached {
         tokio::task::spawn(async move {
             tracing::debug!(?payload, "externalized output");
             let start = Instant::now();
@@ -394,7 +394,7 @@ where
         .and_has_next(first.has_next)
         .build();
 
-    if response_config.asynchronous {
+    if response_config.detached {
         let http_client2 = http_client.clone();
         let coprocessor_url2 = coprocessor_url.clone();
         tokio::task::spawn(async move {
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn mock_with_asynchronous_response_callback(
+    pub(crate) fn mock_with_detached_response_callback(
         callback: fn(
             hyper::Request<Body>,
         ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
@@ -696,7 +696,7 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -831,7 +831,7 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -899,7 +899,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 body: true,
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
             response: Default::default(),
@@ -957,7 +957,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                asynchronous: false,
+                detached: false,
             },
             request: Default::default(),
         };
@@ -1089,7 +1089,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                asynchronous: false,
+                detached: false,
             },
             request: Default::default(),
         };
@@ -1196,7 +1196,7 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
             request: Default::default(),
@@ -1217,7 +1217,7 @@ mod tests {
             });
 
         let mock_http_client =
-            mock_with_asynchronous_response_callback(move |_res: hyper::Request<Body>| {
+            mock_with_detached_response_callback(move |_res: hyper::Request<Body>| {
                 Box::pin(async { panic!() })
             });
 

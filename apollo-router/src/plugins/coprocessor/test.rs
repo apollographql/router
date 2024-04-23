@@ -99,7 +99,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -159,7 +159,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -219,7 +219,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -278,7 +278,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -341,7 +341,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -471,7 +471,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -540,7 +540,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -599,7 +599,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 body: true,
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
             response: Default::default(),
@@ -654,7 +654,7 @@ mod tests {
                 body: true,
                 service_name: false,
                 status_code: false,
-                asynchronous: false,
+                detached: false,
             },
         };
 
@@ -762,7 +762,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 body: true,
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
         };
@@ -782,7 +782,7 @@ mod tests {
             });
 
         let mock_http_client =
-            mock_with_asynchronous_response_callback(move |_: hyper::Request<Body>| {
+            mock_with_detached_response_callback(move |_: hyper::Request<Body>| {
                 Box::pin(async { panic!() })
             });
 
@@ -813,7 +813,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -932,7 +932,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1061,7 +1061,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1150,7 +1150,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                asynchronous: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1229,7 +1229,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                asynchronous: false,
+                detached: false,
             },
             request: Default::default(),
         };
@@ -1355,7 +1355,7 @@ mod tests {
     async fn external_plugin_router_request_async() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
             response: RouterResponseConf::default(),
@@ -1390,7 +1390,7 @@ mod tests {
         let router_stage = RouterStage {
             request: RouterRequestConf::default(),
             response: RouterResponseConf {
-                asynchronous: true,
+                detached: true,
                 ..Default::default()
             },
         };
@@ -1405,7 +1405,7 @@ mod tests {
         .await;
 
         let mock_http_client =
-            mock_with_asynchronous_response_callback(move |_req: hyper::Request<Body>| {
+            mock_with_detached_response_callback(move |_req: hyper::Request<Body>| {
                 Box::pin(async { panic!() })
             });
 
@@ -1509,7 +1509,7 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn mock_with_asynchronous_response_callback(
+    pub(crate) fn mock_with_detached_response_callback(
         callback: fn(
             hyper::Request<Body>,
         ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
