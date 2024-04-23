@@ -80,4 +80,7 @@ preview_file_uploads:
 
 experimental_demand_control:
   enabled: true
-  algorithm: basic
+  mode: measure
+  strategy:
+    static_estimated:
+      max: 256

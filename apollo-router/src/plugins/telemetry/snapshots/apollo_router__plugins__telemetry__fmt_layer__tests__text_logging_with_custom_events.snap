@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/plugins/telemetry/fmt_layer.rs
+expression: buff.to_string()
+---
+[timestamp] INFO test{another=2,custom_dyn=test,first=one,first=one,}  http.response.body="{\"foo\": \"bar\"}" http.response.body.size="125" my message kind=my_custom_event
+[timestamp] ERROR test{another=2,custom_dyn=test,first=one,first=one,}  Hello from test http.method="GET"

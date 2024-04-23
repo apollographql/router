@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.44.0"
+version = "1.45.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -337,6 +337,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry-zipkin",
  "opentelemetry_api",
+ "opentelemetry_sdk 0.20.0",
  "p256 0.13.2",
  "parking_lot",
  "paste",
@@ -411,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.44.0"
+version = "1.45.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -427,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.44.0"
+version = "1.45.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -5889,9 +5890,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.10"
+version = "0.21.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d5a6813c0759e4609cd494e8e725babae6a2ca7b62a5536a13daaec6fcb7ba"
+checksum = "7fecbfb7b1444f477b345853b1fce097a2c6fb637b2bfb87e6bc5db0f043fae4"
 dependencies = [
  "log",
  "ring 0.17.5",

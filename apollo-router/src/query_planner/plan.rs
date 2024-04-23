@@ -74,6 +74,14 @@ impl QueryPlan {
             None => false,
         }
     }
+
+    pub(crate) fn query_hashes(
+        &self,
+        operation: Option<&str>,
+        variables: &Object,
+    ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
+        self.root.query_hashes(operation, variables, &self.query)
+    }
 }
 
 /// Query plans are composed of a set of nodes.
@@ -206,7 +214,12 @@ impl PlanNode {
     /// supported, but it may be that PlanNode::Condition must eventually be supported (or other
     /// new nodes types that are introduced). Explicitly fail each type to provide extra error
     /// details and don't use _ so that future node types must be handled here.
-    pub(crate) fn query_hashes(&self) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
+    pub(crate) fn query_hashes(
+        &self,
+        operation: Option<&str>,
+        variables: &Object,
+        query: &Query,
+    ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
         let mut query_hashes = vec![];
         let mut new_targets = vec![self];
 
@@ -241,11 +254,22 @@ impl PlanNode {
                                 .to_string(),
                         ))
                     }
-                    PlanNode::Condition { .. } => {
-                        return Err(CacheResolverError::BatchingError(
-                            "unexpected condition node encountered during query_hash processing"
-                                .to_string(),
-                        ))
+                    PlanNode::Condition {
+                        if_clause,
+                        else_clause,
+                        condition,
+                    } => {
+                        if query
+                            .variable_value(operation, condition.as_str(), variables)
+                            .map(|v| *v == Value::Bool(true))
+                            .unwrap_or(true)
+                        {
+                            if let Some(node) = if_clause {
+                                new_targets.push(node);
+                            }
+                        } else if let Some(node) = else_clause {
+                            new_targets.push(node);
+                        }
                     }
                 }
             }
