@@ -102,29 +102,32 @@ where
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
         match &self.condition {
-            Some(condition) => match condition.lock().evaluate_request(request) {
-                None => {
-                    if let Some(value) = self.selector.on_request(request) {
-                        *self.value.lock() = value.into();
+            Some(condition) => {
+                let request_condition_res = condition.lock().evaluate_request(request);
+                match request_condition_res {
+                    None => {
+                        if let Some(value) = self.selector.on_request(request) {
+                            *self.value.lock() = value.into();
+                        }
+                        None
                     }
-                    None
-                }
-                Some(true) => {
-                    // The condition evaluated to true, so we can just return the value but may need to try again on the response.
-                    match self.selector.on_request(request) {
-                        None => None,
-                        Some(value) => {
-                            *self.value.lock() = State::Returned;
-                            Some(value)
+                    Some(true) => {
+                        // The condition evaluated to true, so we can just return the value but may need to try again on the response.
+                        match self.selector.on_request(request) {
+                            None => None,
+                            Some(value) => {
+                                *self.value.lock() = State::Returned;
+                                Some(value)
+                            }
                         }
                     }
+                    Some(false) => {
+                        // The condition has been evaluated to false, so we can return None. it will never return true.
+                        *self.value.lock() = State::Returned;
+                        None
+                    }
                 }
-                Some(false) => {
-                    // The condition has been evaluated to false, so we can return None. it will never return true.
-                    *self.value.lock() = State::Returned;
-                    None
-                }
-            },
+            }
             None => {
                 // There is no condition to evaluate, so we can just return the value.
                 match self.selector.on_request(request) {
