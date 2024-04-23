@@ -228,6 +228,8 @@ pub(super) struct RouterRequestConf {
     pub(super) method: bool,
     /// Handles the request without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a router request/response stage
@@ -246,7 +248,10 @@ pub(super) struct RouterResponseConf {
     pub(super) status_code: bool,
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    pub(super) url: Option<String>,
 }
+
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -265,6 +270,8 @@ pub(super) struct SubgraphRequestConf {
     pub(super) service_name: bool,
     /// Handles the request without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -283,6 +290,8 @@ pub(super) struct SubgraphResponseConf {
     pub(super) status_code: bool,
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    pub(super) url: Option<String>,
 }
 
 /// Configures the externalization plugin
@@ -341,7 +350,10 @@ impl RouterStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -384,7 +396,10 @@ impl RouterStage {
             let response_config = self.response.clone();
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
-                let coprocessor_url = coprocessor_url.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
 
@@ -477,7 +492,10 @@ impl SubgraphStage {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
             let http_client = http_client.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let service_name = service_name.clone();
             OneShotAsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
@@ -519,8 +537,11 @@ impl SubgraphStage {
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
-                let coprocessor_url = coprocessor_url.clone();
                 let response_config = response_config.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let service_name = service_name.clone();
 
                 async move {
