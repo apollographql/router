@@ -177,7 +177,7 @@ type Query
   noInputQuery: EverythingResponse!
   basicInputTypeQuery(input: NestedInputType!): EverythingResponse!
   anotherInputTypeQuery(input: AnotherInputType): EverythingResponse!
-  enumInputQuery(enumInput: SomeEnum, inputType: EnumInputType): EverythingResponse!
+  enumInputQuery(enumInput: SomeEnum, inputType: EnumInputType, stringInput: String, anotherStr: String): EverythingResponse!
   basicResponseQuery: BasicResponse!
   scalarResponseQuery: String
   defaultArgQuery(stringInput: String! = "default", inputType: AnotherInputType = {anotherInput: "inputDefault"}): BasicResponse!

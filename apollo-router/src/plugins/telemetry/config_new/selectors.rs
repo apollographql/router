@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
@@ -24,6 +25,7 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum TraceIdFormat {
     /// Open Telemetry trace ID, a hex string.
@@ -33,7 +35,7 @@ pub(crate) enum TraceIdFormat {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -43,7 +45,7 @@ pub(crate) enum OperationName {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
@@ -51,7 +53,7 @@ pub(crate) enum Query {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ResponseStatus {
     /// The http status code.
@@ -61,7 +63,7 @@ pub(crate) enum ResponseStatus {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -69,6 +71,7 @@ pub(crate) enum OperationKind {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
     /// A header from the request
@@ -142,10 +145,18 @@ pub(crate) enum RouterSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        on_graphql_error: bool,
+    },
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SupergraphSelector {
     OperationName {
@@ -252,9 +263,14 @@ pub(crate) enum SupergraphSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
+#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 #[derivative(Debug)]
 pub(crate) enum SubgraphSelector {
@@ -312,7 +328,7 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseData {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_data: JsonPathInst,
         #[serde(skip)]
@@ -325,7 +341,7 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseErrors {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_errors: JsonPathInst,
         #[serde(skip)]
@@ -448,6 +464,10 @@ pub(crate) enum SubgraphSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
 }
 
 impl Selector for RouterSelector {
@@ -486,6 +506,7 @@ impl Selector for RouterSelector {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // Related to Response
             _ => None,
         }
@@ -519,15 +540,23 @@ impl Selector for RouterSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
+            }
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -613,6 +642,7 @@ impl Selector for SupergraphSelector {
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For response
             _ => None,
         }
@@ -647,12 +677,11 @@ impl Selector for SupergraphSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
         }
@@ -794,6 +823,7 @@ impl Selector for SubgraphSelector {
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
 
             // For response
             _ => None,
@@ -885,12 +915,11 @@ impl Selector for SubgraphSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
         }
@@ -932,6 +961,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::otel;
 
     #[test]
     fn router_static() {
@@ -1481,7 +1511,7 @@ mod test {
 
     #[test]
     fn router_baggage() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = RouterSelector::Baggage {
                 baggage: "baggage_key".to_string(),
@@ -1519,7 +1549,7 @@ mod test {
 
     #[test]
     fn supergraph_baggage() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = SupergraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
@@ -1557,7 +1587,7 @@ mod test {
 
     #[test]
     fn subgraph_baggage() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = SubgraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
@@ -1588,7 +1618,7 @@ mod test {
 
     #[test]
     fn router_trace_id() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = RouterSelector::TraceId {
                 trace_id: TraceIdFormat::OpenTelemetry,

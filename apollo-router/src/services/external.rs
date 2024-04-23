@@ -20,8 +20,8 @@ use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::Context;
