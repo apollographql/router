@@ -33,11 +33,16 @@ pub(crate) const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
 /// then the hash will stay the same
 pub(crate) struct QueryHashVisitor<'a> {
     schema: &'a schema::Schema,
+    // TODO: remove once introspection has been moved out of query planning
+    // For now, introspection is stiull handled by the planner, so when an
+    // introspection query is hashed, it should take the whole schema into account
+    schema_str: &'a str,
     hasher: Sha256,
     fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
+    seen_introspection: bool,
     join_field_directive_name: Option<String>,
     join_type_directive_name: Option<String>,
 }
@@ -45,14 +50,17 @@ pub(crate) struct QueryHashVisitor<'a> {
 impl<'a> QueryHashVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
+        schema_str: &'a str,
         executable: &'a executable::ExecutableDocument,
     ) -> Self {
         Self {
             schema,
+            schema_str,
             hasher: Sha256::new(),
             fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
+            seen_introspection: false,
             // should we just return an error if we do not find those directives?
             join_field_directive_name: Schema::directive_name(
                 schema,
@@ -71,10 +79,11 @@ impl<'a> QueryHashVisitor<'a> {
 
     pub(crate) fn hash_query(
         schema: &'a schema::Schema,
+        schema_str: &'a str,
         executable: &'a executable::ExecutableDocument,
         operation_name: Option<&str>,
     ) -> Result<Vec<u8>, BoxError> {
-        let mut visitor = QueryHashVisitor::new(schema, executable);
+        let mut visitor = QueryHashVisitor::new(schema, schema_str, executable);
         traverse::document(&mut visitor, executable, operation_name)?;
         Ok(visitor.finish())
     }
@@ -357,6 +366,12 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
+        if !self.seen_introspection {
+            if field_def.name == "__schema" || field_def.name == "__type" {
+                self.seen_introspection = true;
+                self.schema_str.hash(self);
+            }
+        }
         self.hash_field(
             parent_type.to_string(),
             field_def.name.as_str().to_string(),
@@ -412,8 +427,8 @@ mod tests {
     use crate::spec::query::traverse;
 
     #[track_caller]
-    fn hash(schema: &str, query: &str) -> String {
-        let schema = Schema::parse(schema, "schema.graphql")
+    fn hash(schema_str: &str, query: &str) -> String {
+        let schema = Schema::parse(schema_str, "schema.graphql")
             .unwrap()
             .validate()
             .unwrap();
@@ -424,22 +439,22 @@ mod tests {
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &exec);
+        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec);
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
     }
 
     #[track_caller]
-    fn hash_subgraph_query(schema: &str, query: &str) -> String {
-        let schema = Valid::assume_valid(Schema::parse(schema, "schema.graphql").unwrap());
+    fn hash_subgraph_query(schema_str: &str, query: &str) -> String {
+        let schema = Valid::assume_valid(Schema::parse(schema_str, "schema.graphql").unwrap());
         let doc = Document::parse(query, "query.graphql").unwrap();
         let exec = doc
             .to_executable(&schema)
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &exec);
+        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec);
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
