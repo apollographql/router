@@ -100,6 +100,15 @@ pub(crate) enum FetchError {
 
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
+
+    /// Batching error for '{service}': {reason}
+    SubrequestBatchingError {
+        /// The service for which batch processing failed.
+        service: String,
+
+        /// The reason batch processing failed.
+        reason: String,
+    },
 }
 
 impl FetchError {
@@ -173,6 +182,7 @@ impl ErrorExtension for FetchError {
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
+            FetchError::SubrequestBatchingError { .. } => "SUBREQUEST_BATCHING_ERROR",
         }
         .to_string()
     }
@@ -191,16 +201,23 @@ impl From<QueryPlannerError> for FetchError {
 pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
+    /// batch processing failed: {0}
+    BatchingError(String),
 }
 
 impl IntoGraphQLErrors for CacheResolverError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
-        let CacheResolverError::RetrievalError(retrieval_error) = self;
-        retrieval_error
-            .deref()
-            .clone()
-            .into_graphql_errors()
-            .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error))
+        match self {
+            CacheResolverError::RetrievalError(retrieval_error) => retrieval_error
+                .deref()
+                .clone()
+                .into_graphql_errors()
+                .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error)),
+            CacheResolverError::BatchingError(msg) => Ok(vec![Error::builder()
+                .message(msg)
+                .extension_code("BATCH_PROCESSING_FAILED")
+                .build()]),
+        }
     }
 }
 
@@ -297,6 +314,10 @@ pub(crate) enum QueryPlannerError {
 
     /// Query planner pool error: {0}
     PoolProcessing(String),
+
+    /// Federation error: {0}
+    // TODO: make `FederationError` serializable and store it as-is?
+    FederationError(String),
 }
 
 impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
@@ -521,18 +542,22 @@ impl std::fmt::Display for PlanErrors {
 }
 
 /// Error in the schema.
-#[derive(Debug, Error, Display)]
+#[derive(Debug, Error, Display, derive_more::From)]
 #[non_exhaustive]
 pub(crate) enum SchemaError {
     /// URL parse error for subgraph {0}: {1}
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
+    #[from(ignore)]
     MissingSubgraphUrl(String),
     /// GraphQL parser error: {0}
     Parse(ParseErrors),
     /// GraphQL validation error: {0}
     Validate(ValidationErrors),
+    /// Federation error: {0}
+    FederationError(apollo_federation::error::FederationError),
     /// Api error(s): {0}
+    #[from(ignore)]
     Api(String),
 }
 
@@ -648,6 +673,19 @@ impl std::fmt::Display for ValidationErrors {
         }
         Ok(())
     }
+}
+
+/// Error during subgraph batch processing
+#[derive(Debug, Error, Display)]
+pub(crate) enum SubgraphBatchingError {
+    /// Sender unavailable
+    SenderUnavailable,
+    /// Request does not have a subgraph name
+    MissingSubgraphName,
+    /// Requests is empty
+    RequestsIsEmpty,
+    /// Batch processing failed: {0}
+    ProcessingFailed(String),
 }
 
 #[cfg(test)]

@@ -1,11 +1,12 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use tracing_opentelemetry::OtelData;
+use opentelemetry::OrderMap;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
+use super::otel::OtelData;
 use super::reload::IsSampled;
 use super::tracing::APOLLO_PRIVATE_PREFIX;
 
@@ -28,9 +29,10 @@ impl LogAttributes {
     }
 }
 
-pub(crate) struct DynAttributeLayer;
+/// To add dynamic attributes for spans
+pub(crate) struct DynSpanAttributeLayer;
 
-impl<S> Layer<S> for DynAttributeLayer
+impl<S> Layer<S> for DynSpanAttributeLayer
 where
     S: tracing_core::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
@@ -48,19 +50,20 @@ where
     }
 }
 
-impl DynAttributeLayer {
+impl DynSpanAttributeLayer {
     pub(crate) fn new() -> Self {
         Self {}
     }
 }
 
-pub(crate) trait DynAttribute {
-    fn set_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
-    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
+/// To add dynamic attributes for spans
+pub(crate) trait SpanDynAttribute {
+    fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
+    fn set_span_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
 }
 
-impl DynAttribute for ::tracing::Span {
-    fn set_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
+impl SpanDynAttribute for ::tracing::Span {
+    fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -110,7 +113,7 @@ impl DynAttribute for ::tracing::Span {
         });
     }
 
-    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
+    fn set_span_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
         let mut attributes = attributes.into_iter().peekable();
         if attributes.peek().is_none() {
             return;
@@ -156,6 +159,86 @@ impl DynAttribute for ::tracing::Span {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
                                     eprintln!("no LogAttributes, this is a bug");
                                 }
+                            }
+                        }
+                    }
+                };
+            } else {
+                ::tracing::error!("no Registry, this is a bug");
+            }
+        });
+    }
+}
+
+/// To add dynamic attributes for spans
+pub(crate) trait EventDynAttribute {
+    /// Always use before sending the event
+    fn set_event_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
+    /// Always use before sending the event
+    fn set_event_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
+}
+
+impl EventDynAttribute for ::tracing::Span {
+    fn set_event_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
+        self.with_subscriber(move |(id, dispatch)| {
+            if let Some(reg) = dispatch.downcast_ref::<Registry>() {
+                match reg.span(id) {
+                    None => eprintln!("no spanref, this is a bug"),
+                    Some(s) => {
+                        if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
+                            return;
+                        }
+                        let mut extensions = s.extensions_mut();
+                        match extensions.get_mut::<OtelData>() {
+                            Some(otel_data) => match &mut otel_data.event_attributes {
+                                Some(attributes) => {
+                                    attributes.insert(key, value);
+                                }
+                                None => {
+                                    let mut order_map = OrderMap::new();
+                                    order_map.insert(key, value);
+                                    otel_data.event_attributes = Some(order_map);
+                                }
+                            },
+                            None => {
+                                // Can't use ::tracing::error! because it could create deadlock on extensions
+                                eprintln!("no EventsAttributes, this is a bug");
+                            }
+                        }
+                    }
+                };
+            } else {
+                ::tracing::error!("no Registry, this is a bug");
+            }
+        });
+    }
+
+    fn set_event_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
+        let mut attributes = attributes.into_iter().peekable();
+        if attributes.peek().is_none() {
+            return;
+        }
+        self.with_subscriber(move |(id, dispatch)| {
+            if let Some(reg) = dispatch.downcast_ref::<Registry>() {
+                match reg.span(id) {
+                    None => eprintln!("no spanref, this is a bug"),
+                    Some(s) => {
+                        let mut extensions = s.extensions_mut();
+                        match extensions.get_mut::<OtelData>() {
+                            Some(otel_data) => match &mut otel_data.event_attributes {
+                                Some(event_attributes) => {
+                                    event_attributes
+                                        .extend(attributes.map(|kv| (kv.key, kv.value)));
+                                }
+                                None => {
+                                    otel_data.event_attributes = Some(OrderMap::from_iter(
+                                        attributes.map(|kv| (kv.key, kv.value)),
+                                    ));
+                                }
+                            },
+                            None => {
+                                // Can't use ::tracing::error! because it could create deadlock on extensions
+                                eprintln!("no EventsAttributes, this is a bug");
                             }
                         }
                     }

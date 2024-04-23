@@ -242,6 +242,24 @@ You don't need to import the "base64" module. It is imported in the router.
 
 </Note>
 
+## sha256 hash strings
+
+Your Rhai customization can use the function `sha256::digest()` to hash strings using the SHA256 hashing algorithm.
+
+```rhai
+fn supergraph_service(service){
+    service.map_request(|request|{
+        let sha = sha256::digest("hello world");
+        log_info(sha);
+    });
+}
+```
+<Note>
+
+You don't need to import the "sha256" module. It is imported in the router.
+
+</Note>
+
 ### Different alphabets
 
 Base64 supports multiple alphabets to encode data, depending on the supported characters where it is used. The router supports the following alphabets:

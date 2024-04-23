@@ -1,0 +1,81 @@
+telemetry:
+  apollo:
+    client_name_header: name_header
+    client_version_header: version_header
+  instrumentation:
+    events:
+      router:
+        # Standard events
+        request: info
+        response: info
+        error: info
+
+        # Custom events
+        my.request_event:
+          message: "my event message"
+          level: info
+          on: request
+          attributes:
+            http.request.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.response_event:
+          message: "my response event message"
+          level: info
+          on: response
+          attributes:
+            http.response.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - response_header: "x-log-request"
+      supergraph:
+        # Standard events
+        request: info
+        response: info
+        error: info
+
+        # Custom events
+        my.request.event:
+          message: "my event message"
+          level: info
+          on: request
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.response_event:
+          message: "my response event message"
+          level: warn
+          on: response
+          condition:
+            eq:
+              - "log"
+              - response_header: "x-log-request"
+      subgraph:
+        # Standard events
+        request: info
+        response: warn
+        error: error
+
+        # Custom events
+        my.request.event:
+          message: "my event message"
+          level: info
+          on: request
+        my.response.event:
+          message: "my response event message"
+          level: error
+          on: response
+          attributes:
+            subgraph.name: true
+            response_status:
+              subgraph_response_status: code
+            "my.custom.attribute":
+              subgraph_response_data: "$.*"
+              default: "missing"

@@ -69,6 +69,7 @@ use crate::query_planner::BridgeQueryPlannerPool;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::home_page_content;
@@ -2295,6 +2296,7 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
 async fn test_supergraph_timeout() {
     let config = serde_json::json!({
         "supergraph": {
+            "listen": "127.0.0.1:0",
             "defer_support": false,
         },
         "traffic_shaping": {
@@ -2318,9 +2320,31 @@ async fn test_supergraph_timeout() {
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
-    let plugins = create_plugins(&conf, &schema, planner.subgraph_schemas(), None, None)
+    let mut plugins = create_plugins(&conf, &schema, planner.subgraph_schemas(), None, None)
         .await
         .unwrap();
+
+    plugins.insert("delay".into(), Box::new(Delay));
+
+    struct Delay;
+
+    #[async_trait::async_trait]
+    impl crate::plugin::Plugin for Delay {
+        type Config = ();
+
+        async fn new(_: crate::plugin::PluginInit<()>) -> Result<Self, BoxError> {
+            Ok(Self)
+        }
+
+        fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+            service
+                .map_future(|fut| async {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    fut.await
+                })
+                .boxed()
+        }
+    }
 
     let builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())
@@ -2343,10 +2367,14 @@ async fn test_supergraph_timeout() {
     .make();
 
     // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
+    let (server, client) = init_with_config(service, conf.clone(), MultiMap::new())
         .await
         .unwrap();
-    let url = "http://localhost:4000/";
+    let url = server
+        .graphql_listen_address()
+        .as_ref()
+        .unwrap()
+        .to_string();
 
     let response = client
         .post(url)
