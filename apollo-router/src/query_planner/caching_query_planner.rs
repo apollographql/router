@@ -31,7 +31,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -40,7 +40,6 @@ use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -228,14 +227,16 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let err_res = Query::check_errors(&doc);
-                if let Err(error) = err_res {
-                    let e = Arc::new(QueryPlannerError::SpecError(error));
-                    tokio::spawn(async move {
-                        entry.insert(Err(e)).await;
-                    });
-                    continue;
-                }
+                let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
+                    Ok(doc) => doc,
+                    Err(error) => {
+                        let e = Arc::new(QueryPlannerError::SpecError(error));
+                        tokio::spawn(async move {
+                            entry.insert(Err(e)).await;
+                        });
+                        continue;
+                    }
+                };
 
                 let schema = &self.schema.api_schema().definitions;
                 if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
@@ -281,9 +282,9 @@ where
     }
 }
 
-impl CachingQueryPlanner<BridgeQueryPlanner> {
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.delegate.planner()
+impl CachingQueryPlanner<BridgeQueryPlannerPool> {
+    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.delegate.planners()
     }
 
     pub(crate) fn subgraph_schemas(
@@ -317,11 +318,9 @@ where
             let context = request.context.clone();
             qp.plan(request).await.map(|response| {
                 if let Some(usage_reporting) = {
-                    context
-                        .extensions()
-                        .lock()
-                        .get::<Arc<UsageReporting>>()
-                        .cloned()
+                    let lock = context.extensions().lock();
+                    let urp = lock.get::<Arc<UsageReporting>>();
+                    urp.cloned()
                 } {
                     let _ = response.context.insert(
                         "apollo_operation_id",
@@ -368,25 +367,26 @@ where
         let doc = match request.context.extensions().lock().get::<ParsedDocument>() {
             None => {
                 return Err(CacheResolverError::RetrievalError(Arc::new(
-                    QueryPlannerError::SpecError(SpecError::ParsingError(
+                    // TODO: dedicated error variant?
+                    QueryPlannerError::SpecError(SpecError::TransformError(
                         "missing parsed document".to_string(),
                     )),
-                )))
+                )));
             }
             Some(d) => d.clone(),
+        };
+
+        let metadata = {
+            let lock = request.context.extensions().lock();
+            let ckm = lock.get::<CacheKeyMetadata>().cloned();
+            ckm.unwrap_or_default()
         };
 
         let caching_key = CachingQueryKey {
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
             hash: doc.hash.clone(),
-            metadata: request
-                .context
-                .extensions()
-                .lock()
-                .get::<CacheKeyMetadata>()
-                .cloned()
-                .unwrap_or_default(),
+            metadata,
             plan_options,
         };
 
@@ -416,25 +416,6 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    let err_res = Query::check_errors(&doc);
-
-                    if let Err(error) = err_res {
-                        request
-                            .context
-                            .extensions()
-                            .lock()
-                            .insert(Arc::new(UsageReporting {
-                                stats_report_key: error.get_error_key().to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            }));
-                        let e = Arc::new(QueryPlannerError::SpecError(error));
-                        let err = e.clone();
-                        tokio::spawn(async move {
-                            entry.insert(Err(err)).await;
-                        });
-                        return Err(CacheResolverError::RetrievalError(e));
-                    }
-
                     let res = self.delegate.ready().await?.call(request).await;
 
                     match res {
@@ -449,11 +430,12 @@ where
                                 });
                             }
 
+                            // This will be overridden when running in ApolloMetricsGenerationMode::New mode
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                                 context
                                     .extensions()
                                     .lock()
-                                    .insert(plan.usage_reporting.clone());
+                                    .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                             }
                             Ok(QueryPlannerResponse {
                                 content,
@@ -491,7 +473,7 @@ where
                         context
                             .extensions()
                             .lock()
-                            .insert(plan.usage_reporting.clone());
+                            .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                     }
 
                     Ok(QueryPlannerResponse::builder()
@@ -506,14 +488,16 @@ where
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(pe.usage_reporting.clone());
+                                .insert::<Arc<UsageReporting>>(Arc::new(
+                                    pe.usage_reporting.clone(),
+                                ));
                         }
                         QueryPlannerError::SpecError(e) => {
                             request
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(Arc::new(UsageReporting {
+                                .insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
                                     stats_report_key: e.get_error_key().to_string(),
                                     referenced_fields_by_type: HashMap::new(),
                                 }));
@@ -652,9 +636,7 @@ mod tests {
         });
 
         let configuration = Arc::new(crate::Configuration::default());
-        let schema = Arc::new(
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
-        );
+        let schema = Arc::new(Schema::parse(include_str!("testdata/schema.graphql")).unwrap());
 
         let mut planner =
             CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new())
@@ -663,8 +645,7 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc1 = Query::parse_document(
             "query Me { me { username } }",
@@ -744,8 +725,7 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc = Query::parse_document(
             "query Me { me { username } }",
