@@ -99,6 +99,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -158,6 +159,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -217,6 +219,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -275,6 +278,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -337,6 +341,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -466,6 +471,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -534,6 +540,7 @@ mod tests {
                 uri: false,
                 method: false,
                 service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -588,6 +595,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_subgraph_request_async() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                body: true,
+                detached: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client =
+            mock_with_callback(move |_: hyper::Request<Body>| Box::pin(async { panic!() }));
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .data
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn external_plugin_subgraph_response() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
@@ -597,6 +654,7 @@ mod tests {
                 body: true,
                 service_name: false,
                 status_code: false,
+                detached: false,
             },
         };
 
@@ -699,6 +757,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_subgraph_response_async() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                body: true,
+                detached: true,
+                ..Default::default()
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client =
+            mock_with_detached_response_callback(move |_: hyper::Request<Body>| {
+                Box::pin(async { panic!() })
+            });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
@@ -708,6 +813,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -826,6 +932,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -954,6 +1061,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1042,6 +1150,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1120,6 +1229,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                detached: false,
             },
             request: Default::default(),
         };
@@ -1241,6 +1351,76 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn external_plugin_router_request_async() {
+        let router_stage = RouterStage {
+            request: RouterRequestConf {
+                detached: true,
+                ..Default::default()
+            },
+            response: RouterResponseConf::default(),
+        };
+
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client =
+            mock_with_callback(move |_req: hyper::Request<Body>| Box::pin(async { panic!() }));
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_response_async() {
+        let router_stage = RouterStage {
+            request: RouterRequestConf::default(),
+            response: RouterResponseConf {
+                detached: true,
+                ..Default::default()
+            },
+        };
+
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client =
+            mock_with_detached_response_callback(move |_req: hyper::Request<Body>| {
+                Box::pin(async { panic!() })
+            });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
     #[test]
     fn it_externalizes_headers() {
         // Build our expected HashMap
@@ -1320,6 +1500,32 @@ mod tests {
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
+                mock_http_client
+            });
+            mock_http_client
+        });
+
+        mock_http_client
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn mock_with_detached_response_callback(
+        callback: fn(
+            hyper::Request<Body>,
+        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
+    ) -> MockHttpClientService {
+        let mut mock_http_client = MockHttpClientService::new();
+        mock_http_client.expect_clone().returning(move || {
+            let mut mock_http_client = MockHttpClientService::new();
+
+            mock_http_client.expect_clone().returning(move || {
+                let mut mock_http_client = MockHttpClientService::new();
+                //mock_http_client.expect_call().returning(callback);
+                mock_http_client.expect_clone().returning(move || {
+                    let mut mock_http_client = MockHttpClientService::new();
+                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client
+                });
                 mock_http_client
             });
             mock_http_client
