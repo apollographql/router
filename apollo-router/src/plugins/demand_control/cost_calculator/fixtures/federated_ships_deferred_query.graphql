@@ -1,0 +1,8 @@
+{
+    ships {
+        name
+        ... @defer {
+            registrationFee
+        }
+    }
+}

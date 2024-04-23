@@ -43,20 +43,13 @@ executors:
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
-  arm_macos_build: &arm_macos_build_executor
+  macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: 14.2
     resource_class: macos.m1.medium.gen1
-  intel_macos_build: &intel_macos_build_executor
-    macos:
-      # See https://circleci.com/docs/xcode-policy along with the support matrix
-      # at https://circleci.com/docs/using-macos#supported-xcode-versions.
-      # We use the major.minor notation to bring in compatible patches.
-      xcode: 14.2
-    resource_class: macos.x86.medium.gen2
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -167,7 +160,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -178,20 +171,7 @@ commands:
             - run:
                 name: Write arch
                 command: |
-                  echo 'osx-aarch64' >> ~/.arch
-      - when:
-          condition:
-            equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Make link to md5
-                command: |
-                  mkdir -p ~/.local/aliases
-                  ln -s /sbin/md5 ~/.local/aliases/md5sum
-            - run:
-                name: Write arch
-                command: |
-                  echo 'osx-x86' >> ~/.arch
+                  echo 'osx' >> ~/.arch
       - when:
           condition:
             or:
@@ -264,8 +244,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -306,8 +285,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -342,7 +320,8 @@ commands:
             if [[ ! -d "$HOME/.cargo" ]]; then
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
-              ./rustup.sh -y --profile minimal --component clippy --component rustfmt
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt --default-toolchain none
+              $HOME/.cargo/bin/rustc -V
             fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
@@ -356,6 +335,24 @@ commands:
                 name: Special case for Windows because of ssh-agent
                 command: |
                   printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for OSX x86_64 builds
+                command: |
+                  rustup target add x86_64-apple-darwin
+
+      - when:
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install nightly Rust to build the fuzzers
+                command: |
+                  rustup install nightly
 
   install_extra_tools:
     steps:
@@ -363,7 +360,10 @@ commands:
           name: Install cargo deny, about, edit
           command: |
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked cargo-deny cargo-about cargo-edit
+              cargo install --locked --version 0.14.21 cargo-deny
+              cargo install --locked --version 0.6.1 cargo-about
+              cargo install --locked --version 0.12.2 cargo-edit
+              cargo install --locked --version 0.12.0 cargo-fuzz
             fi
 
   fetch_dependencies:
@@ -421,7 +421,7 @@ commands:
             # Create list of kube versions
             CURRENT_KUBE_VERSIONS=$(curl -s -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
               | yq -o json '.' \
-              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[].release')
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | select(.previousPatches != null) | .previousPatches[].release')
 
             TEMPLATE_DIR=$(mktemp -d)
             MINOR_VERSION="${kube_version%.*}"
@@ -502,6 +502,10 @@ commands:
               key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
               paths:
                 - target
+  fuzz_build:
+    steps:
+      - run: cargo +nightly fuzz build
+
 jobs:
   lint:
     environment:
@@ -556,6 +560,11 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      - when:
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - fuzz_build
 
   test_updated:
     environment:
@@ -608,8 +617,7 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
 
           steps:
             - when:
@@ -619,13 +627,28 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --target aarch64-apple-darwin
+            - run:
+                command: >
+                  cargo xtask dist --target x86_64-apple-darwin
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
                   cargo xtask package
+                  --target aarch64-apple-darwin
+                  --apple-team-id ${APPLE_TEAM_ID}
+                  --apple-username ${APPLE_USERNAME}
+                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
+                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
+                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
+                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
+                  --output artifacts/
+            - run:
+                command: >
+                  cargo xtask package
+                  --target x86_64-apple-darwin
                   --apple-team-id ${APPLE_TEAM_ID}
                   --apple-username ${APPLE_USERNAME}
                   --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
@@ -958,7 +981,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ intel_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -1055,7 +1078,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ intel_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
             branches:
               ignore: /.*/

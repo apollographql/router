@@ -49,12 +49,6 @@ where
 }
 
 impl Extendable<(), ()> {
-    pub(crate) fn empty<A, E>() -> Extendable<A, E>
-    where
-        A: Default,
-    {
-        Default::default()
-    }
     pub(crate) fn empty_arc<A, E>() -> Arc<Extendable<A, E>>
     where
         A: Default,

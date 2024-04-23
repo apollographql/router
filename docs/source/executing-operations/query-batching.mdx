@@ -1,9 +1,9 @@
 ---
 title: Query batching
-description: Receive query batches with the Apollo Router  
+description: Receive query batches with the Apollo Router
 ---
 
-<ExperimentalFeature />
+<EnterpriseFeature />
 
 Learn about query batching and how to configure the Apollo Router to receive query batches.
 
@@ -11,24 +11,36 @@ Learn about query batching and how to configure the Apollo Router to receive que
 
 Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead—different components may be requesting the same data—it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client operations, issued close together, into a single HTTP request. This is supported in Apollo Client and Apollo Server.
 
-The Apollo Router supports client query batching. If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual operations sent to the router.
+The router's batching support is provided by two sets of functionality:
+ - client batching
+ - subgraph batching
 
-Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number in a batch and the maximum duration to wait for operations to accumulate before sending the batch. 
+With client batching, the router accepts batched requests from a client and processes each request of a batch separately. Consequently, the router doesn't present requests to subgraphs in batch form, so subgraphs must process the requests of a batch individually. 
 
-The Apollo Router must be configured to receive query batches, otherwise it rejects them. When processing a  batch, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
+With subgraph batching, the router analyzes input client batch requests and issues batch requests to subgraphs. Subgraph batching is an extension to client batching and requires participating subgraphs to support batching requests. See the examples below to see illustrations of how this works in practice.
 
-## Configure query batching
+The Apollo Router supports client and subgraph query batching.
+
+If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual operations sent to the router.
+
+Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number in a batch and the maximum duration to wait for operations to accumulate before sending the batch.
+
+The Apollo Router must be configured to receive query batches, otherwise it rejects them. When processing a batch, the router deserializes and processes each operation of a batch independently. It responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
+
+## Configure client query batching
 
 Both the Apollo Router and client need to be configured to support query batching.
 
 ### Configure router
 
-By default, receiving client query batches is _not_ enabled in the Apollo Router. 
+#### Client query batching
+
+By default, receiving client query batches is _not_ enabled in the Apollo Router.
 
 To enable query batching, set the following fields in your `router.yaml` configuration file:
 
 ```yaml title="router.yaml"
-experimental_batching:
+batching:
   enabled: true
   mode: batch_http_link
 ```
@@ -37,6 +49,138 @@ experimental_batching:
 | :-- | :-- | :-- | :-- |
 | `enabled` | Flag to enable reception of client query batches | boolean | `false` |
 | `mode` | Supported client batching mode | `batch_http_link`:  the client uses Apollo Link and its [`BatchHttpLink`](/react/api/link/apollo-link-batch-http) link. | No Default |
+
+#### Subgraph query batching
+
+If client query batching is enabled, and the router's subgraphs [support query batching](/apollo-server/api/apollo-server#allowbatchedhttprequests), then subgraph query batching can be enabled by setting the following fields in your `router.yaml` configuration file:
+
+```yaml title="router.all_enabled.yaml"
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Enable batching on all subgraphs
+    all:
+      enabled: true
+```
+
+```yaml title="router.yaml"
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Disable batching on all subgraphs
+    all:
+      enabled: false
+    # Configure(over-ride) batching support per subgraph
+    subgraphs:
+      subgraph_1:
+        enabled: true
+      subgraph_2:
+        enabled: true
+```
+
+<Note>
+
+- The router can be configured to support batching for either all subgraphs or individually enabled per subgraph.
+
+- There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Consequently, the router will only be able to generate batches from queries which are processed which don't contain such constraints. This may result in the router issuing multiple batches or requests. 
+
+- If [query deduplication](../configuration/traffic-shaping/#query-deduplication) is enabled, it will not apply to batched queries. Batching will take precedence over query deduplication. Query deduplication will still be performed for non-batched queries.
+
+</Note>
+
+##### Example: simple subgraph batching
+
+This example shows how the router can batch subgraph requests in the most efficient scenario, where the queries of a batch don't have required fetch constraints.
+
+Assume the federated graph contains three subgraphs: `accounts`, `products`, and `reviews`.
+
+The input client query to the federated graph:
+
+```json title="simple-batch.json"
+[
+    {"query":"query MeQuery1 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery2 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery3 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery4 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery5 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery6 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery7 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery8 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery9 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery10 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery11 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery12 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery13 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery14 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery15 {\n  me {\n    id\n }\n}"}
+]
+```
+
+From the input query, the router generates a set of subgraph queries:
+```
+"query MeQuery1__accounts__0{me{id}}",
+"query MeQuery2__accounts__0{me{name}}",
+"query MeQuery3__accounts__0{me{id}}",
+"query MeQuery4__accounts__0{me{name}}",
+"query MeQuery5__accounts__0{me{id}}",
+"query MeQuery6__accounts__0{me{name}}",
+"query MeQuery7__accounts__0{me{id}}",
+"query MeQuery8__accounts__0{me{name}}",
+"query MeQuery9__accounts__0{me{id}}",
+"query MeQuery10__accounts__0{me{name}}",
+"query MeQuery11__accounts__0{me{id}}",
+"query MeQuery12__accounts__0{me{name}}",
+"query MeQuery13__accounts__0{me{id}}",
+"query MeQuery14__accounts__0{me{name}}",
+"query MeQuery15__accounts__0{me{id}}",
+```
+All of the queries can be combined into a single batch. So instead of 15 (non-batch) subgraph fetches, the router only has to make one fetch.
+
+| Subgraph | Fetch Count (without)| Fetch Count (with) |
+|----------|----------------------|--------------------|
+| accounts | 15                   | 1                  |
+
+##### Example: complex subgraph batching
+
+This example shows how the router might batch subgraph requests for a graph, where the client batch contains a query for an entity.
+
+Assume the federated graph contains three subgraphs: `accounts`, `products`, and `reviews`.
+
+The input client query to the federated graph:
+
+```json title="federated-batch.json"
+[
+    {"query":"query MeQuery1 {\n  me {\n    id\n }\n}"},
+    {"query":"query MeQuery2 {\n  me {\n    reviews {\n      body\n    }\n  }\n}"},
+    {"query":"query MeQuery3 {\n  topProducts {\n    upc\n    reviews {\n      author {\n        name\n      }\n    }\n  }\n  me {\n    name\n  }\n}"},
+    {"query":"query MeQuery4 {\n  me {\n    name\n }\n}"},
+    {"query":"query MeQuery5 {\n  me {\n    id\n }\n}"}
+]
+```
+
+From the input query, the router generates a set of subgraph queries:
+```
+"query MeQuery1__accounts__0{me{id}}",
+"query MeQuery2__accounts__0{me{__typename id}}",
+"query MeQuery3__products__0{topProducts{__typename upc}}",
+"query MeQuery3__accounts__3{me{name}}",
+"query MeQuery4__accounts__0{me{name}}",
+"query MeQuery5__accounts__0{me{id}}",
+"query MeQuery2__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+"query MeQuery3__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{author{__typename id}}}}}",
+"query MeQuery3__accounts__2($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+```
+The first six queries can be combined into two batches—one for `accounts` and one for `products`. They must be fetched before the final three queries can be executed individually. 
+
+Overall, without subgraph batching, the router would make nine fetches in total across the three subgraphs, but with subgraph batching, that total is reduced to five fetches.
+
+| Subgraph | Fetch Count (without)| Fetch Count (with) |
+|----------|----------------------|--------------------|
+| accounts | 6                    | 2                  |
+| products | 1                    | 1                  |
+| reviews  | 2                    | 2                  |
 
 ### Configure client
 
@@ -69,11 +213,12 @@ Metrics in the Apollo Router for query batching:
 <td>
 
 mode
+[subgraph]
 
 </td>
 <td>
 
-Counter for the number of received batches.
+Counter for the number of received (from client) or dispatched (to subgraph) batches.
 
 </td>
 </tr>
@@ -87,6 +232,7 @@ Counter for the number of received batches.
 <td>
 
 mode
+[subgraph]
 
 </td>
 <td>
@@ -98,6 +244,7 @@ Histogram for the size of received batches.
 </tbody>
 </table>
 
+The `subgraph` attribute is optional. If the attribute isn't present, the metric identifies batches received from clients. If the attribute is present, the metric identifies batches sent to a particular subgraph.
 
 ## Query batch formats
 
@@ -166,7 +313,7 @@ As a result, the router returns an invalid batch error:
 
 ### Individual query error
 
-If a single query in a batch cannot be processed, this results in an individual error. 
+If a single query in a batch cannot be processed, this results in an individual error.
 
 For example, the query `MyFirstQuery` is accessing a field that doesn't exist, while the rest of the batch query is valid.
 
@@ -203,7 +350,7 @@ As a result, an error is returned for the individual invalid query and the other
 ## Known limitations
 
 ### Unsupported query modes
- 
+
 When batching is enabled, any batch operation that results in a stream of responses is unsupported, including:
 - [`@defer`](/graphos/operations/defer/)
 - [subscriptions](/graphos/operations/subscriptions/)

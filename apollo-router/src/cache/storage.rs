@@ -41,6 +41,8 @@ where
     // It has the functions it needs already
 }
 
+pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
+
 // placeholder storage module
 //
 // this will be replaced by the multi level (in memory + redis/memcached) once we find
@@ -178,13 +180,19 @@ where
         );
     }
 
-    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
-        self.inner
-            .lock()
-            .await
-            .iter()
-            .map(|(k, _)| k.clone())
-            .collect()
+    pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
+        let mut in_memory = self.inner.lock().await;
+        in_memory.put(key, value);
+        let size = in_memory.len() as u64;
+        tracing::info!(
+            value.apollo_router_cache_size = size,
+            kind = %self.caller,
+            storage = &tracing::field::display(CacheStorageName::Memory),
+        );
+    }
+
+    pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
+        self.inner.clone()
     }
 
     #[cfg(test)]

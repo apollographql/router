@@ -55,7 +55,7 @@
           [
             "enterprise"
           ]
-        ],      
+        ],
         "Subgraph Authentication": "/configuration/authn-subgraph",
         "Operation limits": [
           "/configuration/operation-limits",
@@ -77,10 +77,10 @@
       "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests",
       "Query batching": [
-          "/executing-operations/query-batching",
-          [
-            "experimental"
-          ]
+        "/executing-operations/query-batching",
+        [
+          "enterprise"
+        ]
       ],
       "GraphQL Subscriptions": {
         "Subscriptions setup": [
@@ -128,6 +128,7 @@
         "Zipkin": "/configuration/telemetry/exporters/tracing/zipkin"
       },
       "Instrumentation": {
+        "Instruments" : "/configuration/telemetry/instrumentation/instruments",
         "Spans" : "/configuration/telemetry/instrumentation/spans",
         "Selectors" : "/configuration/telemetry/instrumentation/selectors",
         "Standard attributes": "/configuration/telemetry/instrumentation/standard-attributes",

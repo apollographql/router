@@ -932,6 +932,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::otel;
 
     #[test]
     fn router_static() {
@@ -1481,7 +1482,7 @@ mod test {
 
     #[test]
     fn router_baggage() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = RouterSelector::Baggage {
                 baggage: "baggage_key".to_string(),
@@ -1519,7 +1520,7 @@ mod test {
 
     #[test]
     fn supergraph_baggage() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = SupergraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
@@ -1557,7 +1558,7 @@ mod test {
 
     #[test]
     fn subgraph_baggage() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = SubgraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
@@ -1588,7 +1589,7 @@ mod test {
 
     #[test]
     fn router_trace_id() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = RouterSelector::TraceId {
                 trace_id: TraceIdFormat::OpenTelemetry,
