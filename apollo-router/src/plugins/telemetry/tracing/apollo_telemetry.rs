@@ -587,8 +587,8 @@ impl Exporter {
                         .unwrap_or_default()
                         .iter()
                         .map(|d| DeferredNodeDepends {
-                            id: d.id.clone(),
-                            defer_label: d.defer_label.clone().unwrap_or_default(),
+                            id: d.id.to_string(),
+                            defer_label: "".to_owned(),
                         })
                         .collect(),
                     label: span
