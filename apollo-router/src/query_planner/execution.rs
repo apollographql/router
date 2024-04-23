@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
+use super::fetch::SubgraphSchemas;
 use super::log;
 use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
@@ -49,6 +50,7 @@ impl QueryPlan {
         service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
+        subgraph_schemas: &'a SubgraphSchemas,
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
@@ -66,6 +68,7 @@ impl QueryPlan {
                     context,
                     service_factory,
                     schema,
+                    subgraph_schemas,
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
                     query: &self.query,
@@ -99,6 +102,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
+    pub(crate) subgraph_schemas: &'a SubgraphSchemas,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
@@ -292,6 +296,7 @@ impl PlanNode {
                                         context: parameters.context,
                                         service_factory: parameters.service_factory,
                                         schema: parameters.schema,
+                                        subgraph_schemas: &parameters.subgraph_schemas,
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
                                         query: parameters.query,
@@ -440,6 +445,7 @@ impl DeferredNode {
         let label = self.label.clone();
         let tx = sender;
         let sc = parameters.schema.clone();
+        let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
         let root_node = parameters.root_node.clone();
@@ -480,6 +486,7 @@ impl DeferredNode {
                             context: &ctx,
                             service_factory: &sf,
                             schema: &sc,
+                            subgraph_schemas: &subgraph_schemas,
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,
                             query: &query,

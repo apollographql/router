@@ -3,7 +3,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
 use multimap::MultiMap;
@@ -60,7 +59,7 @@ pub struct Request {
     // authorization metadata for this request
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 
-    pub(crate) executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
+    pub(crate) executable_document: Option<Arc<apollo_compiler::ExecutableDocument>>,
 }
 
 #[buildstructor::buildstructor]

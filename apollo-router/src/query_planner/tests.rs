@@ -115,6 +115,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -176,6 +177,7 @@ async fn fetch_includes_operation_name() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -234,6 +236,7 @@ async fn fetch_makes_post_requests() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -366,6 +369,10 @@ async fn defer() {
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    let subgraph_schemas = Arc::new(HashMap::from([
+        ("X".into(), Arc::new(schema.definitions.clone())),
+        ("Y".into(), Arc::new(schema.definitions.clone())),
+    ]));
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([
             (
@@ -386,6 +393,7 @@ async fn defer() {
             &sf,
             &Default::default(),
             &schema,
+            subgraph_schemas.as_ref(),
             sender,
             None,
             &None,
@@ -493,6 +501,7 @@ async fn defer_if_condition() {
                     .unwrap(),
             ),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -515,6 +524,7 @@ async fn defer_if_condition() {
             &service_factory,
             &Default::default(),
             &schema,
+            &Default::default(),
             default_sender,
             None,
             &None,
@@ -546,6 +556,7 @@ async fn defer_if_condition() {
                     .unwrap(),
             ),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -667,6 +678,7 @@ async fn dependent_mutations() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,

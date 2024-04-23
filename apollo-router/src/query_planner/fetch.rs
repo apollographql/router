@@ -400,6 +400,11 @@ impl FetchNode {
             .build();
         subgraph_request.query_hash = self.schema_aware_hash.clone();
         subgraph_request.authorization = self.authorization.clone();
+        // TODO: This is where we need to set the document, but it makes the tests fail because the
+        // subgraph schemas are set to defauilt. We either need to add valid subgraph schemas for all
+        // the QP tests, or find a way to pass this lazily
+        // subgraph_request.executable_document =
+        //    Some(self.parsed_operation(parameters.subgraph_schemas).clone());
 
         let service = parameters
             .service_factory

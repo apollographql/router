@@ -5,7 +5,6 @@ use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use displaydoc::Display;
@@ -253,7 +252,7 @@ impl Plugin for DemandControl {
                     |req: &subgraph::Request| {
                         req.executable_document.clone().expect("must have document")
                     },
-                    |req: Arc<Valid<ExecutableDocument>>, fut| async move {
+                    |req: Arc<ExecutableDocument>, fut| async move {
                         let resp: subgraph::Response = fut.await?;
                         let strategy = resp
                             .context
@@ -418,7 +417,7 @@ mod test {
             .subgraph_name("test")
             .context(ctx)
             .build();
-        req.executable_document = Some(Arc::new(Valid::assume_valid(ExecutableDocument::new())));
+        req.executable_document = Some(Arc::new(ExecutableDocument::new()));
         let resp = plugin
             .call_subgraph(req, |req| {
                 subgraph::Response::fake_builder()

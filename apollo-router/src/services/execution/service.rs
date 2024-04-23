@@ -42,6 +42,7 @@ use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
 use crate::services::new_service::ServiceFactory;
@@ -57,6 +58,7 @@ use crate::spec::Schema;
 #[derive(Clone)]
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
@@ -148,6 +150,7 @@ impl ExecutionService {
                 &self.subgraph_service_factory,
                 &Arc::new(req.supergraph_request),
                 &self.schema,
+                &self.subgraph_schemas,
                 sender,
                 subscription_handle.clone(),
                 &self.subscription_config,
@@ -616,6 +619,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                 self.plugins.iter().rev().fold(
                     crate::services::execution::service::ExecutionService {
                         schema: self.schema.clone(),
+                        subgraph_schemas: self.subgraph_schemas.clone(),
                         subgraph_service_factory: self.subgraph_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
                     }
