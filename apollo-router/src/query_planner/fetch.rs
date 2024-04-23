@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -45,12 +46,12 @@ pub enum OperationKind {
 
 impl Display for OperationKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.default_type_name())
     }
 }
 
 impl OperationKind {
-    pub(crate) const fn as_str(&self) -> &'static str {
+    pub(crate) const fn default_type_name(&self) -> &'static str {
         match self {
             OperationKind::Query => "Query",
             OperationKind::Mutation => "Mutation",
@@ -95,7 +96,7 @@ pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Sch
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
-    pub(crate) service_name: String,
+    pub(crate) service_name: NodeStr,
 
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -103,19 +104,19 @@ pub(crate) struct FetchNode {
     pub(crate) requires: Vec<Selection>,
 
     /// The variables that are used for the subgraph fetch.
-    pub(crate) variable_usages: Vec<String>,
+    pub(crate) variable_usages: Vec<NodeStr>,
 
     /// The GraphQL subquery that is used for the fetch.
     pub(crate) operation: SubgraphOperation,
 
     /// The GraphQL subquery operation name.
-    pub(crate) operation_name: Option<String>,
+    pub(crate) operation_name: Option<NodeStr>,
 
     /// The GraphQL operation kind that is used for the fetch.
     pub(crate) operation_kind: OperationKind,
 
     /// Optional id used by Deferred nodes
-    pub(crate) id: Option<String>,
+    pub(crate) id: Option<NodeStr>,
 
     // Optionally describes a number of "rewrites" that query plan executors should apply to the data that is sent as input of this fetch.
     pub(crate) input_rewrites: Option<Vec<rewrites::DataRewrite>>,
@@ -137,7 +138,7 @@ pub(crate) struct FetchNode {
 pub(crate) struct SubgraphOperation {
     // At least one of these two must be initialized
     serialized: OnceLock<String>,
-    parsed: OnceLock<Arc<ExecutableDocument>>,
+    parsed: OnceLock<Arc<Valid<ExecutableDocument>>>,
 }
 
 impl SubgraphOperation {
@@ -148,8 +149,7 @@ impl SubgraphOperation {
         }
     }
 
-    // TODO: remove the _ prefix when the Rust query planner starts using this
-    pub(crate) fn _from_parsed(parsed: impl Into<Arc<ExecutableDocument>>) -> Self {
+    pub(crate) fn from_parsed(parsed: impl Into<Arc<Valid<ExecutableDocument>>>) -> Self {
         Self {
             serialized: OnceLock::new(),
             parsed: OnceLock::from(parsed.into()),
@@ -168,16 +168,20 @@ impl SubgraphOperation {
     pub(crate) fn as_parsed(
         &self,
         subgraph_schema: &Valid<apollo_compiler::Schema>,
-    ) -> &Arc<ExecutableDocument> {
+    ) -> &Arc<Valid<ExecutableDocument>> {
         self.parsed.get_or_init(|| {
             let serialized = self
                 .serialized
                 .get()
                 .expect("SubgraphOperation has neither representation initialized");
             Arc::new(
-                ExecutableDocument::parse(subgraph_schema, serialized, "operation.graphql")
-                    .map_err(|e| e.errors)
-                    .expect("Subgraph operation should be valid"),
+                ExecutableDocument::parse_and_validate(
+                    subgraph_schema,
+                    serialized,
+                    "operation.graphql",
+                )
+                .map_err(|e| e.errors)
+                .expect("Subgraph operation should be valid"),
             )
         })
     }
@@ -246,7 +250,7 @@ impl Variables {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         requires: &[Selection],
-        variable_usages: &[String],
+        variable_usages: &[NodeStr],
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
@@ -329,9 +333,9 @@ impl FetchNode {
     pub(crate) fn parsed_operation(
         &self,
         subgraph_schemas: &SubgraphSchemas,
-    ) -> &Arc<ExecutableDocument> {
+    ) -> &Arc<Valid<ExecutableDocument>> {
         self.operation
-            .as_parsed(&subgraph_schemas[&self.service_name])
+            .as_parsed(&subgraph_schemas[self.service_name.as_str()])
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -354,7 +358,7 @@ impl FetchNode {
             inverted_paths: paths,
         } = match Variables::new(
             &self.requires,
-            self.variable_usages.as_ref(),
+            &self.variable_usages,
             data,
             current_dir,
             // Needs the original request here
@@ -387,14 +391,14 @@ impl FetchNode {
                     .body(
                         Request::builder()
                             .query(operation.as_serialized())
-                            .and_operation_name(operation_name.clone())
+                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
                     )
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
-            .subgraph_name(self.service_name.clone())
+            .subgraph_name(self.service_name.to_string())
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
@@ -449,7 +453,7 @@ impl FetchNode {
             return (
                 Value::default(),
                 vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_owned(),
+                    service: service_name.to_string(),
                 }
                 .to_graphql_error(Some(current_dir.to_owned()))],
             );
@@ -602,7 +606,7 @@ impl FetchNode {
 
     pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas) {
         let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[&self.service_name];
+        let schema = &subgraph_schemas[self.service_name.as_str()];
 
         if let Ok(hash) = QueryHashVisitor::hash_query(schema, doc, self.operation_name.as_deref())
         {
@@ -616,7 +620,7 @@ impl FetchNode {
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
         let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[&self.service_name];
+        let schema = &subgraph_schemas[self.service_name.as_str()];
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
             doc,
             self.operation_name.as_deref(),

@@ -214,7 +214,7 @@ impl StaticCostCalculator {
 
     fn estimated_cost_of_operation(
         &self,
-        subgraph: &String,
+        subgraph: &str,
         operation: &SubgraphOperation,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
@@ -358,7 +358,7 @@ mod tests {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         StaticCostCalculator::new(Default::default())
-            .estimated(&query.executable, &schema.definitions)
+            .estimated(&query.executable, schema.supergraph_schema())
             .unwrap()
     }
 

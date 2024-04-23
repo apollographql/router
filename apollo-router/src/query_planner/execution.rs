@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::NodeStr;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
@@ -100,7 +101,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
-    pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
+    pub(crate) deferred_fetches: &'a HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
@@ -247,19 +248,14 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Defer {
-                    primary:
-                        Primary {
-                            path: _primary_path,
-                            node,
-                            ..
-                        },
+                    primary: Primary { node, .. },
                     deferred,
                 } => {
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {
                         let mut deferred_fetches: HashMap<
-                            String,
+                            NodeStr,
                             broadcast::Sender<(Value, Vec<Error>)>,
                         > = HashMap::new();
                         let mut futures = Vec::new();
@@ -408,7 +404,7 @@ impl DeferredNode {
         parent_value: &Value,
         sender: mpsc::Sender<Response>,
         primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
-        deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
+        deferred_fetches: &mut HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> impl Future<Output = ()> {
         let mut deferred_receivers = Vec::new();
 
@@ -437,7 +433,7 @@ impl DeferredNode {
         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
         let deferred_inner = self.node.clone();
         let deferred_path = self.query_path.clone();
-        let label = self.label.clone();
+        let label = self.label.as_ref().map(|l| l.to_string());
         let tx = sender;
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();
