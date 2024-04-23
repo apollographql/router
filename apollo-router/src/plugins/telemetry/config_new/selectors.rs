@@ -473,11 +473,6 @@ pub(crate) enum SubgraphSelector {
         /// A static string value
         r#static: String,
     },
-    /// Cost attributes
-    Cost {
-        /// The cost value to select, one of: estimated, actual, delta.
-        cost: CostValue,
-    },
 }
 
 impl Selector for RouterSelector {

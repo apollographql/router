@@ -26,7 +26,7 @@ use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::cost::CostAttributes;
+use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -457,7 +457,7 @@ where
 pub(crate) struct SupergraphInstruments {
     #[serde(flatten)]
     #[allow(dead_code)]
-    cost: CostAttributes,
+    cost: CostInstruments,
 }
 
 impl DefaultForLevel for SupergraphInstruments {

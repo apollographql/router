@@ -37,7 +37,7 @@ use tracing::Span;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::plugins::telemetry::config_new::cost::CostAttributes;
+use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -138,7 +138,7 @@ pub(crate) struct SupergraphAttributes {
     /// Cost attributes for the operation
     #[serde(flatten)]
     #[allow(dead_code)]
-    cost: CostAttributes,
+    cost: CostInstruments,
 }
 
 impl DefaultForLevel for SupergraphAttributes {

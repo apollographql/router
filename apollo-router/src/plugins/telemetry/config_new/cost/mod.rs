@@ -5,7 +5,7 @@ use serde::Deserialize;
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct CostAttributes {
+pub(crate) struct CostInstruments {
     /// A histogram of the estimated cost of the operation using the currently configured cost model
     #[serde(rename = "cost.estimated")]
     cost_estimated: Option<bool>,
