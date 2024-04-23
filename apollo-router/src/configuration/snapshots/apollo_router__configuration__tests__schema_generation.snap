@@ -1610,6 +1610,33 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_query_planner_mode": {
+      "description": "Set the query planner implementation to use.",
+      "default": "legacy",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "type": "string",
+          "enum": [
+            "new"
+          ]
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "type": "string",
+          "enum": [
+            "legacy"
+          ]
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "type": "string",
+          "enum": [
+            "both"
+          ]
+        }
+      ]
+    },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
       "type": "boolean"
@@ -2433,6 +2460,12 @@ expression: "&schema"
                 "description": "activates caching for this subgraph, overrides the global configuration",
                 "default": null,
                 "type": "boolean",
+                "nullable": true
+              },
+              "private_id": {
+                "description": "Context key used to separate cache sections per user",
+                "default": null,
+                "type": "string",
                 "nullable": true
               },
               "ttl": {
