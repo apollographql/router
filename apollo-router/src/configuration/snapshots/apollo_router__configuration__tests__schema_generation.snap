@@ -2404,6 +2404,12 @@ expression: "&schema"
                 "type": "boolean",
                 "nullable": true
               },
+              "private_id": {
+                "description": "Context key used to separate cache sections per user",
+                "default": null,
+                "type": "string",
+                "nullable": true
+              },
               "ttl": {
                 "description": "expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses",
                 "type": "string",
