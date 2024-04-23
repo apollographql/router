@@ -81,7 +81,7 @@ where
             where
                 A: MapAccess<'de>,
             {
-                let mut attributes: Map<String, Value> = Map::new();
+                let mut attributes = Map::new();
                 let mut custom: HashMap<String, Ext> = HashMap::new();
                 while let Some(key) = map.next_key()? {
                     let value: Value = map.next_value()?;

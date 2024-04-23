@@ -2,15 +2,26 @@
 source: apollo-router/src/plugins/telemetry/config_new/extendable.rs
 expression: o
 ---
-attributes:
-  graphql.document: ~
-  graphql.operation.name: true
-  graphql.operation.type: true
-custom:
-  custom_1:
-    operation_name: string
-    default: ~
-  custom_2:
-    operation_name: string
-    default: ~
-
+Extendable {
+    attributes: SupergraphAttributes {
+        graphql_document: None,
+        graphql_operation_name: Some(
+            true,
+        ),
+        graphql_operation_type: Some(
+            true,
+        ),
+    },
+    custom: {
+        "custom_1": OperationName {
+            operation_name: String,
+            redact: None,
+            default: None,
+        },
+        "custom_2": OperationName {
+            operation_name: String,
+            redact: None,
+            default: None,
+        },
+    },
+}

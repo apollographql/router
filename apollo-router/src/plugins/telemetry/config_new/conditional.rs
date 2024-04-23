@@ -194,8 +194,9 @@ where
             where
                 A: MapAccess<'de>,
             {
-                let mut selector: Option<Att> = None;
                 let mut condition: Option<Condition<Att>> = None;
+                let mut attributes = Map::new();
+                // Separate out the condition from the rest of the attributes.
                 while let Some(key) = map.next_key::<String>()? {
                     let value: Value = map.next_value()?;
                     if key == "condition" {
@@ -204,19 +205,16 @@ where
                                 .map_err(|e| Error::custom(e.to_string()))?,
                         )
                     } else {
-                        let mut map = Map::new();
-                        map.insert(key.clone(), value);
-                        let o = Value::Object(map);
-                        selector =
-                            Some(Att::deserialize(o).map_err(|e| Error::custom(e.to_string()))?)
+                        attributes.insert(key.clone(), value);
                     }
                 }
-                if selector.is_none() {
-                    return Err(A::Error::custom("selector is required"));
-                }
+
+                // Try to parse the attribute
+                let selector =
+                    Att::deserialize(Value::Object(attributes)).map_err(A::Error::custom)?;
 
                 Ok(Conditional {
-                    selector: selector.expect("selector is required"),
+                    selector,
                     condition: condition.map(|c| Arc::new(Mutex::new(c))),
                     value: Arc::new(Default::default()),
                 })
@@ -419,7 +417,8 @@ mod test {
     #[test]
     fn test_deserialization() {
         let config = r#"
-            static: "there was an error"
+            request_header: head
+            default: hmm
             condition:
               any:
               - eq:
@@ -428,15 +427,12 @@ mod test {
         "#;
 
         let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
-        let result = conditional.on_response(
-            &crate::services::router::Response::fake_builder()
-                .status_code(StatusCode::from_u16(201).unwrap())
-                .build()
-                .expect("req"),
-        );
+        let result = on_request(&conditional);
+        assert!(result.is_none());
+        let result = on_response(conditional);
         assert_eq!(
             result.expect("expected result"),
-            Value::String("there was an error".into())
+            Value::String("val".into())
         );
     }
 
