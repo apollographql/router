@@ -56,7 +56,8 @@ pub(super) struct SupergraphResponseConf {
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
     /// The url you'd like to offload processing to
-    pub(super) url: Option<String>,
+    #[schemars(with = "String")]
+    pub(super) url: Option<url::Url>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
