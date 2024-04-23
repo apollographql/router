@@ -7,19 +7,15 @@ use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::validation::WithErrors;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -28,18 +24,15 @@ use crate::Configuration;
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) definitions: Valid<apollo_compiler::Schema>,
-    /// Stored for comparison with the validation errors from query planning.
-    diagnostics: Option<DiagnosticList>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<Box<Schema>>,
-    pub(crate) schema_id: Option<String>,
 }
 
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let schema = Self::parse(s, configuration)?;
+        let schema = Self::parse(s)?;
         let api_schema = Self::parse(
             &schema
                 .create_api_schema(configuration)
@@ -50,7 +43,6 @@ impl Schema {
                         "The supergraph schema failed to produce a valid API schema: {err}"
                     ))
                 })?,
-            configuration,
         )?;
         Ok(schema.with_api_schema(api_schema))
     }
@@ -70,31 +62,15 @@ impl Schema {
         })
     }
 
-    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+    pub(crate) fn parse(sdl: &str) -> Result<Self, SchemaError> {
         let start = Instant::now();
         let ast = Self::parse_ast(sdl)?;
-        let validate =
-            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
-        // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
-        let (definitions, diagnostics) = if validate {
-            match ast.to_schema_validate() {
-                Ok(schema) => (schema, None),
-                Err(WithErrors { partial, errors }) => (Valid::assume_valid(partial), Some(errors)),
-            }
-        } else {
-            match ast.to_schema() {
-                Ok(schema) => (Valid::assume_valid(schema), None),
-                Err(WithErrors { partial, .. }) => (Valid::assume_valid(partial), None),
+        let definitions = match ast.to_schema_validate() {
+            Ok(schema) => schema,
+            Err(errors) => {
+                return Err(SchemaError::Validate(errors.into()));
             }
         };
-
-        // Only error out if new validation is used: with `Both`, we take the legacy
-        // validation as authoritative and only use the new result for comparison
-        if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
-            if let Some(errors) = diagnostics {
-                return Err(SchemaError::Validate(ValidationErrors { errors }));
-            }
-        }
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
@@ -133,7 +109,6 @@ impl Schema {
             }
         }
 
-        let schema_id = Some(Self::schema_id(sdl));
         tracing::info!(
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
@@ -143,11 +118,9 @@ impl Schema {
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
             definitions,
-            diagnostics,
             subgraphs,
             implementers_map,
             api_schema: None,
-            schema_id,
         })
     }
 
@@ -249,10 +222,6 @@ impl Schema {
         } else {
             kind.as_str()
         }
-    }
-
-    pub(crate) fn has_errors(&self) -> bool {
-        self.diagnostics.is_some()
     }
 
     /// Return the federation major version based on the @link or @core directives in the schema,
@@ -585,17 +554,13 @@ mod tests {
             let schema = Schema::parse_test(schema, &Default::default()).unwrap();
 
             assert_eq!(
-                schema.schema_id,
-                Some(
-                    "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
-                )
+                Schema::schema_id(&schema.raw_sdl),
+                "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
             );
 
             assert_eq!(
-                schema.api_schema().schema_id,
-                Some(
-                    "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
-                )
+                Schema::schema_id(&schema.api_schema().raw_sdl),
+                "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
             );
         }
     }

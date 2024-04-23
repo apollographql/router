@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Document;
+use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -39,10 +39,10 @@ use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::register_plugin;
 use crate::services::execution;
+use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -175,19 +175,21 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn query_analysis(
-        query: &str,
+        doc: &ParsedDocumentInner,
+        operation_name: Option<&str>,
         schema: &Schema,
-        configuration: &Configuration,
         context: &Context,
     ) {
-        let doc = Query::parse_document(query, schema, configuration);
-        let ast = &doc.ast;
-
         let CacheKeyMetadata {
             is_authenticated,
             scopes,
             policies,
-        } = Self::generate_cache_metadata(ast, &schema.definitions, false);
+        } = Self::generate_cache_metadata(
+            &doc.executable,
+            operation_name,
+            &schema.definitions,
+            false,
+        );
         if is_authenticated {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
@@ -204,36 +206,37 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn generate_cache_metadata(
-        ast: &Document,
+        document: &ExecutableDocument,
+        operation_name: Option<&str>,
         schema: &apollo_compiler::Schema,
         entity_query: bool,
     ) -> CacheKeyMetadata {
         let mut is_authenticated = false;
-        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, ast, entity_query) {
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, document, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, ast).is_ok() && visitor.found {
+            if traverse::document(&mut visitor, document, operation_name).is_ok() && visitor.found {
                 is_authenticated = true;
             }
         }
 
         let mut scopes = Vec::new();
-        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, ast, entity_query) {
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, document, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, ast).is_ok() {
+            if traverse::document(&mut visitor, document, operation_name).is_ok() {
                 scopes = visitor.extracted_scopes.into_iter().collect();
             }
         }
 
         let mut policies: Vec<String> = Vec::new();
-        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, ast, entity_query) {
+        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, document, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, ast).is_ok() {
+            if traverse::document(&mut visitor, document, operation_name).is_ok() {
                 policies = visitor.extracted_policies.into_iter().collect();
             }
         }
@@ -434,7 +437,7 @@ impl AuthorizationPlugin {
             AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map, dry_run)
         {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_authentication {
                 if is_authenticated {
@@ -473,7 +476,7 @@ impl AuthorizationPlugin {
             dry_run,
         ) {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
             if visitor.query_requires_scopes {
                 tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
@@ -508,7 +511,7 @@ impl AuthorizationPlugin {
             dry_run,
         ) {
             let modified_query = transform::document(&mut visitor, doc)
-                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+                .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_policies {
                 tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",

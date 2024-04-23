@@ -12,7 +12,6 @@ use futures::pin_mut;
 use futures::stream::repeat;
 use futures::stream::select_all;
 use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::Algorithm;
@@ -170,8 +169,7 @@ pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
 
         let mut builder = my_client
             .get(url)
-            .header(ACCEPT, APPLICATION_JSON.essence_str())
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+            .header(ACCEPT, APPLICATION_JSON.essence_str());
 
         for header in headers.into_iter() {
             builder = builder.header(header.name, header.value);

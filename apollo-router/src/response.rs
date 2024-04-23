@@ -102,12 +102,18 @@ impl Response {
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
-        let mut object =
+        let object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
+        Response::from_object(service_name, object)
+    }
 
+    pub(crate) fn from_object(
+        service_name: &str,
+        mut object: Object,
+    ) -> Result<Response, FetchError> {
         let data = object.remove("data");
         let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
             .map_err(|err| FetchError::SubrequestMalformedResponse {

@@ -42,9 +42,15 @@ A request's HTTP `Accept` header didn't contain any of the router's supported mi
 - `multipart/mixed;subscriptionSpec=1.0`.
 
 </Property>
+
 <Property name="429" short="Too many requests">
 
 Request traffic exceeded configured rate limits. See [client side traffic shaping](./configuration/traffic-shaping/#client-side-traffic-shaping).
+
+</Property>
+<Property name="499" short="Request canceled by client">
+
+The request was canceled because the client closed the connection, possibly due to a client side timeout.
 
 </Property>
 <Property name="500" short="Internal server error">
@@ -52,10 +58,16 @@ Request traffic exceeded configured rate limits. See [client side traffic shapin
 The router encountered an unexpected issue. [Report](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) this possible bug to the router team.
 
 </Property>
+
+<Property name="504" short="Request timed out">
+
+The request was not able to complete within a configured amount of time.  See [client side traffic shaping timeouts](./configuration/traffic-shaping/#timeouts).
+
+</Property>
 </PropertyList>
 
 <Note>
 
-You can create Rhai scripts that throw custom status codes. See [Terminating client requests](/customizations/rhai-api#terminating-client-requests) to learn more.
+You can create Rhai scripts that throw custom status codes. See [Terminating client requests](./customizations/rhai-api#terminating-client-requests) to learn more.
 
 </Note>

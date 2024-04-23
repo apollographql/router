@@ -1,0 +1,14 @@
+---
+source: apollo-router/tests/integration/lifecycle.rs
+expression: "command_output(Command::new(IntegrationTest::router_location()).arg(\"config\").arg(\"experimental\").env(\"RUST_BACKTRACE\",\n            \"\")).await"
+---
+Success: true
+Exit code: Some(0)
+stderr:
+
+stdout:
+List of all experimental configurations with related GitHub discussions:
+
+	- experimental_response_trace_id: https://github.com/apollographql/router/discussions/2147
+	- experimental_retry: https://github.com/apollographql/router/discussions/2241
+	- experimental_when_header: https://github.com/apollographql/router/discussions/1961

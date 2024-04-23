@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -8,10 +10,12 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::error::CacheResolverError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::QueryHash;
 use crate::spec::Query;
 
 /// A planner key.
@@ -69,6 +73,14 @@ impl QueryPlan {
             Some(op) => matches!(op.kind(), OperationKind::Subscription),
             None => false,
         }
+    }
+
+    pub(crate) fn query_hashes(
+        &self,
+        operation: Option<&str>,
+        variables: &Object,
+    ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
+        self.root.query_hashes(operation, variables, &self.query)
     }
 }
 
@@ -190,6 +202,81 @@ impl PlanNode {
         }
     }
 
+    /// Iteratively populate a Vec of QueryHashes representing Fetches in this plan.
+    ///
+    /// Do not include any operations which contain "requires" elements.
+    ///
+    /// This function is specifically designed to be used within the context of simple batching. It
+    /// explicitly fails if nodes which should *not* be encountered within that context are
+    /// encountered. e.g.: PlanNode::Defer
+    ///
+    /// It's unlikely/impossible that PlanNode::Defer or PlanNode::Subscription will ever be
+    /// supported, but it may be that PlanNode::Condition must eventually be supported (or other
+    /// new nodes types that are introduced). Explicitly fail each type to provide extra error
+    /// details and don't use _ so that future node types must be handled here.
+    pub(crate) fn query_hashes(
+        &self,
+        operation: Option<&str>,
+        variables: &Object,
+        query: &Query,
+    ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
+        let mut query_hashes = vec![];
+        let mut new_targets = vec![self];
+
+        loop {
+            let targets = new_targets;
+            if targets.is_empty() {
+                break;
+            }
+
+            new_targets = vec![];
+            for target in targets {
+                match target {
+                    PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                        new_targets.extend(nodes);
+                    }
+                    PlanNode::Fetch(node) => {
+                        // If requires.is_empty() we can batch it!
+                        if node.requires.is_empty() {
+                            query_hashes.push(node.schema_aware_hash.clone());
+                        }
+                    }
+                    PlanNode::Flatten(node) => new_targets.push(&node.node),
+                    PlanNode::Defer { .. } => {
+                        return Err(CacheResolverError::BatchingError(
+                            "unexpected defer node encountered during query_hash processing"
+                                .to_string(),
+                        ))
+                    }
+                    PlanNode::Subscription { .. } => {
+                        return Err(CacheResolverError::BatchingError(
+                            "unexpected subscription node encountered during query_hash processing"
+                                .to_string(),
+                        ))
+                    }
+                    PlanNode::Condition {
+                        if_clause,
+                        else_clause,
+                        condition,
+                    } => {
+                        if query
+                            .variable_value(operation, condition.as_str(), variables)
+                            .map(|v| *v == Value::Bool(true))
+                            .unwrap_or(true)
+                        {
+                            if let Some(node) = if_clause {
+                                new_targets.push(node);
+                            }
+                        } else if let Some(node) = else_clause {
+                            new_targets.push(node);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(query_hashes)
+    }
+
     pub(crate) fn subgraph_fetches(&self) -> usize {
         match self {
             PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
@@ -225,38 +312,43 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+    pub(crate) fn hash_subqueries(
+        &mut self,
+        schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
+    ) {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.hash_subquery(schema);
+                if let Some(schema) = schemas.get(&fetch_node.service_name) {
+                    fetch_node.hash_subquery(schema);
+                }
             }
 
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(schema);
+                    node.hash_subqueries(schemas);
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(schema);
+                    node.hash_subqueries(schemas);
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(schema),
+            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(schemas),
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.hash_subqueries(schema);
+                    node.hash_subqueries(schemas);
                 }
                 for deferred_node in deferred {
                     if let Some(node) = deferred_node.node.take() {
                         let mut new_node = (*node).clone();
-                        new_node.hash_subqueries(schema);
+                        new_node.hash_subqueries(schemas);
                         deferred_node.node = Some(Arc::new(new_node));
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.hash_subqueries(schema);
+                    node.hash_subqueries(schemas);
                 }
             }
             PlanNode::Condition {
@@ -265,10 +357,10 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.hash_subqueries(schema);
+                    node.hash_subqueries(schemas);
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.hash_subqueries(schema);
+                    node.hash_subqueries(schemas);
                 }
             }
         }
