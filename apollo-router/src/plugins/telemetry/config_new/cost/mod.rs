@@ -225,7 +225,17 @@ impl Instrumented for CostInstruments {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
 
-    fn on_request(&self, _request: &Self::Request) {}
+    fn on_request(&self, request: &Self::Request) {
+        if let Some(cost_estimated) = &self.cost_estimated {
+            cost_estimated.on_request(request);
+        }
+        if let Some(cost_actual) = &self.cost_actual {
+            cost_actual.on_request(request);
+        }
+        if let Some(cost_delta) = &self.cost_delta {
+            cost_delta.on_request(request);
+        }
+    }
 
     fn on_response(&self, response: &Self::Response) {
         if let Some(cost_estimated) = &self.cost_estimated {
@@ -239,7 +249,17 @@ impl Instrumented for CostInstruments {
         }
     }
 
-    fn on_error(&self, _error: &BoxError, _ctx: &Context) {}
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        if let Some(cost_estimated) = &self.cost_estimated {
+            cost_estimated.on_error(error, ctx);
+        }
+        if let Some(cost_actual) = &self.cost_actual {
+            cost_actual.on_error(error, ctx);
+        }
+        if let Some(cost_delta) = &self.cost_delta {
+            cost_delta.on_error(error, ctx);
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
