@@ -837,7 +837,8 @@ expression: "&schema"
               "sdl": false,
               "method": false,
               "query_plan": false,
-              "detached": false
+              "detached": false,
+              "url": null
             },
             "response": {
               "headers": false,
@@ -845,7 +846,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "status_code": false,
-              "detached": false
+              "detached": false,
+              "url": null
             }
           },
           "type": "object",
@@ -859,7 +861,8 @@ expression: "&schema"
                 "sdl": false,
                 "method": false,
                 "query_plan": false,
-                "detached": false
+                "detached": false,
+                "url": null
               },
               "type": "object",
               "properties": {
@@ -897,6 +900,11 @@ expression: "&schema"
                   "description": "Send the SDL",
                   "default": false,
                   "type": "boolean"
+                },
+                "url": {
+                  "description": "The url you'd like to offload processing to",
+                  "default": null,
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -909,7 +917,8 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "status_code": false,
-                "detached": false
+                "detached": false,
+                "url": null
               },
               "type": "object",
               "properties": {
@@ -942,6 +951,11 @@ expression: "&schema"
                   "description": "Send the HTTP status",
                   "default": false,
                   "type": "boolean"
+                },
+                "url": {
+                  "description": "The url you'd like to offload processing to",
+                  "default": null,
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -958,7 +972,8 @@ expression: "&schema"
               "sdl": false,
               "path": false,
               "method": false,
-              "detached": false
+              "detached": false,
+              "url": null
             },
             "response": {
               "headers": false,
@@ -966,7 +981,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "status_code": false,
-              "detached": false
+              "detached": false,
+              "url": null
             }
           },
           "type": "object",
@@ -980,7 +996,8 @@ expression: "&schema"
                 "sdl": false,
                 "path": false,
                 "method": false,
-                "detached": false
+                "detached": false,
+                "url": null
               },
               "type": "object",
               "properties": {
@@ -1018,6 +1035,11 @@ expression: "&schema"
                   "description": "Send the SDL",
                   "default": false,
                   "type": "boolean"
+                },
+                "url": {
+                  "description": "The url you'd like to offload processing to",
+                  "default": null,
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -1030,7 +1052,8 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "status_code": false,
-                "detached": false
+                "detached": false,
+                "url": null
               },
               "type": "object",
               "properties": {
@@ -1063,6 +1086,11 @@ expression: "&schema"
                   "description": "Send the HTTP status",
                   "default": false,
                   "type": "boolean"
+                },
+                "url": {
+                  "description": "The url you'd like to offload processing to",
+                  "default": null,
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -1080,7 +1108,8 @@ expression: "&schema"
                 "uri": false,
                 "method": false,
                 "service_name": false,
-                "detached": false
+                "detached": false,
+                "url": null
               },
               "response": {
                 "headers": false,
@@ -1088,7 +1117,8 @@ expression: "&schema"
                 "body": false,
                 "service_name": false,
                 "status_code": false,
-                "detached": false
+                "detached": false,
+                "url": null
               }
             }
           },
@@ -1104,7 +1134,8 @@ expression: "&schema"
                   "uri": false,
                   "method": false,
                   "service_name": false,
-                  "detached": false
+                  "detached": false,
+                  "url": null
                 },
                 "response": {
                   "headers": false,
@@ -1112,7 +1143,8 @@ expression: "&schema"
                   "body": false,
                   "service_name": false,
                   "status_code": false,
-                  "detached": false
+                  "detached": false,
+                  "url": null
                 }
               },
               "type": "object",
@@ -1126,7 +1158,8 @@ expression: "&schema"
                     "uri": false,
                     "method": false,
                     "service_name": false,
-                    "detached": false
+                    "detached": false,
+                    "url": null
                   },
                   "type": "object",
                   "properties": {
@@ -1164,6 +1197,11 @@ expression: "&schema"
                       "description": "Send the subgraph URI",
                       "default": false,
                       "type": "boolean"
+                    },
+                    "url": {
+                      "description": "The url you'd like to offload processing to",
+                      "default": null,
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
@@ -1176,7 +1214,8 @@ expression: "&schema"
                     "body": false,
                     "service_name": false,
                     "status_code": false,
-                    "detached": false
+                    "detached": false,
+                    "url": null
                   },
                   "type": "object",
                   "properties": {
@@ -1209,6 +1248,11 @@ expression: "&schema"
                       "description": "Send the http status",
                       "default": false,
                       "type": "boolean"
+                    },
+                    "url": {
+                      "description": "The url you'd like to offload processing to",
+                      "default": null,
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
@@ -1228,7 +1272,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "method": false,
-              "detached": false
+              "detached": false,
+              "url": null
             },
             "response": {
               "headers": false,
@@ -1236,7 +1281,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "status_code": false,
-              "detached": false
+              "detached": false,
+              "url": null
             }
           },
           "type": "object",
@@ -1249,7 +1295,8 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "method": false,
-                "detached": false
+                "detached": false,
+                "url": null
               },
               "type": "object",
               "properties": {
@@ -1282,6 +1329,11 @@ expression: "&schema"
                   "description": "Send the SDL",
                   "default": false,
                   "type": "boolean"
+                },
+                "url": {
+                  "description": "The url you'd like to offload processing to",
+                  "default": null,
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -1294,7 +1346,8 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "status_code": false,
-                "detached": false
+                "detached": false,
+                "url": null
               },
               "type": "object",
               "properties": {
@@ -1327,6 +1380,11 @@ expression: "&schema"
                   "description": "Send the HTTP status",
                   "default": false,
                   "type": "boolean"
+                },
+                "url": {
+                  "description": "The url you'd like to offload processing to",
+                  "default": null,
+                  "type": "string"
                 }
               },
               "additionalProperties": false

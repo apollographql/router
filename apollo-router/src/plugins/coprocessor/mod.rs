@@ -29,6 +29,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use url::Url;
 
 use crate::error::Error;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
@@ -228,6 +229,9 @@ pub(super) struct RouterRequestConf {
     pub(super) method: bool,
     /// Handles the request without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a router request/response stage
@@ -246,7 +250,11 @@ pub(super) struct RouterResponseConf {
     pub(super) status_code: bool,
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
+
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -265,6 +273,9 @@ pub(super) struct SubgraphRequestConf {
     pub(super) service_name: bool,
     /// Handles the request without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -283,6 +294,9 @@ pub(super) struct SubgraphResponseConf {
     pub(super) status_code: bool,
     /// Handles the response without waiting for the coprocessor to respond
     pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// Configures the externalization plugin
@@ -290,7 +304,8 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
-    url: String,
+    #[schemars(with = "String")]
+    url: Url,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
@@ -328,7 +343,7 @@ impl RouterStage {
         &self,
         http_client: C,
         service: router::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         sdl: Arc<String>,
     ) -> router::BoxService
     where
@@ -341,7 +356,10 @@ impl RouterStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -384,7 +402,10 @@ impl RouterStage {
             let response_config = self.response.clone();
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
-                let coprocessor_url = coprocessor_url.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
 
@@ -463,7 +484,7 @@ impl SubgraphStage {
         &self,
         http_client: C,
         service: subgraph::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         service_name: String,
     ) -> subgraph::BoxService
     where
@@ -477,7 +498,10 @@ impl SubgraphStage {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
             let http_client = http_client.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let service_name = service_name.clone();
             OneShotAsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
@@ -519,8 +543,11 @@ impl SubgraphStage {
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
-                let coprocessor_url = coprocessor_url.clone();
                 let response_config = response_config.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let service_name = service_name.clone();
 
                 async move {
@@ -576,7 +603,7 @@ impl SubgraphStage {
 // -----------------------------------------------------------------------------------------
 async fn process_router_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: router::Request,
     request_config: RouterRequestConf,
@@ -745,7 +772,7 @@ where
 
 async fn process_router_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut response: router::Response,
     response_config: RouterResponseConf,
@@ -1008,7 +1035,7 @@ where
 
 async fn process_subgraph_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut request: subgraph::Request,
     request_config: SubgraphRequestConf,
@@ -1169,7 +1196,7 @@ where
 
 async fn process_subgraph_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,
