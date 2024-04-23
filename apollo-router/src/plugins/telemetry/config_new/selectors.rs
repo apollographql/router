@@ -14,6 +14,8 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::demand_control::CostResult;
+
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
@@ -690,6 +692,19 @@ impl Selector for SupergraphSelector {
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::Cost { cost } => {
+                let extensions = response.context.extensions().lock();
+                if let Some(cost_result) = extensions.get::<CostResult>() {
+                    Some(match cost {
+                        CostValue::Estimated => cost_result.estimated.into(),
+                        CostValue::Actual => cost_result.actual.into(),
+                        CostValue::Delta => cost_result.delta().into(),
+                        CostValue::Result => cost_result.result.into(),
+                    })
+                } else {
+                    None
+                }
+            }
             // For request
             _ => None,
         }

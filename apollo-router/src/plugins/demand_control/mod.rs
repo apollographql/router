@@ -36,6 +36,34 @@ use crate::services::subgraph;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
+/// The results of cost calculations for use in telemetry
+pub(crate) struct CostResult {
+    pub(crate) estimated: f64,
+    pub(crate) actual: f64,
+    pub(crate) result: &'static str,
+}
+
+impl Default for CostResult {
+    fn default() -> Self {
+        Self {
+            estimated: 0.0,
+            actual: 0.0,
+            result: "COST_OK",
+        }
+    }
+}
+
+impl CostResult {
+    pub(crate) fn delta(&self) -> f64 {
+        self.actual - self.estimated
+    }
+
+    pub(crate) fn result(&mut self, error: DemandControlError) -> DemandControlError {
+        self.result = error.code();
+        error
+    }
+}
+
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -120,7 +148,7 @@ impl IntoGraphQLErrors for DemandControlError {
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
                 Ok(vec![graphql::Error::builder()
-                    .extension_code("COST_ESTIMATED_TOO_EXPENSIVE")
+                    .extension_code(self.code())
                     .extensions(extensions)
                     .message(self.to_string())
                     .build()])
@@ -133,19 +161,30 @@ impl IntoGraphQLErrors for DemandControlError {
                 extensions.insert("cost.actual", actual_cost.into());
                 extensions.insert("cost.max", max_cost.into());
                 Ok(vec![graphql::Error::builder()
-                    .extension_code("COST_ACTUAL_TOO_EXPENSIVE")
+                    .extension_code(self.code())
                     .extensions(extensions)
                     .message(self.to_string())
                     .build()])
             }
             DemandControlError::QueryParseFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_QUERY_PARSE_FAILURE")
+                .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
             DemandControlError::ResponseTypingFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_RESPONSE_TYPING_FAILURE")
+                .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
+        }
+    }
+}
+
+impl DemandControlError {
+    fn code(&self) -> &'static str {
+        match self {
+            DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
+            DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
+            DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
+            DemandControlError::ResponseTypingFailure(_) => "COST_RESPONSE_TYPING_FAILURE",
         }
     }
 }
@@ -211,12 +250,13 @@ impl Plugin for DemandControl {
                         .get::<Strategy>()
                         .expect("must have strategy")
                         .clone();
+                    let context = resp.context.clone();
                     resp.response = resp.response.map(move |resp| {
                         // Here we are going to abort the stream if the cost is too high
                         // First we map based on cost, then we use take while to abort the stream if an error is emitted.
                         // When we terminate the stream we still want to emit a graphql error, so the error response is emitted first before a termination error.
                         resp.flat_map(move |resp| {
-                            match strategy.on_execution_response(req.as_ref(), &resp) {
+                            match strategy.on_execution_response(&context, req.as_ref(), &resp) {
                                 Ok(_) => Either::Left(stream::once(future::ready(Ok(resp)))),
                                 Err(err) => Either::Right(stream::iter(vec![
                                     // This is the error we are returning to the user
@@ -280,7 +320,10 @@ impl Plugin for DemandControl {
                 })
                 .map_future_with_request_data(
                     |req: &subgraph::Request| {
-                        req.executable_document.clone().expect("must have document")
+                        //TODO convert this to expect
+                        req.executable_document.clone().unwrap_or_else(|| {
+                            Arc::new(Valid::assume_valid(ExecutableDocument::new()))
+                        })
                     },
                     |req: Arc<Valid<ExecutableDocument>>, fut| async move {
                         let resp: subgraph::Response = fut.await?;
@@ -299,7 +342,7 @@ impl Plugin for DemandControl {
                                         .expect("must be able to convert to graphql error"),
                                 )
                                 .context(resp.context.clone())
-                                .extensions(crate::json_ext::Object::new())
+                                .extensions(Object::new())
                                 .build(),
                         })
                     },

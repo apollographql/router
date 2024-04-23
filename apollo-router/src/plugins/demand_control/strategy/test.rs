@@ -54,6 +54,7 @@ impl StrategyImpl for Test {
 
     fn on_execution_response(
         &self,
+        _context: &crate::Context,
         _request: &ExecutableDocument,
         _response: &crate::graphql::Response,
     ) -> Result<(), DemandControlError> {

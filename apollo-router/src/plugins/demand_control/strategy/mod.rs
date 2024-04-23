@@ -5,7 +5,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 
-use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
 use crate::plugins::demand_control::DemandControlConfig;
@@ -14,6 +13,7 @@ use crate::plugins::demand_control::Mode;
 use crate::plugins::demand_control::StrategyConfig;
 use crate::services::execution;
 use crate::services::subgraph;
+use crate::{graphql, Context};
 
 mod static_estimated;
 #[cfg(test)]
@@ -59,10 +59,11 @@ impl Strategy {
     }
     pub(crate) fn on_execution_response(
         &self,
+        context: &Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
-        match self.inner.on_execution_response(request, response) {
+        match self.inner.on_execution_response(context, request, response) {
             Err(e) if self.mode == Mode::Enforce => Err(e),
             _ => Ok(()),
         }
@@ -119,6 +120,7 @@ pub(crate) trait StrategyImpl: Send + Sync {
     ) -> Result<(), DemandControlError>;
     fn on_execution_response(
         &self,
+        context: &Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError>;

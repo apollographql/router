@@ -3,7 +3,7 @@ use apollo_compiler::ExecutableDocument;
 use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
-use crate::plugins::demand_control::DemandControlError;
+use crate::plugins::demand_control::{CostResult, DemandControlError};
 use crate::services::execution;
 use crate::services::subgraph;
 
@@ -19,11 +19,16 @@ impl StrategyImpl for StaticEstimated {
         self.cost_calculator
             .planned(&request.query_plan)
             .and_then(|cost| {
+                let mut extensions = request.context.extensions().lock();
+                let cost_result = extensions.get_or_default_mut::<CostResult>();
+                cost_result.estimated = cost;
                 if cost > self.max {
-                    Err(DemandControlError::EstimatedCostTooExpensive {
-                        estimated_cost: cost,
-                        max_cost: self.max,
-                    })
+                    Err(
+                        cost_result.result(DemandControlError::EstimatedCostTooExpensive {
+                            estimated_cost: cost,
+                            max_cost: self.max,
+                        }),
+                    )
                 } else {
                     Ok(())
                 }
@@ -44,12 +49,15 @@ impl StrategyImpl for StaticEstimated {
 
     fn on_execution_response(
         &self,
+        context: &crate::Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
         if response.data.is_some() {
-            let _cost = self.cost_calculator.actual(request, response)?;
-            // Todo metrics
+            let cost = self.cost_calculator.actual(request, response)?;
+            let mut extensions = context.extensions().lock();
+            let cost_result = extensions.get_or_default_mut::<CostResult>();
+            cost_result.actual = cost;
         }
         Ok(())
     }
