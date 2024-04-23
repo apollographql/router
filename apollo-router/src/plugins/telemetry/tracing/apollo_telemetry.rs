@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::future;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use async_trait::async_trait;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
 use derivative::Derivative;
+use futures::future::try_join_all;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -177,7 +179,7 @@ pub(crate) struct Exporter {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
     #[derivative(Debug = "ignore")]
     report_exporter: Arc<ApolloExporter>,
-    otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
+    otlp_exporter: Option<ApolloOtlpExporter>,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
@@ -235,13 +237,13 @@ impl Exporter {
                 schema_id,
             )?),
             otlp_exporter: match otlp_endpoint {
-                Some(otlp_endpoint) => Some(Arc::new(ApolloOtlpExporter::new(
+                Some(otlp_endpoint) => Some(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     batch_config,
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
-                )?)),
+                )?),
                 None => None,
             },
             field_execution_weight: match field_execution_sampler {
@@ -874,19 +876,31 @@ impl SpanExporter for Exporter {
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
         let mut report = telemetry::apollo::Report::default();
         report += SingleReport::Traces(TracesReport { traces });
-        let exporter = self.report_exporter.clone();
+        let apollo_exporter = self.report_exporter.clone();
         let fut = async move {
-            exporter
+            let apollo_result = 
+                apollo_exporter
                 .submit_report(report)
-                .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-                .await
+                .map_err(|e| TraceError::ExportFailed(Box::new(e))).boxed();
+            
+            // ideally we get something like this working but some problem with lifetimes (see below)
+            let otlp_result = if let Some(otlp_exporter) = &mut self.otlp_exporter { 
+                otlp_exporter
+                .export(otlp_exporter.span_data_from_traces(otlp_trace_spans))
+            } else {
+                // if there is no otlp_exporter available, this is a no-op
+                future::ready(Ok(())).boxed()
+            };
+            // The following line works without issue, however with the code above (`let otlp_result =`) we get
+            // an error like "lifetime may not live long enough"
+            // let otlp_result = future::ready(Ok(())).boxed();
+
+            match try_join_all(vec![apollo_result, otlp_result]).await {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e)
+            }
         };
-        if let Some(otlp_exporter) = &self.otlp_exporter {
-            let exporter = otlp_exporter.clone();
-            // TODO this won't work because to call export you need a mutable ref to exporter and you can't have it from an Arc
-            let fut = async move { exporter.export(otlp_trace_spans) };
-        }
-        fut.boxed()
+        fut.boxed() // causes lifetime issue here
     }
 }
 

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-
+use async_trait::async_trait;
 use crate::plugins::telemetry::{
     apollo_exporter::get_uname, metrics::apollo::ROUTER_ID, tracing::BatchProcessorConfig,
     GLOBAL_TRACER_NAME,
@@ -99,37 +99,43 @@ impl ApolloOtlpExporter {
         });
     }
 
-    pub(crate) async fn submit_trace_batch(
-        &mut self,
-        traces: Vec<Vec<LightSpanData>>,
-    ) -> BoxFuture<'static, ExportResult> {
-        let spans = traces
-            .into_iter()
-            .flat_map(|t| {
-                t.into_iter().map(|s| {
-                    SpanData {
-                        span_context: SpanContext::new(
-                            s.trace_id,
-                            s.span_id,
-                            TraceFlags::default().with_sampled(true),
-                            true,
-                            TraceState::default(),
-                        ),
-                        parent_span_id: s.parent_span_id,
-                        span_kind: s.span_kind,
-                        name: s.name,
-                        start_time: s.start_time,
-                        end_time: s.end_time,
-                        attributes: s.attributes,
-                        events: EvictedQueue::new(0),
-                        links: EvictedQueue::new(0),
-                        status: Status::Unset,
-                        resource: Cow::Owned(self.resource_template.to_owned()), // Hooray, Cows!  This might need a look.
-                        instrumentation_lib: self.intrumentation_library.clone(),
-                    }
-                })
+    pub(crate) fn span_data_from_traces(&self, traces: Vec<Vec<LightSpanData>>) -> Vec<SpanData> {
+      traces
+        .into_iter()
+        .flat_map(|t| {
+            t.into_iter().map(|s| {
+                SpanData {
+                    span_context: SpanContext::new(
+                        s.trace_id,
+                        s.span_id,
+                        TraceFlags::default().with_sampled(true),
+                        true,
+                        TraceState::default(),
+                    ),
+                    parent_span_id: s.parent_span_id,
+                    span_kind: s.span_kind,
+                    name: s.name,
+                    start_time: s.start_time,
+                    end_time: s.end_time,
+                    attributes: s.attributes,
+                    events: EvictedQueue::new(0),
+                    links: EvictedQueue::new(0),
+                    status: Status::Unset,
+                    resource: Cow::Owned(self.resource_template.to_owned()), // Hooray, Cows!  This might need a look.
+                    instrumentation_lib: self.intrumentation_library.clone(),
+                }
             })
-            .collect_vec();
+        })
+        .collect_vec()
+    }
+  }
+
+#[async_trait]
+impl SpanExporter for ApolloOtlpExporter {
+    fn export(
+        &mut self,
+        spans: Vec<SpanData>,
+    ) -> BoxFuture<'static, ExportResult> {
         self.otlp_exporter.export(spans)
     }
 }
