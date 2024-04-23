@@ -294,8 +294,8 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
-                for (name, negated) in variables.0.iter() {
-                    let (if_clause, else_clause) = if *negated {
+                for (name, negated) in variables.iter() {
+                    let (if_clause, else_clause) = if negated {
                         (None, Some(Box::new(value)))
                     } else {
                         (Some(Box::new(value)), None)

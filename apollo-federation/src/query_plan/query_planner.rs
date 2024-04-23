@@ -508,9 +508,7 @@ fn compute_root_parallel_best_plan(
         has_defers,
         parameters.operation.root_kind,
         FetchDependencyGraphToCostProcessor,
-        /*excluded_destinations*/ &Default::default(),
-        /*excluded_conditions*/ &Default::default(),
-    );
+    )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
     // so we just return an empty plan.
@@ -540,10 +538,10 @@ fn compute_plan_internal(
                 None => local_main,
             };
             deferred.extend(local_deferred);
-            let new_selection = dependency_graph.defer_tracking.primary_selection.as_deref();
+            let new_selection = dependency_graph.defer_tracking.primary_selection;
             match primary_selection.as_mut() {
-                Some(selection) => selection.merge_into(new_selection.into_iter())?,
-                None => primary_selection = new_selection.cloned(),
+                Some(selection) => selection.merge_into(new_selection.iter())?,
+                None => primary_selection = new_selection,
             }
         }
         (main, deferred, primary_selection)
@@ -552,11 +550,7 @@ fn compute_plan_internal(
 
         let (main, deferred) = dependency_graph.process(&mut parameters.processor, root_kind)?;
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
-        let primary_selection = dependency_graph
-            .defer_tracking
-            .primary_selection
-            .as_deref()
-            .cloned();
+        let primary_selection = dependency_graph.defer_tracking.primary_selection;
 
         (main, deferred, primary_selection)
     };
@@ -582,6 +576,8 @@ fn compute_plan_for_defer_conditionals(
 
 #[cfg(test)]
 mod tests {
+    use crate::subgraph::Subgraph;
+
     use super::*;
 
     const TEST_SUPERGRAPH: &str = r#"
@@ -723,20 +719,84 @@ type User
     "#;
 
     #[test]
+    #[allow(unused)] // remove when build_query_plan() can run without panicking
     fn it_does_not_crash() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let _planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
 
-        let _document = ExecutableDocument::parse_and_validate(
-            supergraph
-                .to_api_schema(Default::default())
-                .unwrap()
-                .schema(),
-            "{ userById(id: 1) { name email } }",
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    name
+                    email
+                }
+            }
+            "#,
             "operation.graphql",
         )
         .unwrap();
-        // This part does crash :)
-        // let _plan = planner.build_query_plan(&document, None).unwrap();
+        // let plan = planner.build_query_plan(&document, None).unwrap();
+    }
+
+    #[test]
+    fn bypass_planner_for_single_subgraph() {
+        let a = Subgraph::parse_and_expand(
+            "A",
+            "https://A",
+            r#"
+            type Query {
+                a: A
+            }
+            type A {
+                b: B
+            }
+            type B {
+                x: Int
+                y: String
+            }
+        "#,
+        )
+        .unwrap();
+        let subgraphs = vec![&a];
+        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                a {
+                    b {
+                        x
+                        y
+                    }
+                }
+            }
+            "#,
+            "",
+        )
+        .unwrap();
+
+        let mut config = QueryPlannerConfig::default();
+        config.debug.bypass_planner_for_single_subgraph = true;
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "A") {
+            {
+                    a {
+                b {
+                  x
+                  y
+                }
+              }
+            }
+          }
+        }
+        "###);
     }
 }

@@ -3,8 +3,9 @@ use crate::query_graph::condition_resolver::{
     ConditionResolution, ConditionResolutionCacheResult, ConditionResolver, ConditionResolverCache,
 };
 use crate::query_graph::graph_path::{
-    ClosedBranch, ClosedPath, ExcludedConditions, ExcludedDestinations, OpGraphPathContext,
-    OpPathElement, OpenBranch, SimultaneousPaths, SimultaneousPathsWithLazyIndirectPaths,
+    create_initial_options, ClosedBranch, ClosedPath, ExcludedConditions, ExcludedDestinations,
+    OpGraphPath, OpGraphPathContext, OpPathElement, OpenBranch, SimultaneousPaths,
+    SimultaneousPathsWithLazyIndirectPaths,
 };
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::{QueryGraph, QueryGraphNodeType};
@@ -81,6 +82,8 @@ pub(crate) struct QueryPlanningTraversal<'a> {
     /// The closed branches that have been planned.
     closed_branches: Vec<ClosedBranch>,
     /// The best plan found as a result of query planning.
+    // TODO(@goto-bus-stop): FED-164: can we remove this? `find_best_plan` consumes `self` and returns the
+    // best plan, so it should not be necessary to store it.
     best_plan: Option<BestQueryPlanInfo>,
     /// The cache for condition resolution.
     // PORT_NOTE: This is different from JS version. See `ConditionResolver` trait implementation below.
@@ -126,28 +129,84 @@ impl<'a> QueryPlanningTraversal<'a> {
         // The ownership of `QueryPlanningParameters` is awkward and should probably be
         // refactored.
         parameters: &'a QueryPlanningParameters,
-        _selection_set: NormalizedSelectionSet,
+        selection_set: NormalizedSelectionSet,
         has_defers: bool,
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
-        _excluded_destinations: &ExcludedDestinations, // To be used by `createInitialOptions` call (FED-147)
-        _excluded_conditions: &ExcludedConditions,
-    ) -> Self {
-        // FIXME(@goto-bus-stop): Is this correct?
+    ) -> Result<Self, FederationError> {
+        Self::new_inner(
+            parameters,
+            selection_set,
+            0,
+            has_defers,
+            root_kind,
+            cost_processor,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )
+    }
+
+    // Many arguments is okay for a private constructor function.
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        parameters: &'a QueryPlanningParameters,
+        selection_set: NormalizedSelectionSet,
+        starting_id_generation: u64,
+        has_defers: bool,
+        root_kind: SchemaRootDefinitionKind,
+        cost_processor: FetchDependencyGraphToCostProcessor,
+        initial_context: OpGraphPathContext,
+        excluded_destinations: ExcludedDestinations,
+        excluded_conditions: ExcludedConditions,
+    ) -> Result<Self, FederationError> {
         let is_top_level = parameters.head_must_be_root;
-        Self {
+
+        fn map_options_to_selections(
+            selection_set: NormalizedSelectionSet,
+            options: Vec<SimultaneousPathsWithLazyIndirectPaths>,
+        ) -> Vec<OpenBranchAndSelections> {
+            let open_branch = OpenBranch(options);
+            let selections = selection_set.selections.values().cloned().rev().collect();
+            vec![OpenBranchAndSelections {
+                open_branch,
+                selections,
+            }]
+        }
+
+        let initial_path = OpGraphPath::new(
+            Arc::clone(&parameters.federated_query_graph),
+            parameters.head,
+        )
+        .unwrap();
+        // In JS this is done *inside* create_initial_options, which would require awareness of the
+        // query graph.
+        let tail = parameters
+            .federated_query_graph
+            .node_weight(initial_path.tail)?;
+
+        let initial_options = create_initial_options(
+            initial_path,
+            &tail.type_,
+            initial_context,
+            excluded_destinations,
+            excluded_conditions,
+        )?;
+
+        let open_branches = map_options_to_selections(selection_set, initial_options);
+
+        Ok(Self {
             parameters,
             root_kind,
             has_defers,
-            starting_id_generation: 0,
+            starting_id_generation,
             cost_processor,
             is_top_level,
-            // TODO: In JS this calls `createInitialOptions()`. Do we still need that? See FED-147.
-            open_branches: Default::default(),
+            open_branches,
             closed_branches: Default::default(),
             best_plan: None,
             resolver_cache: ConditionResolverCache::new(),
-        }
+        })
     }
 
     // PORT_NOTE: In JS, the traversal is still usable after finding the best plan. Here we consume
@@ -695,15 +754,17 @@ impl<'a> QueryPlanningTraversal<'a> {
             config: self.parameters.config.clone(),
             statistics: self.parameters.statistics.clone(),
         };
-        let best_plan_opt = QueryPlanningTraversal::new(
+        let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
             edge_conditions.clone(),
+            self.starting_id_generation,
             self.has_defers,
             self.root_kind,
             self.cost_processor,
-            excluded_destinations,
-            &excluded_conditions.add_item(edge_conditions),
-        )
+            Default::default(),
+            excluded_destinations.clone(),
+            excluded_conditions.add_item(edge_conditions),
+        )?
         .find_best_plan()?;
         match best_plan_opt {
             Some(best_plan) => Ok(ConditionResolution::Satisfied {
