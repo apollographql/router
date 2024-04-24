@@ -152,7 +152,6 @@ where
         ttl: Option<Duration>,
         heartbeat_error_message: Option<V>,
         queue_size: Option<usize>,
-        router_broadcasts: Option<Arc<RouterBroadcasts>>,
     ) -> Notify<K, V> {
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
         let receiver_stream = ReceiverStream::new(receiver);
@@ -160,8 +159,7 @@ where
         Notify {
             sender,
             queue_size,
-            router_broadcasts: router_broadcasts
-                .unwrap_or_else(|| Arc::new(RouterBroadcasts::new())),
+            router_broadcasts: Arc::new(RouterBroadcasts::new()),
         }
     }
 
@@ -201,12 +199,6 @@ where
     K: Send + Hash + Eq + Clone + 'static,
     V: Send + Clone + 'static,
 {
-    #[cfg(not(test))]
-    pub(crate) fn set_queue_size(mut self, queue_size: Option<usize>) -> Self {
-        self.queue_size = queue_size;
-        self
-    }
-
     pub(crate) async fn set_ttl(&self, new_ttl: Option<Duration>) -> Result<(), NotifyError<V>> {
         self.sender
             .send(Notification::UpdateHeartbeat { new_ttl })

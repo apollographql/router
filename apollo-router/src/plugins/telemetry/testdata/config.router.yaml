@@ -1,4 +1,146 @@
 telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      default_attribute_requirement_level: recommended
+      router:
+        attributes:
+          "custom_one":
+            request_header: host
+      supergraph:
+        attributes:
+          graphql.document: true
+      subgraph:
+        attributes:
+          subgraph.graphql.document: true
+    instruments:
+      router:
+        http.server.request.body.size:
+          attributes:
+            # Standard attributes
+            http.response.status_code: true
+            "my_attribute":
+              response_header: "content-type"
+        http.server.request.duration:
+          attributes:
+            # Standard attributes
+            http.response.status_code: true
+            http.request.method: true
+            # Custom attribute
+            "my_attribute":
+              response_header: "content-type"
+        my.request.duration: # The name of your custom instrument/metric
+          value: duration
+          type: counter
+          unit: s
+          description: "my description"
+        acme.request.size: # The name of your custom instrument/metric
+          value:
+           request_header: "content-length"
+          type: counter
+          unit: s
+          description: "my description" 
+            
+        acme.request.length: # The name of your custom instrument/metric
+          value:
+           request_header: "content-length"
+          type: histogram
+          unit: s
+          description: "my description"
+      supergraph:
+        acme.graphql.requests:
+          value: unit
+          type: counter
+          unit: request
+          description: "supergraph requests"
+          attributes:
+            static: hello
+            graphql_operation_kind:
+              operation_kind: string
+      subgraph:
+        request_including_price1:
+          value: unit
+          type: counter
+          unit: request
+          description: "supergraph requests"
+          condition:
+            exists:
+             subgraph_response_data: "$.products[*].price1"
+          attributes:
+            subgraph.name: true
+    events:
+      router:
+        # Standard events
+        request: info
+        response: info
+        error: info
+
+        # Custom events
+        my.request_event:
+          message: "my event message"
+          level: info
+          on: request
+          attributes:
+            http.request.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.response_event:
+          message: "my response event message"
+          level: info
+          on: response
+          attributes:
+            http.response.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - response_header: "x-log-request"
+      supergraph:
+        # Standard events
+        request: info
+        response: info
+        error: info
+
+        # Custom events
+        my.request.event:
+          message: "my event message"
+          level: info
+          on: request
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.response_event:
+          message: "my response event message"
+          level: warn
+          on: response
+          condition:
+            eq:
+              - "log"
+              - response_header: "x-log-request"
+      subgraph:
+        # Standard events
+        request: info
+        response: warn
+        error: error
+
+        # Custom events
+        my.request.event:
+          message: "my event message"
+          level: info
+          on: request
+        my.response.event:
+          message: "my response event message"
+          level: error
+          on: response
+          attributes:
+            subgraph.name: true
+            response_status:
+              subgraph_response_status: code
   exporters:
     tracing:
       common:

@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use apollo_compiler::name;
 use futures::StreamExt;
 use http::Method;
 use router_bridge::planner::UsageReporting;
@@ -254,16 +255,15 @@ async fn defer() {
             formatted_query_plan: Default::default(),
             root: PlanNode::Defer {
                 primary: Primary {
-                    path: None,
                     subselection: Some("{ t { x } }".to_string()),
                     node: Some(Box::new(PlanNode::Fetch(FetchNode {
-                        service_name: "X".to_string(),
+                        service_name: "X".into(),
                         requires: vec![],
                         variable_usages: vec![],
                         operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
-                        operation_name: Some("t".to_string()),
+                        operation_name: Some("t".into()),
                         operation_kind: OperationKind::Query,
-                        id: Some("fetch1".to_string()),
+                        id: Some("fetch1".into()),
                         input_rewrites: None,
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
@@ -272,8 +272,7 @@ async fn defer() {
                 },
                 deferred: vec![DeferredNode {
                     depends: vec![Depends {
-                        id: "fetch1".to_string(),
-                        defer_label: None,
+                        id: "fetch1".into(),
                     }],
                     label: None,
                     query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
@@ -281,22 +280,22 @@ async fn defer() {
                     node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
                         path: Path(vec![PathElement::Key("t".to_string(), None)]),
                         node: Box::new(PlanNode::Fetch(FetchNode {
-                            service_name: "Y".to_string(),
+                            service_name: "Y".into(),
                             requires: vec![query_planner::selection::Selection::InlineFragment(
                                 query_planner::selection::InlineFragment {
-                                    type_condition: Some("T".into()),
+                                    type_condition: Some(name!("T")),
                                     selections: vec![
                                         query_planner::selection::Selection::Field(
                                             query_planner::selection::Field {
                                                 alias: None,
-                                                name: "id".into(),
+                                                name: name!("id"),
                                                 selections: None,
                                             },
                                         ),
                                         query_planner::selection::Selection::Field(
                                             query_planner::selection::Field {
                                                 alias: None,
-                                                name: "__typename".into(),
+                                                name: name!("__typename"),
                                                 selections: None,
                                             },
                                         ),
@@ -309,7 +308,7 @@ async fn defer() {
                             ),
                             operation_name: None,
                             operation_kind: OperationKind::Query,
-                            id: Some("fetch2".to_string()),
+                            id: Some("fetch2".into()),
                             input_rewrites: None,
                             output_rewrites: None,
                             schema_aware_hash: Default::default(),
