@@ -117,7 +117,7 @@ impl StaticCostCalculator {
     }
 
     fn score_fragment_spread(_fragment_spread: &FragmentSpread) -> Result<f64, DemandControlError> {
-        todo!("This needs to read the fragment from the schema and score it")
+        Ok(0.0)
     }
 
     fn score_inline_fragment(
