@@ -1700,6 +1700,11 @@ expression: "&schema"
         }
       ]
     },
+    "experimental_type_conditioned_fetching": {
+      "description": "Type conditioned fetching configuration.",
+      "default": false,
+      "type": "boolean"
+    },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
       "type": "boolean"
