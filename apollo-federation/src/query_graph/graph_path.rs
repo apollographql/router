@@ -77,7 +77,7 @@ use std::sync::{atomic, Arc};
 // in the Rust code we don't have a distinguished type for that case. We instead check this at
 // runtime (at the callsites that require root nodes). This means the `RootPath` type in the
 // JS codebase is replaced with this one.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct GraphPath<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -128,6 +128,54 @@ where
     /// If the trigger of the last edge in the `edges` array was an operation element with a
     /// `@defer` application, then the arguments of that application.
     defer_on_tail: Option<DeferDirectiveArguments>,
+}
+
+impl<TTrigger, TEdge> std::fmt::Debug for GraphPath<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+    // In addition to the bounds of the GraphPath struct, also require Debug:
+    TTrigger: std::fmt::Debug,
+    TEdge: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            graph: _, // skip
+            head,
+            tail,
+            edges,
+            edge_triggers,
+            edge_conditions,
+            last_subgraph_entering_edge_info,
+            own_path_ids,
+            overriding_path_ids,
+            runtime_types_of_tail,
+            runtime_types_before_tail_if_last_is_cast,
+            defer_on_tail,
+        } = self;
+
+        f.debug_struct("GraphPath")
+            .field("head", head)
+            .field("tail", tail)
+            .field("edges", edges)
+            .field("edge_triggers", edge_triggers)
+            .field("edge_conditions", edge_conditions)
+            .field(
+                "last_subgraph_entering_edge_info",
+                last_subgraph_entering_edge_info,
+            )
+            .field("own_path_ids", own_path_ids)
+            .field("overriding_path_ids", overriding_path_ids)
+            .field("runtime_types_of_tail", runtime_types_of_tail)
+            .field(
+                "runtime_types_before_tail_if_last_is_cast",
+                runtime_types_before_tail_if_last_is_cast,
+            )
+            .field("defer_on_tail", defer_on_tail)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
@@ -381,13 +429,21 @@ impl Display for OpGraphPathContext {
 #[derive(Clone)]
 pub(crate) struct SimultaneousPaths(pub(crate) Vec<Arc<OpGraphPath>>);
 
+impl std::fmt::Debug for SimultaneousPaths {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(ToString::to_string))
+            .finish()
+    }
+}
+
 /// One of the options for an `OpenBranch` (see the documentation of that struct for details). This
 /// includes the simultaneous paths we are traversing for the option, along with metadata about the
 /// traversal.
 // PORT_NOTE: The JS codebase stored a `ConditionResolver` callback here, but it was the same for
 // a given traversal (and cached resolution across the traversal), so we accordingly store it in
 // `QueryPlanTraversal` and pass it down when needed instead.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
     pub(crate) paths: SimultaneousPaths,
     pub(crate) context: OpGraphPathContext,
@@ -462,7 +518,7 @@ impl Default for ExcludedConditions {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct IndirectPaths<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -475,6 +531,22 @@ where
 }
 
 type OpIndirectPaths = IndirectPaths<OpGraphPathTrigger, Option<EdgeIndex>>;
+
+impl std::fmt::Debug for OpIndirectPaths {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpIndirectPaths")
+            .field(
+                "paths",
+                &self
+                    .paths
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            )
+            .field("dead_ends", &self.dead_ends)
+            .finish()
+    }
+}
 
 impl OpIndirectPaths {
     /// When `self` is just-computed indirect paths and given a field that we're trying to advance
