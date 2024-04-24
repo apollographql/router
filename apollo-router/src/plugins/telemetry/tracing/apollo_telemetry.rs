@@ -348,14 +348,18 @@ impl Exporter {
     }
 
     // TBD(tim): Likely need to revisit this, handle errors, deal with the unknown spans more carefully, etc.
-    fn collect_spans_for_tree(&self, root_span: LightSpanData) -> Vec<LightSpanData> {
-        // iterate over all children and recursively collect the entire subtree
-        // we're going to use "peek" here b/c it would otherwise remove the span from the cache
+    fn collect_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
+        // Iterate over all children and recursively collect the entire subtree.
+        // We're going to use "peek" here b/c it would otherwise remove the span from the cache
         // and prevent the apollo exporter from finding it.
+        // We'll probably also need some flag to indicate whether we should pop() or peek() based on whether
+        // or not we expect the apollo exporter to run (only one should use pop() to remove spans from the cache).
         let mut child_spans = match self.spans_by_parent_id.peek(&root_span.span_id) {
             Some(spans) => spans
                 .into_iter()
-                .flat_map(|(_, span)| self.collect_spans_for_tree(span.clone()))
+                .flat_map(|(_, span)| {
+                    self.collect_spans_for_tree(span)
+                })
                 .collect(),
             None => Vec::new(),
         };
@@ -364,16 +368,16 @@ impl Exporter {
         let mut spans_for_tree = if unknown {
             Vec::new()
         } else {
-            vec![root_span]
+            let exporter = self.otlp_exporter.as_ref().unwrap();
+            vec![exporter.prepare_for_export(root_span)]
         };
 
         spans_for_tree.append(&mut child_spans);
-
         spans_for_tree
     }
 
-    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
-        // TBD(tim): this could alternatively use the same algorithm in `groupbytrace` processor, which
+    fn group_by_trace(&mut self, span: &LightSpanData) -> Vec<SpanData> {
+        // TBD(tim): This could alternatively use the same algorithm in `groupbytrace` processor, which
         // groups based on trace ID instead of connecting recursively by parent ID.
         self.collect_spans_for_tree(span)
     }
@@ -826,7 +830,7 @@ impl SpanExporter for Exporter {
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
-        let mut otlp_trace_spans: Vec<Vec<LightSpanData>> = Vec::new();
+        let mut otlp_trace_spans: Vec<Vec<SpanData>> = Vec::new();
 
         for span in batch {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
@@ -834,7 +838,7 @@ impl SpanExporter for Exporter {
             {
                 let root_span: LightSpanData = span.into();
                 if self.otlp_exporter.is_some() {
-                    let grouped_trace_spans = self.group_by_trace(root_span.clone());
+                    let grouped_trace_spans = self.group_by_trace(&root_span);
                     otlp_trace_spans.push(grouped_trace_spans);
                 }
 
@@ -891,7 +895,7 @@ impl SpanExporter for Exporter {
                 .map_err(|e| TraceError::ExportFailed(Box::new(e))).boxed();
             
             let otlp_result = match otlp_exporter {
-                Some(exporter) => exporter.export(exporter.span_data_from_traces(otlp_trace_spans)),
+                Some(exporter) => exporter.export(otlp_trace_spans.into_iter().flatten().collect()),
                 None => 
                     // if there is no otlp_exporter available, this is a no-op
                     future::ready(Ok(())).boxed()

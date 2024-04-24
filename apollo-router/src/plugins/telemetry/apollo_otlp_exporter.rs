@@ -6,7 +6,6 @@ use crate::plugins::telemetry::{
 };
 use derivative::Derivative;
 use futures::future::BoxFuture;
-use itertools::Itertools;
 use opentelemetry::{
     sdk::{
         export::trace::{ExportResult, SpanData, SpanExporter},
@@ -99,34 +98,27 @@ impl ApolloOtlpExporter {
         });
     }
 
-    pub(crate) fn span_data_from_traces(&self, traces: Vec<Vec<LightSpanData>>) -> Vec<SpanData> {
-      traces
-        .into_iter()
-        .flat_map(|t| {
-            t.into_iter().map(|s| {
-                SpanData {
-                    span_context: SpanContext::new(
-                        s.trace_id,
-                        s.span_id,
-                        TraceFlags::default().with_sampled(true),
-                        true,
-                        TraceState::default(),
-                    ),
-                    parent_span_id: s.parent_span_id,
-                    span_kind: s.span_kind,
-                    name: s.name,
-                    start_time: s.start_time,
-                    end_time: s.end_time,
-                    attributes: s.attributes,
-                    events: EvictedQueue::new(0),
-                    links: EvictedQueue::new(0),
-                    status: Status::Unset,
-                    resource: Cow::Owned(self.resource_template.to_owned()), // Hooray, Cows!  This might need a look.
-                    instrumentation_lib: self.intrumentation_library.clone(),
-                }
-            })
-        })
-        .collect_vec()
+    pub(crate) fn prepare_for_export(&self, span: &LightSpanData) -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                span.trace_id,
+                span.span_id,
+                TraceFlags::default().with_sampled(true),
+                true,
+                TraceState::default(),
+            ),
+            parent_span_id: span.parent_span_id,
+            span_kind: span.span_kind.clone(),
+            name: span.name.to_owned(),
+            start_time: span.start_time,
+            end_time: span.end_time,
+            attributes: span.attributes.clone(),
+            events: EvictedQueue::new(0),
+            links: EvictedQueue::new(0),
+            status: Status::Unset,
+            resource: Cow::Owned(self.resource_template.to_owned()),
+            instrumentation_lib: self.intrumentation_library.clone(),
+        }
     }
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
