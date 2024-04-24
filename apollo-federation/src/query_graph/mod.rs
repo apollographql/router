@@ -2,6 +2,7 @@ use crate::error::{FederationError, SingleFederationError};
 use crate::query_plan::operation::normalized_field_selection::NormalizedField;
 use crate::query_plan::operation::normalized_inline_fragment_selection::NormalizedInlineFragment;
 use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::schema::field_set::parse_field_set;
 use crate::schema::position::{
     CompositeTypeDefinitionPosition, FieldDefinitionPosition, InterfaceFieldDefinitionPosition,
     ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition, SchemaRootDefinitionKind,
@@ -695,11 +696,56 @@ impl QueryGraph {
         };
     }
 
+    /// Returns a selection set that can be used as a key for the given type, and that can be
+    /// entirely resolved in the same subgraph. Returns None if such a key does not exist for the
+    /// given type.
     pub(crate) fn get_locally_satisfiable_key(
         &self,
-        _node: NodeIndex,
+        node_index: NodeIndex,
     ) -> Result<Option<NormalizedSelectionSet>, FederationError> {
-        todo!()
+        let node = self.node_weight(node_index)?;
+        let type_name = match &node.type_ {
+            QueryGraphNodeType::SchemaType(ty) => {
+                CompositeTypeDefinitionPosition::try_from(ty.clone())?
+            }
+            QueryGraphNodeType::FederatedRootType(_) => {
+                return Err(FederationError::internal(format!(
+                    "get_locally_satisfiable_key must be called on a composite type, got {}",
+                    node.type_
+                )));
+            }
+        };
+        let schema = self.schema_by_source(&node.source)?;
+        let Some(metadata) = schema.subgraph_metadata() else {
+            return Err(FederationError::internal(format!(
+                "Could not find subgraph metadata for source {}",
+                node.source
+            )));
+        };
+        let key_directive_definition = metadata
+            .federation_spec_definition()
+            .key_directive_definition(schema)?;
+
+        let ty = type_name.get(schema.schema())?;
+
+        for key in ty.directives().get_all(&key_directive_definition.name) {
+            let Some(value) = key
+                .argument_by_name("fields")
+                .and_then(|arg| arg.as_node_str())
+                .cloned()
+            else {
+                continue;
+            };
+            let selection = parse_field_set(schema, ty.name().clone(), value)?;
+            let has_external = metadata
+                .external_metadata()
+                .selects_any_external_field(&selection)?;
+            if !has_external {
+                return Ok(Some(selection));
+            }
+        }
+
+        Ok(None)
     }
 
     pub(crate) fn is_cross_subgraph_edge(&self, edge: EdgeIndex) -> Result<bool, FederationError> {
