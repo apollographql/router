@@ -598,6 +598,58 @@ impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition 
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub(crate) enum AbstractFieldDefinitionPosition {
+    Interface(InterfaceFieldDefinitionPosition),
+    Union(UnionTypenameFieldDefinitionPosition),
+}
+
+impl Debug for AbstractFieldDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+        }
+    }
+}
+
+impl AbstractFieldDefinitionPosition {
+    pub(crate) fn type_name(&self) -> &Name {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => &field.type_name,
+            AbstractFieldDefinitionPosition::Union(field) => &field.type_name,
+        }
+    }
+
+    pub(crate) fn field_name(&self) -> &Name {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => &field.field_name,
+            AbstractFieldDefinitionPosition::Union(field) => field.field_name(),
+        }
+    }
+
+    pub(crate) fn is_introspection_typename_field(&self) -> bool {
+        *self.field_name() == *INTROSPECTION_TYPENAME_FIELD_NAME
+    }
+
+    pub(crate) fn parent(&self) -> CompositeTypeDefinitionPosition {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => field.parent().into(),
+            AbstractFieldDefinitionPosition::Union(field) => field.parent().into(),
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => field.get(schema),
+            AbstractFieldDefinitionPosition::Union(field) => field.get(schema),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
@@ -677,6 +729,13 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
+    pub(crate) field: ObjectOrInterfaceFieldDefinitionPosition,
+    pub(crate) directive_name: Name,
+    pub(crate) directive_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
