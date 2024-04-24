@@ -133,4 +133,9 @@ impl ApolloOtlpExporter {
         let mut exporter = self.otlp_exporter.lock().unwrap();
         exporter.export(spans)
     }
+
+    pub(crate) fn shutdown(&self) {
+        let mut exporter = self.otlp_exporter.lock().unwrap();
+        exporter.shutdown()
+    }
   }

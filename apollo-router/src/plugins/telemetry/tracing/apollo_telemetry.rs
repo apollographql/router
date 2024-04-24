@@ -909,6 +909,13 @@ impl SpanExporter for Exporter {
         };
         fut.boxed()
     }
+
+    fn shutdown(&mut self) {
+        // currently only handled in the OTLP case
+        if let Some(exporter) = self.otlp_exporter.clone() {
+            exporter.shutdown()
+        };
+    }
 }
 
 trait ChildNodes {
