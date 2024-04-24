@@ -772,14 +772,17 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     where
         E: serde::de::Error,
     {
-        let mut type_conditions = Vec::new();
+        let mut type_conditions: Vec<String> = Vec::new();
         let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
             type_conditions.extend(
-                caps.extract::<1>()
-                    .1
-                    .map(|s| s.split(',').map(|s| s.to_string()))
-                    .into_iter()
-                    .flatten(),
+                caps.name("condition")
+                    .map(|c| {
+                        c.as_str()
+                            .split(',')
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
             );
             ""
         });
