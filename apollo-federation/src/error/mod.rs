@@ -1127,6 +1127,12 @@ lazy_static! {
             replaces: &[],
         }),
     );
+
+    static ref INTERNAL: ErrorCodeDefinition = ErrorCodeDefinition::new(
+        "INTERNAL".to_owned(),
+        "An internal federation error occured.".to_owned(),
+        None,
+    );
 }
 
 #[derive(Debug, strum_macros::EnumIter)]
@@ -1214,7 +1220,7 @@ impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
             // TODO: We should determine the code and doc info for internal errors.
-            ErrorCode::Internal => todo!(),
+            ErrorCode::Internal => &INTERNAL,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
             ErrorCode::TypeDefinitionInvalid => &TYPE_DEFINITION_INVALID,
