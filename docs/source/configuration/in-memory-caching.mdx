@@ -40,7 +40,7 @@ On schema reloads, the cache will be reset, and queries will need to go through 
 ```yaml title="router.yaml"
 supergraph:
   query_planning:
-    # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
+    # Pre-plan the 100 most used operations when the supergraph changes.  (By default, the Router warms up the cache with 30% of the queries already in cache)
     warmed_up_queries: 100
     cache:
       in_memory:
