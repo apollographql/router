@@ -1619,9 +1619,16 @@ expression: "&schema"
                 "static_estimated": {
                   "type": "object",
                   "required": [
+                    "list_size",
                     "max"
                   ],
                   "properties": {
+                    "list_size": {
+                      "description": "The assumed length of lists returned by the operation.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0.0
+                    },
                     "max": {
                       "description": "The maximum cost of a query",
                       "type": "number",
