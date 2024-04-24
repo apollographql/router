@@ -1553,7 +1553,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "experimental_type_conditioned_fetching": {
-      "description": "Type conditioned fetching configuration. If you don't know what this is about, you probably don't need it.",
+      "description": "Type conditioned fetching configuration.",
       "default": false,
       "type": "boolean"
     },
