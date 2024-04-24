@@ -1,5 +1,4 @@
 use std::any::type_name;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
@@ -7,8 +6,6 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
-use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
 use serde::de::Error;
 use serde::de::MapAccess;
@@ -61,22 +58,28 @@ where
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        // Add the condition and also allow string as a fallback.
-        let mut selector = gen.subschema_for::<HashMap<String, T>>();
+        // Add condition to each variant in the schema.
+        //Maybe we can rearrange this for a smaller schema
+        let mut selector = gen.subschema_for::<T>();
+
         if let Schema::Object(schema) = &mut selector {
-            if let Some(object) = &mut schema.object {
-                object
-                    .properties
-                    .insert("condition".to_string(), gen.subschema_for::<Condition<T>>());
+            if let Some(object) = &mut schema.subschemas {
+                if let Some(any_of) = &mut object.any_of {
+                    for mut variant in any_of {
+                        if let Schema::Object(variant) = &mut variant {
+                            if let Some(object) = &mut variant.object {
+                                object.properties.insert(
+                                    "condition".to_string(),
+                                    gen.subschema_for::<Condition<T>>(),
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
-        Schema::Object(SchemaObject {
-            subschemas: Some(Box::new(SubschemaValidation {
-                one_of: Some(vec![selector, gen.subschema_for::<String>()]),
-                ..Default::default()
-            })),
-            ..Default::default()
-        })
+
+        selector
     }
 }
 
