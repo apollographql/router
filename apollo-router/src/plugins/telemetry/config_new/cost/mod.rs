@@ -113,7 +113,7 @@ impl CostInstrumentsConfig {
                     condition: Condition::True,
                     histogram: Some(
                         meter
-                            .f64_histogram("apollo.router.operation.cost.estimated")
+                            .f64_histogram("apollo.router.operations.cost.estimated")
                             .init(),
                     ),
                     attributes: Vec::with_capacity(nb_attributes),
@@ -141,7 +141,7 @@ impl CostInstrumentsConfig {
                     condition: Condition::True,
                     histogram: Some(
                         meter
-                            .f64_histogram("apollo.router.operation.cost.actual")
+                            .f64_histogram("apollo.router.operations.cost.actual")
                             .init(),
                     ),
                     attributes: Vec::with_capacity(nb_attributes),
@@ -169,7 +169,7 @@ impl CostInstrumentsConfig {
                     condition: Condition::True,
                     histogram: Some(
                         meter
-                            .f64_histogram("apollo.router.operation.cost.delta")
+                            .f64_histogram("apollo.router.operations.cost.delta")
                             .init(),
                     ),
                     attributes: Vec::with_capacity(nb_attributes),
