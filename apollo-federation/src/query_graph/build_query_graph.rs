@@ -3,13 +3,13 @@ use crate::link::federation_spec_definition::{
     get_federation_spec_definition_from_subgraph, FederationSpecDefinition, KeyDirectiveArguments,
 };
 use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
-use crate::query_graph::field_set::parse_field_set;
 use crate::query_graph::{
     QueryGraph, QueryGraphEdge, QueryGraphEdgeTransition, QueryGraphNode, QueryGraphNodeType,
 };
 use crate::query_plan::operation::{
     merge_selection_sets, NormalizedSelection, NormalizedSelectionSet,
 };
+use crate::schema::field_set::parse_field_set;
 use crate::schema::position::{
     AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition, FieldDefinitionPosition,
     InterfaceTypeDefinitionPosition, ObjectFieldDefinitionPosition,
@@ -270,22 +270,15 @@ impl SchemaQueryGraphBuilder {
 
     fn is_external(
         &self,
-        field_definition_position: FieldDefinitionPosition,
+        field_definition_position: &FieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        // TODO: Should port JS ExternalTester for this, as we're missing some fields which are
-        // effectively external.
-        Ok(if let Some(subgraph) = &self.subgraph {
-            let external_directive_definition = subgraph
-                .federation_spec_definition
-                .external_directive_definition(self.base.query_graph.schema()?)?;
-            field_definition_position
-                .get(self.base.query_graph.schema()?.schema())?
-                .directives
-                .iter()
-                .any(|d| d.name == external_directive_definition.name)
+        if let Some(subgraph_metadata) = self.base.query_graph.schema()?.subgraph_metadata() {
+            Ok(subgraph_metadata
+                .external_metadata()
+                .is_external(field_definition_position)?)
         } else {
-            false
-        })
+            Ok(false)
+        }
     }
 
     /// Adds a node for the provided root object type (marking that node as a root node for the
@@ -418,7 +411,7 @@ impl SchemaQueryGraphBuilder {
             // we don't add the type here, we never do and get issues later when we add @provides
             // edges.
             let pos = object_type_definition_position.field(field_name);
-            let is_external = self.is_external(pos.clone().into())?;
+            let is_external = self.is_external(&pos.clone().into())?;
             self.add_edge_for_field(pos.into(), head, is_external)?;
         }
         // We add an edge for the built-in __typename field. For instance, it's perfectly valid to
@@ -521,7 +514,7 @@ impl SchemaQueryGraphBuilder {
             // To include the field, it must not be external itself, and it must be provided on
             // all of the local runtime types.
             let pos = interface_type_definition_position.field(field_name.clone());
-            let is_external = self.is_external(pos.clone().into())?;
+            let is_external = self.is_external(&pos.clone().into())?;
             let mut is_provided_by_all_local_types = true;
             for local_runtime_type in &local_runtime_type_positions {
                 if !self
@@ -565,7 +558,7 @@ impl SchemaQueryGraphBuilder {
         {
             return Ok(false);
         }
-        let is_external = self.is_external(object_field_definition_position.clone().into())?;
+        let is_external = self.is_external(&object_field_definition_position.clone().into())?;
         let has_requires = if let Some(subgraph) = &self.subgraph {
             let requires_directive_definition = subgraph
                 .federation_spec_definition
@@ -1343,7 +1336,7 @@ impl FederatedQueryGraphBuilder {
                         message: "Singleton list was unexpectedly empty".to_owned(),
                     })?
             } else {
-                merge_selection_sets(all_conditions.into_iter())?
+                merge_selection_sets(all_conditions)?
             };
             let edge_weight_mut = self.base.query_graph.edge_weight_mut(edge)?;
             edge_weight_mut.conditions = Some(Arc::new(new_conditions));
@@ -1414,7 +1407,7 @@ impl FederatedQueryGraphBuilder {
                         message: "Singleton list was unexpectedly empty".to_owned(),
                     })?
             } else {
-                merge_selection_sets(all_conditions.into_iter())?
+                merge_selection_sets(all_conditions)?
             };
             // We make a copy of the tail node (representing the field's type) with all the same
             // out-edges, and we change this particular in-edge to point to the new copy. We then

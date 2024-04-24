@@ -1,9 +1,9 @@
 use crate::error::FederationError;
+use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
 use crate::query_plan::operation::{NormalizedSelectionSet, RebasedFragments};
-use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -18,7 +18,6 @@ use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 /// Constant used during query plan cost computation to account for the base cost of doing a fetch,
 /// that is the fact any fetch imply some networking cost, request serialization/deserialization,
@@ -42,8 +41,8 @@ const FETCH_COST: QueryPlanCost = 1000;
 /// The exact number is a tad  arbitrary however.
 const PIPELINING_COST: QueryPlanCost = 100;
 
+#[derive(Clone)]
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
-    config: Arc<QueryPlannerConfig>,
     variable_definitions: Vec<Node<VariableDefinition>>,
     fragments: Option<RebasedFragments>,
     operation_name: Option<Name>,
@@ -73,6 +72,7 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
 ///    it assumes that the networking and other query processing costs are much higher than
 ///    the cost of resolving a single field. Or to put it more concretely, it assumes that
 ///    a fetch of 5 fields is probably not too different from than of 2 fields.
+#[derive(Clone, Copy)]
 pub(crate) struct FetchDependencyGraphToCostProcessor;
 
 /// Generic interface for "processing" a (reduced) dependency graph of fetch dependency nodes
@@ -87,6 +87,7 @@ pub(crate) struct FetchDependencyGraphToCostProcessor;
 pub(crate) trait FetchDependencyGraphProcessor<TProcessed, TDeferred> {
     fn on_node(
         &mut self,
+        query_graph: &QueryGraph,
         node: &mut FetchDependencyGraphNode,
         handled_conditions: &Conditions,
     ) -> Result<TProcessed, FederationError>;
@@ -106,6 +107,45 @@ pub(crate) trait FetchDependencyGraphProcessor<TProcessed, TDeferred> {
     ) -> Result<TProcessed, FederationError>;
 }
 
+// So you can use `&mut processor` as an `impl Processor`.
+impl<TProcessed, TDeferred, T> FetchDependencyGraphProcessor<TProcessed, TDeferred> for &mut T
+where
+    T: FetchDependencyGraphProcessor<TProcessed, TDeferred>,
+{
+    fn on_node(
+        &mut self,
+        query_graph: &QueryGraph,
+        node: &mut FetchDependencyGraphNode,
+        handled_conditions: &Conditions,
+    ) -> Result<TProcessed, FederationError> {
+        (*self).on_node(query_graph, node, handled_conditions)
+    }
+    fn on_conditions(&mut self, conditions: &Conditions, value: TProcessed) -> TProcessed {
+        (*self).on_conditions(conditions, value)
+    }
+    fn reduce_parallel(&mut self, values: impl IntoIterator<Item = TProcessed>) -> TProcessed {
+        (*self).reduce_parallel(values)
+    }
+    fn reduce_sequence(&mut self, values: impl IntoIterator<Item = TProcessed>) -> TProcessed {
+        (*self).reduce_sequence(values)
+    }
+    fn reduce_deferred(
+        &mut self,
+        defer_info: &DeferredInfo,
+        value: TProcessed,
+    ) -> Result<TDeferred, FederationError> {
+        (*self).reduce_deferred(defer_info, value)
+    }
+    fn reduce_defer(
+        &mut self,
+        main: TProcessed,
+        sub_selection: &NormalizedSelectionSet,
+        deferred_blocks: Vec<TDeferred>,
+    ) -> Result<TProcessed, FederationError> {
+        (*self).reduce_defer(main, sub_selection, deferred_blocks)
+    }
+}
+
 impl FetchDependencyGraphProcessor<QueryPlanCost, QueryPlanCost>
     for FetchDependencyGraphToCostProcessor
 {
@@ -115,6 +155,7 @@ impl FetchDependencyGraphProcessor<QueryPlanCost, QueryPlanCost>
     /// (and that fetch cost often dwarfted the actual cost of fields resolution).
     fn on_node(
         &mut self,
+        _query_graph: &QueryGraph,
         node: &mut FetchDependencyGraphNode,
         _handled_conditions: &Conditions,
     ) -> Result<QueryPlanCost, FederationError> {
@@ -199,14 +240,12 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
 
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
-        config: Arc<QueryPlannerConfig>,
         variable_definitions: Vec<Node<VariableDefinition>>,
         fragments: Option<RebasedFragments>,
         operation_name: Option<Name>,
         assigned_defer_labels: Option<HashSet<NodeStr>>,
     ) -> Self {
         Self {
-            config,
             variable_definitions,
             fragments,
             operation_name,
@@ -221,6 +260,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
 {
     fn on_node(
         &mut self,
+        query_graph: &QueryGraph,
         node: &mut FetchDependencyGraphNode,
         handled_conditions: &Conditions,
     ) -> Result<Option<PlanNode>, FederationError> {
@@ -228,15 +268,15 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             let counter = self.counter;
             self.counter += 1;
             let subgraph = to_valid_graphql_name(&node.subgraph_name).unwrap_or("".into());
-            format!("{name}__{subgraph}__{counter}")
+            format!("{name}__{subgraph}__{counter}").into()
         });
-        Ok(node.to_plan_node(
-            &self.config,
+        node.to_plan_node(
+            query_graph,
             handled_conditions,
             &self.variable_definitions,
-            self.fragments.as_ref(),
+            self.fragments.as_mut(),
             op_name,
-        ))
+        )
     }
 
     fn on_conditions(
@@ -254,17 +294,17 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
-                for (name, negated) in variables.0.iter() {
-                    let (if_clause, else_clause) = if *negated {
-                        (None, Some(value))
+                for (name, negated) in variables.iter() {
+                    let (if_clause, else_clause) = if negated {
+                        (None, Some(Box::new(value)))
                     } else {
-                        (Some(value), None)
+                        (Some(Box::new(value)), None)
                     };
-                    value = PlanNode::Condition(Arc::new(ConditionNode {
+                    value = PlanNode::from(ConditionNode {
                         condition_variable: name.clone(),
                         if_clause,
                         else_clause,
-                    }));
+                    });
                 }
                 Some(value)
             }
@@ -319,7 +359,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             } else {
                 None
             },
-            node,
+            node: node.map(Box::new),
         })
     }
 
@@ -329,16 +369,16 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         sub_selection: &NormalizedSelectionSet,
         deferred: Vec<DeferredDeferBlock>,
     ) -> Result<Option<PlanNode>, FederationError> {
-        Ok(Some(PlanNode::Defer(Arc::new(DeferNode {
+        Ok(Some(PlanNode::Defer(DeferNode {
             primary: PrimaryDeferBlock {
                 sub_selection: sub_selection
                     .without_empty_branches()?
                     .map(|filtered| filtered.as_ref().try_into())
                     .transpose()?,
-                node: main,
+                node: main.map(Box::new),
             },
             deferred,
-        }))))
+        })))
     }
 }
 
@@ -406,7 +446,7 @@ fn flat_wrap_nodes(
         }
     }
     Some(match kind {
-        NodeKind::Parallel => PlanNode::Parallel(Arc::new(ParallelNode { nodes })),
-        NodeKind::Sequence => PlanNode::Sequence(Arc::new(SequenceNode { nodes })),
+        NodeKind::Parallel => PlanNode::Parallel(ParallelNode { nodes }),
+        NodeKind::Sequence => PlanNode::Sequence(SequenceNode { nodes }),
     })
 }

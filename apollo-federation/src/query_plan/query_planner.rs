@@ -1,24 +1,42 @@
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::QueryGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::operation::normalize_operation;
+use crate::query_plan::operation::NormalizedDefer;
+use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
+use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
+use crate::query_plan::FetchNode;
+use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
+use crate::query_plan::SequenceNode;
+use crate::query_plan::TopLevelPlanNode;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -103,7 +121,7 @@ pub struct QueryPlannerDebugConfig {
     /// setting this value too low can negatively affect query runtime (due to the use of
     /// sub-optimal query plans).
     // TODO: should there additionally be a max_evaluated_cost?
-    pub max_evaluated_plans: u32,
+    pub max_evaluated_plans: NonZeroU32,
 
     /// Before creating query plans, for each path of fields in the query we compute all the
     /// possible options to traverse that path via the subgraphs. Multiple options can arise because
@@ -124,8 +142,23 @@ impl Default for QueryPlannerDebugConfig {
     fn default() -> Self {
         Self {
             bypass_planner_for_single_subgraph: false,
-            max_evaluated_plans: 10_000,
+            max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
+        }
+    }
+}
+
+// PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct QueryPlanningStatistics {
+    pub(crate) evaluated_plan_count: usize,
+}
+
+impl QueryPlannerConfig {
+    /// Panics if options are used together in unsupported ways.
+    fn assert_valid(&self) {
+        if self.incremental_delivery.enable_defer {
+            assert!(!self.debug.bypass_planner_for_single_subgraph, "Cannot use the `debug.bypass_planner_for_single_subgraph` query planner option when @defer support is enabled");
         }
     }
 }
@@ -144,9 +177,6 @@ pub struct QueryPlanner {
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
     abstract_types_with_inconsistent_runtime_types: IndexSet<AbstractTypeDefinitionPosition>,
-    // TODO: Port _lastGeneratedPlanStatistics from the JS codebase in a way that keeps QueryPlanner
-    // immutable.
-    // last_generated_plan_statistics: QueryPlanningStatistics,
 }
 
 impl QueryPlanner {
@@ -154,6 +184,8 @@ impl QueryPlanner {
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
+        config.assert_valid();
+
         let supergraph_schema = supergraph.schema.clone();
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: config.incremental_delivery.enable_defer,
@@ -185,7 +217,7 @@ impl QueryPlanner {
                 _ => None,
             })
             .filter(|position| {
-                query_graph.sources().any(|schema| {
+                query_graph.sources().any(|(_name, schema)| {
                     schema
                         .schema()
                         .types
@@ -196,7 +228,7 @@ impl QueryPlanner {
             .collect::<IndexSet<_>>();
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
-            let mut sources = query_graph.sources().filter_map(|subgraph| {
+            let mut sources = query_graph.sources().filter_map(|(_name, subgraph)| {
                 match subgraph.try_get_type(position.type_name().clone())? {
                     // This is only called for type names that are abstract in the supergraph, so it
                     // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
@@ -262,22 +294,66 @@ impl QueryPlanner {
     pub fn build_query_plan(
         &self,
         document: &Valid<ExecutableDocument>,
-        operation_name: Option<&str>,
+        operation_name: Option<Name>,
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
-            .get_operation(operation_name)
-            // TODO(@goto-bus-stop) this is not an internal error
+            .get_operation(operation_name.as_ref().map(|name| name.as_str()))
+            // TODO(@goto-bus-stop) this is not an internal error, but a user error
             .map_err(|_| FederationError::internal("requested operation does not exist"))?;
 
-        // TODO(@goto-bus-stop) this isn't valid GraphQL so it should never happen given a
-        // `Valid<ExecutableDocument>`?
-        // The JS code checks this *again* post-normalization. That should be enough
         if operation.selection_set.selections.is_empty() {
-            return Ok(QueryPlan::default());
+            // This should never happen because `operation` comes from a known-valid document.
+            return Err(SingleFederationError::InvalidGraphQL {
+                message: "Invalid operation: empty selection set".to_string(),
+            }
+            .into());
         }
 
+        let is_subscription = operation.is_subscription();
+
+        let statistics = QueryPlanningStatistics {
+            evaluated_plan_count: 0,
+        };
+
         if self.config.debug.bypass_planner_for_single_subgraph {
-            todo!("return a single fetch node for the whole operation");
+            // A federated query graph always have 1 more sources than there is subgraph, because the root vertices
+            // belong to no subgraphs and use a special source named '_'. So we skip that "fake" source.
+            let mut subgraphs = self
+                .federated_query_graph
+                .sources()
+                .filter(|&(name, _schema)| name != "_");
+            if let (Some((subgraph_name, _subgraph_schema)), None) =
+                (subgraphs.next(), subgraphs.next())
+            {
+                let node = FetchNode {
+                    subgraph_name: subgraph_name.clone(),
+                    operation_document: document.clone(),
+                    operation_name: operation_name.as_deref().cloned(),
+                    operation_kind: operation.operation_type,
+                    id: None,
+                    variable_usages: operation
+                        .variables
+                        .iter()
+                        .map(|var| var.name.clone())
+                        .collect(),
+                    requires: Default::default(),
+                    input_rewrites: Default::default(),
+                    output_rewrites: Default::default(),
+                };
+
+                return Ok(QueryPlan::new(node, statistics));
+            }
+        }
+
+        let reuse_query_fragments = self.config.reuse_query_fragments;
+        if reuse_query_fragments && !document.fragments.is_empty() {
+            // For all subgraph fetches we query `__typename` on every abstract types (see `FetchDependencyGraphNode::to_plan_node`)
+            // so if we want to have a chance to reuse fragments, we should make sure those fragments also query `__typename` for
+            // every abstract type.
+            //
+            // TODO: FED-165
+            //
+            // JS: fragments = addTypenameFieldForAbstractTypesInNamedFragments(fragments);
         }
 
         let normalized_operation = normalize_operation(
@@ -287,18 +363,221 @@ impl QueryPlanner {
             &self.interface_types_with_interface_objects,
         )?;
 
-        // TODO(@goto-bus-stop): some defer stuff
+        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
+            if self.config.incremental_delivery.enable_defer {
+                let NormalizedDefer {
+                    operation,
+                    assigned_defer_labels,
+                    defer_conditions,
+                    has_defers,
+                } = normalized_operation.with_normalized_defer();
+                if has_defers && is_subscription {
+                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+                }
+                (
+                    operation,
+                    Some(assigned_defer_labels),
+                    Some(defer_conditions),
+                    has_defers,
+                )
+            } else {
+                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
+                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
+                // to end up passing through a @defer to a subgraph by mistake).
+                (normalized_operation.without_defer(), None, None, false)
+            };
 
         if normalized_operation.selection_set.selections.is_empty() {
             return Ok(QueryPlan::default());
         }
 
-        todo!("the rest of the owl")
+        let Some(root) = self
+            .federated_query_graph
+            .root_kinds_to_nodes()?
+            .get(&normalized_operation.root_kind)
+        else {
+            panic!(
+                "Shouldn't have a {0} operation if the subgraphs don't have a {0} root",
+                normalized_operation.root_kind
+            );
+        };
+
+        let processor = FetchDependencyGraphToQueryPlanProcessor::new(
+            operation.variables.clone(),
+            Some(RebasedFragments::new(&normalized_operation.named_fragments)),
+            operation_name.clone(),
+            assigned_defer_labels,
+        );
+        let mut parameters = QueryPlanningParameters {
+            supergraph_schema: self.supergraph_schema.clone(),
+            federated_query_graph: self.federated_query_graph.clone(),
+            operation: Arc::new(normalized_operation),
+            processor,
+            head: *root,
+            // PORT_NOTE(@goto-bus-stop): In JS, `root` is a `RootVertex`, which is dynamically
+            // checked at various points in query planning. This is our Rust equivalent of that.
+            head_must_be_root: true,
+            statistics,
+            abstract_types_with_inconsistent_runtime_types: self
+                .abstract_types_with_inconsistent_runtime_types
+                .clone()
+                .into(),
+            config: self.config.clone(),
+            // PORT_NOTE: JS provides `override_conditions` here: see port note in `QueryPlanner::new`.
+        };
+
+        let root_node = match defer_conditions {
+            Some(defer_conditions) if !defer_conditions.is_empty() => {
+                compute_plan_for_defer_conditionals(&mut parameters, defer_conditions)?
+            }
+            _ => compute_plan_internal(&mut parameters, has_defers)?,
+        };
+
+        let root_node = match root_node {
+            // If this is a subscription, we want to make sure that we return a SubscriptionNode rather than a PlanNode
+            // We potentially will need to separate "primary" from "rest"
+            // Note that if it is a subscription, we are guaranteed that nothing is deferred.
+            Some(PlanNode::Fetch(root_node)) if is_subscription => Some(
+                TopLevelPlanNode::Subscription(crate::query_plan::SubscriptionNode {
+                    primary: root_node,
+                    rest: None,
+                }),
+            ),
+            Some(PlanNode::Sequence(root_node)) if is_subscription => {
+                let Some((primary, rest)) = root_node.nodes.split_first() else {
+                    unreachable!("Sequence must have at least one node");
+                };
+                let PlanNode::Fetch(primary) = primary.clone() else {
+                    unreachable!("Primary node of a subscription is not a Fetch");
+                };
+                let rest = PlanNode::Sequence(SequenceNode {
+                    nodes: rest.to_vec(),
+                });
+                Some(TopLevelPlanNode::Subscription(
+                    crate::query_plan::SubscriptionNode {
+                        primary,
+                        rest: Some(Box::new(rest)),
+                    },
+                ))
+            }
+            Some(node) if is_subscription => {
+                unreachable!(
+                    "Unexpected top level PlanNode: '{node:?}' when processing subscription"
+                )
+            }
+            Some(PlanNode::Fetch(inner)) => Some(TopLevelPlanNode::Fetch(inner)),
+            Some(PlanNode::Sequence(inner)) => Some(TopLevelPlanNode::Sequence(inner)),
+            Some(PlanNode::Parallel(inner)) => Some(TopLevelPlanNode::Parallel(inner)),
+            Some(PlanNode::Flatten(inner)) => Some(TopLevelPlanNode::Flatten(inner)),
+            Some(PlanNode::Defer(inner)) => Some(TopLevelPlanNode::Defer(inner)),
+            Some(PlanNode::Condition(inner)) => Some(TopLevelPlanNode::Condition(inner)),
+            None => None,
+        };
+
+        Ok(QueryPlan {
+            node: root_node,
+            statistics: parameters.statistics,
+        })
     }
+}
+
+fn compute_root_serial_dependency_graph(
+    _parameters: &QueryPlanningParameters,
+    _has_defers: bool,
+) -> Result<Vec<FetchDependencyGraph>, FederationError> {
+    todo!("FED-127")
+}
+
+fn compute_root_parallel_dependency_graph(
+    parameters: &QueryPlanningParameters,
+    has_defers: bool,
+) -> Result<FetchDependencyGraph, FederationError> {
+    let selection_set = parameters.operation.selection_set.clone();
+    let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    Ok(best_plan.fetch_dependency_graph)
+}
+
+fn compute_root_parallel_best_plan(
+    parameters: &QueryPlanningParameters,
+    selection: NormalizedSelectionSet,
+    has_defers: bool,
+) -> Result<BestQueryPlanInfo, FederationError> {
+    let planning_traversal = QueryPlanningTraversal::new(
+        parameters,
+        selection,
+        has_defers,
+        parameters.operation.root_kind,
+        FetchDependencyGraphToCostProcessor,
+    )?;
+
+    // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
+    // so we just return an empty plan.
+    Ok(planning_traversal
+        .find_best_plan()?
+        .unwrap_or_else(|| BestQueryPlanInfo::empty(parameters)))
+}
+
+fn compute_plan_internal(
+    parameters: &mut QueryPlanningParameters,
+    has_defers: bool,
+) -> Result<Option<PlanNode>, FederationError> {
+    let root_kind = parameters.operation.root_kind;
+
+    let (main, deferred, primary_selection) = if root_kind == SchemaRootDefinitionKind::Mutation {
+        let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
+        let mut main = None;
+        let mut deferred = vec![];
+        let mut primary_selection = None::<NormalizedSelectionSet>;
+        for mut dependency_graph in dependency_graphs {
+            let (local_main, local_deferred) =
+                dependency_graph.process(&mut parameters.processor, root_kind)?;
+            main = match main {
+                Some(unlocal_main) => parameters
+                    .processor
+                    .reduce_sequence([Some(unlocal_main), local_main]),
+                None => local_main,
+            };
+            deferred.extend(local_deferred);
+            let new_selection = dependency_graph.defer_tracking.primary_selection;
+            match primary_selection.as_mut() {
+                Some(selection) => selection.merge_into(new_selection.iter())?,
+                None => primary_selection = new_selection,
+            }
+        }
+        (main, deferred, primary_selection)
+    } else {
+        let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
+
+        let (main, deferred) = dependency_graph.process(&mut parameters.processor, root_kind)?;
+        // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
+        let primary_selection = dependency_graph.defer_tracking.primary_selection;
+
+        (main, deferred, primary_selection)
+    };
+
+    if deferred.is_empty() {
+        Ok(main)
+    } else {
+        let Some(primary_selection) = primary_selection else {
+            unreachable!("Should have had a primary selection created");
+        };
+        parameters
+            .processor
+            .reduce_defer(main, &primary_selection, deferred)
+    }
+}
+
+fn compute_plan_for_defer_conditionals(
+    _parameters: &mut QueryPlanningParameters,
+    _defer_conditions: IndexMap<String, IndexSet<String>>,
+) -> Result<Option<PlanNode>, FederationError> {
+    todo!("FED-95")
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::subgraph::Subgraph;
+
     use super::*;
 
     const TEST_SUPERGRAPH: &str = r#"
@@ -440,20 +719,84 @@ type User
     "#;
 
     #[test]
+    #[allow(unused)] // remove when build_query_plan() can run without panicking
     fn it_does_not_crash() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let _planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
 
-        let _document = ExecutableDocument::parse_and_validate(
-            supergraph
-                .to_api_schema(Default::default())
-                .unwrap()
-                .schema(),
-            "{ userById(id: 1) { name email } }",
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    name
+                    email
+                }
+            }
+            "#,
             "operation.graphql",
         )
         .unwrap();
-        // This part does crash :)
-        // let _plan = planner.build_query_plan(&document, None).unwrap();
+        // let plan = planner.build_query_plan(&document, None).unwrap();
+    }
+
+    #[test]
+    fn bypass_planner_for_single_subgraph() {
+        let a = Subgraph::parse_and_expand(
+            "A",
+            "https://A",
+            r#"
+            type Query {
+                a: A
+            }
+            type A {
+                b: B
+            }
+            type B {
+                x: Int
+                y: String
+            }
+        "#,
+        )
+        .unwrap();
+        let subgraphs = vec![&a];
+        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                a {
+                    b {
+                        x
+                        y
+                    }
+                }
+            }
+            "#,
+            "",
+        )
+        .unwrap();
+
+        let mut config = QueryPlannerConfig::default();
+        config.debug.bypass_planner_for_single_subgraph = true;
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "A") {
+            {
+                    a {
+                b {
+                  x
+                  y
+                }
+              }
+            }
+          }
+        }
+        "###);
     }
 }

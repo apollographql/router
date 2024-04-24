@@ -37,7 +37,10 @@ impl State<'_, '_> {
 
 impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
-        let Self { node } = self;
+        let Self {
+            node,
+            statistics: _,
+        } = self;
         state.write("QueryPlan {")?;
         if let Some(node) = node {
             state.indent()?;
@@ -117,9 +120,11 @@ impl FetchNode {
         state.write(") {")?;
         state.indent()?;
 
-        if !requires.is_empty() {
-            write_selections(state, requires)?;
-            state.write(" => ")?;
+        if let Some(v) = requires.as_ref() {
+            if !v.is_empty() {
+                write_selections(state, v)?;
+                state.write(" => ")?;
+            }
         }
         write_operation(state, operation_document)?;
 

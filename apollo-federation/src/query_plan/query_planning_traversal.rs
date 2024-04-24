@@ -1,7 +1,10 @@
 use crate::error::FederationError;
-use crate::query_graph::condition_resolver::CachingConditionResolver;
+use crate::query_graph::condition_resolver::{
+    ConditionResolution, ConditionResolutionCacheResult, ConditionResolver, ConditionResolverCache,
+};
 use crate::query_graph::graph_path::{
-    ClosedBranch, ClosedPath, OpPathElement, OpenBranch, SimultaneousPaths,
+    create_initial_options, ClosedBranch, ClosedPath, ExcludedConditions, ExcludedDestinations,
+    OpGraphPath, OpGraphPathContext, OpPathElement, OpenBranch, SimultaneousPaths,
     SimultaneousPathsWithLazyIndirectPaths,
 };
 use crate::query_graph::path_tree::OpPathTree;
@@ -14,45 +17,49 @@ use crate::query_plan::operation::{
     NormalizedOperation, NormalizedSelection, NormalizedSelectionSet,
 };
 use crate::query_plan::query_planner::QueryPlannerConfig;
+use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::{AbstractTypeDefinitionPosition, OutputTypeDefinitionPosition};
 use crate::schema::ValidFederationSchema;
 use indexmap::IndexSet;
-use petgraph::graph::NodeIndex;
+use petgraph::graph::{EdgeIndex, NodeIndex};
 use std::sync::Arc;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we
 // don't have a distinguished type for when the head is a root vertex, so we instead check this at
 // runtime (introducing the new field `head_must_be_root`).
+// NOTE: `head_must_be_root` can be deduced from the `head` node's type, so we might be able to
+//       remove it.
 pub(crate) struct QueryPlanningParameters {
     /// The supergraph schema that generated the federated query graph.
-    supergraph_schema: ValidFederationSchema,
+    pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph used for query planning.
-    federated_query_graph: Arc<QueryGraph>,
+    pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
-    operation: Arc<NormalizedOperation>,
+    pub(crate) operation: Arc<NormalizedOperation>,
     /// A processor for converting fetch dependency graphs to query plans.
-    processor: FetchDependencyGraphToQueryPlanProcessor,
+    pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor,
     /// The query graph node at which query planning begins.
-    head: NodeIndex,
+    pub(crate) head: NodeIndex,
     /// Whether the head must be a root node for query planning.
-    head_must_be_root: bool,
+    pub(crate) head_must_be_root: bool,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    abstract_types_with_inconsistent_runtime_types: Arc<IndexSet<AbstractTypeDefinitionPosition>>,
+    pub(crate) abstract_types_with_inconsistent_runtime_types:
+        Arc<IndexSet<AbstractTypeDefinitionPosition>>,
     /// The configuration for the query planner.
-    config: Arc<QueryPlannerConfig>,
-    // TODO: When `PlanningStatistics` is ported, add a field for it.
+    pub(crate) config: QueryPlannerConfig,
+    pub(crate) statistics: QueryPlanningStatistics,
 }
 
-pub(crate) struct QueryPlanningTraversal {
+pub(crate) struct QueryPlanningTraversal<'a> {
     /// The parameters given to query planning.
-    parameters: QueryPlanningParameters,
+    parameters: &'a QueryPlanningParameters,
     /// The root kind of the operation.
     root_kind: SchemaRootDefinitionKind,
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
@@ -65,8 +72,6 @@ pub(crate) struct QueryPlanningTraversal {
     /// True if this query planning is at top-level (note that query planning can recursively start
     /// further query planning).
     is_top_level: bool,
-    /// A query plan resolver for edge conditions that caches the outcome per edge.
-    condition_resolver: CachingConditionResolver,
     /// The stack of open branches left to plan, along with state indicating the next selection to
     /// plan for them.
     // PORT_NOTE: The `stack` in the JS codebase only contained one selection per stack entry, but
@@ -77,7 +82,12 @@ pub(crate) struct QueryPlanningTraversal {
     /// The closed branches that have been planned.
     closed_branches: Vec<ClosedBranch>,
     /// The best plan found as a result of query planning.
+    // TODO(@goto-bus-stop): FED-164: can we remove this? `find_best_plan` consumes `self` and returns the
+    // best plan, so it should not be necessary to store it.
     best_plan: Option<BestQueryPlanInfo>,
+    /// The cache for condition resolution.
+    // PORT_NOTE: This is different from JS version. See `ConditionResolver` trait implementation below.
+    resolver_cache: ConditionResolverCache,
 }
 
 struct OpenBranchAndSelections {
@@ -87,17 +97,131 @@ struct OpenBranchAndSelections {
     selections: Vec<NormalizedSelection>,
 }
 
-struct BestQueryPlanInfo {
+pub(crate) struct BestQueryPlanInfo {
     /// The fetch dependency graph for this query plan.
-    fetch_dependency_graph: FetchDependencyGraph,
+    pub fetch_dependency_graph: FetchDependencyGraph,
     /// The path tree for the closed branch options chosen for this query plan.
-    path_tree: OpPathTree,
+    pub path_tree: OpPathTree,
     /// The cost of this query plan.
-    cost: QueryPlanCost,
+    pub cost: QueryPlanCost,
 }
 
-impl QueryPlanningTraversal {
-    fn find_best_plan(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
+impl BestQueryPlanInfo {
+    // PORT_NOTE: The equivalent of `createEmptyPlan` in the JS codebase.
+    pub fn empty(parameters: &QueryPlanningParameters) -> Self {
+        Self {
+            fetch_dependency_graph: FetchDependencyGraph::new(
+                parameters.supergraph_schema.clone(),
+                parameters.federated_query_graph.clone(),
+                None,
+                0,
+            ),
+            path_tree: OpPathTree::new(parameters.federated_query_graph.clone(), parameters.head),
+            cost: Default::default(),
+        }
+    }
+}
+
+impl<'a> QueryPlanningTraversal<'a> {
+    pub fn new(
+        // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
+        // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
+        // The ownership of `QueryPlanningParameters` is awkward and should probably be
+        // refactored.
+        parameters: &'a QueryPlanningParameters,
+        selection_set: NormalizedSelectionSet,
+        has_defers: bool,
+        root_kind: SchemaRootDefinitionKind,
+        cost_processor: FetchDependencyGraphToCostProcessor,
+    ) -> Result<Self, FederationError> {
+        Self::new_inner(
+            parameters,
+            selection_set,
+            0,
+            has_defers,
+            root_kind,
+            cost_processor,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )
+    }
+
+    // Many arguments is okay for a private constructor function.
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        parameters: &'a QueryPlanningParameters,
+        selection_set: NormalizedSelectionSet,
+        starting_id_generation: u64,
+        has_defers: bool,
+        root_kind: SchemaRootDefinitionKind,
+        cost_processor: FetchDependencyGraphToCostProcessor,
+        initial_context: OpGraphPathContext,
+        excluded_destinations: ExcludedDestinations,
+        excluded_conditions: ExcludedConditions,
+    ) -> Result<Self, FederationError> {
+        let is_top_level = parameters.head_must_be_root;
+
+        fn map_options_to_selections(
+            selection_set: NormalizedSelectionSet,
+            options: Vec<SimultaneousPathsWithLazyIndirectPaths>,
+        ) -> Vec<OpenBranchAndSelections> {
+            let open_branch = OpenBranch(options);
+            let selections = selection_set.selections.values().cloned().rev().collect();
+            vec![OpenBranchAndSelections {
+                open_branch,
+                selections,
+            }]
+        }
+
+        let initial_path = OpGraphPath::new(
+            Arc::clone(&parameters.federated_query_graph),
+            parameters.head,
+        )
+        .unwrap();
+        // In JS this is done *inside* create_initial_options, which would require awareness of the
+        // query graph.
+        let tail = parameters
+            .federated_query_graph
+            .node_weight(initial_path.tail)?;
+
+        // Two-step initialization: initializing open_branches requires a condition resolver,
+        // which `QueryPlanningTraversal` is.
+        let mut traversal = Self {
+            parameters,
+            root_kind,
+            has_defers,
+            starting_id_generation,
+            cost_processor,
+            is_top_level,
+            open_branches: Default::default(),
+            closed_branches: Default::default(),
+            best_plan: None,
+            resolver_cache: ConditionResolverCache::new(),
+        };
+
+        let initial_options = create_initial_options(
+            initial_path,
+            &tail.type_,
+            initial_context,
+            &mut traversal,
+            excluded_destinations,
+            excluded_conditions,
+        )?;
+
+        traversal.open_branches = map_options_to_selections(selection_set, initial_options);
+
+        Ok(traversal)
+    }
+
+    // PORT_NOTE: In JS, the traversal is still usable after finding the best plan. Here we consume
+    // the struct so we do not need to return a reference, which is very unergonomic.
+    pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
+        self.find_best_plan_inner()?;
+        Ok(self.best_plan)
+    }
+
+    fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
             let Some(current_selection) = current_branch.selections.pop() else {
                 return Err(FederationError::internal(
@@ -138,7 +262,7 @@ impl QueryPlanningTraversal {
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
                 &operation_element,
-                &mut self.condition_resolver,
+                /*resolver*/ self,
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -241,7 +365,7 @@ impl QueryPlanningTraversal {
                 }
             }
             if self.selection_set_is_fully_local_from_all_nodes(selection_set, &all_tail_nodes)?
-                && !selection.has_defer()?
+                && !selection.has_defer()
             {
                 // We known the rest of the selection is local to whichever subgraph the current
                 // options are in, and so we're going to keep that selection around and add it
@@ -261,7 +385,7 @@ impl QueryPlanningTraversal {
                 let new_selection_set = Arc::new(
                     selection_set
                         .add_back_typename_in_attachments()?
-                        .add_typename_field_for_abstract_types()?,
+                        .add_typename_field_for_abstract_types(None, &None)?,
                 );
                 self.record_closed_branch(ClosedBranch(
                     new_options
@@ -446,7 +570,8 @@ impl QueryPlanningTraversal {
             .unwrap_or(0);
         // debug!("Query has {plan_count} possible plans");
 
-        let max_evaluated_plans = self.parameters.config.debug.max_evaluated_plans as usize;
+        let max_evaluated_plans =
+            u32::from(self.parameters.config.debug.max_evaluated_plans) as usize;
         loop {
             // Note that if `self.closed_branches[0]` is our only branch, it's fine,
             // we'll continue to remove options from it (but that is beyond unlikely).
@@ -598,6 +723,102 @@ impl QueryPlanningTraversal {
             )?;
         }
         Ok(())
+    }
+
+    fn resolve_condition_plan(
+        &self,
+        edge: EdgeIndex,
+        // PORT_NOTE: The following parameters are not currently used.
+        _context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+    ) -> Result<ConditionResolution, FederationError> {
+        let graph = &self.parameters.federated_query_graph;
+        let head = graph.edge_endpoints(edge)?.0;
+        // Note: `QueryPlanningTraversal::resolve` method asserts that the edge has conditions before
+        //       calling this method.
+        let edge_conditions = graph
+            .edge_weight(edge)?
+            .conditions
+            .as_ref()
+            .unwrap()
+            .as_ref();
+        let parameters = QueryPlanningParameters {
+            head,
+            head_must_be_root: graph.node_weight(head)?.is_root_node(),
+            // otherwise, the same as self.parameters
+            // TODO: Some fields are deep-cloned here. We might want to revisit how they should be defined.
+            supergraph_schema: self.parameters.supergraph_schema.clone(),
+            federated_query_graph: graph.clone(),
+            operation: self.parameters.operation.clone(),
+            processor: self.parameters.processor.clone(),
+            abstract_types_with_inconsistent_runtime_types: self
+                .parameters
+                .abstract_types_with_inconsistent_runtime_types
+                .clone(),
+            config: self.parameters.config.clone(),
+            statistics: self.parameters.statistics.clone(),
+        };
+        let best_plan_opt = QueryPlanningTraversal::new_inner(
+            &parameters,
+            edge_conditions.clone(),
+            self.starting_id_generation,
+            self.has_defers,
+            self.root_kind,
+            self.cost_processor,
+            Default::default(),
+            excluded_destinations.clone(),
+            excluded_conditions.add_item(edge_conditions),
+        )?
+        .find_best_plan()?;
+        match best_plan_opt {
+            Some(best_plan) => Ok(ConditionResolution::Satisfied {
+                cost: best_plan.cost,
+                path_tree: Some(Arc::new(best_plan.path_tree)),
+            }),
+            None => Ok(ConditionResolution::unsatisfied_conditions()),
+        }
+    }
+}
+
+// PORT_NOTE: In JS version, QueryPlanningTraversal has `conditionResolver` field, which
+//            is a closure calling `this.resolveConditionPlan` (`this` is captured here).
+//            The same would be infeasible to implement in Rust due to the cyclic references.
+//            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
+//            implement `ConditionResolver` trait along with `resolver_cache` field.
+impl<'a> ConditionResolver for QueryPlanningTraversal<'a> {
+    /// A query plan resolver for edge conditions that caches the outcome per edge.
+    fn resolve(
+        &mut self,
+        edge: EdgeIndex,
+        context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+    ) -> Result<ConditionResolution, FederationError> {
+        // Invariant check: The edge must have conditions.
+        let graph = &self.parameters.federated_query_graph;
+        let edge_data = graph.edge_weight(edge)?;
+        assert!(
+            edge_data.conditions.is_some(),
+            "Should not have been called for edge without conditions"
+        );
+
+        let cache_result =
+            self.resolver_cache
+                .contains(edge, context, excluded_destinations, excluded_conditions);
+
+        if let ConditionResolutionCacheResult::Hit(cached_resolution) = cache_result {
+            return Ok(cached_resolution);
+        }
+
+        let resolution =
+            self.resolve_condition_plan(edge, context, excluded_destinations, excluded_conditions)?;
+        // See if this resolution is eligible to be inserted into the cache.
+        if cache_result.is_miss() {
+            self.resolver_cache
+                .insert(edge, resolution.clone(), excluded_destinations.clone());
+        }
+        Ok(resolution)
     }
 }
 

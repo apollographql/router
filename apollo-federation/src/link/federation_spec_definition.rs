@@ -15,6 +15,7 @@ use lazy_static::lazy_static;
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
 pub(crate) const FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("interfaceObject");
+pub(crate) const FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC: Name = name!("extends");
 pub(crate) const FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC: Name = name!("external");
 pub(crate) const FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC: Name = name!("requires");
 pub(crate) const FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC: Name = name!("provides");
@@ -39,6 +40,7 @@ pub(crate) struct ProvidesDirectiveArguments {
     pub(crate) fields: NodeStr,
 }
 
+#[derive(Debug)]
 pub(crate) struct FederationSpecDefinition {
     url: Url,
 }
@@ -175,6 +177,19 @@ impl FederationSpecDefinition {
             name: name_in_schema,
             arguments: Vec::new(),
         })
+    }
+
+    pub(crate) fn extends_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC
+                ))
+            })
     }
 
     pub(crate) fn external_directive_definition<'schema>(

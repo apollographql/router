@@ -1,10 +1,16 @@
 use crate::error::FederationError;
+use crate::query_graph::graph_path::selection_of_element;
+use crate::query_graph::graph_path::OpPathElement;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::Name;
 use apollo_compiler::executable::Value;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use std::sync::Arc;
+
+use super::operation::normalized_selection_map::NormalizedSelectionMap;
+use super::operation::NormalizedSelectionSet;
 
 /// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
 /// to be queried, based on the `@skip`/`@include` applications on the selections within.
@@ -27,7 +33,43 @@ pub(crate) enum Condition {
 /// is negated in the condition. We maintain the invariant that there's at least one condition (i.e.
 /// the map is non-empty), and that there's at most one condition per variable name.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct VariableConditions(pub(crate) Arc<IndexMap<Name, bool>>);
+pub(crate) struct VariableConditions(Arc<IndexMap<Name, bool>>);
+
+impl VariableConditions {
+    /// Construct VariableConditions from a non-empty map of variable names.
+    ///
+    /// In release builds, this does not check if the map is empty.
+    fn new_unchecked(map: IndexMap<Name, bool>) -> Self {
+        debug_assert!(!map.is_empty());
+        Self(Arc::new(map))
+    }
+
+    pub fn insert(&mut self, name: Name, negated: bool) {
+        Arc::make_mut(&mut self.0).insert(name, negated);
+    }
+
+    /// Returns true if there are no conditions.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Returns a variable condition by name.
+    pub fn get(&self, name: &str) -> Option<VariableCondition> {
+        self.0.get_key_value(name).map(|(variable, &negated)| {
+            let variable = variable.clone();
+            VariableCondition { variable, negated }
+        })
+    }
+
+    /// Returns whether a variable condition is negated, or None if there is no condition for the variable name.
+    pub fn is_negated(&self, name: &str) -> Option<bool> {
+        self.0.get(name).copied()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Name, bool)> {
+        self.0.iter().map(|(name, &negated)| (name, negated))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct VariableCondition {
@@ -36,8 +78,18 @@ pub(crate) struct VariableCondition {
 }
 
 impl Conditions {
+    /// Create conditions from a map of variable conditions. If empty, instead returns a
+    /// condition that always evaluates to true.
+    fn from_variables(map: IndexMap<Name, bool>) -> Self {
+        if map.is_empty() {
+            Self::Boolean(true)
+        } else {
+            Self::Variables(VariableConditions::new_unchecked(map))
+        }
+    }
+
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
-        let mut variables = None;
+        let mut variables = IndexMap::new();
         for directive in directives {
             let negated = match directive.name.as_str() {
                 "include" => false,
@@ -54,22 +106,17 @@ impl Conditions {
                 Value::Boolean(false) if !negated => return Ok(Self::Boolean(false)),
                 Value::Boolean(true) if negated => return Ok(Self::Boolean(false)),
                 Value::Boolean(_) => {}
-                Value::Variable(name) => {
-                    match variables
-                        .get_or_insert_with(IndexMap::new)
-                        .entry(name.clone())
-                    {
-                        Entry::Occupied(entry) => {
-                            let previous_negated = *entry.get();
-                            if previous_negated != negated {
-                                return Ok(Self::Boolean(false));
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(negated);
+                Value::Variable(name) => match variables.entry(name.clone()) {
+                    Entry::Occupied(entry) => {
+                        let previous_negated = *entry.get();
+                        if previous_negated != negated {
+                            return Ok(Self::Boolean(false));
                         }
                     }
-                }
+                    Entry::Vacant(entry) => {
+                        entry.insert(negated);
+                    }
+                },
                 _ => {
                     return Err(FederationError::internal(format!(
                         "expected boolean or variable `if` argument, got {value}",
@@ -77,10 +124,31 @@ impl Conditions {
                 }
             }
         }
-        Ok(match variables {
-            Some(map) => Self::Variables(VariableConditions(Arc::new(map))),
-            None => Self::Boolean(true),
-        })
+        Ok(Self::from_variables(variables))
+    }
+
+    pub(crate) fn update_with(&self, new_conditions: &Self) -> Self {
+        match (new_conditions, self) {
+            (Conditions::Boolean(_), _) | (_, Conditions::Boolean(_)) => new_conditions.clone(),
+            (Conditions::Variables(new_conditions), Conditions::Variables(handled_conditions)) => {
+                let mut filtered = IndexMap::new();
+                for (cond_name, &cond_negated) in new_conditions.0.iter() {
+                    match handled_conditions.is_negated(cond_name) {
+                        Some(handled_cond) if cond_negated != handled_cond => {
+                            // If we've already handled that exact condition, we can skip it.
+                            // But if we've already handled the _negation_ of this condition, then this mean the overall conditions
+                            // are unreachable and we can just return `false` directly.
+                            return Conditions::Boolean(false);
+                        }
+                        Some(_) => {}
+                        None => {
+                            filtered.insert(cond_name.clone(), cond_negated);
+                        }
+                    }
+                }
+                Self::from_variables(filtered)
+            }
+        }
     }
 
     pub(crate) fn merge(self, other: Self) -> Self {
@@ -111,5 +179,122 @@ impl Conditions {
                 Conditions::Variables(self_vars)
             }
         }
+    }
+}
+
+fn is_constant_condition(condition: &Conditions) -> bool {
+    match condition {
+        Conditions::Variables(_) => false,
+        Conditions::Boolean(_) => true,
+    }
+}
+
+pub(crate) fn remove_conditions_from_selection_set(
+    selection_set: &NormalizedSelectionSet,
+    conditions: &Conditions,
+) -> Result<NormalizedSelectionSet, FederationError> {
+    match conditions {
+        Conditions::Boolean(_) => {
+            // If the conditions are the constant false, this means we know the selection will not be included
+            // in the plan in practice, and it doesn't matter too much what we return here. So we just
+            // the input unchanged as a shortcut.
+            // If the conditions are the constant true, then it means we have no conditions to remove and we can
+            // keep the selection "as is".
+            Ok(selection_set.clone())
+        }
+        Conditions::Variables(variable_conditions) => {
+            let mut selection_map = NormalizedSelectionMap::new();
+
+            for selection in selection_set.selections.values() {
+                let element = selection.element()?;
+                // We remove any of the conditions on the element and recurse.
+                let updated_element =
+                    remove_conditions_of_element(element.clone(), variable_conditions);
+                let new_selection = if let Ok(Some(selection_set)) = selection.selection_set() {
+                    let updated_selection_set =
+                        remove_conditions_from_selection_set(selection_set, conditions)?;
+                    if updated_element == element {
+                        if *selection_set == updated_selection_set {
+                            selection.clone()
+                        } else {
+                            selection.with_updated_selection_set(Some(updated_selection_set))?
+                        }
+                    } else {
+                        selection_of_element(updated_element, Some(updated_selection_set))?
+                    }
+                } else if updated_element == element {
+                    selection.clone()
+                } else {
+                    selection_of_element(updated_element, None)?
+                };
+                selection_map.insert(new_selection);
+            }
+
+            Ok(NormalizedSelectionSet {
+                schema: selection_set.schema.clone(),
+                type_position: selection_set.type_position.clone(),
+                selections: Arc::new(selection_map),
+            })
+        }
+    }
+}
+
+fn remove_conditions_of_element(
+    element: OpPathElement,
+    conditions: &VariableConditions,
+) -> OpPathElement {
+    let updated_directives: DirectiveList = DirectiveList(
+        element
+            .directives()
+            .iter()
+            .filter(|d| {
+                !matches_condition_for_kind(d, conditions, ConditionKind::Include)
+                    && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
+            })
+            .cloned()
+            .collect(),
+    );
+
+    if updated_directives.0.len() == element.directives().len() {
+        element
+    } else {
+        element.with_updated_directives(updated_directives)
+    }
+}
+
+#[derive(PartialEq)]
+enum ConditionKind {
+    Include,
+    Skip,
+}
+
+fn matches_condition_for_kind(
+    directive: &Directive,
+    conditions: &VariableConditions,
+    kind: ConditionKind,
+) -> bool {
+    let kind_str = match kind {
+        ConditionKind::Include => "include",
+        ConditionKind::Skip => "skip",
+    };
+
+    if directive.name != kind_str {
+        return false;
+    }
+
+    let value = directive.argument_by_name("if");
+
+    let matches_if_negated = match kind {
+        ConditionKind::Include => false,
+        ConditionKind::Skip => true,
+    };
+    match value {
+        None => false,
+        Some(v) => match v.as_variable() {
+            Some(directive_var) => conditions.0.iter().any(|(cond_name, cond_is_negated)| {
+                cond_name == directive_var && *cond_is_negated == matches_if_negated
+            }),
+            None => true,
+        },
     }
 }
