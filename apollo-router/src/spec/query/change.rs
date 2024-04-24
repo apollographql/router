@@ -366,12 +366,12 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
-        if !self.seen_introspection {
-            if field_def.name == "__schema" || field_def.name == "__type" {
-                self.seen_introspection = true;
-                self.schema_str.hash(self);
-            }
+        if !self.seen_introspection && (field_def.name == "__schema" || field_def.name == "__type")
+        {
+            self.seen_introspection = true;
+            self.schema_str.hash(self);
         }
+
         self.hash_field(
             parent_type.to_string(),
             field_def.name.as_str().to_string(),
