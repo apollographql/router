@@ -559,11 +559,11 @@ You can improve the performance of the router's query planner by configuring par
 
 By default, the query planner plans one operation at a time. It plans one operation to completion before planning the next one. This serial planning can be problematic when an operation takes a long time to plan and consequently blocks the query planner from working on other operations.
 
-To resolve such blocking scenarios, you can enable parallel query planning. Configure it in `router.yaml` with `supergraph.query_planner.experimental_parallelism`:
+To resolve such blocking scenarios, you can enable parallel query planning. Configure it in `router.yaml` with `supergraph.query_planning.experimental_parallelism`:
 
 ```yaml title="router.yaml"
 supergraph:
-  query_planner:
+  query_planning:
     experimental_parallelism: auto # number of available cpus 
 ```
 

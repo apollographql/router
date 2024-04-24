@@ -1,0 +1,130 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/events.rs
+expression: yaml
+---
+- fields:
+    kind: router.request
+  level: INFO
+  message: ""
+  span:
+    http.flavor: HTTP/1.1
+    http.method: GET
+    http.request.method: GET
+    http.route: "http://example.com/"
+    name: router
+    otel.kind: INTERNAL
+    trace_id: ""
+  spans:
+    - http.flavor: HTTP/1.1
+      http.method: GET
+      http.request.method: GET
+      http.route: "http://example.com/"
+      name: router
+      otel.kind: INTERNAL
+      trace_id: ""
+- fields:
+    kind: my.request_event
+  level: INFO
+  message: my event message
+  span:
+    http.flavor: HTTP/1.1
+    http.method: GET
+    http.request.method: GET
+    http.route: "http://example.com/"
+    name: router
+    otel.kind: INTERNAL
+    trace_id: ""
+  spans:
+    - http.flavor: HTTP/1.1
+      http.method: GET
+      http.request.method: GET
+      http.route: "http://example.com/"
+      name: router
+      otel.kind: INTERNAL
+      trace_id: ""
+- fields:
+    kind: router.response
+  level: INFO
+  message: ""
+  span:
+    apollo_private.duration_ns: "[duration]"
+    http.flavor: HTTP/1.1
+    http.method: GET
+    http.request.method: GET
+    http.route: "http://example.com/"
+    name: router
+    otel.kind: INTERNAL
+    trace_id: ""
+  spans:
+    - apollo_private.duration_ns: "[duration]"
+      http.flavor: HTTP/1.1
+      http.method: GET
+      http.request.method: GET
+      http.route: "http://example.com/"
+      name: router
+      otel.kind: INTERNAL
+      trace_id: ""
+- fields:
+    kind: my.response_event
+  level: INFO
+  message: my response event message
+  span:
+    apollo_private.duration_ns: "[duration]"
+    http.flavor: HTTP/1.1
+    http.method: GET
+    http.request.method: GET
+    http.route: "http://example.com/"
+    name: router
+    otel.kind: INTERNAL
+    trace_id: ""
+  spans:
+    - apollo_private.duration_ns: "[duration]"
+      http.flavor: HTTP/1.1
+      http.method: GET
+      http.request.method: GET
+      http.route: "http://example.com/"
+      name: router
+      otel.kind: INTERNAL
+      trace_id: ""
+- fields:
+    kind: router.request
+  level: INFO
+  message: ""
+  span:
+    http.flavor: HTTP/1.1
+    http.method: GET
+    http.request.method: GET
+    http.route: "http://example.com/"
+    name: router
+    otel.kind: INTERNAL
+    trace_id: ""
+  spans:
+    - http.flavor: HTTP/1.1
+      http.method: GET
+      http.request.method: GET
+      http.route: "http://example.com/"
+      name: router
+      otel.kind: INTERNAL
+      trace_id: ""
+- fields:
+    kind: router.response
+  level: INFO
+  message: ""
+  span:
+    apollo_private.duration_ns: "[duration]"
+    http.flavor: HTTP/1.1
+    http.method: GET
+    http.request.method: GET
+    http.route: "http://example.com/"
+    name: router
+    otel.kind: INTERNAL
+    trace_id: ""
+  spans:
+    - apollo_private.duration_ns: "[duration]"
+      http.flavor: HTTP/1.1
+      http.method: GET
+      http.request.method: GET
+      http.route: "http://example.com/"
+      name: router
+      otel.kind: INTERNAL
+      trace_id: ""
