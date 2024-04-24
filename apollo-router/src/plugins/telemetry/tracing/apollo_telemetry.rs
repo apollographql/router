@@ -348,12 +348,14 @@ impl Exporter {
     }
 
     // TBD(tim): Likely need to revisit this, handle errors, deal with the unknown spans more carefully, etc.
-    fn collect_spans_for_tree(&mut self, root_span: &LightSpanData) -> Vec<LightSpanData> {
+    fn collect_spans_for_tree(&self, root_span: LightSpanData) -> Vec<LightSpanData> {
         // iterate over all children and recursively collect the entire subtree
-        let mut child_spans = match self.spans_by_parent_id.pop_entry(&root_span.span_id) {
-            Some((_, spans)) => spans
+        // we're going to use "peek" here b/c it would otherwise remove the span from the cache
+        // and prevent the apollo exporter from finding it.
+        let mut child_spans = match self.spans_by_parent_id.peek(&root_span.span_id) {
+            Some(spans) => spans
                 .into_iter()
-                .flat_map(|(_, span)| self.collect_spans_for_tree(&span))
+                .flat_map(|(_, span)| self.collect_spans_for_tree(span.clone()))
                 .collect(),
             None => Vec::new(),
         };
@@ -362,7 +364,7 @@ impl Exporter {
         let mut spans_for_tree = if unknown {
             Vec::new()
         } else {
-            vec![root_span.clone()]
+            vec![root_span]
         };
 
         spans_for_tree.append(&mut child_spans);
@@ -373,7 +375,7 @@ impl Exporter {
     fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
         // TBD(tim): this could alternatively use the same algorithm in `groupbytrace` processor, which
         // groups based on trace ID instead of connecting recursively by parent ID.
-        self.collect_spans_for_tree(&span)
+        self.collect_spans_for_tree(span)
     }
 
     fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
@@ -830,8 +832,13 @@ impl SpanExporter for Exporter {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
-                // TODO if else to avoid cloning the span
-                match self.extract_traces(span.clone().into()) {
+                let root_span: LightSpanData = span.into();
+                if self.otlp_exporter.is_some() {
+                    let grouped_trace_spans = self.group_by_trace(root_span.clone());
+                    otlp_trace_spans.push(grouped_trace_spans);
+                }
+
+                match self.extract_traces(root_span) {
                     Ok(extracted_traces) => {
                         for mut trace in extracted_traces {
                             let mut operation_signature = Default::default();
@@ -850,11 +857,6 @@ impl SpanExporter for Exporter {
                     Err(error) => {
                         tracing::error!("failed to construct trace: {}, skipping", error);
                     }
-                }
-
-                if self.otlp_exporter.is_some() {
-                    let grouped_trace_spans = self.group_by_trace(span.into());
-                    otlp_trace_spans.push(grouped_trace_spans);
                 }
             } else if span.parent_span_id != SpanId::INVALID {
                 // Not a root span, we may need it later so stash it.
