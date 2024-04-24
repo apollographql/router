@@ -877,12 +877,10 @@ impl SpanExporter for Exporter {
         let mut report = telemetry::apollo::Report::default();
         report += SingleReport::Traces(TracesReport { traces });
         let apollo_exporter = self.report_exporter.clone();
-        let otlp_exporter = if let Some(exporter) = self.otlp_exporter.clone() { 
-            Some(exporter)
-        } else {
-            None
+        let otlp_exporter = match self.otlp_exporter.clone() { 
+            Some(exporter) => Some(exporter),
+            None => None,
         };
-
 
         let fut = async move {
             let apollo_result = 
@@ -890,7 +888,6 @@ impl SpanExporter for Exporter {
                 .submit_report(report)
                 .map_err(|e| TraceError::ExportFailed(Box::new(e))).boxed();
             
-            // ideally we get something like this working but some problem with lifetimes (see below)
             let otlp_result = match otlp_exporter {
                 Some(exporter) => exporter.export(exporter.span_data_from_traces(otlp_trace_spans)),
                 None => 
@@ -898,10 +895,6 @@ impl SpanExporter for Exporter {
                     future::ready(Ok(())).boxed()
             };
                 
-            // The following line works without issue, however with the code above (`let otlp_result =`) we get
-            // an error like "lifetime may not live long enough"
-            // let otlp_result = future::ready(Ok(())).boxed();
-
             match try_join_all(vec![apollo_result, otlp_result]).await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e)
