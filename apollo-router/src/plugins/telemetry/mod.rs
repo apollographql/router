@@ -76,7 +76,6 @@ use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
-use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::layers::instrument::InstrumentLayer;
@@ -1259,11 +1258,6 @@ impl Telemetry {
                         .enumerate()
                         .map(move |(idx, response)| {
                             let has_errors = !response.errors.is_empty();
-                            // Useful for selector in spans/instruments/events
-                            ctx.insert_json_value(
-                                CONTAINS_GRAPHQL_ERROR,
-                                serde_json_bytes::Value::Bool(has_errors),
-                            );
 
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {
