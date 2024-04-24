@@ -25,7 +25,7 @@ pub(crate) type Object = Map<ByteString, Value>;
 const FRAGMENT_PREFIX: &str = "... on ";
 
 static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:\|\[)(.+?)(?:,\s*|)(?:\])")
+    Regex::new(r"(?:\|\[)(?<condition>.+?)(?:,\s*|)(?:\])")
         .expect("this regex to check for type conditions is valid")
 });
 
@@ -713,7 +713,6 @@ fn iterate_path_mut<'a, F>(
 
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
-/// TODO: impl display for PathElement
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(untagged)]
 pub enum PathElement {
@@ -1036,7 +1035,6 @@ impl Path {
 
     pub fn last_key(&mut self) -> Option<String> {
         self.0.last().and_then(|elem| match elem {
-            // Todo: impl tostring
             PathElement::Key(key, type_conditions) => {
                 let mut tc = String::new();
                 if let Some(c) = type_conditions {

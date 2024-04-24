@@ -1480,7 +1480,6 @@ mod tests {
             .await
     }
 
-    #[ignore]
     #[test]
     fn router_bridge_dependency_is_pinned() {
         let cargo_manifest: serde_json::Value = basic_toml::from_str(

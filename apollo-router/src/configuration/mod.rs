@@ -193,7 +193,6 @@ pub struct Configuration {
     pub(crate) batching: Batching,
 
     /// Type conditioned fetching configuration.
-    /// If you don't know what this is about, you probably don't need it.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
 }
