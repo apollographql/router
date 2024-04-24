@@ -418,7 +418,9 @@ mod test {
     async fn test_on_subgraph(config: &'static str) -> Response {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
-            .schema(include_str!("fixtures/test_schema.graphql"))
+            .schema(include_str!(
+                "cost_calculator/fixtures/federated_ships_schema.graphql"
+            ))
             .build()
             .await;
         let strategy = plugin.strategy_factory.create();
@@ -426,12 +428,12 @@ mod test {
         let ctx = context();
         ctx.extensions().lock().insert(strategy);
         let mut req = subgraph::Request::fake_builder()
-            .subgraph_name("test")
+            .subgraph_name("vehicles")
             .context(ctx)
             .build();
         req.fetch_node = Some(Arc::new(
             FetchNode::fake_builder()
-                .service_name("test")
+                .service_name("vehicles")
                 .operation(SubgraphOperation::_from_parsed(ExecutableDocument::new()))
                 .build(),
         ));
