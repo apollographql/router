@@ -241,8 +241,8 @@ impl Exporter {
                         apollo_graph_ref,
                         schema_id,
                     )?))
-                },
-                ApolloTracingProtocol::Otlp  => None,
+                }
+                ApolloTracingProtocol::Otlp => None,
             },
             otlp_exporter: match apollo_tracing_protocol {
                 ApolloTracingProtocol::Apollo => None,
@@ -371,15 +371,13 @@ impl Exporter {
     }
 
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
-    /// all spans in the tree. 
+    /// all spans in the tree.
     fn pop_spans_for_tree(&mut self, root_span: &LightSpanData) -> Vec<SpanData> {
         let root_span_id = root_span.span_id;
         let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {
             Some(spans) => spans
                 .into_iter()
-                .flat_map(|(_, span)| {
-                    self.pop_spans_for_tree(&span)
-                })
+                .flat_map(|(_, span)| self.pop_spans_for_tree(&span))
                 .collect(),
             None => Vec::new(),
         };
@@ -389,19 +387,17 @@ impl Exporter {
     }
 
     /// Collects the subtree for a trace by calling peek() on the LRU cache for
-    /// all spans in the tree. 
+    /// all spans in the tree.
     fn peek_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
         let root_span_id = root_span.span_id;
         let mut child_spans = match self.spans_by_parent_id.peek(&root_span_id) {
             Some(spans) => spans
                 .into_iter()
-                .flat_map(|(_, span)| {
-                    self.peek_spans_for_tree(span)
-                })
+                .flat_map(|(_, span)| self.peek_spans_for_tree(span))
                 .collect(),
             None => Vec::new(),
         };
-        
+
         let mut spans_for_tree = self.init_spans_for_tree(root_span);
         spans_for_tree.append(&mut child_spans);
         spans_for_tree
@@ -418,11 +414,11 @@ impl Exporter {
             // We're going to use "pop" here b/c it's ok to remove the spans from the cache
             // when the apollo exporter is not enabled.
             self.pop_spans_for_tree(span)
-         } else {
+        } else {
             // We're going to use "peek" here b/c it would otherwise remove the spans from the cache
             // and prevent the apollo exporter from finding them.
             self.peek_spans_for_tree(span)
-         } 
+        }
     }
 
     fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
@@ -933,7 +929,7 @@ impl SpanExporter for Exporter {
             Some(exporter) => Some(exporter.clone()),
             None => None,
         };
-        let otlp_exporter = match self.otlp_exporter.as_ref() { 
+        let otlp_exporter = match self.otlp_exporter.as_ref() {
             Some(exporter) => Some(exporter.clone()),
             None => None,
         };
@@ -943,9 +939,9 @@ impl SpanExporter for Exporter {
             if let Some(exporter) = report_exporter.as_ref() {
                 exports.push(
                     exporter
-                    .submit_report(report)
-                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-                    .boxed()
+                        .submit_report(report)
+                        .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                        .boxed(),
                 );
             }
             if let Some(exporter) = otlp_exporter.as_ref() {
@@ -953,7 +949,7 @@ impl SpanExporter for Exporter {
             }
             match try_join_all(exports).await {
                 Ok(_) => Ok(()),
-                Err(e) => Err(e)
+                Err(e) => Err(e),
             }
         };
         fut.boxed()

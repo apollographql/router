@@ -1,5 +1,3 @@
-use std::{borrow::Cow, sync::Mutex};
-use std::sync::Arc;
 use crate::plugins::telemetry::{
     apollo_exporter::get_uname, metrics::apollo::ROUTER_ID, tracing::BatchProcessorConfig,
     GLOBAL_TRACER_NAME,
@@ -16,6 +14,8 @@ use opentelemetry::{
     InstrumentationLibrary, KeyValue,
 };
 use opentelemetry_otlp::{SpanExporterBuilder, WithExportConfig};
+use std::sync::Arc;
+use std::{borrow::Cow, sync::Mutex};
 use sys_info::hostname;
 use tonic::metadata::{MetadataMap, MetadataValue};
 use tower::BoxError;
@@ -91,7 +91,7 @@ impl ApolloOtlpExporter {
                         .with_metadata(metadata)
                         .with_compression(opentelemetry_otlp::Compression::Gzip),
                 )
-                .build_span_exporter()?
+                .build_span_exporter()?,
             )),
             // TBD(tim): do we need another batch processor for this?
             // Seems like we've already set up a batcher earlier in the pipe but not quite sure.
@@ -130,4 +130,4 @@ impl ApolloOtlpExporter {
         let mut exporter = self.otlp_exporter.lock().unwrap();
         exporter.shutdown()
     }
-  }
+}
