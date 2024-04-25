@@ -24,6 +24,7 @@ pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSu
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
@@ -128,3 +129,8 @@ const _: () = {
     assert_thread_safe::<Supergraph>();
     assert_thread_safe::<query_plan::query_planner::QueryPlanner>();
 };
+
+/// Returns if the type of the node is a scalar or enum.
+pub(crate) fn is_leaf_type(schema: &Schema, ty: &NodeStr) -> bool {
+    schema.get_scalar(ty).is_some() || schema.get_enum(ty).is_some()
+}
