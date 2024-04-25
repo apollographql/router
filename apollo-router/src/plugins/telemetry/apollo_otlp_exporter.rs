@@ -94,8 +94,9 @@ impl ApolloOtlpExporter {
                         .tonic()
                         .with_timeout(batch_config.max_export_timeout)
                         .with_endpoint(endpoint.to_string())
-                        .with_metadata(metadata)
-                        .with_compression(opentelemetry_otlp::Compression::Gzip),
+                        .with_metadata(metadata),
+                        // TBD(tim): figure out why compression seems to be turned off on our collector
+                        // .with_compression(opentelemetry_otlp::Compression::Gzip),
                 )
                 .build_span_exporter()?,
             )),
