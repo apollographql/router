@@ -496,6 +496,23 @@ mod tests {
     }
 
     #[test]
+    fn fields_with_different_arguments_have_different_hashes() {
+        let schema: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query { a: test(arg: 1) b: test(arg: 2) }";
+        let query_two = "query { a: test(arg: 1) b: test(arg: 3) }";
+        assert_ne!(hash(schema, query_one), hash(schema, query_two));
+    }
+
+    #[test]
     fn directive() {
         let schema1: &str = r#"
         schema {
