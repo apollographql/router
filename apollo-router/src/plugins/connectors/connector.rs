@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_compiler::schema::Name;
-
 use super::directives::KeyTypeMap;
 use super::directives::SourceAPI;
 use super::directives::SourceField;

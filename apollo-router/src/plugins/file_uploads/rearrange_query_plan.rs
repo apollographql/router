@@ -159,7 +159,8 @@ fn rearrange_plan_node<'a>(
                 path: flatten_node.path.clone(),
             })
         }
-        PlanNode::Sequence { nodes } => {
+        // TODO: file uploads ?
+        PlanNode::Sequence { nodes, .. } => {
             // We can't rearange nodes inside a Sequence so just error if "file ranges" of nodes overlaps.
             let mut sequence = Vec::new();
             let mut sequence_last = None;
@@ -197,7 +198,10 @@ fn rearrange_plan_node<'a>(
             if has_overlap {
                 return Err(FileUploadError::MisorderedVariables);
             }
-            PlanNode::Sequence { nodes: sequence }
+            PlanNode::Sequence {
+                nodes: sequence,
+                connector: None,
+            }
         }
         PlanNode::Parallel { nodes } => {
             // We can rearange nodes inside a Parallel, so we order all nodes based on the first file they use and wrap them into Sequence node.
@@ -260,10 +264,16 @@ fn rearrange_plan_node<'a>(
 
                 if parallel.is_empty() {
                     // if all nodes competing for files replace Parallel with Sequence
-                    PlanNode::Sequence { nodes }
+                    PlanNode::Sequence {
+                        nodes,
+                        connector: None,
+                    }
                 } else {
                     // if some of the nodes competing for files wrap them with Sequence within Parallel
-                    parallel.push(PlanNode::Sequence { nodes });
+                    parallel.push(PlanNode::Sequence {
+                        nodes,
+                        connector: None,
+                    });
                     PlanNode::Parallel { nodes: parallel }
                 }
             }

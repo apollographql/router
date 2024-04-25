@@ -1216,7 +1216,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) query_plan: QueryPlan,
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 /// The root query plan container.
 pub(super) struct QueryPlan {

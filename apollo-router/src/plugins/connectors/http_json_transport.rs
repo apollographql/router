@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::ast::Selection as GraphQLSelection;
+use crate::query_planner::QueryPlannerSelection as Selection;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::ApplyToError;
 use apollo_federation::sources::connect::Selection as JSONSelection;
@@ -192,9 +192,7 @@ impl HttpJsonTransport {
     }
 
     // TODO incorporate body selection too?
-    pub(super) fn input_selection_from_http_source(
-        http: &HTTPSource,
-    ) -> (Vec<GraphQLSelection>, String) {
+    pub(super) fn input_selection_from_http_source(http: &HTTPSource) -> (Vec<Selection>, String) {
         let required = http.path_template.required_parameters();
         let selection_set = parameters_to_selection_set(&required);
         let selection_set_string = selection_set_to_string(&selection_set);

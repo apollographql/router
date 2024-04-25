@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::executable;
+use apollo_compiler::NodeStr;
 use apollo_federation::query_plan as next;
 
 use crate::query_planner::bridge_query_planner as bridge;
@@ -12,7 +13,7 @@ use crate::query_planner::subscription;
 
 impl From<&'_ next::QueryPlan> for bridge::QueryPlan {
     fn from(value: &'_ next::QueryPlan) -> Self {
-        let next::QueryPlan { node } = value;
+        let next::QueryPlan { node, .. } = value;
         Self { node: option(node) }
     }
 }
@@ -21,12 +22,12 @@ impl From<&'_ next::TopLevelPlanNode> for plan::PlanNode {
     fn from(value: &'_ next::TopLevelPlanNode) -> Self {
         match value {
             next::TopLevelPlanNode::Subscription(node) => node.into(),
-            next::TopLevelPlanNode::Fetch(node) => node.into(),
+            next::TopLevelPlanNode::Fetch(node) => node.as_ref().into(),
             next::TopLevelPlanNode::Sequence(node) => node.into(),
             next::TopLevelPlanNode::Parallel(node) => node.into(),
             next::TopLevelPlanNode::Flatten(node) => node.into(),
             next::TopLevelPlanNode::Defer(node) => node.into(),
-            next::TopLevelPlanNode::Condition(node) => node.into(),
+            next::TopLevelPlanNode::Condition(node) => node.as_ref().into(),
         }
     }
 }
@@ -35,10 +36,10 @@ impl From<&'_ next::PlanNode> for plan::PlanNode {
     fn from(value: &'_ next::PlanNode) -> Self {
         match value {
             next::PlanNode::Fetch(node) => node.as_ref().into(),
-            next::PlanNode::Sequence(node) => node.as_ref().into(),
-            next::PlanNode::Parallel(node) => node.as_ref().into(),
-            next::PlanNode::Flatten(node) => node.as_ref().into(),
-            next::PlanNode::Defer(node) => node.as_ref().into(),
+            next::PlanNode::Sequence(node) => node.into(),
+            next::PlanNode::Parallel(node) => node.into(),
+            next::PlanNode::Flatten(node) => node.into(),
+            next::PlanNode::Defer(node) => node.into(),
             next::PlanNode::Condition(node) => node.as_ref().into(),
         }
     }
@@ -48,8 +49,8 @@ impl From<&'_ next::SubscriptionNode> for plan::PlanNode {
     fn from(value: &'_ next::SubscriptionNode) -> Self {
         let next::SubscriptionNode { primary, rest } = value;
         Self::Subscription {
-            primary: primary.into(),
-            rest: option(rest).map(Box::new),
+            primary: primary.as_ref().into(),
+            rest: rest.map(|r| Box::new(r.as_ref().into())),
         }
     }
 }
@@ -69,17 +70,40 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
         } = value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
-            requires: vec(requires),
+            requires: requires
+                .unwrap_or_default()
+                .iter()
+                .map(std::convert::Into::into)
+                .collect(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             // TODO: use Arc in apollo_federation to avoid this clone
             operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
             operation_name: operation_name.clone(),
             operation_kind: (*operation_kind).into(),
-            id: id.clone(),
-            input_rewrites: option_vec(input_rewrites),
-            output_rewrites: option_vec(output_rewrites),
+            id: id.map(|id| NodeStr::from(id.to_string())),
+            input_rewrites: if input_rewrites.is_empty() {
+                Default::default()
+            } else {
+                Some(
+                    input_rewrites
+                        .into_iter()
+                        .map(|fdr| fdr.as_ref().into())
+                        .collect(),
+                )
+            },
+            output_rewrites: if output_rewrites.is_empty() {
+                Default::default()
+            } else {
+                Some(
+                    output_rewrites
+                        .into_iter()
+                        .map(|fdr: &Arc<next::FetchDataRewrite>| fdr.as_ref().into())
+                        .collect(),
+                )
+            },
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            protocol: Default::default(),
         })
     }
 }
@@ -87,7 +111,10 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
 impl From<&'_ next::SequenceNode> for plan::PlanNode {
     fn from(value: &'_ next::SequenceNode) -> Self {
         let next::SequenceNode { nodes } = value;
-        Self::Sequence { nodes: vec(nodes) }
+        Self::Sequence {
+            nodes: vec(nodes),
+            connector: None,
+        }
     }
 }
 
@@ -103,7 +130,7 @@ impl From<&'_ next::FlattenNode> for plan::PlanNode {
         let next::FlattenNode { path, node } = value;
         Self::Flatten(plan::FlattenNode {
             path: crate::json_ext::Path(vec(path)),
-            node: Box::new(node.into()),
+            node: Box::new(node.as_ref().into()),
         })
     }
 }
@@ -127,8 +154,8 @@ impl From<&'_ next::ConditionNode> for plan::PlanNode {
         } = value;
         Self::Condition {
             condition: condition_variable.to_string(),
-            if_clause: if_clause.as_ref().map(Into::into).map(Box::new),
-            else_clause: else_clause.as_ref().map(Into::into).map(Box::new),
+            if_clause: if_clause.map(|stuff| Box::new(stuff.as_ref().into())),
+            else_clause: else_clause.map(|stuff| Box::new(stuff.as_ref().into())),
         }
     }
 }
@@ -153,8 +180,26 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
             operation_name: operation_name.clone(),
             operation_kind: (*operation_kind).into(),
-            input_rewrites: option_vec(input_rewrites),
-            output_rewrites: option_vec(output_rewrites),
+            input_rewrites: if input_rewrites.is_empty() {
+                Default::default()
+            } else {
+                Some(
+                    input_rewrites
+                        .into_iter()
+                        .map(|fdr| fdr.as_ref().into())
+                        .collect(),
+                )
+            },
+            output_rewrites: if output_rewrites.is_empty() {
+                Default::default()
+            } else {
+                Some(
+                    output_rewrites
+                        .into_iter()
+                        .map(|fdr| fdr.as_ref().into())
+                        .collect(),
+                )
+            },
         }
     }
 }
@@ -166,7 +211,7 @@ impl From<&'_ next::PrimaryDeferBlock> for plan::Primary {
             node,
         } = value;
         Self {
-            node: option(node).map(Box::new),
+            node: node.map(|stuff| Box::new(stuff.as_ref().into())),
             subselection: sub_selection.as_ref().map(|s| s.to_string()),
         }
     }
@@ -203,7 +248,7 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
                     })
                     .collect(),
             ),
-            node: option(node).map(Arc::new),
+            node: node.map(|stuff| Arc::new(stuff.as_ref().into())),
             subselection: sub_selection.as_ref().map(|s| s.to_string()),
         }
     }

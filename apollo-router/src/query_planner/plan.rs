@@ -25,6 +25,7 @@ use crate::plugins::connectors::Connector;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::spec::Query;
+use crate::spec::Schema;
 use futures::future;
 
 /// A planner key.
@@ -489,7 +490,7 @@ impl PlanNode {
     // generates a query plan for each connector fetch node in the main query plan
     pub(crate) fn generate_connector_plan<'a>(
         &'a mut self,
-        schema: &'a apollo_compiler::Schema,
+        schema: &'a Schema,
         subgraph_planners: &'a HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
         connector_urls: &'a HashMap<Arc<String>, String>,
         connectors: &'a Arc<HashMap<Arc<String>, Connector>>,
