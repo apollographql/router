@@ -359,15 +359,9 @@ impl Exporter {
     }
 
     fn init_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
-        // if we're known, add ourselves to the list, otherwise don't.
-        let unknown = self.include_span_names.contains(root_span.name.as_ref());
-        if unknown {
-            Vec::new()
-        } else {
-            let exporter = self.otlp_exporter.as_ref().unwrap();
-            let root_span_data = exporter.prepare_for_export(root_span);
-            vec![root_span_data]
-        }
+        let exporter = self.otlp_exporter.as_ref().unwrap();
+        let root_span_data = exporter.prepare_for_export(root_span);
+        vec![root_span_data]
     }
 
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
