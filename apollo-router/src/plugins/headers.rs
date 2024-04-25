@@ -839,7 +839,7 @@ mod test {
             connection_closed_signal: None,
             query_hash: Default::default(),
             authorization: Default::default(),
-            fetch_node: None,
+            operation: None,
         };
         service.modify_request(&mut request);
         let headers = request
@@ -911,7 +911,7 @@ mod test {
             connection_closed_signal: None,
             query_hash: Default::default(),
             authorization: Default::default(),
-            fetch_node: None,
+            operation: None,
         };
         service.modify_request(&mut request);
         let headers = request
@@ -973,7 +973,7 @@ mod test {
             connection_closed_signal: None,
             query_hash: Default::default(),
             authorization: Default::default(),
-            fetch_node: None,
+            operation: None,
         }
     }
 

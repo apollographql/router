@@ -26,9 +26,9 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::QueryHash;
+use crate::query_planner::fetch::SubgraphOperation;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -60,7 +60,7 @@ pub struct Request {
     // authorization metadata for this request
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 
-    pub(crate) fetch_node: Option<Arc<FetchNode>>,
+    pub(crate) operation: Option<Arc<SubgraphOperation>>,
 }
 
 #[buildstructor::buildstructor]
@@ -88,7 +88,7 @@ impl Request {
             connection_closed_signal,
             query_hash: Default::default(),
             authorization: Default::default(),
-            fetch_node: None,
+            operation: None,
         }
     }
 
@@ -152,7 +152,7 @@ impl Clone for Request {
                 .map(|s| s.resubscribe()),
             query_hash: self.query_hash.clone(),
             authorization: self.authorization.clone(),
-            fetch_node: self.fetch_node.clone(),
+            operation: self.operation.clone(),
         }
     }
 }

@@ -5,6 +5,7 @@ use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use displaydoc::Display;
@@ -255,13 +256,15 @@ impl Plugin for DemandControl {
                 })
                 .map_future_with_request_data(
                     move |req: &subgraph::Request| {
-                        req.fetch_node
-                            .clone()
-                            .expect("must have fetch node")
-                            .parsed_operation(&subgraph_schemas)
+                        req.subgraph_name
+                            .as_ref()
+                            .and_then(|subgraph| subgraph_schemas.get(subgraph))
+                            .zip(req.operation.as_ref())
+                            .map(|(schema, operation)| operation.as_parsed(schema))
+                            .expect("must have a valid query")
                             .clone()
                     },
-                    |req: Arc<ExecutableDocument>, fut| async move {
+                    |req: Arc<Valid<ExecutableDocument>>, fut| async move {
                         let resp: subgraph::Response = fut.await?;
                         let strategy = resp
                             .context
@@ -307,7 +310,6 @@ mod test {
     use crate::plugins::demand_control::DemandControl;
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
-    use crate::query_planner::fetch::FetchNode;
     use crate::query_planner::fetch::QueryHash;
     use crate::query_planner::fetch::SubgraphOperation;
     use crate::services::execution;
@@ -431,12 +433,9 @@ mod test {
             .subgraph_name("vehicles")
             .context(ctx)
             .build();
-        req.fetch_node = Some(Arc::new(
-            FetchNode::fake_builder()
-                .service_name("vehicles")
-                .operation(SubgraphOperation::_from_parsed(ExecutableDocument::new()))
-                .build(),
-        ));
+        req.operation = Some(Arc::new(SubgraphOperation::from_parsed(
+            Valid::assume_valid(ExecutableDocument::new()),
+        )));
         let resp = plugin
             .call_subgraph(req, |req| {
                 subgraph::Response::fake_builder()

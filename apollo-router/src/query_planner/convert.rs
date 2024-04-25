@@ -72,7 +72,9 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
             requires: vec(requires),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             // TODO: use Arc in apollo_federation to avoid this clone
-            operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
+            operation: Arc::new(SubgraphOperation::from_parsed(Arc::new(
+                operation_document.clone(),
+            ))),
             operation_name: operation_name.clone(),
             operation_kind: (*operation_kind).into(),
             id: id.clone(),

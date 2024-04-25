@@ -263,7 +263,7 @@ async fn defer() {
                         service_name: "X".into(),
                         requires: vec![],
                         variable_usages: vec![],
-                        operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
+                        operation: Arc::new(SubgraphOperation::from_string("{ t { id __typename x } }")),
                         operation_name: Some("t".into()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".into()),
@@ -306,9 +306,9 @@ async fn defer() {
                                 },
                             )],
                             variable_usages: vec![],
-                            operation: SubgraphOperation::from_string(
+                            operation: Arc::new(SubgraphOperation::from_string(
                                 "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
-                            ),
+                            )),
                             operation_name: None,
                             operation_kind: OperationKind::Query,
                             id: Some("fetch2".into()),
@@ -368,10 +368,6 @@ async fn defer() {
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
-    let subgraph_schemas = Arc::new(HashMap::from([
-        ("X".into(), Arc::new(schema.definitions.clone())),
-        ("Y".into(), Arc::new(schema.definitions.clone())),
-    ]));
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([
             (
@@ -392,7 +388,7 @@ async fn defer() {
             &sf,
             &Default::default(),
             &schema,
-            subgraph_schemas.as_ref(),
+            &Default::default(),
             sender,
             None,
             &None,

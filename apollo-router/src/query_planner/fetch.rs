@@ -107,7 +107,7 @@ pub(crate) struct FetchNode {
     pub(crate) variable_usages: Vec<NodeStr>,
 
     /// The GraphQL subquery that is used for the fetch.
-    pub(crate) operation: SubgraphOperation,
+    pub(crate) operation: Arc<SubgraphOperation>,
 
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<NodeStr>,
@@ -403,7 +403,7 @@ impl FetchNode {
             .build();
         subgraph_request.query_hash = self.schema_aware_hash.clone();
         subgraph_request.authorization = self.authorization.clone();
-        subgraph_request.fetch_node = Some(Arc::new(self.clone()));
+        subgraph_request.operation = Some(self.operation.clone());
 
         let service = parameters
             .service_factory
@@ -638,38 +638,5 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
-    }
-}
-
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl FetchNode {
-    #[builder]
-    pub(crate) fn fake_new(
-        service_name: Option<String>,
-        requires: Option<Vec<Selection>>,
-        variable_usages: Option<Vec<String>>,
-        operation: Option<SubgraphOperation>,
-        operation_name: Option<String>,
-        operation_kind: Option<OperationKind>,
-        id: Option<String>,
-        input_rewrites: Option<Vec<rewrites::DataRewrite>>,
-        output_rewrites: Option<Vec<rewrites::DataRewrite>>,
-        schema_aware_hash: Option<Arc<QueryHash>>,
-        authorization: Option<Arc<CacheKeyMetadata>>,
-    ) -> Self {
-        Self {
-            service_name: service_name.unwrap_or_default(),
-            requires: requires.unwrap_or_default(),
-            variable_usages: variable_usages.unwrap_or_default(),
-            operation: operation.unwrap_or_default(),
-            operation_name,
-            operation_kind: operation_kind.unwrap_or_default(),
-            id,
-            input_rewrites,
-            output_rewrites,
-            schema_aware_hash: schema_aware_hash.unwrap_or_default(),
-            authorization: authorization.unwrap_or_default(),
-        }
     }
 }
