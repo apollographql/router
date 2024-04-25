@@ -134,7 +134,7 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct SubgraphOperation {
     // At least one of these two must be initialized
     serialized: OnceLock<String>,
