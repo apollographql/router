@@ -256,7 +256,7 @@ impl Exporter {
                     )?))
                 }
             },
-            apollo_tracing_protocol: apollo_tracing_protocol,
+            apollo_tracing_protocol,
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
@@ -925,14 +925,11 @@ impl SpanExporter for Exporter {
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
         let mut report = telemetry::apollo::Report::default();
         report += SingleReport::Traces(TracesReport { traces });
-        let report_exporter = match self.report_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
-        let otlp_exporter = match self.otlp_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
+        let report_exporter = self
+            .report_exporter
+            .as_ref()
+            .map(|exporter| exporter.clone());
+        let otlp_exporter = self.otlp_exporter.as_ref().map(|exporter| exporter.clone());
 
         let fut = async move {
             let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();

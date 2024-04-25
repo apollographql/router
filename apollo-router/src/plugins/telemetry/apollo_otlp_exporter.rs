@@ -115,7 +115,7 @@ impl ApolloOtlpExporter {
             ),
             parent_span_id: span.parent_span_id,
             span_kind: span.span_kind.clone(),
-            name: span.name.to_owned(),
+            name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
             attributes: span.attributes.clone(),
