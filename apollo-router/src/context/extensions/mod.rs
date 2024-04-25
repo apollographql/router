@@ -91,7 +91,7 @@ impl Extensions {
             .as_mut()
             .map(|map| {
                 map.entry(TypeId::of::<T>())
-                    .or_insert(Box::new(T::default()))
+                    .or_insert_with(|| Box::<T>::default())
             })
             .and_then(|boxed| (&mut **boxed as &mut (dyn Any + 'static)).downcast_mut())
             .expect("default value should be inserted and we should be able to downcast it")

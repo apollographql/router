@@ -1,25 +1,29 @@
-use crate::plugins::demand_control::CostResult;
-use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::instruments::Increment::Unit;
-use crate::plugins::telemetry::config_new::instruments::{
-    CustomHistogram, CustomHistogramInner, DefaultedStandardInstrument, Instrumented,
-};
-use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::config_new::Selectors;
-use crate::services::supergraph;
-use crate::{metrics, Context};
+use std::sync::Arc;
+
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::sync::Arc;
 use tower::BoxError;
 
+use crate::metrics;
+use crate::plugins::demand_control::CostResult;
+use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
+use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
+use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
+use crate::plugins::telemetry::config_new::instruments::Increment::Unit;
+use crate::plugins::telemetry::config_new::instruments::Instrumented;
+use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::config_new::Selectors;
+use crate::services::supergraph;
+use crate::Context;
+
 /// Attributes for Cost
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphCostAttributes {
     /// The estimated cost of the operation using the currently configured cost model
@@ -262,7 +266,7 @@ impl Instrumented for CostInstruments {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum CostValue {
     /// The estimated cost of the operation using the currently configured cost model

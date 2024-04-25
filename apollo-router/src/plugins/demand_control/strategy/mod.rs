@@ -5,6 +5,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 
+use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
 use crate::plugins::demand_control::DemandControlConfig;
@@ -13,7 +14,7 @@ use crate::plugins::demand_control::Mode;
 use crate::plugins::demand_control::StrategyConfig;
 use crate::services::execution;
 use crate::services::subgraph;
-use crate::{graphql, Context};
+use crate::Context;
 
 mod static_estimated;
 #[cfg(test)]

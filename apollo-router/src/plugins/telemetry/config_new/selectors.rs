@@ -4,8 +4,6 @@ use jsonpath_rust::JsonPathFinder;
 use jsonpath_rust::JsonPathInst;
 use schemars::JsonSchema;
 use serde::Deserialize;
-#[cfg(test)]
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
@@ -15,7 +13,6 @@ use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::demand_control::CostResult;
-
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
@@ -28,6 +25,7 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum TraceIdFormat {
     /// Open Telemetry trace ID, a hex string.
@@ -37,7 +35,7 @@ pub(crate) enum TraceIdFormat {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -47,7 +45,7 @@ pub(crate) enum OperationName {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
@@ -55,7 +53,7 @@ pub(crate) enum Query {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ResponseStatus {
     /// The http status code.
@@ -65,7 +63,7 @@ pub(crate) enum ResponseStatus {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -73,6 +71,7 @@ pub(crate) enum OperationKind {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
     /// A header from the request
@@ -157,6 +156,7 @@ pub(crate) enum RouterSelector {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SupergraphSelector {
     OperationName {
@@ -276,6 +276,7 @@ pub(crate) enum SupergraphSelector {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
+#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 #[derivative(Debug)]
 pub(crate) enum SubgraphSelector {
@@ -333,7 +334,7 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseData {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_data: JsonPathInst,
         #[serde(skip)]
@@ -346,7 +347,7 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseErrors {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_errors: JsonPathInst,
         #[serde(skip)]
@@ -689,16 +690,14 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SupergraphSelector::Cost { cost } => {
                 let extensions = response.context.extensions().lock();
-                if let Some(cost_result) = extensions.get::<CostResult>() {
-                    Some(match cost {
+                extensions
+                    .get::<CostResult>()
+                    .map(|cost_result| match cost {
                         CostValue::Estimated => cost_result.estimated.into(),
                         CostValue::Actual => cost_result.actual.into(),
                         CostValue::Delta => cost_result.delta().into(),
                         CostValue::Result => cost_result.result.into(),
                     })
-                } else {
-                    None
-                }
             }
             // For request
             _ => None,
