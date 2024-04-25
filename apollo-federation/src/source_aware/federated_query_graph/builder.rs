@@ -3,9 +3,9 @@ use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
 use crate::sources::{
     SourceFederatedAbstractFieldQueryGraphEdge, SourceFederatedConcreteFieldQueryGraphEdge,
-    SourceFederatedEnumQueryGraphNode, SourceFederatedQueryGraphBuilders,
-    SourceFederatedQueryGraphs, SourceFederatedScalarQueryGraphNode,
-    SourceFederatedTypeConditionQueryGraphEdge, SourceId,
+    SourceFederatedConcreteQueryGraphNode, SourceFederatedEnumQueryGraphNode,
+    SourceFederatedQueryGraphBuilders, SourceFederatedQueryGraphs,
+    SourceFederatedScalarQueryGraphNode, SourceFederatedTypeConditionQueryGraphEdge, SourceId,
 };
 use crate::ValidFederationSubgraph;
 use apollo_compiler::schema::{Name, NamedType};
@@ -66,7 +66,7 @@ pub(crate) trait IntraSourceQueryGraphBuilderApi {
     fn add_concrete_node(
         &mut self,
         supergraph_type_name: NamedType,
-        source_data: SourceFederatedConcreteFieldQueryGraphEdge,
+        source_data: SourceFederatedConcreteQueryGraphNode,
     ) -> Result<NodeIndex, FederationError>;
 
     fn add_enum_node(
