@@ -20,6 +20,7 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::Context;
 
 /// The state of the conditional.
 #[derive(Debug, Default)]
@@ -113,12 +114,13 @@ where
     }
 }
 
-impl<Att, Request, Response> Selector for Conditional<Att>
+impl<Att, Request, Response, ChunkResponse> Selector for Conditional<Att>
 where
-    Att: Selector<Request = Request, Response = Response>,
+    Att: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
         match &self.condition {
@@ -158,6 +160,40 @@ where
                     }
                 }
             }
+        }
+    }
+
+    fn on_chunk_response(
+        &self,
+        response: &Self::ChunkResponse,
+        ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
+
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
+                if condition.lock().evaluate_chunk_response(response, ctx) {
+                    *self.value.lock() = State::Returned;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            (State::Pending | State::Returned, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the response if the condition was evaluated to true.
+                if condition.lock().evaluate_chunk_response(response, ctx) {
+                    self.selector.on_chunk_response(response, ctx)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector.on_chunk_response(response, ctx)
+            }
+            _ => None,
         }
     }
 

@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -124,6 +125,26 @@ where
         }
     }
 
+    pub(crate) fn evaluate_chunk_response(
+        &self,
+        response: &T::ChunkResponse,
+        ctx: &Context,
+    ) -> bool {
+        match self {
+            Condition::Eq(eq) => {
+                let left = eq[0].on_chunk_response(response, ctx);
+                let right = eq[1].on_chunk_response(response, ctx);
+                left == right
+            }
+            Condition::Exists(exist) => exist.on_chunk_response(response, ctx).is_some(),
+            Condition::All(all) => all.iter().all(|c| c.evaluate_chunk_response(response, ctx)),
+            Condition::Any(any) => any.iter().any(|c| c.evaluate_chunk_response(response, ctx)),
+            Condition::Not(not) => !not.evaluate_chunk_response(response, ctx),
+            Condition::True => true,
+            Condition::False => false,
+        }
+    }
+
     pub(crate) fn evaluate_response(&self, response: &T::Response) -> bool {
         match self {
             Condition::Eq(eq) => {
@@ -147,6 +168,7 @@ where
 {
     type Request = T::Request;
     type Response = T::Response;
+    type ChunkResponse = T::ChunkResponse;
 
     fn on_request(&self, request: &T::Request) -> Option<Value> {
         match self {
@@ -159,6 +181,13 @@ where
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
             SelectorOrValue::Selector(selector) => selector.on_response(response),
+        }
+    }
+
+    fn on_chunk_response(&self, response: &T::ChunkResponse, ctx: &Context) -> Option<Value> {
+        match self {
+            SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Selector(selector) => selector.on_chunk_response(response, ctx),
         }
     }
 }
@@ -175,10 +204,12 @@ mod test {
     impl Selector for TestSelector {
         type Request = Option<i64>;
         type Response = Option<i64>;
+        type ChunkResponse = Option<i64>;
 
         fn on_request(&self, request: &Self::Request) -> Option<Value> {
             request.map(Value::I64)
         }
+        // TODO add on_chunk_resposne
 
         fn on_response(&self, response: &Self::Response) -> Option<Value> {
             response.map(Value::I64)
@@ -193,6 +224,7 @@ mod test {
     impl Selector for TestSelectorReqRes {
         type Request = Option<i64>;
         type Response = Option<i64>;
+        type ChunkResponse = Option<i64>;
 
         fn on_request(&self, request: &Self::Request) -> Option<Value> {
             match self {
@@ -200,6 +232,8 @@ mod test {
                 TestSelectorReqRes::Resp => None,
             }
         }
+
+        // TODO add on_chunk_response
 
         fn on_response(&self, response: &Self::Response) -> Option<Value> {
             match self {

@@ -10,6 +10,7 @@ use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::Context;
 
 /// These modules contain a new config structure for telemetry that will progressively move to
 pub(crate) mod attributes;
@@ -27,17 +28,30 @@ pub(crate) mod spans;
 pub(crate) trait Selectors {
     type Request;
     type Response;
+    type ChunkResponse;
+
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
     fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
+    fn on_chunk_response(&self, _response: &Self::ChunkResponse, _ctx: &Context) -> Vec<KeyValue> {
+        Vec::with_capacity(0)
+    }
     fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
 }
 
 pub(crate) trait Selector {
     type Request;
     type Response;
+    type ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value>;
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value>;
+    fn on_chunk_response(
+        &self,
+        _response: &Self::ChunkResponse,
+        _ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        None
+    }
 }
 
 pub(crate) trait DefaultForLevel {

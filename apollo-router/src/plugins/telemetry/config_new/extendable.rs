@@ -21,6 +21,7 @@ use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::Context;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
@@ -157,13 +158,14 @@ where
     }
 }
 
-impl<A, E, Request, Response> Selectors for Extendable<A, E>
+impl<A, E, Request, Response, ChunkResponse> Selectors for Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response>,
-    E: Selector<Request = Request, Response = Response>,
+    A: Default + Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    E: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
@@ -191,6 +193,18 @@ where
 
     fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
         self.attributes.on_error(error)
+    }
+
+    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_chunk_response(response, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_chunk_response(response, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
     }
 }
 

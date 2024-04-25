@@ -421,31 +421,39 @@ where
     }
 }
 
-impl<T, Request, Response> Selectors for DefaultedStandardInstrument<T>
+impl<T, Request, Response, ChunkResponse> Selectors for DefaultedStandardInstrument<T>
 where
-    T: Selectors<Request = Request, Response = Response>,
+    T: Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) | Self::Unset => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
     fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) | Self::Unset => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response(response),
         }
     }
 
     fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) | Self::Unset => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_error(error),
+        }
+    }
+
+    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) -> Vec<KeyValue> {
+        match self {
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
+            Self::Extendable { attributes } => attributes.on_chunk_response(response, ctx),
         }
     }
 }
@@ -528,14 +536,16 @@ where
     condition: Condition<E>,
 }
 
-impl<A, E, Request, Response> Selectors for Instrument<A, E>
+impl<A, E, Request, Response, ChunkResponse> Selectors for Instrument<A, E>
 where
-    A: Debug + Default + Selectors<Request = Request, Response = Response>,
-    E: Debug + Selector<Request = Request, Response = Response>,
+    A: Debug
+        + Default
+        + Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    E: Debug + Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
 {
     type Request = Request;
-
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_request(request)
@@ -545,12 +555,19 @@ where
         self.attributes.on_response(response)
     }
 
+    fn on_chunk_response(
+        &self,
+        response: &Self::ChunkResponse,
+        ctx: &Context,
+    ) -> Vec<opentelemetry_api::KeyValue> {
+        self.attributes.on_chunk_response(response, ctx)
+    }
+
     fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_error(error)
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum InstrumentType {
@@ -565,15 +582,14 @@ pub(crate) enum InstrumentType {
     // Gauge,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum InstrumentValue<T> {
     Standard(Standard),
+    Chunked(Chunked<T>),
     Custom(T),
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Standard {
@@ -582,23 +598,43 @@ pub(crate) enum Standard {
     // Active,
 }
 
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Chunked<T> {
+    /// For every chunk sent through http multipart connection
+    #[serde(rename = "chunked_duration")]
+    Duration,
+    /// For every chunk sent through http multipart connection
+    #[serde(rename = "chunked_unit")]
+    Unit,
+    /// For every chunk sent through http multipart connection
+    #[serde(rename = "chunked_custom")]
+    Custom(T),
+}
+
 pub(crate) trait Instrumented {
     type Request;
     type Response;
+    type ChunkResponse;
 
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
+    fn on_chunk_response(&self, _response: &Self::ChunkResponse, _ctx: &Context) {}
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
-impl<A, B, E, Request, Response> Instrumented for Extendable<A, Instrument<B, E>>
+impl<A, B, E, Request, Response, ChunkResponse> Instrumented for Extendable<A, Instrument<B, E>>
 where
-    A: Default + Instrumented<Request = Request, Response = Response>,
-    B: Default + Debug + Selectors<Request = Request, Response = Response>,
-    E: Debug + Selector<Request = Request, Response = Response>,
+    A: Default
+        + Instrumented<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    B: Default
+        + Debug
+        + Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    E: Debug + Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) {
         self.attributes.on_request(request);
@@ -606,6 +642,10 @@ where
 
     fn on_response(&self, response: &Self::Response) {
         self.attributes.on_response(response);
+    }
+
+    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
+        self.attributes.on_chunk_response(response, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -616,6 +656,7 @@ where
 impl Selectors for SubgraphInstrumentsConfig {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
+    type ChunkResponse = ();
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
@@ -675,6 +716,14 @@ where
                         InstrumentValue::Custom(selector) => {
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
+                        InstrumentValue::Chunked(incr) => match incr {
+                            Chunked::Duration => (None, Increment::ChunkedDuration(Instant::now())),
+                            Chunked::Unit => (None, Increment::ChunkedUnit),
+                            Chunked::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::ChunkedCustom(None),
+                            ),
+                        },
                     };
                     let counter = CustomCounterInner {
                         increment,
@@ -701,6 +750,14 @@ where
                         InstrumentValue::Custom(selector) => {
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
+                        InstrumentValue::Chunked(incr) => match incr {
+                            Chunked::Duration => (None, Increment::ChunkedDuration(Instant::now())),
+                            Chunked::Unit => (None, Increment::ChunkedUnit),
+                            Chunked::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::ChunkedCustom(None),
+                            ),
+                        },
                     };
                     let histogram = CustomHistogramInner {
                         increment,
@@ -725,14 +782,16 @@ where
     }
 }
 
-impl<Request, Response, Attributes, Select> Instrumented
+impl<Request, Response, ChunkResponse, Attributes, Select> Instrumented
     for CustomInstruments<Request, Response, Attributes, Select>
 where
-    Attributes: Selectors<Request = Request, Response = Response> + Default,
-    Select: Selector<Request = Request, Response = Response> + Debug,
+    Attributes:
+        Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Default,
+    Select: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Debug,
 {
     type Request = Request;
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) {
         for counter in &self.counters {
@@ -760,6 +819,15 @@ where
             histogram.on_error(error, ctx);
         }
     }
+
+    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
+        for counter in &self.counters {
+            counter.on_chunk_response(response, ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_chunk_response(response, ctx);
+        }
+    }
 }
 
 pub(crate) struct RouterInstruments {
@@ -778,8 +846,8 @@ pub(crate) struct RouterInstruments {
 
 impl Instrumented for RouterInstruments {
     type Request = router::Request;
-
     type Response = router::Response;
+    type ChunkResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(http_server_request_duration) = &self.http_server_request_duration {
@@ -860,8 +928,8 @@ pub(crate) struct SubgraphInstruments {
 
 impl Instrumented for SubgraphInstruments {
     type Request = subgraph::Request;
-
     type Response = subgraph::Response;
+    type ChunkResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(http_client_request_duration) = &self.http_client_request_duration {
@@ -919,8 +987,11 @@ pub(crate) type SubgraphCustomInstruments =
 // ---------------- Counter -----------------------
 enum Increment {
     Unit,
+    ChunkedUnit,
     Duration(Instant),
+    ChunkedDuration(Instant),
     Custom(Option<i64>),
+    ChunkedCustom(Option<i64>),
 }
 
 struct CustomCounter<Request, Response, A, T>
@@ -944,13 +1015,16 @@ where
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
-impl<A, T, Request, Response> Instrumented for CustomCounter<Request, Response, A, T>
+impl<A, T, Request, Response, ChunkResponse> Instrumented for CustomCounter<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response> + Debug + Debug,
+    A: Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Default,
+    T: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>
+        + Debug
+        + Debug,
 {
     type Request = Request;
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -960,7 +1034,19 @@ where
         }
         inner.attributes = inner.selectors.on_request(request).into_iter().collect();
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match inner.increment {
+                Increment::ChunkedCustom(None) => {
+                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                _ => {
+                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
     }
 
@@ -978,7 +1064,19 @@ where
             .as_ref()
             .and_then(|s| s.on_response(response))
         {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match inner.increment {
+                Increment::ChunkedCustom(None) => {
+                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                _ => {
+                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
 
         let increment = match inner.increment {
@@ -988,9 +1086,66 @@ where
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
+            Increment::ChunkedUnit
+            | Increment::ChunkedDuration(_)
+            | Increment::ChunkedCustom(_) => {
+                // Nothing to do because we're incrementing on events
+                return;
+            }
         };
 
         if let Some(counter) = inner.counter.take() {
+            counter.add(increment, &attrs);
+        }
+    }
+
+    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
+        // TODO find a trick here to not always execute it
+        // Playing with a specific type of increment
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_chunk_response(response, ctx) {
+            let _ = inner.counter.take();
+            return;
+        }
+        let mut attrs: Vec<KeyValue> = inner
+            .selectors
+            .on_chunk_response(response, ctx)
+            .into_iter()
+            .collect();
+        attrs.append(&mut inner.attributes);
+
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_chunk_response(response, ctx))
+        {
+            let new_incr = match inner.increment {
+                Increment::ChunkedCustom(None) => {
+                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                _ => {
+                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment = match inner.increment {
+            Increment::Unit | Increment::ChunkedUnit => 1f64,
+            Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+                instant.elapsed().as_secs_f64()
+            }
+            Increment::Custom(val) | Increment::ChunkedCustom(val) => match val {
+                Some(incr) => incr as f64,
+                None => 0f64,
+            },
+        };
+
+        if let Some(counter) = &inner.counter {
             counter.add(increment, &attrs);
         }
     }
@@ -1001,9 +1156,11 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit => 1f64,
-            Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
-            Increment::Custom(val) => match val {
+            Increment::Unit | Increment::ChunkedUnit => 1f64,
+            Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+                instant.elapsed().as_secs_f64()
+            }
+            Increment::Custom(val) | Increment::ChunkedCustom(val) => match val {
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
@@ -1026,9 +1183,11 @@ where
         if let Some(mut inner) = inner {
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
-                    Increment::Unit => 1f64,
-                    Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
-                    Increment::Custom(val) => match val {
+                    Increment::Unit | Increment::ChunkedUnit => 1f64,
+                    Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+                        instant.elapsed().as_secs_f64()
+                    }
+                    Increment::Custom(val) | Increment::ChunkedCustom(val) => match val {
                         Some(incr) => *incr as f64,
                         None => 0f64,
                     },
@@ -1052,6 +1211,7 @@ struct ActiveRequestsCounterInner {
 impl Instrumented for ActiveRequestsCounter {
     type Request = router::Request;
     type Response = router::Response;
+    type ChunkResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -1143,13 +1303,15 @@ where
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
-impl<A, T, Request, Response> Instrumented for CustomHistogram<Request, Response, A, T>
+impl<A, T, Request, Response, ChunkResponse> Instrumented
+    for CustomHistogram<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response>,
+    A: Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Default,
+    T: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type ChunkResponse = ChunkResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -1161,7 +1323,19 @@ where
             inner.attributes = selectors.on_request(request).into_iter().collect();
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match inner.increment {
+                Increment::ChunkedCustom(None) => {
+                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                _ => {
+                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
     }
 
@@ -1182,13 +1356,31 @@ where
             .as_ref()
             .and_then(|s| s.on_response(response))
         {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match inner.increment {
+                Increment::ChunkedCustom(None) => {
+                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                _ => {
+                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
 
         let increment = match inner.increment {
             Increment::Unit => Some(1f64),
             Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
             Increment::Custom(val) => val.map(|incr| incr as f64),
+            Increment::ChunkedUnit
+            | Increment::ChunkedDuration(_)
+            | Increment::ChunkedCustom(_) => {
+                // Nothing to do because we're incrementing on events
+                return;
+            }
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
@@ -1206,9 +1398,11 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit => Some(1f64),
-            Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
-            Increment::Custom(val) => val.map(|incr| incr as f64),
+            Increment::Unit | Increment::ChunkedUnit => Some(1f64),
+            Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+                Some(instant.elapsed().as_secs_f64())
+            }
+            Increment::Custom(val) | Increment::ChunkedCustom(val) => val.map(|incr| incr as f64),
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
@@ -1228,9 +1422,13 @@ where
         if let Some(mut inner) = inner {
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
-                    Increment::Unit => Some(1f64),
-                    Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
-                    Increment::Custom(val) => val.map(|incr| incr as f64),
+                    Increment::Unit | Increment::ChunkedUnit => Some(1f64),
+                    Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+                        Some(instant.elapsed().as_secs_f64())
+                    }
+                    Increment::Custom(val) | Increment::ChunkedCustom(val) => {
+                        val.map(|incr| incr as f64)
+                    }
                 };
 
                 if let Some(increment) = increment {

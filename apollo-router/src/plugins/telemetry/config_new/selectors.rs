@@ -23,6 +23,7 @@ use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -155,9 +156,10 @@ pub(crate) enum RouterSelector {
     },
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Derivative)]
+#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
+#[derivative(Debug)]
 pub(crate) enum SupergraphSelector {
     OperationName {
         /// The operation name from the query.
@@ -235,6 +237,32 @@ pub(crate) enum SupergraphSelector {
     ResponseContext {
         /// The response context key.
         response_context: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    ResponseData {
+        /// The supergraph response body json path of the chunks.
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        response_data: JsonPathInst,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    ResponseErrors {
+        /// The supergraph response body json path of the chunks.
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        response_errors: JsonPathInst,
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
@@ -473,6 +501,7 @@ pub(crate) enum SubgraphSelector {
 impl Selector for RouterSelector {
     type Request = router::Request;
     type Response = router::Response;
+    type ChunkResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
         match self {
@@ -565,6 +594,7 @@ impl Selector for RouterSelector {
 impl Selector for SupergraphSelector {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
+    type ChunkResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &supergraph::Request) -> Option<opentelemetry::Value> {
         match self {
@@ -686,11 +716,63 @@ impl Selector for SupergraphSelector {
             _ => None,
         }
     }
+
+    fn on_chunk_response(
+        &self,
+        response: &Self::ChunkResponse,
+        _ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        match self {
+            SupergraphSelector::ResponseData {
+                response_data,
+                default,
+                ..
+            } => if let Some(data) = &response.data {
+                let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
+                let mut val =
+                    JsonPathFinder::new(Box::new(data), Box::new(response_data.clone())).find();
+                if let serde_json::Value::Array(array) = &mut val {
+                    if array.len() == 1 {
+                        val = array
+                            .pop()
+                            .expect("already checked the array had a length of 1; qed");
+                    }
+                }
+
+                val.maybe_to_otel_value()
+            } else {
+                None
+            }
+            .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::ResponseErrors {
+                response_errors,
+                default,
+                ..
+            } => {
+                let errors = response.errors.clone();
+                let data: serde_json::Value = serde_json::to_value(errors).ok()?;
+                let mut val =
+                    JsonPathFinder::new(Box::new(data), Box::new(response_errors.clone())).find();
+                if let serde_json::Value::Array(array) = &mut val {
+                    if array.len() == 1 {
+                        val = array
+                            .pop()
+                            .expect("already checked the array had a length of 1; qed");
+                    }
+                }
+
+                val.maybe_to_otel_value()
+            }
+            .or_else(|| default.maybe_to_otel_value()),
+            _ => None,
+        }
+    }
 }
 
 impl Selector for SubgraphSelector {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
+    type ChunkResponse = ();
 
     fn on_request(&self, request: &subgraph::Request) -> Option<opentelemetry::Value> {
         match self {
