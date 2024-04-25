@@ -170,7 +170,7 @@ impl Merger {
     fn merge_descriptions<T: Eq + Clone>(&mut self, merged: &mut Option<T>, new: &Option<T>) {
         match (&mut *merged, new) {
             (_, None) => {}
-            (None, Some(_)) => *merged = new.clone(),
+            (None, Some(_)) => merged.clone_from(new),
             (Some(a), Some(b)) => {
                 if a != b {
                     // TODO add info about type and from/to subgraph
@@ -186,15 +186,17 @@ impl Merger {
         self.merge_descriptions(&mut supergraph_def.description, &subgraph_def.description);
 
         if subgraph_def.query.is_some() {
-            supergraph_def.query = subgraph_def.query.clone();
+            supergraph_def.query.clone_from(&subgraph_def.query);
             // TODO mismatch on query types
         }
         if subgraph_def.mutation.is_some() {
-            supergraph_def.mutation = subgraph_def.mutation.clone();
+            supergraph_def.mutation.clone_from(&subgraph_def.mutation);
             // TODO mismatch on mutation types
         }
         if subgraph_def.subscription.is_some() {
-            supergraph_def.subscription = subgraph_def.subscription.clone();
+            supergraph_def
+                .subscription
+                .clone_from(&subgraph_def.subscription);
             // TODO mismatch on subscription types
         }
     }

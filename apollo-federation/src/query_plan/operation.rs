@@ -176,10 +176,10 @@ pub(crate) mod normalized_selection_map {
             self.0.insert(value.key(), value)
         }
 
-        pub(crate) fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<NormalizedSelection>
+        pub(crate) fn remove<Q>(&mut self, key: &Q) -> Option<NormalizedSelection>
         where
             NormalizedSelectionKey: Borrow<Q>,
-            Q: Eq + Hash,
+            Q: Eq + Hash + ?Sized,
         {
             // We specifically use shift_remove() instead of swap_remove() to maintain order.
             self.0.shift_remove(key)
@@ -192,10 +192,10 @@ pub(crate) mod normalized_selection_map {
             self.0.retain(|k, v| predicate(k, v))
         }
 
-        pub(crate) fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<NormalizedSelectionValue>
+        pub(crate) fn get_mut<Q>(&mut self, key: &Q) -> Option<NormalizedSelectionValue>
         where
             NormalizedSelectionKey: Borrow<Q>,
-            Q: Eq + Hash,
+            Q: Eq + Hash + ?Sized,
         {
             self.0.get_mut(key).map(NormalizedSelectionValue::new)
         }
