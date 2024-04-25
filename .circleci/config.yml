@@ -504,6 +504,9 @@ commands:
             - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
       - run:
           name: Run tests
+          environment:
+            # Use the settings from the "ci" profile in nextest configuration.
+            NEXTEST_PROFILE: ci
           command: xtask test --workspace --locked
       - run:
           name: Delete large files from cache
@@ -518,6 +521,9 @@ commands:
               key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
               paths:
                 - target
+      - store_test_results:
+          # The results from nextest that power the CircleCI Insights.
+          path: ./target/nextest/ci/junit.xml
   fuzz_build:
     steps:
       - run: cargo +nightly fuzz build
