@@ -20,7 +20,13 @@ use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::services::supergraph;
+use crate::services::supergraph::Request;
+use crate::services::supergraph::Response;
 use crate::Context;
+
+static COST_ESTIMATED: &str = "cost.estimated";
+static COST_ACTUAL: &str = "cost.actual";
+static COST_DELTA: &str = "cost.delta";
 
 /// Attributes for Cost
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
@@ -98,96 +104,66 @@ pub(crate) struct CostInstrumentsConfig {
 
 impl CostInstrumentsConfig {
     pub(crate) fn to_instruments(&self) -> CostInstruments {
-        let meter = metrics::meter_provider()
-            .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
-
         let cost_estimated = self.cost_estimated.is_enabled().then(|| {
-            let mut nb_attributes = 0;
-            let selectors = match &self.cost_estimated {
-                DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
-                DefaultedStandardInstrument::Extendable { attributes } => {
-                    nb_attributes = attributes.custom.len();
-                    Some(attributes.clone())
-                }
-            };
-
-            CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Unit,
-                    condition: Condition::True,
-                    histogram: Some(
-                        meter
-                            .f64_histogram("apollo.router.operations.cost.estimated")
-                            .init(),
-                    ),
-                    attributes: Vec::with_capacity(nb_attributes),
-                    selector: Some(Arc::new(SupergraphSelector::Cost {
-                        cost: CostValue::Estimated,
-                    })),
-                    selectors,
-                }),
-            }
+            Self::histogram(
+                COST_ESTIMATED,
+                &self.cost_estimated,
+                SupergraphSelector::Cost {
+                    cost: CostValue::Estimated,
+                },
+            )
         });
 
         let cost_actual = self.cost_actual.is_enabled().then(|| {
-            let mut nb_attributes = 0;
-            let selectors = match &self.cost_actual {
-                DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
-                DefaultedStandardInstrument::Extendable { attributes } => {
-                    nb_attributes = attributes.custom.len();
-                    Some(attributes.clone())
-                }
-            };
-
-            CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Unit,
-                    condition: Condition::True,
-                    histogram: Some(
-                        meter
-                            .f64_histogram("apollo.router.operations.cost.actual")
-                            .init(),
-                    ),
-                    attributes: Vec::with_capacity(nb_attributes),
-                    selector: Some(Arc::new(SupergraphSelector::Cost {
-                        cost: CostValue::Actual,
-                    })),
-                    selectors,
-                }),
-            }
+            Self::histogram(
+                COST_ACTUAL,
+                &self.cost_actual,
+                SupergraphSelector::Cost {
+                    cost: CostValue::Actual,
+                },
+            )
         });
 
-        let cost_delta = self.cost_estimated.is_enabled().then(|| {
-            let mut nb_attributes = 0;
-            let selectors = match &self.cost_delta {
-                DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
-                DefaultedStandardInstrument::Extendable { attributes } => {
-                    nb_attributes = attributes.custom.len();
-                    Some(attributes.clone())
-                }
-            };
-
-            CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Unit,
-                    condition: Condition::True,
-                    histogram: Some(
-                        meter
-                            .f64_histogram("apollo.router.operations.cost.delta")
-                            .init(),
-                    ),
-                    attributes: Vec::with_capacity(nb_attributes),
-                    selector: Some(Arc::new(SupergraphSelector::Cost {
-                        cost: CostValue::Delta,
-                    })),
-                    selectors,
-                }),
-            }
+        let cost_delta = self.cost_delta.is_enabled().then(|| {
+            Self::histogram(
+                COST_DELTA,
+                &self.cost_delta,
+                SupergraphSelector::Cost {
+                    cost: CostValue::Delta,
+                },
+            )
         });
         CostInstruments {
             cost_estimated,
             cost_actual,
             cost_delta,
+        }
+    }
+
+    fn histogram(
+        name: &'static str,
+        config: &DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
+        selector: SupergraphSelector,
+    ) -> CustomHistogram<Request, Response, SupergraphAttributes, SupergraphSelector> {
+        let meter = metrics::meter_provider()
+            .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
+        let mut nb_attributes = 0;
+        let selectors = match config {
+            DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
+            DefaultedStandardInstrument::Extendable { attributes } => {
+                nb_attributes = attributes.custom.len();
+                Some(attributes.clone())
+            }
+        };
+        CustomHistogram {
+            inner: Mutex::new(CustomHistogramInner {
+                increment: Unit,
+                condition: Condition::True,
+                histogram: Some(meter.f64_histogram(name).init()),
+                attributes: Vec::with_capacity(nb_attributes),
+                selector: Some(Arc::new(selector)),
+                selectors,
+            }),
         }
     }
 }
@@ -277,4 +253,106 @@ pub(crate) enum CostValue {
     Delta,
     /// The result of the cost calculation. This is the error code returned by the cost calculation.
     Result,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::plugins::demand_control::CostResult;
+    use crate::plugins::telemetry::config_new::cost::CostInstruments;
+    use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
+    use crate::plugins::telemetry::config_new::instruments::Instrumented;
+    use crate::services::supergraph;
+    use crate::Context;
+
+    #[test]
+    fn test_default_estimated() {
+        let config = config(include_str!("fixtures/cost_estimated.router.yaml"));
+        let instruments = config.to_instruments();
+        make_request(instruments);
+
+        assert_histogram_sum!("cost.estimated", 100.0);
+    }
+
+    #[test]
+    fn test_default_actual() {
+        let config = config(include_str!("fixtures/cost_actual.router.yaml"));
+        let instruments = config.to_instruments();
+        make_request(instruments);
+
+        assert_histogram_sum!("cost.actual", 10.0);
+    }
+
+    #[test]
+    fn test_default_delta() {
+        let config = config(include_str!("fixtures/cost_delta.router.yaml"));
+        let instruments = config.to_instruments();
+        make_request(instruments);
+
+        assert_histogram_sum!("cost.delta", 90.0);
+    }
+
+    #[test]
+    fn test_default_estimated_with_attributes() {
+        let config = config(include_str!(
+            "fixtures/cost_estimated_with_attributes.router.yaml"
+        ));
+        let instruments = config.to_instruments();
+        make_request(instruments);
+
+        assert_histogram_sum!("cost.estimated", 100.0, cost.result = "COST_TOO_EXPENSIVE");
+    }
+
+    #[test]
+    fn test_default_actual_with_attributes() {
+        let config = config(include_str!(
+            "fixtures/cost_actual_with_attributes.router.yaml"
+        ));
+        let instruments = config.to_instruments();
+        make_request(instruments);
+
+        assert_histogram_sum!("cost.actual", 10.0, cost.result = "COST_TOO_EXPENSIVE");
+    }
+
+    #[test]
+    fn test_default_delta_with_attributes() {
+        let config = config(include_str!(
+            "fixtures/cost_delta_with_attributes.router.yaml"
+        ));
+        let instruments = config.to_instruments();
+        make_request(instruments);
+
+        assert_histogram_sum!("cost.delta", 90.0, cost.result = "COST_TOO_EXPENSIVE");
+    }
+
+    fn config(config: &'static str) -> CostInstrumentsConfig {
+        let config: serde_json::Value = serde_yaml::from_str(config).expect("config");
+        let supergraph_instruments = jsonpath_lib::select(&config, "$..supergraph");
+
+        serde_json::from_value((*supergraph_instruments.unwrap().first().unwrap()).clone())
+            .expect("config")
+    }
+
+    fn make_request(instruments: CostInstruments) {
+        let context = Context::new();
+        {
+            let mut extensions = context.extensions().lock();
+            extensions.insert(CostResult::default());
+            let cost_result = extensions.get_or_default_mut::<CostResult>();
+            cost_result.estimated = 100.0;
+            cost_result.actual = 10.0;
+            cost_result.result = "COST_TOO_EXPENSIVE"
+        }
+        instruments.on_request(
+            &supergraph::Request::fake_builder()
+                .context(context.clone())
+                .build()
+                .expect("request"),
+        );
+        instruments.on_response(
+            &supergraph::Response::fake_builder()
+                .context(context)
+                .build()
+                .expect("response"),
+        );
+    }
 }
