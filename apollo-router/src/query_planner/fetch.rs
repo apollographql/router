@@ -497,12 +497,20 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, schema: &Valid<apollo_compiler::Schema>) {
+    pub(crate) fn hash_subquery(
+        &mut self,
+        schema: &Valid<apollo_compiler::Schema>,
+        supergraph_schema_hash: &str,
+    ) {
         let doc = ExecutableDocument::parse(schema, &self.operation, "query.graphql")
             .expect("subgraph queries should be valid");
 
-        if let Ok(hash) = QueryHashVisitor::hash_query(schema, &doc, self.operation_name.as_deref())
-        {
+        if let Ok(hash) = QueryHashVisitor::hash_query(
+            schema,
+            supergraph_schema_hash,
+            &doc,
+            self.operation_name.as_deref(),
+        ) {
             self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
     }

@@ -173,6 +173,7 @@ If something crashes on your side for a specific subscription on specific events
 Also, when handling subscriptions with heartbeats disabled, make sure to store a subscription's request payload (including extensions data with callback URL and verifier) to be able to send the right events on the right callback URL when you start your lambda function triggered by an event.
 
 </Caution>
+
 ### Using a combination of modes
 
 If some of your subgraphs require [passthrough mode](#websocket-setup) and others require [callback mode](#http-callback-setup) for subscriptions, you can apply different modes to different subgraphs in your configuration:
