@@ -538,13 +538,13 @@ mod test {
                 TestError::EstimatedCostTooExpensive => {
                     DemandControlError::EstimatedCostTooExpensive {
                         max_cost: 1.0,
-                        estimated_cost: 1.0,
+                        estimated_cost: 2.0,
                     }
                 }
 
                 TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive {
                     actual_cost: 1.0,
-                    max_cost: 1.0,
+                    max_cost: 2.0,
                 },
             }
         }
