@@ -42,7 +42,7 @@ telemetry:
             request_header: "x-my-header"
             condition:
               eq:
-                - response_header: "head"
+                - request_header: "head"
                 - "test"
       supergraph:
         attributes:
