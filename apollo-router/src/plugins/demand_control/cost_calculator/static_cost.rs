@@ -579,4 +579,21 @@ mod tests {
         assert_eq!(planned_cost(schema, query).await, 10400.0);
         assert_eq!(actual_cost(schema, query, response), 2.0);
     }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_adjustable_list_cost() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+        let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
+
+        let conservative_estimate = StaticCostCalculator::new(Default::default(), 100)
+            .estimated(&query.executable, schema.supergraph_schema())
+            .unwrap();
+        let narrow_estimate = StaticCostCalculator::new(Default::default(), 5)
+            .estimated(&query.executable, schema.supergraph_schema())
+            .unwrap();
+
+        assert_eq!(conservative_estimate, 10200.0);
+        assert_eq!(narrow_estimate, 35.0);
+    }
 }
