@@ -965,4 +965,46 @@ mod tests {
         let query = "query { me { a } }";
         assert_ne!(hash(schema1, query), hash(schema2, query));
     }
+
+    #[test]
+    fn introspection_hash_changes_when_schema_updates() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          me: User
+          customer: User
+        }
+    
+        type User {
+          id: ID
+          name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+    
+        type Query {
+          me: NotUser
+        }
+    
+    
+        type NotUser {
+          id: ID!
+          name: String
+        }
+        "#;
+
+        let query = "{ __schema { types { name } } }";
+
+        assert!(
+            hash(schema1, query) != hash(schema2, query),
+            "introspection queries should not yield the same hash if the schema changed"
+        );
+    }
 }
