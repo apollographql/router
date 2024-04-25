@@ -59,8 +59,9 @@ impl StaticCostCalculator {
     fn score_field(
         &self,
         field: &Field,
-        parent_type_name: &NamedType,
+        parent_type: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         if StaticCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
@@ -88,17 +89,21 @@ impl StaticCostCalculator {
         } else {
             0.0
         };
-        type_cost +=
-            self.score_selection_set(&field.selection_set, field.ty().inner_named_type(), schema)?;
+        type_cost += self.score_selection_set(
+            &field.selection_set,
+            field.ty().inner_named_type(),
+            schema,
+            executable,
+        )?;
 
         // If the field is marked with `@requires`, the required selection may not be included
         // in the query's selection. Adding that requirement's cost to the field ensures it's
         // accounted for.
         let requirements =
-            RequiresDirective::from_field(field, parent_type_name, schema)?.map(|d| d.fields);
+            RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
         let requirements_cost = match requirements {
             Some(selection_set) => {
-                self.score_selection_set(&selection_set, parent_type_name, schema)?
+                self.score_selection_set(&selection_set, parent_type, schema, executable)?
             }
             None => 0.0,
         };
@@ -116,8 +121,20 @@ impl StaticCostCalculator {
         Ok(cost)
     }
 
-    fn score_fragment_spread(_fragment_spread: &FragmentSpread) -> Result<f64, DemandControlError> {
-        Ok(0.0)
+    fn score_fragment_spread(
+        &self,
+        fragment_spread: &FragmentSpread,
+        parent_type: &NamedType,
+        schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
+    ) -> Result<f64, DemandControlError> {
+        let fragment = fragment_spread.fragment_def(executable).ok_or(
+            DemandControlError::QueryParseFailure(format!(
+                "Parsed operation did not have a definition for fragment {}",
+                fragment_spread.fragment_name
+            )),
+        )?;
+        self.score_selection_set(&fragment.selection_set, parent_type, schema, executable)
     }
 
     fn score_inline_fragment(
@@ -125,14 +142,21 @@ impl StaticCostCalculator {
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
-        self.score_selection_set(&inline_fragment.selection_set, parent_type, schema)
+        self.score_selection_set(
+            &inline_fragment.selection_set,
+            parent_type,
+            schema,
+            executable,
+        )
     }
 
     fn score_operation(
         &self,
         operation: &Operation,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
 
@@ -143,7 +167,8 @@ impl StaticCostCalculator {
             )));
         };
 
-        cost += self.score_selection_set(&operation.selection_set, root_type_name, schema)?;
+        cost +=
+            self.score_selection_set(&operation.selection_set, root_type_name, schema, executable)?;
 
         Ok(cost)
     }
@@ -153,14 +178,18 @@ impl StaticCostCalculator {
         selection: &Selection,
         parent_type: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         match selection {
-            Selection::Field(f) => self.score_field(f, parent_type, schema),
-            Selection::FragmentSpread(s) => StaticCostCalculator::score_fragment_spread(s),
+            Selection::Field(f) => self.score_field(f, parent_type, schema, executable),
+            Selection::FragmentSpread(s) => {
+                self.score_fragment_spread(s, parent_type, schema, executable)
+            }
             Selection::InlineFragment(i) => self.score_inline_fragment(
                 i,
                 i.type_condition.as_ref().unwrap_or(parent_type),
                 schema,
+                executable,
             ),
         }
     }
@@ -170,10 +199,11 @@ impl StaticCostCalculator {
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
-            cost += self.score_selection(selection, parent_type_name, schema)?;
+            cost += self.score_selection(selection, parent_type_name, schema, executable)?;
         }
         Ok(cost)
     }
@@ -305,10 +335,10 @@ impl StaticCostCalculator {
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         if let Some(op) = &query.anonymous_operation {
-            cost += self.score_operation(op, schema)?;
+            cost += self.score_operation(op, schema, query)?;
         }
         for (_name, op) in query.named_operations.iter() {
-            cost += self.score_operation(op, schema)?;
+            cost += self.score_operation(op, schema, query)?;
         }
         Ok(cost)
     }
