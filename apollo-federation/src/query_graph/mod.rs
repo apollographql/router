@@ -769,9 +769,32 @@ impl QueryGraph {
 
     pub(crate) fn has_an_implementation_with_provides(
         &self,
-        _source: &NodeStr,
-        _interface_field_definition_position: InterfaceFieldDefinitionPosition,
+        source: &NodeStr,
+        interface_field_definition_position: InterfaceFieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        todo!()
+        let schema = self.schema_by_source(source)?;
+        let Some(metadata) = schema.subgraph_metadata() else {
+            return Err(FederationError::internal(format!(
+                "Interface should have come from a federation subgraph {}",
+                source
+            )));
+        };
+
+        let provides_directive_definition = metadata
+            .federation_spec_definition()
+            .provides_directive_definition(schema)?;
+
+        for object_type_definition_position in
+            schema.possible_runtime_types(interface_field_definition_position.parent().into())?
+        {
+            let field_pos = object_type_definition_position
+                .field(interface_field_definition_position.field_name.clone());
+            let field = field_pos.get(schema.schema())?;
+            if field.directives.has(&provides_directive_definition.name) {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
