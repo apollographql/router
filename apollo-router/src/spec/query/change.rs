@@ -36,8 +36,6 @@ pub(crate) struct QueryHashVisitor<'a> {
     hasher: Sha256,
     fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
-    // name, field
-    hashed_fields: HashSet<(String, String)>,
     join_field_directive_name: Option<String>,
     join_type_directive_name: Option<String>,
 }
@@ -52,7 +50,6 @@ impl<'a> QueryHashVisitor<'a> {
             hasher: Sha256::new(),
             fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
-            hashed_fields: HashSet::new(),
             // should we just return an error if we do not find those directives?
             join_field_directive_name: Schema::directive_name(
                 schema,
@@ -232,31 +229,28 @@ impl<'a> QueryHashVisitor<'a> {
     fn hash_field(
         &mut self,
         parent_type: String,
-        type_name: String,
         field_def: &FieldDefinition,
         arguments: &[Node<Argument>],
     ) -> Result<(), BoxError> {
-        if self.hashed_fields.insert((parent_type.clone(), type_name)) {
-            self.hash_type_by_name(&parent_type)?;
+        self.hash_type_by_name(&parent_type)?;
 
-            field_def.name.hash(self);
+        field_def.name.hash(self);
 
-            for argument in &field_def.arguments {
-                self.hash_input_value_definition(argument)?;
-            }
-
-            for argument in arguments {
-                self.hash_argument(argument);
-            }
-
-            self.hash_type(&field_def.ty)?;
-
-            for directive in &field_def.directives {
-                self.hash_directive(directive);
-            }
-
-            self.hash_join_field(&parent_type, &field_def.directives)?;
+        for argument in &field_def.arguments {
+            self.hash_input_value_definition(argument)?;
         }
+
+        for argument in arguments {
+            self.hash_argument(argument);
+        }
+
+        self.hash_type(&field_def.ty)?;
+
+        for directive in &field_def.directives {
+            self.hash_directive(directive);
+        }
+
+        self.hash_join_field(&parent_type, &field_def.directives)?;
         Ok(())
     }
 
@@ -359,7 +353,6 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
     ) -> Result<(), BoxError> {
         self.hash_field(
             parent_type.to_string(),
-            field_def.name.as_str().to_string(),
             field_def,
             &node.arguments,
         )?;
