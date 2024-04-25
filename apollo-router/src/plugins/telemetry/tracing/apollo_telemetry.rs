@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::future;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -35,6 +34,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::plugins::telemetry;
+use crate::plugins::telemetry::apollo::ApolloTracingProtocol;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::OperationSubType;
@@ -178,8 +178,10 @@ impl From<SpanData> for LightSpanData {
 pub(crate) struct Exporter {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
     #[derivative(Debug = "ignore")]
-    report_exporter: Arc<ApolloExporter>,
+    report_exporter: Option<Arc<ApolloExporter>>,
+    #[derivative(Debug = "ignore")]
     otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
+    apollo_tracing_protocol: ApolloTracingProtocol,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
@@ -215,7 +217,8 @@ impl Exporter {
     #[builder]
     pub(crate) fn new<'a>(
         endpoint: &'a Url,
-        otlp_endpoint: Option<&'a Url>,
+        otlp_endpoint: &'a Url,
+        apollo_tracing_protocol: ApolloTracingProtocol,
         apollo_key: &'a str,
         apollo_graph_ref: &'a str,
         schema_id: &'a str,
@@ -229,23 +232,31 @@ impl Exporter {
 
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
-            report_exporter: Arc::new(ApolloExporter::new(
-                endpoint,
-                batch_config,
-                apollo_key,
-                apollo_graph_ref,
-                schema_id,
-            )?),
-            otlp_exporter: match otlp_endpoint {
-                Some(otlp_endpoint) => Some(Arc::new(ApolloOtlpExporter::new(
-                    otlp_endpoint,
-                    batch_config,
-                    apollo_key,
-                    apollo_graph_ref,
-                    schema_id,
-                )?)),
-                None => None,
+            report_exporter: match apollo_tracing_protocol {
+                ApolloTracingProtocol::Apollo | ApolloTracingProtocol::ApolloAndOtlp => {
+                    Some(Arc::new(ApolloExporter::new(
+                        endpoint,
+                        batch_config,
+                        apollo_key,
+                        apollo_graph_ref,
+                        schema_id,
+                    )?))
+                },
+                ApolloTracingProtocol::Otlp  => None,
             },
+            otlp_exporter: match apollo_tracing_protocol {
+                ApolloTracingProtocol::Apollo => None,
+                ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => {
+                    Some(Arc::new(ApolloOtlpExporter::new(
+                        otlp_endpoint,
+                        batch_config,
+                        apollo_key,
+                        apollo_graph_ref,
+                        schema_id,
+                    )?))
+                }
+            },
+            apollo_tracing_protocol: apollo_tracing_protocol,
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
@@ -347,39 +358,71 @@ impl Exporter {
         Ok(results)
     }
 
-    // TBD(tim): Likely need to revisit this, handle errors, deal with the unknown spans more carefully, etc.
-    fn collect_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
-        // Iterate over all children and recursively collect the entire subtree.
-        // We're going to use "peek" here b/c it would otherwise remove the span from the cache
-        // and prevent the apollo exporter from finding it.
-        // We'll probably also need some flag to indicate whether we should pop() or peek() based on whether
-        // or not we expect the apollo exporter to run (only one should use pop() to remove spans from the cache).
-        let mut child_spans = match self.spans_by_parent_id.peek(&root_span.span_id) {
+    fn init_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
+        // if we're known, add ourselves to the list, otherwise don't.
+        let unknown = self.include_span_names.contains(root_span.name.as_ref());
+        if unknown {
+            Vec::new()
+        } else {
+            let exporter = self.otlp_exporter.as_ref().unwrap();
+            let root_span_data = exporter.prepare_for_export(root_span);
+            vec![root_span_data]
+        }
+    }
+
+    /// Collects the subtree for a trace by calling pop() on the LRU cache for
+    /// all spans in the tree. 
+    fn pop_spans_for_tree(&mut self, root_span: &LightSpanData) -> Vec<SpanData> {
+        let root_span_id = root_span.span_id;
+        let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {
             Some(spans) => spans
                 .into_iter()
                 .flat_map(|(_, span)| {
-                    self.collect_spans_for_tree(span)
+                    self.pop_spans_for_tree(&span)
                 })
                 .collect(),
             None => Vec::new(),
         };
-        let unknown = self.include_span_names.contains(root_span.name.as_ref());
-        // if we're known, add ourselves to the list, otherwise don't.
-        let mut spans_for_tree = if unknown {
-            Vec::new()
-        } else {
-            let exporter = self.otlp_exporter.as_ref().unwrap();
-            vec![exporter.prepare_for_export(root_span)]
-        };
-
+        let mut spans_for_tree = self.init_spans_for_tree(root_span);
         spans_for_tree.append(&mut child_spans);
         spans_for_tree
     }
 
-    fn group_by_trace(&mut self, span: &LightSpanData) -> Vec<SpanData> {
-        // TBD(tim): This could alternatively use the same algorithm in `groupbytrace` processor, which
-        // groups based on trace ID instead of connecting recursively by parent ID.
-        self.collect_spans_for_tree(span)
+    /// Collects the subtree for a trace by calling peek() on the LRU cache for
+    /// all spans in the tree. 
+    fn peek_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
+        let root_span_id = root_span.span_id;
+        let mut child_spans = match self.spans_by_parent_id.peek(&root_span_id) {
+            Some(spans) => spans
+                .into_iter()
+                .flat_map(|(_, span)| {
+                    self.peek_spans_for_tree(span)
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        
+        let mut spans_for_tree = self.init_spans_for_tree(root_span);
+        spans_for_tree.append(&mut child_spans);
+        spans_for_tree
+    }
+
+    /// Used by the OTLP exporter to build up a complete trace given an initial "root span".
+    /// Iterates over all children and recursively collect the entire subtree.
+    /// The pop_cache flag indicates whether we should pop() or peek() when reading from the LRU cache.
+    /// When we are running in ApolloAndOtlp mode, only the Apollo side will pop and the Otlp side will peek & clone.
+    /// TBD(tim): For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
+    /// groups based on trace ID instead of connecting recursively by parent ID.
+    fn group_by_trace(&mut self, span: &LightSpanData, pop_cache: bool) -> Vec<SpanData> {
+        if pop_cache {
+            // We're going to use "pop" here b/c it's ok to remove the spans from the cache
+            // when the apollo exporter is not enabled.
+            self.pop_spans_for_tree(span)
+         } else {
+            // We're going to use "peek" here b/c it would otherwise remove the spans from the cache
+            // and prevent the apollo exporter from finding them.
+            self.peek_spans_for_tree(span)
+         } 
     }
 
     fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
@@ -838,28 +881,32 @@ impl SpanExporter for Exporter {
             {
                 let root_span: LightSpanData = span.into();
                 if self.otlp_exporter.is_some() {
-                    let grouped_trace_spans = self.group_by_trace(&root_span);
+                    // Only pop from the cache if running in Otlp-only mode.
+                    let pop_cache = self.apollo_tracing_protocol == ApolloTracingProtocol::Otlp;
+                    let grouped_trace_spans = self.group_by_trace(&root_span, pop_cache);
                     otlp_trace_spans.push(grouped_trace_spans);
                 }
 
-                match self.extract_traces(root_span) {
-                    Ok(extracted_traces) => {
-                        for mut trace in extracted_traces {
-                            let mut operation_signature = Default::default();
-                            std::mem::swap(&mut trace.signature, &mut operation_signature);
-                            if !operation_signature.is_empty() {
-                                traces.push((operation_signature, trace));
+                if self.report_exporter.is_some() {
+                    match self.extract_traces(root_span) {
+                        Ok(extracted_traces) => {
+                            for mut trace in extracted_traces {
+                                let mut operation_signature = Default::default();
+                                std::mem::swap(&mut trace.signature, &mut operation_signature);
+                                if !operation_signature.is_empty() {
+                                    traces.push((operation_signature, trace));
+                                }
                             }
                         }
-                    }
-                    Err(Error::MultipleErrors(errors)) => {
-                        tracing::error!(
-                            "failed to construct trace: {}, skipping",
-                            Error::MultipleErrors(errors)
-                        );
-                    }
-                    Err(error) => {
-                        tracing::error!("failed to construct trace: {}, skipping", error);
+                        Err(Error::MultipleErrors(errors)) => {
+                            tracing::error!(
+                                "failed to construct trace: {}, skipping",
+                                Error::MultipleErrors(errors)
+                            );
+                        }
+                        Err(error) => {
+                            tracing::error!("failed to construct trace: {}, skipping", error);
+                        }
                     }
                 }
             } else if span.parent_span_id != SpanId::INVALID {
@@ -882,26 +929,29 @@ impl SpanExporter for Exporter {
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
         let mut report = telemetry::apollo::Report::default();
         report += SingleReport::Traces(TracesReport { traces });
-        let apollo_exporter = self.report_exporter.clone();
-        let otlp_exporter = match self.otlp_exporter.clone() { 
-            Some(exporter) => Some(exporter),
+        let report_exporter = match self.report_exporter.as_ref() {
+            Some(exporter) => Some(exporter.clone()),
+            None => None,
+        };
+        let otlp_exporter = match self.otlp_exporter.as_ref() { 
+            Some(exporter) => Some(exporter.clone()),
             None => None,
         };
 
         let fut = async move {
-            let apollo_result = 
-                apollo_exporter
-                .submit_report(report)
-                .map_err(|e| TraceError::ExportFailed(Box::new(e))).boxed();
-            
-            let otlp_result = match otlp_exporter {
-                Some(exporter) => exporter.export(otlp_trace_spans.into_iter().flatten().collect()),
-                None => 
-                    // if there is no otlp_exporter available, this is a no-op
-                    future::ready(Ok(())).boxed()
-            };
-                
-            match try_join_all(vec![apollo_result, otlp_result]).await {
+            let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();
+            if let Some(exporter) = report_exporter.as_ref() {
+                exports.push(
+                    exporter
+                    .submit_report(report)
+                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                    .boxed()
+                );
+            }
+            if let Some(exporter) = otlp_exporter.as_ref() {
+                exports.push(exporter.export(otlp_trace_spans.into_iter().flatten().collect()));
+            }
+            match try_join_all(exports).await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e)
             }

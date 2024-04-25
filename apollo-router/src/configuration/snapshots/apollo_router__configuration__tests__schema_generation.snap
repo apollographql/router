@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 31
 expression: "&schema"
 ---
 {
@@ -3212,6 +3213,32 @@ expression: "&schema"
               "description": "The Apollo Studio endpoint for exporting traces and metrics.",
               "default": "https://usage-reporting.api.apollographql.com/",
               "type": "string"
+            },
+            "experimental_tracing_protocol": {
+              "description": "The protocol used for sending traces to Apollo Studio.",
+              "oneOf": [
+                {
+                  "description": "Use only the Apollo usage reporting protobuf over http",
+                  "type": "string",
+                  "enum": [
+                    "apollo"
+                  ]
+                },
+                {
+                  "description": "Use only OTLP over GRPC",
+                  "type": "string",
+                  "enum": [
+                    "otlp"
+                  ]
+                },
+                {
+                  "description": "Use both the Apollo usage reporting protobuf AND OTLP (note this is a testing mode and not intended for use in production)",
+                  "type": "string",
+                  "enum": [
+                    "apollo_and_otlp"
+                  ]
+                }
+              ]
             },
             "field_level_instrumentation_sampler": {
               "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",

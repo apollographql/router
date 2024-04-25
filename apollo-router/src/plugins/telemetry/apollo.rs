@@ -186,15 +186,16 @@ impl Default for Config {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Copy)]
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ApolloTracingProtocol {
-    // Use only the Apollo usage reporting protobuf over http
+    /// Use only the Apollo usage reporting protobuf over http
     Apollo,
-    // Use both the Apollo usage reporting protobuf AND Apollo OTLP
+    /// Use only OTLP over GRPC
+    Otlp,
+    /// Use both the Apollo usage reporting protobuf AND OTLP
+    /// (note this is a testing mode and not intended for use in production)
     ApolloAndOtlp,
-    // Use only the Apollo OTLP over GRPC
-    // Otlp, TBD(Tim): we don't support "OTLP only" mode just yet.
 }
 
 schemar_fn!(
