@@ -967,7 +967,7 @@ mod tests {
     }
 
     #[test]
-    fn introspection_hash_changes_when_schema_updates() {
+    fn introspection() {
         let schema1: &str = r#"
         schema {
           query: Query
@@ -1002,9 +1002,6 @@ mod tests {
 
         let query = "{ __schema { types { name } } }";
 
-        assert!(
-            hash(schema1, query) != hash(schema2, query),
-            "introspection queries should not yield the same hash if the schema changed"
-        );
+        assert_ne!(hash(schema1, query), hash(schema2, query));
     }
 }
