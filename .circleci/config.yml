@@ -378,6 +378,10 @@ commands:
               cargo binstall --no-confirm --locked --version 0.12.0 cargo-fuzz
             fi
 
+            if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
+              cargo binstall --no-confirm --locked --version 0.9.70 cargo-nextest
+            fi
+
   fetch_dependencies:
     steps:
       - run:
