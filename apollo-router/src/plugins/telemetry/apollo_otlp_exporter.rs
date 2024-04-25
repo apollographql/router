@@ -1,28 +1,34 @@
-use crate::plugins::telemetry::{
-    apollo_exporter::get_uname, metrics::apollo::ROUTER_ID, tracing::BatchProcessorConfig,
-    GLOBAL_TRACER_NAME,
-};
+use std::borrow::Cow;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use derivative::Derivative;
 use futures::future::BoxFuture;
-use opentelemetry::{
-    sdk::{
-        export::trace::{ExportResult, SpanData, SpanExporter},
-        trace::EvictedQueue,
-        Resource,
-    },
-    trace::{SpanContext, Status, TraceFlags, TraceState},
-    InstrumentationLibrary, KeyValue,
-};
-use opentelemetry_otlp::{SpanExporterBuilder, WithExportConfig};
-use std::sync::Arc;
-use std::{borrow::Cow, sync::Mutex};
+use opentelemetry::sdk::export::trace::ExportResult;
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::sdk::trace::EvictedQueue;
+use opentelemetry::sdk::Resource;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::Status;
+use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceState;
+use opentelemetry::InstrumentationLibrary;
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::SpanExporterBuilder;
+use opentelemetry_otlp::WithExportConfig;
 use sys_info::hostname;
-use tonic::metadata::{MetadataMap, MetadataValue};
+use tonic::metadata::MetadataMap;
+use tonic::metadata::MetadataValue;
 use tower::BoxError;
 use url::Url;
 use uuid::Uuid;
 
 use super::tracing::apollo_telemetry::LightSpanData;
+use crate::plugins::telemetry::apollo_exporter::get_uname;
+use crate::plugins::telemetry::metrics::apollo::ROUTER_ID;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
 #[derive(Clone, Derivative)]
