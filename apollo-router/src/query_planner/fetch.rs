@@ -132,6 +132,29 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+    #[serde(default)]
+    pub(crate) protocol: Arc<Protocol>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Protocol {
+    #[default]
+    GraphQL,
+    RestWrapper(RestProtocolWrapper),
+    RestFetch(RestFetchNode),
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RestProtocolWrapper {
+    pub(crate) magic_finder_field: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct RestFetchNode {
+    connector_service_name: String,
+    parent_service_name: String,
 }
 
 #[derive(Clone)]

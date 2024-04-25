@@ -6,6 +6,7 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
@@ -21,6 +22,7 @@ use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
@@ -44,6 +46,8 @@ use crate::metrics::meter_provider;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
+use crate::plugins::connectors::connector_subgraph_names;
+use crate::plugins::connectors::Connector;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
@@ -70,6 +74,9 @@ pub(crate) struct BridgeQueryPlanner {
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
+    subgraph_planners: Arc<HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>>,
+    connectors: Option<Arc<HashMap<Arc<String>, Connector>>>,
+    connector_urls: HashMap<Arc<String>, String>,
     _federation_instrument: ObservableGauge<u64>,
 }
 
@@ -233,13 +240,14 @@ impl PlannerMode {
                 )
                 .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
 
+                // TODO: name new is probably wrong here
                 let plan = rust
-                    .build_query_plan(&document, operation.as_deref())
+                    .build_query_plan(&document, operation.and_then(|n| Name::new(n).ok()))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()))?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
                 // `Configuration::validate` ensures that we only take this path
-                // when we also have `ApolloMetricsGenerationMode::New``
+                // when we also have `ApolloMetricsGenerationMode::New`
                 let usage_reporting = UsageReporting {
                     stats_report_key: Default::default(),
                     referenced_fields_by_type: Default::default(),
@@ -266,7 +274,10 @@ impl PlannerMode {
                 // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
                 let rust_result = std::panic::catch_unwind(|| {
                     USING_CATCH_UNWIND.set(true);
-                    let result = rust.build_query_plan(&document, operation.as_deref());
+                    let result = rust.build_query_plan(
+                        &document,
+                        operation.clone().and_then(|n| Name::new(n).ok()),
+                    );
                     USING_CATCH_UNWIND.set(false);
                     result
                 })
@@ -437,6 +448,75 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
+        let connectors = schema
+            .source
+            .as_ref()
+            .map(|source| source.connectors().clone());
+
+        let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
+            // TODO: arbitrary, going for the js planner until the rust one is ready
+            let planner = match &planner {
+                PlannerMode::Js(planner) => planner.clone(),
+                PlannerMode::Both { js, .. } => js.clone(),
+                PlannerMode::Rust { .. } => {
+                    return Err(ServiceBuildError::ServiceError(
+                        "no support in rust yet".into(),
+                    ))
+                }
+            };
+            let connector_supergraph = source.supergraph();
+            let connectors = source.connectors();
+            let connector_subgraph_names = connector_subgraph_names(&connectors);
+            let connector_supergraph_str = connector_supergraph.serialize().to_string();
+
+            let mut subgraph_planners = HashMap::new();
+
+            let connector_urls = connectors
+                .iter()
+                .map(|(name, connector)| (name.clone(), connector.to_string()))
+                .collect::<HashMap<_, _>>();
+
+            let subgraph_planner = Arc::new(
+                planner
+                    .update(
+                        connector_supergraph_str.clone(),
+                        QueryPlannerConfig {
+                            incremental_delivery: Some(IncrementalDeliverySupport {
+                                enable_defer: Some(configuration.supergraph.defer_support),
+                            }),
+                            graphql_validation: false,
+                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                            debug: Some(QueryPlannerDebugConfig {
+                                bypass_planner_for_single_subgraph: None,
+                                max_evaluated_plans: configuration
+                                    .supergraph
+                                    .query_planning
+                                    .experimental_plans_limit
+                                    .or(Some(10000)),
+                                paths_limit: configuration
+                                    .supergraph
+                                    .query_planning
+                                    .experimental_paths_limit,
+                            }),
+                            generate_query_fragments: Some(
+                                configuration.supergraph.generate_query_fragments,
+                            ),
+                            type_conditioned_fetching: configuration
+                                .experimental_type_conditioned_fetching,
+                        },
+                    )
+                    .await?,
+            );
+
+            for name in connector_subgraph_names {
+                subgraph_planners.insert(name, subgraph_planner.clone());
+            }
+
+            (subgraph_planners, connector_urls)
+        } else {
+            (Default::default(), Default::default())
+        };
+
         let subgraph_schemas = Arc::new(planner.subgraphs().await?);
 
         let introspection = if configuration.supergraph.introspection {
@@ -463,6 +543,9 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
+            subgraph_planners: Arc::new(subgraph_planners),
+            connectors,
+            connector_urls,
         })
     }
 
@@ -514,7 +597,75 @@ impl BridgeQueryPlanner {
                 .map_err(|errors| SchemaError::Validate(errors.into()))?;
             subgraph_schemas.insert(name, Arc::new(schema));
         }
-        let subgraph_schemas = Arc::new(subgraph_schemas);
+
+        let connectors = schema
+            .source
+            .as_ref()
+            .map(|source| source.connectors().clone());
+
+        let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
+            let connector_supergraph = source.supergraph();
+            let connectors = source.connectors();
+            let connector_subgraph_names = connector_subgraph_names(&connectors);
+            let connector_supergraph_str = connector_supergraph.serialize().to_string();
+
+            let mut subgraph_planners = HashMap::new();
+
+            let connector_urls = connectors
+                .iter()
+                .map(|(name, connector)| (name.clone(), connector.to_string()))
+                .collect::<HashMap<_, _>>();
+
+            let subgraph_planner = Arc::new(
+                planner
+                    .update(
+                        connector_supergraph_str.clone(),
+                        QueryPlannerConfig {
+                            incremental_delivery: Some(IncrementalDeliverySupport {
+                                enable_defer: Some(configuration.supergraph.defer_support),
+                            }),
+                            graphql_validation: false,
+                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                            debug: Some(QueryPlannerDebugConfig {
+                                bypass_planner_for_single_subgraph: None,
+                                max_evaluated_plans: configuration
+                                    .supergraph
+                                    .query_planning
+                                    .experimental_plans_limit
+                                    .or(Some(10000)),
+                                paths_limit: configuration
+                                    .supergraph
+                                    .query_planning
+                                    .experimental_paths_limit,
+                            }),
+                            generate_query_fragments: Some(
+                                configuration.supergraph.generate_query_fragments,
+                            ),
+                            type_conditioned_fetching: configuration
+                                .experimental_type_conditioned_fetching,
+                        },
+                    )
+                    .await?,
+            );
+
+            for name in connector_subgraph_names {
+                subgraph_planners.insert(name, subgraph_planner.clone());
+            }
+
+            (subgraph_planners, connector_urls)
+        } else {
+            (Default::default(), Default::default())
+        };
+
+        let subgraph_schema_strings = planner.subgraphs().await?;
+        let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
+
+        for (name, schema) in subgraph_schema_strings {
+            subgraph_schemas.insert(
+                name.clone(),
+                Arc::new(Schema::parse_compiler_schema(&schema)?),
+            );
+        }
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
@@ -529,11 +680,14 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
-            subgraph_schemas,
+            subgraph_schemas: Arc::new(subgraph_schemas),
             introspection,
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
+            subgraph_planners: Arc::new(subgraph_planners),
+            connectors,
+            connector_urls,
         })
     }
 
@@ -628,6 +782,23 @@ impl BridgeQueryPlanner {
                 plan_options,
             )
             .await?;
+
+        if let Some(node) = plan_success.data.query_plan.node.as_mut() {
+            node.extract_authorization_metadata(&self.subgraph_schemas, &key);
+            node.generate_connector_plan(
+                self.schema.as_ref(),
+                &self.subgraph_planners,
+                &self.connector_urls,
+                &self.connectors.clone().unwrap_or_default(),
+            )
+            .await?;
+
+            tracing::debug!(
+                query = original_query,
+                plan = serde_json::to_string(&node).unwrap()
+            );
+        }
+
         plan_success
             .data
             .query_plan
@@ -1038,7 +1209,7 @@ impl BridgeQueryPlanner {
 }
 
 /// Data coming from the `plan` method on the router_bridge
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<String>,
