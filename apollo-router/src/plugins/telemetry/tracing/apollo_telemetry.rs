@@ -925,11 +925,16 @@ impl SpanExporter for Exporter {
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
         let mut report = telemetry::apollo::Report::default();
         report += SingleReport::Traces(TracesReport { traces });
-        let report_exporter = self
-            .report_exporter
-            .as_ref()
-            .map(|exporter| exporter.clone());
-        let otlp_exporter = self.otlp_exporter.as_ref().map(|exporter| exporter.clone());
+        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
+        let report_exporter = match self.report_exporter.as_ref() {
+            Some(exporter) => Some(exporter.clone()),
+            None => None,
+        };
+        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
+        let otlp_exporter = match self.otlp_exporter.as_ref() {
+            Some(exporter) => Some(exporter.clone()),
+            None => None,
+        };
 
         let fut = async move {
             let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();
