@@ -518,6 +518,7 @@ impl IntegrationTest {
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
                     .header("x-my-header", "test")
+                    .header("head", "test")
                     .json(&query)
                     .build()
                     .unwrap();
