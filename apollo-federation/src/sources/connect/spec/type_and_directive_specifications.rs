@@ -1,16 +1,19 @@
 use apollo_compiler::{
-    ast::{DirectiveLocation, Name, Type, Value},
-    name, ty,
+    ast::{DirectiveLocation, InputValueDefinition, Name, Type, Value},
+    name,
+    schema::{Component, InputObjectType},
+    ty,
 };
+use indexmap::IndexMap;
 
 use crate::{
     error::FederationError,
     link::Link,
     schema::{
+        position::InputObjectTypeDefinitionPosition,
         type_and_directive_specification::{
             ArgumentSpecification, DirectiveArgumentSpecification, DirectiveSpecification,
-            InputFieldSpecification, InputTypeSpecification, ScalarTypeSpecification,
-            TypeAndDirectiveSpecification,
+            ScalarTypeSpecification, TypeAndDirectiveSpecification,
         },
         FederationSchema,
     },
@@ -37,90 +40,143 @@ pub(super) fn check_or_add(
     link: &Link,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
+    // scalar JSONSelection
     let json_selection_spec = ScalarTypeSpecification {
         name: link.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME),
     };
 
+    // scalar URLPathTemplate
     let url_path_template_spec = ScalarTypeSpecification {
         name: link.type_name_in_schema(&URL_PATH_TEMPLATE_SCALAR_NAME),
     };
 
-    let http_header_mapping = InputTypeSpecification {
+    // -------------------------------------------------------------------------
+    let http_header_mapping_field_list = vec![
+        InputValueDefinition {
+            description: None,
+            name: Name::new_unchecked(HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.into()),
+            ty: ty!(String!).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: Name::new_unchecked(HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.into()),
+            ty: ty!(String).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: Name::new_unchecked(HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.into()),
+            ty: ty!([String!]).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ];
+
+    let mut http_header_mapping_fields = IndexMap::new();
+    for field in http_header_mapping_field_list {
+        http_header_mapping_fields.insert(field.name.clone(), Component::new(field));
+    }
+
+    // input HTTPHeaderMapping {
+    //   name: String!
+    //   as: String
+    //   value: [String!]
+    // }
+    let http_header_mapping = InputObjectType {
+        description: None,
         name: link.type_name_in_schema(&HTTP_HEADER_MAPPING_NAME_IN_SPEC),
-        fields: |_| {
-            vec![
-                InputFieldSpecification {
-                    name: Name::new_unchecked(HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.into()),
-                    ty: ty!(String!),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: Name::new_unchecked(HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.into()),
-                    ty: ty!(String),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: Name::new_unchecked(HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.into()),
-                    ty: ty!([String!]),
-                    default_value: None,
-                },
-            ]
-        },
+        directives: Default::default(),
+        fields: http_header_mapping_fields,
     };
 
-    let connect_http_spec = InputTypeSpecification {
+    let http_header_mapping_pos = InputObjectTypeDefinitionPosition {
+        type_name: http_header_mapping.name.clone(),
+    };
+
+    // -------------------------------------------------------------------------
+
+    let connect_http_field_list = vec![
+        InputValueDefinition {
+            description: None,
+            name: name!(GET),
+            ty: Type::Named(url_path_template_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: name!(POST),
+            ty: Type::Named(url_path_template_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: name!(PUT),
+            ty: Type::Named(url_path_template_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: name!(PATCH),
+            ty: Type::Named(url_path_template_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: name!(DELETE),
+            ty: Type::Named(url_path_template_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: Name::new_unchecked(CONNECT_BODY_ARGUMENT_NAME.into()),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: Name::new_unchecked(CONNECT_HEADERS_ARGUMENT_NAME.into()),
+            ty: Type::List(Box::new(Type::NonNullNamed(
+                http_header_mapping.name.clone(),
+            )))
+            .into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ];
+
+    let mut connect_http_fields = IndexMap::new();
+    for field in connect_http_field_list {
+        connect_http_fields.insert(field.name.clone(), Component::new(field));
+    }
+
+    let connect_http = InputObjectType {
         name: link.type_name_in_schema(&CONNECT_HTTP_NAME_IN_SPEC),
-        fields: |s| {
-            let link = s
-                .metadata()
-                .unwrap()
-                .for_identity(&ConnectSpecDefinition::identity())
-                .unwrap();
-            let url_path_template_name = link.type_name_in_schema(&URL_PATH_TEMPLATE_SCALAR_NAME);
-            let json_selection_template_name =
-                link.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
-            let http_header_mapping_name =
-                link.type_name_in_schema(&HTTP_HEADER_MAPPING_NAME_IN_SPEC);
-            vec![
-                InputFieldSpecification {
-                    name: name!(GET),
-                    ty: Type::Named(url_path_template_name.clone()),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: name!(POST),
-                    ty: Type::Named(url_path_template_name.clone()),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: name!(PUT),
-                    ty: Type::Named(url_path_template_name.clone()),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: name!(PATCH),
-                    ty: Type::Named(url_path_template_name.clone()),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: name!(DELETE),
-                    ty: Type::Named(url_path_template_name.clone()),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: Name::new_unchecked(CONNECT_BODY_ARGUMENT_NAME.into()),
-                    ty: Type::Named(json_selection_template_name.clone()),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: Name::new_unchecked(CONNECT_HEADERS_ARGUMENT_NAME.into()),
-                    ty: Type::List(Box::new(Type::NonNullNamed(http_header_mapping_name))),
-                    default_value: None,
-                },
-            ]
-        },
+        description: None,
+        directives: Default::default(),
+        fields: connect_http_fields,
     };
 
+    let connect_http_pos = InputObjectTypeDefinitionPosition {
+        type_name: connect_http.name.clone(),
+    };
+
+    // -------------------------------------------------------------------------
+
+    // directive @connect(
+    //   source: String
+    //   http: ConnectHTTP
+    //   selection: JSONSelection!
+    //   entity: Boolean = false
+    // ) repeatable on FIELD_DEFINITION
     let connect_spec = DirectiveSpecification::new(
         link.directive_name_in_schema(&CONNECT_DIRECTIVE_NAME_IN_SPEC),
         &[
@@ -179,31 +235,54 @@ pub(super) fn check_or_add(
         None,
     );
 
-    let source_http_spec = InputTypeSpecification {
-        name: link.type_name_in_schema(&SOURCE_HTTP_NAME_IN_SPEC),
-        fields: |s| {
-            let link = s
-                .metadata()
-                .unwrap()
-                .for_identity(&ConnectSpecDefinition::identity())
-                .unwrap();
-            let http_header_mapping_name =
-                link.type_name_in_schema(&HTTP_HEADER_MAPPING_NAME_IN_SPEC);
-            vec![
-                InputFieldSpecification {
-                    name: Name::new_unchecked(SOURCE_BASE_URL_ARGUMENT_NAME.into()),
-                    ty: ty!(String!),
-                    default_value: None,
-                },
-                InputFieldSpecification {
-                    name: Name::new_unchecked(SOURCE_HEADERS_ARGUMENT_NAME.into()),
-                    ty: Type::List(Box::new(Type::NonNullNamed(http_header_mapping_name))),
-                    default_value: None,
-                },
-            ]
+    // -------------------------------------------------------------------------
+
+    let source_http_field_list = vec![
+        InputValueDefinition {
+            description: None,
+            name: Name::new_unchecked(SOURCE_BASE_URL_ARGUMENT_NAME.into()),
+            ty: ty!(String!).into(),
+            default_value: None,
+            directives: Default::default(),
         },
+        InputValueDefinition {
+            description: None,
+            name: Name::new_unchecked(SOURCE_HEADERS_ARGUMENT_NAME.into()),
+            ty: Type::List(Box::new(Type::NonNullNamed(
+                http_header_mapping.name.clone(),
+            )))
+            .into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ];
+
+    let mut source_http_fields = IndexMap::new();
+    for field in source_http_field_list {
+        source_http_fields.insert(field.name.clone(), Component::new(field));
+    }
+
+    // input SourceHTTP {
+    //   baseURL: String!
+    //   headers: [HTTPHeaderMapping!]
+    // }
+    let source_http_spec = InputObjectType {
+        name: link.type_name_in_schema(&SOURCE_HTTP_NAME_IN_SPEC),
+        description: None,
+        directives: Default::default(),
+        fields: source_http_fields,
     };
 
+    let source_http_pos = InputObjectTypeDefinitionPosition {
+        type_name: source_http_spec.name.clone(),
+    };
+
+    // -------------------------------------------------------------------------
+
+    // directive @source(
+    //   name: String!
+    //   http: SourceHTTP
+    // ) repeatable on SCHEMA
     let source_spec = DirectiveSpecification::new(
         link.directive_name_in_schema(&SOURCE_DIRECTIVE_NAME_IN_SPEC),
         &[
@@ -240,12 +319,15 @@ pub(super) fn check_or_add(
 
     json_selection_spec.check_or_add(schema)?;
     url_path_template_spec.check_or_add(schema)?;
-    http_header_mapping.check_or_add(schema)?;
+    http_header_mapping_pos.pre_insert(schema)?;
+    http_header_mapping_pos.insert(schema, http_header_mapping.into())?;
 
-    connect_http_spec.check_or_add(schema)?;
+    connect_http_pos.pre_insert(schema)?;
+    connect_http_pos.insert(schema, connect_http.into())?;
     connect_spec.check_or_add(schema)?;
 
-    source_http_spec.check_or_add(schema)?;
+    source_http_pos.pre_insert(schema)?;
+    source_http_pos.insert(schema, source_http_spec.into())?;
     source_spec.check_or_add(schema)?;
 
     Ok(())

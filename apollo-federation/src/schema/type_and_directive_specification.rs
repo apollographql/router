@@ -3,7 +3,7 @@ use indexmap::{IndexMap, IndexSet};
 use apollo_compiler::ast::{DirectiveLocation, FieldDefinition, Value};
 use apollo_compiler::schema::{
     Component, ComponentName, DirectiveDefinition, EnumType, EnumValueDefinition, ExtendedType,
-    InputObjectType, InputValueDefinition, Name, ObjectType, ScalarType, Type, UnionType,
+    InputValueDefinition, Name, ObjectType, ScalarType, Type, UnionType,
 };
 use apollo_compiler::Node;
 
@@ -12,9 +12,8 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::{
-    DirectiveDefinitionPosition, EnumTypeDefinitionPosition, InputObjectTypeDefinitionPosition,
-    ObjectTypeDefinitionPosition, ScalarTypeDefinitionPosition, TypeDefinitionPosition,
-    UnionTypeDefinitionPosition,
+    DirectiveDefinitionPosition, EnumTypeDefinitionPosition, ObjectTypeDefinitionPosition,
+    ScalarTypeDefinitionPosition, TypeDefinitionPosition, UnionTypeDefinitionPosition,
 };
 use crate::schema::FederationSchema;
 
@@ -70,27 +69,6 @@ impl From<&FieldSpecification> for FieldDefinition {
                 .collect(),
             ty: field_spec.ty.clone(),
             directives: Default::default(),
-        }
-    }
-}
-
-pub(crate) struct InputFieldSpecification {
-    pub name: Name,
-    pub ty: Type,
-    pub default_value: Option<Value>,
-}
-
-impl From<&InputFieldSpecification> for InputValueDefinition {
-    fn from(field_spec: &InputFieldSpecification) -> Self {
-        InputValueDefinition {
-            description: None,
-            name: field_spec.name.clone(),
-            ty: field_spec.ty.clone().into(),
-            directives: Default::default(),
-            default_value: field_spec
-                .default_value
-                .as_ref()
-                .map(|v| Node::new(v.clone())),
         }
     }
 }
@@ -171,55 +149,6 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
                 description: None,
                 name: type_pos.type_name.clone(),
                 implements_interfaces: Default::default(),
-                directives: Default::default(),
-                fields: field_map,
-            }),
-        )
-    }
-}
-
-pub(crate) struct InputTypeSpecification {
-    pub name: Name,
-    pub fields: fn(&FederationSchema) -> Vec<InputFieldSpecification>,
-}
-
-impl TypeAndDirectiveSpecification for InputTypeSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let field_specs = (self.fields)(schema);
-        let existing = schema.try_get_type(self.name.clone());
-        if let Some(existing) = existing {
-            // ensure existing definition is an object type
-            ensure_expected_type_kind(TypeKind::Object, &existing)?;
-            let existing_type = existing.get(schema.schema())?;
-            let ExtendedType::InputObject(_existing_obj_type) = existing_type else {
-                return Err(FederationError::internal(format!(
-                    "Expected ExtendedType::InputObject but got {}",
-                    TypeKind::from(existing_type)
-                )));
-            };
-
-            // ensure all expected fields are present in the existing object type
-            // TODO
-            // let errors = ensure_same_fields(existing_obj_type, &field_specs, schema);
-            let errors = vec![];
-            return MultipleFederationErrors::from_iter(errors).into_result();
-        }
-
-        let mut field_map = IndexMap::new();
-        for ref field_spec in field_specs {
-            let field_def: InputValueDefinition = field_spec.into();
-            field_map.insert(field_spec.name.clone(), Component::new(field_def));
-        }
-
-        let type_pos = InputObjectTypeDefinitionPosition {
-            type_name: self.name.clone(),
-        };
-        type_pos.pre_insert(schema)?;
-        type_pos.insert(
-            schema,
-            Node::new(InputObjectType {
-                description: None,
-                name: type_pos.type_name.clone(),
                 directives: Default::default(),
                 fields: field_map,
             }),
