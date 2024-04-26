@@ -717,11 +717,11 @@ where
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::ChunkedDuration(Instant::now())),
-                            Event::Unit => (None, Increment::ChunkedUnit),
+                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => (
                                 Some(Arc::new(selector.clone())),
-                                Increment::ChunkedCustom(None),
+                                Increment::EventCustom(None),
                             ),
                         },
                     };
@@ -751,11 +751,11 @@ where
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::ChunkedDuration(Instant::now())),
-                            Event::Unit => (None, Increment::ChunkedUnit),
+                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => (
                                 Some(Arc::new(selector.clone())),
-                                Increment::ChunkedCustom(None),
+                                Increment::EventCustom(None),
                             ),
                         },
                     };
@@ -987,11 +987,11 @@ pub(crate) type SubgraphCustomInstruments =
 // ---------------- Counter -----------------------
 enum Increment {
     Unit,
-    ChunkedUnit,
+    EventUnit,
     Duration(Instant),
-    ChunkedDuration(Instant),
+    EventDuration(Instant),
     Custom(Option<i64>),
-    ChunkedCustom(Option<i64>),
+    EventCustom(Option<i64>),
 }
 
 struct CustomCounter<Request, Response, A, T>
@@ -1035,8 +1035,8 @@ where
         inner.attributes = inner.selectors.on_request(request).into_iter().collect();
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match inner.increment {
-                Increment::ChunkedCustom(None) => {
-                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
@@ -1053,7 +1053,12 @@ where
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
-            let _ = inner.counter.take();
+            if !matches!(
+                &inner.increment,
+                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+            ) {
+                let _ = inner.counter.take();
+            }
             return;
         }
         let mut attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
@@ -1065,8 +1070,8 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match inner.increment {
-                Increment::ChunkedCustom(None) => {
-                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
@@ -1086,9 +1091,7 @@ where
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
-            Increment::ChunkedUnit
-            | Increment::ChunkedDuration(_)
-            | Increment::ChunkedCustom(_) => {
+            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
                 // Nothing to do because we're incrementing on events
                 return;
             }
@@ -1100,8 +1103,6 @@ where
     }
 
     fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
-        // TODO find a trick here to not always execute it
-        // Playing with a specific type of increment
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_event_response(response, ctx) {
             let _ = inner.counter.take();
@@ -1120,8 +1121,8 @@ where
             .and_then(|s| s.on_event_response(response, ctx))
         {
             let new_incr = match inner.increment {
-                Increment::ChunkedCustom(None) => {
-                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
@@ -1135,11 +1136,11 @@ where
         }
 
         let increment = match inner.increment {
-            Increment::Unit | Increment::ChunkedUnit => 1f64,
-            Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+            Increment::Unit | Increment::EventUnit => 1f64,
+            Increment::Duration(instant) | Increment::EventDuration(instant) => {
                 instant.elapsed().as_secs_f64()
             }
-            Increment::Custom(val) | Increment::ChunkedCustom(val) => match val {
+            Increment::Custom(val) | Increment::EventCustom(val) => match val {
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
@@ -1156,11 +1157,11 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit | Increment::ChunkedUnit => 1f64,
-            Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+            Increment::Unit | Increment::EventUnit => 1f64,
+            Increment::Duration(instant) | Increment::EventDuration(instant) => {
                 instant.elapsed().as_secs_f64()
             }
-            Increment::Custom(val) | Increment::ChunkedCustom(val) => match val {
+            Increment::Custom(val) | Increment::EventCustom(val) => match val {
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
@@ -1183,11 +1184,11 @@ where
         if let Some(mut inner) = inner {
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
-                    Increment::Unit | Increment::ChunkedUnit => 1f64,
-                    Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+                    Increment::Unit | Increment::EventUnit => 1f64,
+                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
                         instant.elapsed().as_secs_f64()
                     }
-                    Increment::Custom(val) | Increment::ChunkedCustom(val) => match val {
+                    Increment::Custom(val) | Increment::EventCustom(val) => match val {
                         Some(incr) => *incr as f64,
                         None => 0f64,
                     },
@@ -1324,8 +1325,8 @@ where
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match inner.increment {
-                Increment::ChunkedCustom(None) => {
-                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
@@ -1342,7 +1343,12 @@ where
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
-            let _ = inner.histogram.take();
+            if !matches!(
+                &inner.increment,
+                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+            ) {
+                let _ = inner.histogram.take();
+            }
             return;
         }
         let mut attrs: Vec<KeyValue> = inner
@@ -1357,8 +1363,8 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match inner.increment {
-                Increment::ChunkedCustom(None) => {
-                    Increment::ChunkedCustom(selected_value.as_str().parse::<i64>().ok())
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
@@ -1375,9 +1381,7 @@ where
             Increment::Unit => Some(1f64),
             Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
             Increment::Custom(val) => val.map(|incr| incr as f64),
-            Increment::ChunkedUnit
-            | Increment::ChunkedDuration(_)
-            | Increment::ChunkedCustom(_) => {
+            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
                 // Nothing to do because we're incrementing on events
                 return;
             }
@@ -1398,11 +1402,11 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit | Increment::ChunkedUnit => Some(1f64),
-            Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+            Increment::Unit | Increment::EventUnit => Some(1f64),
+            Increment::Duration(instant) | Increment::EventDuration(instant) => {
                 Some(instant.elapsed().as_secs_f64())
             }
-            Increment::Custom(val) | Increment::ChunkedCustom(val) => val.map(|incr| incr as f64),
+            Increment::Custom(val) | Increment::EventCustom(val) => val.map(|incr| incr as f64),
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
@@ -1422,11 +1426,11 @@ where
         if let Some(mut inner) = inner {
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
-                    Increment::Unit | Increment::ChunkedUnit => Some(1f64),
-                    Increment::Duration(instant) | Increment::ChunkedDuration(instant) => {
+                    Increment::Unit | Increment::EventUnit => Some(1f64),
+                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
                         Some(instant.elapsed().as_secs_f64())
                     }
-                    Increment::Custom(val) | Increment::ChunkedCustom(val) => {
+                    Increment::Custom(val) | Increment::EventCustom(val) => {
                         val.map(|incr| incr as f64)
                     }
                 };
@@ -1481,6 +1485,23 @@ mod tests {
                                         }
                                     ]
                                 }
+                            },
+                            "attributes": {
+                                "http.response.status_code": true
+                            }
+                        },
+                        "acme.request.on_critical_error": {
+                            "value": "unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "request time out",
+                                    {
+                                        "error": "reason"
+                                    }
+                                ]
                             },
                             "attributes": {
                                 "http.response.status_code": true
@@ -1627,6 +1648,20 @@ mod tests {
                 2.0,
                 "http.response.status_code" = 400
             );
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            router_instruments.on_error(&BoxError::from("request time out"), &Context::new());
+            assert_counter!(
+                "acme.request.on_critical_error",
+                1.0,
+                "http.response.status_code" = 500
+            );
         }
         .with_metrics()
         .await;
@@ -1651,6 +1686,25 @@ mod tests {
                                             "response_status": "code"
                                         }
                                     ]
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error": {
+                            "value": "event_unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "NOPE",
+                                    {
+                                        "response_errors": "$.[0].extensions.code"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
                                 }
                             }
                         },
@@ -1706,9 +1760,23 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_event_response(
+                &graphql::Response::builder()
+                    .errors(vec![graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build()])
+                    .build(),
+                &supergraph_req.context.clone(),
+            );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 1.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let supergraph_req = supergraph::Request::fake_builder()
@@ -1732,9 +1800,23 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_event_response(
+                &graphql::Response::builder()
+                    .errors(vec![graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build()])
+                    .build(),
+                &supergraph_req.context.clone(),
+            );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let supergraph_req = supergraph::Request::fake_builder()
@@ -1750,16 +1832,24 @@ mod tests {
                 .status_code(StatusCode::OK)
                 .header("content-type", "application/json")
                 .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
+                .data(serde_json_bytes::json!({"foo": "bar"}))
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_event_response(
+                &graphql::Response::builder()
+                    .data(serde_json_bytes::json!({"foo": "bar"}))
+                    .build(),
+                &supergraph_req.context.clone(),
+            );
 
             assert_counter!("acme.query", 2.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
         }
         .with_metrics()
         .await;

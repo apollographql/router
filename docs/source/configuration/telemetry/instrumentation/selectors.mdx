@@ -41,6 +41,7 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 | `env`              | Yes         |                             | The name of an environment variable  |
 | `on_graphql_error` | No          | `true`|`false`              | Boolean set to true if the response payload contains a graphql error  |
 | `static`           | No          |                             | A static string value                |
+| `error`            | No          | `reason`                    | a string value containing error reason when it's a critical error                |
 
 #### Supergraph
 
@@ -50,15 +51,18 @@ The supergraph service is executed after query parsing but before query executio
 |--------------------|-------------|-------------------------------------|--------------------------------------|
 | `operation_name`   | Yes         |                                     | The operation name from the query    |
 | `operation_kind`   | No          | `string`                            | The operation kind from the query    |
-| `query`            | Yes         | `string`                     | The graphql query                    |
+| `query`            | Yes         | `string`                            | The graphql query                    |
 | `query_variable`   | Yes         |                                     | The name of a graphql query variable |
 | `request_header`   | Yes         |                                     | The name of a request header         |
 | `response_header`  | Yes         |                                     | The name of a response header        |
+| `response_data`    | Yes         |                                     | Json Path into the supergraph response body data (it might impact performances)   |
+| `response_errors`  | Yes         |                                     | Json Path into the supergraph response body errors (it might impact performances) |
 | `request_context`  | Yes         |                                     | The name of a request context key    |
 | `response_context` | Yes         |                                     | The name of a response context key   |
 | `baggage`          | Yes         |                                     | The name of a baggage item           |
 | `env`              | Yes         |                                     | The name of an environment variable  |
 | `static`           | No          |                                     | A static string value                |
+| `error`            | No          | `reason`                            | a string value containing error reason when it's a critical error                |
 
 
 #### Subgraph
@@ -85,3 +89,4 @@ The subgraph service executes multiple times during query execution, with each e
 | `baggage`                   | Yes         |                                     | The name of a baggage item                                                      |
 | `env`                       | Yes         |                                     | The name of an environment variable                                             |
 | `static`                    | No          |                                     | A static string value                                                           |
+| `error`                     | No          | `reason`                            | a string value containing error reason when it's a critical error                |

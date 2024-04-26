@@ -52,6 +52,7 @@ pub(crate) trait Selector {
     ) -> Option<opentelemetry::Value> {
         None
     }
+    fn on_error(&self, error: &BoxError) -> Option<opentelemetry::Value>;
 }
 
 pub(crate) trait DefaultForLevel {

@@ -48,6 +48,16 @@ pub(crate) enum OperationName {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum ErrorRepr {
+    // /// The error code if available
+    // Code,
+    /// The error reason
+    Reason,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
     String,
@@ -153,6 +163,10 @@ pub(crate) enum RouterSelector {
     OnGraphQLError {
         /// Boolean set to true if the response body contains graphql error
         on_graphql_error: bool,
+    },
+    Error {
+        /// Critical error if it happens
+        error: ErrorRepr,
     },
 }
 
@@ -294,6 +308,10 @@ pub(crate) enum SupergraphSelector {
     StaticField {
         /// A static string value
         r#static: String,
+    },
+    Error {
+        /// Critical error if it happens
+        error: ErrorRepr,
     },
 }
 
@@ -496,6 +514,10 @@ pub(crate) enum SubgraphSelector {
         /// A static string value
         r#static: String,
     },
+    Error {
+        /// Critical error if it happens
+        error: ErrorRepr,
+    },
 }
 
 impl Selector for RouterSelector {
@@ -586,6 +608,13 @@ impl Selector for RouterSelector {
                 }
             }
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            _ => None,
+        }
+    }
+
+    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+        match self {
+            RouterSelector::Error { .. } => Some(error.to_string().into()),
             _ => None,
         }
     }
@@ -764,6 +793,13 @@ impl Selector for SupergraphSelector {
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
+            _ => None,
+        }
+    }
+
+    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+        match self {
+            SupergraphSelector::Error { .. } => Some(error.to_string().into()),
             _ => None,
         }
     }
@@ -1003,6 +1039,13 @@ impl Selector for SubgraphSelector {
                 .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
+            _ => None,
+        }
+    }
+
+    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+        match self {
+            SubgraphSelector::Error { .. } => Some(error.to_string().into()),
             _ => None,
         }
     }
