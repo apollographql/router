@@ -349,6 +349,10 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
     }
 
     fn write(&mut self, bytes: &[u8]) {
+        // FIXME: hack I used to debug my code, remove
+        if bytes.len() != 1 || bytes[0] != 0xFF {
+            println!("{:?}", std::str::from_utf8(bytes).unwrap());
+        }
         self.hasher.update(bytes);
     }
 }
@@ -496,10 +500,6 @@ mod tests {
     #[test]
     fn me() {
         let schema1: &str = r#"
-        schema {
-          query: Query
-        }
-    
         type Query {
           me: User
           customer: User
@@ -512,10 +512,6 @@ mod tests {
         "#;
 
         let schema2: &str = r#"
-        schema {
-            query: Query
-        }
-    
         type Query {
           me: User
         }
@@ -544,9 +540,6 @@ mod tests {
     #[test]
     fn directive() {
         let schema1: &str = r#"
-        schema {
-          query: Query
-        }
         directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     
         type Query {
@@ -561,9 +554,6 @@ mod tests {
         "#;
 
         let schema2: &str = r#"
-        schema {
-            query: Query
-        }
         directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     
         type Query {
@@ -590,9 +580,6 @@ mod tests {
     #[test]
     fn interface() {
         let schema1: &str = r#"
-        schema {
-          query: Query
-        }
         directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     
         type Query {
@@ -678,10 +665,6 @@ mod tests {
     #[test]
     fn entities() {
         let schema1: &str = r#"
-        schema {
-          query: Query
-        }
-    
         scalar _Any
 
         union _Entity = User
@@ -699,10 +682,6 @@ mod tests {
         "#;
 
         let schema2: &str = r#"
-        schema {
-            query: Query
-        }
-    
         scalar _Any
 
         union _Entity = User
@@ -728,14 +707,8 @@ mod tests {
             }
         }"#;
 
-        println!("query1: {query1}");
-
         let hash1 = hash_subgraph_query(schema1, query1);
-        println!("hash1: {hash1}");
-
         let hash2 = hash_subgraph_query(schema2, query1);
-        println!("hash2: {hash2}");
-
         assert_ne!(hash1, hash2);
 
         let query2 = r#"query Query1($representations:[_Any!]!){
@@ -746,14 +719,8 @@ mod tests {
             }
         }"#;
 
-        println!("query2: {query2}");
-
         let hash1 = hash_subgraph_query(schema1, query2);
-        println!("hash1: {hash1}");
-
         let hash2 = hash_subgraph_query(schema2, query2);
-        println!("hash2: {hash2}");
-
         assert_eq!(hash1, hash2);
     }
 
@@ -1039,10 +1006,6 @@ mod tests {
     #[test]
     fn fields_with_different_arguments_have_different_hashes() {
         let schema: &str = r#"
-        schema {
-          query: Query
-        }
-    
         type Query {
           test(arg: Int): String
         }
@@ -1061,19 +1024,36 @@ mod tests {
     }
 
     #[test]
+    fn fields_with_different_arguments_on_nest_field_different_hashes() {
+        let schema: &str = r#"
+        type Test {
+          test(arg: Int): String
+          recursiveLink: Test
+        }
+
+        type Query {
+          directLink: Test
+        }
+        "#;
+
+        let query_one = "{ directLink { test recursiveLink { test(arg: 1) } } }";
+        let query_two = "{ directLink { test recursiveLink { test(arg: 2) } } }";
+
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+        // FIXME:
+        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
     fn fields_with_different_aliases_have_different_hashes() {
         let schema: &str = r#"
-        schema {
-          query: Query
-        }
-    
         type Query {
           test(arg: Int): String
         }
         "#;
 
-        let query_one = "query { a: test }";
-        let query_two = "query { b: test }";
+        let query_one = "{ a: test }";
+        let query_two = "{ b: test }";
 
         // This assertion tests an internal hash function that isn't directly
         // used for the query hash, and we'll need to make it pass to rely
@@ -1081,5 +1061,493 @@ mod tests {
         //
         // assert!(hash(schema, query_one).doesnt_match(&hash(schema, query_two)));
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+    }
+
+    #[test]
+    fn operations_with_different_names_have_different_hash() {
+        let schema: &str = r#"
+        type Query {
+          test: String
+        }
+        "#;
+
+        let query_one = "query Foo { test }";
+        let query_two = "query Bar { test }";
+
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+        // FIXME:
+        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
+    fn adding_direction_on_operation_changes_hash() {
+        let schema: &str = r#"
+        directive @test on QUERY
+        type Query {
+          test: String
+        }
+        "#;
+
+        let query_one = "query { test }";
+        let query_two = "query @test { test }";
+
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+        // FIXME:
+        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
+    fn order_of_varibles_changes_hash() {
+        let schema: &str = r#"
+        type Query {
+          test1(arg: Int): String
+          test2(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query ($foo: Int, $bar: Int) {  test1(arg: $foo) test2(arg: $bar) }";
+        let query_two = "query ($foo: Int, $bar: Int) { test1(arg: $bar) test2(arg: $foo) }";
+
+        assert!(hash(schema, query_one).doesnt_match(&hash(schema, query_two)));
+    }
+
+    #[test]
+    fn query_variables_with_different_types_have_different_hash() {
+        let schema: &str = r#"
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query ($var: Int) { test(arg: $var) }";
+        let query_two = "query ($var: Int!) { test(arg: $var) }";
+
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+        // FIXME:
+        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
+    fn query_variables_with_different_default_values_have_different_hash() {
+        let schema: &str = r#"
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query ($var: Int = 1) { test(arg: $var) }";
+        let query_two = "query ($var: Int = 2) { test(arg: $var) }";
+
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+        // FIXME:
+        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
+    fn adding_directive_to_query_variable_change_hash() {
+        let schema: &str = r#"
+        directive @test on VARIABLE_DEFINITION
+
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query ($var: Int) { test(arg: $var) }";
+        let query_two = "query ($var: Int @test) { test(arg: $var) }";
+
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+        // FIXME:
+        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
+    fn order_of_directives_change_hash() {
+        let schema: &str = r#"
+        directive @foo on FIELD
+        directive @bar on FIELD
+
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "{ test @foo @bar }";
+        let query_two = "{ test @bar @foo }";
+
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+        // FIXME:
+        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
+    fn adding_directive_on_schema_changes_hash() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        } 
+
+        type Query {
+          foo: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        directive @test on SCHEMA
+        schema @test {
+          query: Query
+        } 
+
+        type Query {
+          foo: String
+        }
+        "#;
+
+        let query = "{ foo }";
+
+        // FIXME: both hashes doesn't catch schema change
+        assert!(hash(schema1, query).from_hash_query == hash(schema2, query).from_hash_query);
+        assert!(hash(schema1, query).from_visitor == hash(schema2, query).from_visitor);
+    }
+
+    #[test]
+    fn changing_type_of_field_changes_hash() {
+        let schema1: &str = r#"
+        type Query {
+          test: Int
+        }
+        "#;
+
+        let schema2: &str = r#"
+        type Query {
+          test: Float
+        }
+        "#;
+
+        let query = "{ test }";
+
+        // FIXME: both hashes doesn't catch schema change
+        assert!(hash(schema1, query).from_hash_query == hash(schema2, query).from_hash_query);
+        assert!(hash(schema1, query).from_visitor == hash(schema2, query).from_visitor);
+    }
+
+    #[test]
+    fn changing_type_to_interface_changes_hash() {
+        let schema1: &str = r#"
+        type Query {
+          foo: Foo
+        }
+
+        interface Foo {
+          value: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        type Query {
+          foo: Foo
+        }
+
+        type Foo {
+          value: String
+        }
+        "#;
+
+        let query = "{ foo { value } }";
+
+        // FIXME: both hashes doesn't catch schema change
+        assert!(hash(schema1, query).from_hash_query == hash(schema2, query).from_hash_query);
+        assert!(hash(schema1, query).from_visitor == hash(schema2, query).from_visitor);
+    }
+
+    #[test]
+    fn changing_operation_kind_changes_hash() {
+        let schema: &str = r#"
+        schema {
+          query: Test
+          mutation: Test
+        }
+
+        type Test {
+          test: String
+        }
+        "#;
+
+        let query_one = "query { test }";
+        let query_two = "mutation { test }";
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn adding_directive_on_field_should_change_hash() {
+        let schema: &str = r#"
+        directive @test on FIELD
+
+        type Query {
+          test: String
+        }
+        "#;
+
+        let query_one = "{ test }";
+        let query_two = "{ test @test }";
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn adding_directive_on_fragment_spread_change_hash() {
+        let schema: &str = r#"
+        type Query {
+          test: String
+        }
+        "#;
+
+        let query_one = r#"
+        { ...Test }
+
+        fragment Test on Query {
+          test
+        }
+        "#;
+        let query_two = r#"
+        { ...Test @skip(if: false) }
+
+        fragment Test on Query {
+          test
+        }
+        "#;
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn adding_directive_on_fragment_change_hash() {
+        let schema: &str = r#"
+        directive @test on FRAGMENT_DEFINITION
+
+        type Query {
+          test: String
+        }
+        "#;
+
+        let query_one = r#"
+        { ...Test }
+
+        fragment Test on Query {
+          test
+        }
+        "#;
+        let query_two = r#"
+        { ...Test }
+
+        fragment Test on Query @test {
+          test
+        }
+        "#;
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn adding_directive_on_inline_fragment_change_hash() {
+        let schema: &str = r#"
+        type Query {
+          test: String
+        }
+        "#;
+
+        let query_one = "{ ... { test } }";
+        let query_two = "{ ... @skip(if: false) { test } }";
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn moving_field_changes_hash() {
+        let schema: &str = r#"
+        type Query {
+          me: User
+        }
+
+        type User {
+          id: ID
+          name: String
+          friend: User
+        }
+        "#;
+
+        let query_one = r#"
+        { 
+          me {
+            friend {
+              id
+              name
+            }
+          }
+        }
+        "#;
+        let query_two = r#"
+        { 
+          me {
+            friend {
+              id
+            }
+            name
+          }
+        }
+        "#;
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn changing_type_of_fragment_changes_hash() {
+        let schema: &str = r#"
+        type Query {
+          fooOrBar: FooOrBar
+        }
+
+        type Foo {
+          id: ID
+          value: String
+        }
+
+        type Bar {
+          id: ID
+          value: String
+        }
+
+        union FooOrBar = Foo | Bar
+        "#;
+
+        let query_one = r#"
+        { 
+          fooOrBar {
+            ... on Foo { id }
+            ... on Bar { id }
+            ... Test
+          }
+        }
+
+        fragment Test on Foo {
+          value
+        }
+        "#;
+        let query_two = r#"
+        { 
+          fooOrBar {
+            ... on Foo { id }
+            ... on Bar { id }
+            ... Test
+          }
+        }
+
+        fragment Test on Bar {
+          value
+        }
+        "#;
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn it_is_weird_so_i_dont_know_how_to_name_it_change_hash() {
+        let schema: &str = r#"
+        type Query {
+          id: ID
+          someField: SomeType
+          test: String
+        }
+
+        type SomeType {
+          id: ID
+          test: String
+        }
+        "#;
+
+        let query_one = r#"
+        {
+          test 
+          someField { id test }
+          id
+        }
+        "#;
+        let query_two = r#"
+        { 
+          ...test
+          someField { id }
+        }
+
+        fragment test on Query {
+          id
+        }
+        "#;
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        // FIXME:
+        assert_eq!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
     }
 }
