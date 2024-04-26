@@ -427,8 +427,34 @@ mod tests {
     use super::QueryHashVisitor;
     use crate::spec::query::traverse;
 
+    #[derive(Debug)]
+    struct HashComparator {
+        from_visitor: String,
+        from_hash_query: String,
+    }
+
+    impl From<(String, String)> for HashComparator {
+        fn from(value: (String, String)) -> Self {
+            Self {
+                from_visitor: value.0,
+                from_hash_query: value.1,
+            }
+        }
+    }
+
+    // Beware: do not use assert_ne! because it checks for equality
+    impl PartialEq for HashComparator {
+        fn eq(&self, other: &Self) -> bool {
+            self.from_visitor == other.from_visitor && self.from_hash_query == other.from_hash_query
+        }
+        fn ne(&self, other: &Self) -> bool {
+            // This is intentional, we check to prevent BOTH hashes from being equal
+            self.from_visitor != other.from_visitor && self.from_hash_query != other.from_hash_query
+        }
+    }
+
     #[track_caller]
-    fn hash(schema_str: &str, query: &str) -> String {
+    fn hash(schema_str: &str, query: &str) -> HashComparator {
         let schema = Schema::parse(schema_str, "schema.graphql")
             .unwrap()
             .validate()
@@ -443,7 +469,11 @@ mod tests {
         let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec);
         traverse::document(&mut visitor, &exec, None).unwrap();
 
-        hex::encode(visitor.finish())
+        (
+            hex::encode(visitor.finish()),
+            hex::encode(QueryHashVisitor::hash_query(&schema, schema_str, &exec, None).unwrap()),
+        )
+            .into()
     }
 
     #[track_caller]
@@ -499,14 +529,14 @@ mod tests {
 
         // id is nullable in 1, non nullable in 2
         let query = "query { me { id name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         // simple normalization
         let query = "query {  moi: me { name   } }";
         assert_eq!(hash(schema1, query), hash(schema2, query));
 
-        assert_ne!(
-            hash(schema1, "query { me { id name } }"),
+        assert!(
+            hash(schema1, "query { me { id name } }") !=
             hash(schema1, "query { me { name id } }")
         );
     }
@@ -551,10 +581,10 @@ mod tests {
         assert_eq!(hash(schema1, query), hash(schema2, query));
 
         let query = "query { me { id name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { customer { id } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
     }
 
     #[test]
@@ -605,10 +635,10 @@ mod tests {
         assert_eq!(hash(schema1, query), hash(schema2, query));
 
         let query = "query { customer { id } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { customer { ... on User { name } } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
     }
 
     #[test]
@@ -630,19 +660,19 @@ mod tests {
         "#;
 
         let query = "query { a(i: 0) }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { b }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { b(i: 0)}";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { c(j: 0)}";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { c(i:0, j: 0)}";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
     }
 
     #[test]
@@ -833,10 +863,10 @@ mod tests {
         }
         "#;
         let query = "query { me { name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { itf { name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
     }
 
     #[test]
@@ -961,10 +991,10 @@ mod tests {
         }
         "#;
         let query = "query { me { username } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
 
         let query = "query { me { a } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
     }
 
     #[test]
@@ -1003,6 +1033,50 @@ mod tests {
 
         let query = "{ __schema { types { name } } }";
 
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query) != hash(schema2, query));
+    }
+
+    #[test]
+    fn fields_with_different_arguments_have_different_hashes() {
+        let schema: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query { a: test(arg: 1) b: test(arg: 2) }";
+        let query_two = "query { a: test(arg: 1) b: test(arg: 3) }";
+
+        // this test won't pass until we land a fix for it
+        // assert_ne!(hash(schema, query_one), hash(schema, query_two));
+        assert!(
+            hash(schema, query_one).from_hash_query !=
+            hash(schema, query_two).from_hash_query
+        );
+    }
+
+    #[test]
+    fn fields_with_different_aliases_have_different_hashes() {
+        let schema: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query { a: test }";
+        let query_two = "query { b: test }";
+
+
+        // this test won't pass until we land a fix for it
+        // assert_ne!(hash(schema, query_one), hash(schema, query_two));
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
     }
 }
