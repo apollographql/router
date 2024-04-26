@@ -311,92 +311,39 @@ mod tests {
     use apollo_compiler::Schema;
 
     use crate::{
-        schema::ValidFederationSchema,
+        query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph,
+        schema::FederationSchema,
         sources::connect::spec::schema::{
             ConnectDirectiveArguments, SourceDirectiveArguments, CONNECT_DIRECTIVE_NAME_IN_SPEC,
             SOURCE_DIRECTIVE_NAME_IN_SPEC,
         },
+        ValidFederationSubgraphs,
     };
 
-    const SUBGRAPH_SCHEMA: &str = r#"
-        extend schema
-         @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
-         @source(
-           name: "json"
-           http: {
-             baseURL: "https://jsonplaceholder.typicode.com/",
-             headers: [
-               {
-                 name: "X-Auth-Token",
-                 as: "AuthToken"
-               },
-               {
-                 name: "user-agent",
-                 value: "Firefox"
-               },
-               { name: "X-From-Env" }
-             ]
-           }
-         )
+    static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
 
-        type Query {
-          users: [User]
-           @connect(
-             source: "json"
-             http: { GET: "/users" }
-             selection: "id name"
-           )
-
-          posts: [Post]
-           @connect(
-             source: "json"
-             http: { GET: "/posts" }
-             selection: "id title body"
-           )
-        }
-
-        type User {
-          id: ID!
-          name: String
-        }
-
-        type Post {
-          id: ID!
-          title: String
-          body: String
-        }
-    "#;
+    fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
+        let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
+        let supergraph_schema = FederationSchema::new(schema).unwrap();
+        extract_subgraphs_from_supergraph(&supergraph_schema, Some(true)).unwrap()
+    }
 
     #[test]
     fn it_parses_at_source() {
-        let schema_str = format!(
-            "{}\n{}\n{}",
-            SUBGRAPH_SCHEMA, TEMP_FEDERATION_DEFINITIONS, TEMP_SOURCE_DEFINITIONS
-        );
-        let schema = Schema::parse(schema_str, "schema.graphql").unwrap();
+        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
 
-        let schema = ValidFederationSchema::new(schema.validate().unwrap()).unwrap();
-
-        let actual_definition = schema
+        let actual_definition = subgraph
+            .schema
             .get_directive_definition(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
             .unwrap()
-            .get(schema.schema())
+            .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(
-            actual_definition.to_string(),
-            @r###"
-                """
-                Defines connector configuration for reuse across multiple connectors.
-
-                Exactly one of {http} must be present.
-                """
-                directive @source(name: String!, http: SourceHTTP) on SCHEMA
-            "###
-        );
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
-            schema
+            subgraph.schema
                 .referencers()
                 .get_directive(SOURCE_DIRECTIVE_NAME_IN_SPEC.as_str())
                 .unwrap(),
@@ -425,13 +372,9 @@ mod tests {
 
     #[test]
     fn it_parses_at_connect() {
-        let schema_str = format!(
-            "{}\n{}\n{}",
-            SUBGRAPH_SCHEMA, TEMP_FEDERATION_DEFINITIONS, TEMP_SOURCE_DEFINITIONS
-        );
-        let schema = Schema::parse(schema_str, "schema.graphql").unwrap();
-
-        let schema = ValidFederationSchema::new(schema.validate().unwrap()).unwrap();
+        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let schema = &subgraph.schema;
 
         let actual_definition = schema
             .get_directive_definition(&CONNECT_DIRECTIVE_NAME_IN_SPEC)
@@ -441,33 +384,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @r###"
-              """
-              Defines a connector as the implementation of a field.
-
-              Exactly one of {http} must be present.
-              """
-              directive @connect(
-                """
-                Optionally connects a @source directive for shared connector configuration.
-                Must match the `name:` argument of a @source directive in this schema.
-                """
-                source: String,
-                """Defines HTTP configuration for this connector."""
-                http: ConnectHTTP,
-                """
-                Uses the JSONSelection syntax to define a mapping of connector response
-                to GraphQL schema.
-                """
-                selection: JSONSelection,
-                """
-                Marks this connector as a canonical resolver for an entity (uniquely
-                identified domain model.) If true, the connector must be defined on a
-                field of the Query type.
-                """
-                entity: Boolean = false,
-              ) on FIELD_DEFINITION
-        "###
+            @"directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
         );
 
         let fields = schema
@@ -491,13 +408,9 @@ mod tests {
 
     #[test]
     fn it_extracts_at_source() {
-        // Convert the schema into its validated form
-        let schema_str = format!(
-            "{}\n{}\n{}",
-            SUBGRAPH_SCHEMA, TEMP_FEDERATION_DEFINITIONS, TEMP_SOURCE_DEFINITIONS
-        );
-        let schema = Schema::parse(schema_str, "schema.graphql").unwrap();
-        let schema = ValidFederationSchema::new(schema.validate().unwrap()).unwrap();
+        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let schema = &subgraph.schema;
 
         // Try to extract the source information from the valid schema
         // TODO: This should probably be handled by the rest of the stack
@@ -507,7 +420,6 @@ mod tests {
             .unwrap();
 
         // Extract the sources from the schema definition and map them to their `Source` equivalent
-        // TODO: We can safely assume that a source can only be on a schema, right?
         let schema_directive_refs = sources.schema.as_ref().unwrap();
         let sources: Result<Vec<_>, _> = schema_directive_refs
             .get(schema.schema())
@@ -551,13 +463,9 @@ mod tests {
 
     #[test]
     fn it_extracts_at_connect() {
-        // Convert the schema into its validated form
-        let schema_str = format!(
-            "{}\n{}\n{}",
-            SUBGRAPH_SCHEMA, TEMP_FEDERATION_DEFINITIONS, TEMP_SOURCE_DEFINITIONS
-        );
-        let schema = Schema::parse(schema_str, "schema.graphql").unwrap();
-        let schema = ValidFederationSchema::new(schema.validate().unwrap()).unwrap();
+        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let schema = &subgraph.schema;
 
         // Try to extract the source information from the valid schema
         // TODO: This should probably be handled by the rest of the stack
@@ -680,151 +588,4 @@ mod tests {
         "###
         );
     }
-
-    static TEMP_FEDERATION_DEFINITIONS: &str = r#"
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-        scalar link__Import
-
-        enum link__Purpose {
-          """
-          \`SECURITY\` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-
-          """
-          \`EXECUTION\` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-    "#;
-
-    static TEMP_SOURCE_DEFINITIONS: &str = r#"
-        """
-        Defines a connector as the implementation of a field.
-
-        Exactly one of {http} must be present.
-        """
-        directive @connect(
-          """
-          Optionally connects a @source directive for shared connector configuration.
-          Must match the `name:` argument of a @source directive in this schema.
-          """
-          source: String
-
-          """
-          Defines HTTP configuration for this connector.
-          """
-          http: ConnectHTTP
-
-          """
-          Uses the JSONSelection syntax to define a mapping of connector response
-          to GraphQL schema.
-          """
-          selection: JSONSelection
-
-          """
-          Marks this connector as a canonical resolver for an entity (uniquely
-          identified domain model.) If true, the connector must be defined on a
-          field of the Query type.
-          """
-          entity: Boolean = false
-        ) on FIELD_DEFINITION
-
-        """
-        HTTP configuration for a connector.
-
-        Exactly one of {GET,POST,PATCH,PUT,DELETE} must be present.
-        """
-        input ConnectHTTP {
-          """
-          URL template for GET requests to an HTTP endpoint.
-
-          Can be a full URL or a partial path. If it's a partial path, it will
-          be appended to an associated `baseURL` from the related @source.
-          """
-          GET: URLPathTemplate
-
-          "Same as GET but for POST requests"
-          POST: URLPathTemplate
-
-          "Same as GET but for PATCH requests"
-          PATCH: URLPathTemplate
-
-          "Same as GET but for PUT requests"
-          PUT: URLPathTemplate
-
-          "Same as GET but for DELETE requests"
-          DELETE: URLPathTemplate
-
-          """
-          Define a request body using JSONSelection. Selections can include
-          values from field arguments using `$args.argName` and from fields on the
-          parent type using `$this.fieldName`.
-          """
-          body: JSONSelection
-
-          """
-          Configuration for headers to attach to the request.
-
-          Takes precedence over headers defined on the associated @source.
-          """
-          headers: [HTTPHeaderMapping!]
-        }
-
-        """
-        At most one of {as,value} can be present.
-        """
-        input HTTPHeaderMapping {
-          "The name of the incoming HTTP header to propagate to the endpoint"
-          name: String!
-
-          "If present, this defines the name of the header in the endpoint request"
-          as: String
-
-          "If present, this defines values for the headers in the endpoint request"
-          value: [String]
-        }
-
-        """
-        Defines connector configuration for reuse across multiple connectors.
-
-        Exactly one of {http} must be present.
-        """
-        directive @source(
-          name: String!
-
-          http: SourceHTTP
-        ) on SCHEMA
-
-        """
-        Common HTTP configuration for connectors.
-        """
-        input SourceHTTP {
-          """
-          If the URL path template in a connector is not a valid URL, it will be appended
-          to this URL. Must be a valid URL.
-          """
-          baseURL: String!
-
-          """
-          Common headers from related connectors.
-          """
-          headers: [HTTPHeaderMapping!]
-        }
-
-        """
-        A string containing a "JSON Selection", which defines a mapping from one JSON-like
-        shape to another JSON-like shape.
-
-        Example: ".data { id: user_id name account: { id: account_id } }"
-        """
-        scalar JSONSelection @specifiedBy(url: "...")
-
-        """
-        A string that declares a URL path with values interpolated inside `{}`.
-
-        Example: "/product/{$this.id}/reviews?count={$args.count}"
-        """
-        scalar URLPathTemplate @specifiedBy(url: "...")
-    "#;
 }

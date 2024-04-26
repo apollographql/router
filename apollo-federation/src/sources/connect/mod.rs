@@ -20,6 +20,8 @@ pub use selection_parser::ApplyToError;
 pub use selection_parser::Selection;
 pub use url_path_template::URLPathTemplate;
 
+pub(crate) use spec::ConnectSpecDefinition;
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct ConnectId {
     subgraph_name: NodeStr,

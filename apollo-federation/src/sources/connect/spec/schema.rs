@@ -2,44 +2,34 @@ use apollo_compiler::schema::Name;
 use apollo_compiler::{name, NodeStr};
 use indexmap::IndexMap;
 
-use crate::link::spec::{Url, Version};
 use crate::sources::connect::selection_parser::Selection;
 use crate::sources::connect::url_path_template::URLPathTemplate;
-
-pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
-pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
-pub(crate) const SOURCE_HTTP_ARGUMENT_NAME: Name = name!("http");
-pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
-pub(crate) const SOURCE_HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
 pub(crate) const CONNECT_HTTP_ARGUMENT_NAME: Name = name!("http");
 pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
+
+pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const CONNECT_HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
+pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
+pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
+pub(crate) const SOURCE_HTTP_ARGUMENT_NAME: Name = name!("http");
+
+pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
+pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
+pub(crate) const SOURCE_HEADERS_ARGUMENT_NAME: Name = name!("headers");
+
+pub(crate) const HTTP_HEADER_MAPPING_NAME_IN_SPEC: Name = name!("HTTPHeaderMapping");
 pub(crate) const HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME: Name = name!("as");
 pub(crate) const HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME: Name = name!("value");
 
-/// A directive to model an upstream HTTP data source
-///
-/// A source describes an HTTP endpoint that contains data that can be scraped
-/// and automatically transformed into GraphQL objects.
-///
-/// The relevant GraphQL directive takes [SourceDirectiveArguments] as arguments and
-/// is mainly used to allow for sharing common HTTP parameters, allowing for a
-/// more DRY subgraph configuration.
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct SourceSpecDefinition {
-    /// The URL as shown in the @link import
-    url: Url,
-
-    /// The minimum version of federation needed for @source
-    minimum_federation_version: Option<Version>,
-}
+pub(crate) const JSON_SELECTION_SCALAR_NAME: Name = name!("JSONSelection");
+pub(crate) const URL_PATH_TEMPLATE_SCALAR_NAME: Name = name!("URLPathTemplate");
 
 /// Arguments to the `@source` directive
 ///
@@ -80,23 +70,6 @@ pub(crate) enum HTTPHeaderOption {
 
     /// The raw values to use for the HTTP header
     Value(Vec<NodeStr>),
-}
-
-/// A directive to model an upstream HTTP data type
-///
-/// A connect describes an HTTP endpoint that contains a specific data type and
-/// semantic transformers needed to convert them to their GraphQL representation.
-///
-/// The relevant GraphQL directive takes [ConnectDirectiveArguments] as arguments and
-/// defines the upstream source (which can optionally be specified as a [SourceSpecDefinition]),
-/// transformers for consuming the necessary data, and HTTP semantics for the actual request.
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectSpecDefinition {
-    /// The URL as shown in the @link import
-    url: Url,
-
-    /// The minimum version of federation needed for @source
-    minimum_federation_version: Option<Version>,
 }
 
 /// Arguments to the `@connect` directive
