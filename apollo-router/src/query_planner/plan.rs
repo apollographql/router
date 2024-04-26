@@ -336,9 +336,7 @@ impl PlanNode {
 
             PlanNode::Sequence { nodes, connector } => {
                 if let Some(c) = connector {
-                    if let Some(schema) = subgraph_schemas.get(&c.service_name) {
-                        c.hash_subquery(schema);
-                    }
+                    c.hash_subquery(subgraph_schemas);
                 } else {
                     for node in nodes {
                         node.hash_subqueries(subgraph_schemas);

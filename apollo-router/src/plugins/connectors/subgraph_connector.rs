@@ -267,7 +267,7 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::supergraph;
 
-    const SCHEMA: &str = include_str!("../../../../examples/connectors/supergraph.graphql");
+    const SCHEMA: &str = include_str!("../../../tests/fixtures/connectors/supergraph.graphql");
 
     async fn emulate_rest_connector(listener: TcpListener) {
         async fn handle(
@@ -280,18 +280,10 @@ mod tests {
                 graph: "network"
                 api: "ipinfo"
                 http: { GET: "/json" }
-                selection: "ip hostname city region country loc org postal timezone readme"
+                selection: "ip hostname"
               ) {
               ip: ID!
               hostname: String
-              city: String
-              region: String
-              country: String
-              loc: String
-              org: String
-              postal: String
-              timezone: String
-              readme: String
             }
             */
 
@@ -300,15 +292,7 @@ mod tests {
             {
                 let value = serde_json::json! {{
                     "ip": "1.2.3.4",
-                    "hostname": "hello",
-                    "city": "Paris",
-                    "region": "Ile de France",
-                    "country": "France",
-                    "loc": "1",
-                    "org": "a",
-                    "postal": "75000",
-                    "timezone": "CEST",
-                    "readme": "readme"
+                    "hostname": "hello"
                 }};
                 Ok(http::Response::builder()
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -367,7 +351,7 @@ mod tests {
         let service = router_creator.create();
 
         let request = supergraph::Request::fake_builder()
-            .query("query { serverNetworkInfo { ip city country } }")
+            .query("query { serverNetworkInfo { ip hostname } }")
             // Request building here
             .build()
             .unwrap()

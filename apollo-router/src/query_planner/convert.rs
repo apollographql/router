@@ -50,7 +50,7 @@ impl From<&'_ next::SubscriptionNode> for plan::PlanNode {
         let next::SubscriptionNode { primary, rest } = value;
         Self::Subscription {
             primary: primary.as_ref().into(),
-            rest: rest.map(|r| Box::new(r.as_ref().into())),
+            rest: rest.as_ref().map(|r| Box::new(r.as_ref().into())),
         }
     }
 }
@@ -70,7 +70,9 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
         } = value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
+            // TODO: cmon jeremy
             requires: requires
+                .clone()
                 .unwrap_or_default()
                 .iter()
                 .map(std::convert::Into::into)
@@ -86,7 +88,7 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
             } else {
                 Some(
                     input_rewrites
-                        .into_iter()
+                        .iter()
                         .map(|fdr| fdr.as_ref().into())
                         .collect(),
                 )
@@ -96,8 +98,9 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
             } else {
                 Some(
                     output_rewrites
+                        .clone()
                         .into_iter()
-                        .map(|fdr: &Arc<next::FetchDataRewrite>| fdr.as_ref().into())
+                        .map(|fdr| fdr.as_ref().into())
                         .collect(),
                 )
             },
@@ -154,8 +157,12 @@ impl From<&'_ next::ConditionNode> for plan::PlanNode {
         } = value;
         Self::Condition {
             condition: condition_variable.to_string(),
-            if_clause: if_clause.map(|stuff| Box::new(stuff.as_ref().into())),
-            else_clause: else_clause.map(|stuff| Box::new(stuff.as_ref().into())),
+            if_clause: if_clause
+                .as_ref()
+                .map(|stuff| Box::new(stuff.as_ref().into())),
+            else_clause: else_clause
+                .as_ref()
+                .map(|stuff| Box::new(stuff.as_ref().into())),
         }
     }
 }
@@ -185,7 +192,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             } else {
                 Some(
                     input_rewrites
-                        .into_iter()
+                        .iter()
                         .map(|fdr| fdr.as_ref().into())
                         .collect(),
                 )
@@ -211,7 +218,7 @@ impl From<&'_ next::PrimaryDeferBlock> for plan::Primary {
             node,
         } = value;
         Self {
-            node: node.map(|stuff| Box::new(stuff.as_ref().into())),
+            node: node.as_ref().map(|stuff| Box::new(stuff.as_ref().into())),
             subselection: sub_selection.as_ref().map(|s| s.to_string()),
         }
     }
@@ -248,7 +255,7 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
                     })
                     .collect(),
             ),
-            node: node.map(|stuff| Arc::new(stuff.as_ref().into())),
+            node: node.as_ref().map(|stuff| Arc::new(stuff.as_ref().into())),
             subselection: sub_selection.as_ref().map(|s| s.to_string()),
         }
     }

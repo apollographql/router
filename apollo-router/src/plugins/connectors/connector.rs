@@ -3,8 +3,6 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use apollo_compiler::ast::Selection as GraphQLSelection;
-use apollo_compiler::schema::Name;
 use super::directives::KeyTypeMap;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
@@ -12,6 +10,8 @@ use super::directives::SourceType;
 use super::finder_fields::finder_field_for_connector;
 use super::http_json_transport::HttpJsonTransport;
 use crate::error::ConnectorDirectiveError;
+use apollo_compiler::ast::Selection as GraphQLSelection;
+use apollo_compiler::schema::Name;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph

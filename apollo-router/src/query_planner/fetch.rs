@@ -173,9 +173,10 @@ pub(crate) struct SubgraphOperation {
 
 impl SubgraphOperation {
     pub(crate) fn replace(&self, from: &str, to: &str) -> Self {
-        let serialized = self.serialized.get().map(|operation| {
-            operation.replace(from, to)
-        });
+        let serialized = self
+            .serialized
+            .get()
+            .map(|operation| operation.replace(from, to));
 
         Self::from_string(serialized.unwrap_or_default())
     }
@@ -783,7 +784,7 @@ impl FetchNode {
 
     pub(crate) async fn generate_connector_plan(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        schema: &Schema,
         subgraph_planners: &HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
         connector_urls: &HashMap<Arc<String>, String>,
         connectors: &Arc<HashMap<Arc<String>, Connector>>,

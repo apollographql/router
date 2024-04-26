@@ -959,7 +959,9 @@ mod tests {
         let inner = source.supergraph();
 
         // new supergraph can be parsed into subgraphs
-        let result = RouterSchema::parse(inner.serialize().to_string().as_str()).unwrap();
+        let result =
+            RouterSchema::parse(inner.serialize().to_string().as_str(), &Default::default())
+                .unwrap();
 
         assert_snapshot!(inner.serialize().to_string());
 

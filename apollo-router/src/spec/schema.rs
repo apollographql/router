@@ -397,6 +397,7 @@ impl std::fmt::Debug for Schema {
             subgraphs,
             implementers_map,
             api_schema: _, // skip
+            ..
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
