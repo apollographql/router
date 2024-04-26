@@ -1846,10 +1846,9 @@ impl OpGraphPath {
                 "Unexpectedly found federated root node as tail",
             ));
         };
-        let Ok(tail_type_pos): Result<CompositeTypeDefinitionPosition, _> =
-            tail_type_pos.clone().try_into()
+        let Ok(tail_type_pos) = CompositeTypeDefinitionPosition::try_from(tail_type_pos.clone())
         else {
-            return Ok(self.clone());
+            return Ok(path);
         };
         let typename_field = NormalizedField::new(NormalizedFieldData {
             schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
@@ -1859,12 +1858,17 @@ impl OpGraphPath {
             directives: Arc::new(Default::default()),
             sibling_typename: None,
         });
-        let Some(_edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
+        let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
             ));
         };
-        todo!()
+        path.add(
+            typename_field.into(),
+            Some(edge),
+            ConditionResolution::no_conditions(),
+            None,
+        )
     }
 
     /// Remove all trailing downcast edges and `None` edges.
