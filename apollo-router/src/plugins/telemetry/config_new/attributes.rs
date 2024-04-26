@@ -514,7 +514,7 @@ impl DefaultForLevel for HttpServerAttributes {
 impl Selectors for RouterAttributes {
     type Request = router::Request;
     type Response = router::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = self.common.on_request(request);
@@ -562,7 +562,7 @@ impl Selectors for RouterAttributes {
 impl Selectors for HttpCommonAttributes {
     type Request = router::Request;
     type Response = router::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -680,7 +680,7 @@ impl Selectors for HttpCommonAttributes {
 impl Selectors for HttpServerAttributes {
     type Request = router::Request;
     type Response = router::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -857,7 +857,7 @@ impl HttpServerAttributes {
 impl Selectors for SupergraphAttributes {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
-    type ChunkResponse = crate::graphql::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &supergraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -906,7 +906,7 @@ impl Selectors for SupergraphAttributes {
 impl Selectors for SubgraphAttributes {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &subgraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();

@@ -28,11 +28,11 @@ pub(crate) mod spans;
 pub(crate) trait Selectors {
     type Request;
     type Response;
-    type ChunkResponse;
+    type EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
     fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
-    fn on_chunk_response(&self, _response: &Self::ChunkResponse, _ctx: &Context) -> Vec<KeyValue> {
+    fn on_event_response(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
         Vec::with_capacity(0)
     }
     fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
@@ -41,13 +41,13 @@ pub(crate) trait Selectors {
 pub(crate) trait Selector {
     type Request;
     type Response;
-    type ChunkResponse;
+    type EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value>;
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value>;
-    fn on_chunk_response(
+    fn on_event_response(
         &self,
-        _response: &Self::ChunkResponse,
+        _response: &Self::EventResponse,
         _ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         None

@@ -149,7 +149,7 @@ impl Instrumented
 {
     type Request = router::Request;
     type Response = router::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
@@ -252,7 +252,7 @@ impl Instrumented
 {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
-    type ChunkResponse = crate::graphql::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
@@ -306,9 +306,9 @@ impl Instrumented
         }
     }
 
-    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
         for custom_event in &self.custom {
-            custom_event.on_chunk_response(response, ctx);
+            custom_event.on_event_response(response, ctx);
         }
     }
 
@@ -329,7 +329,7 @@ impl Instrumented
 {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
@@ -456,7 +456,7 @@ pub(crate) enum EventOn {
     /// Log the event on response
     Response,
     /// Log the event on every chunks in the response
-    ChunkResponse,
+    EventResponse,
     /// Log the event on error
     Error,
 }
@@ -483,16 +483,16 @@ where
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
-impl<A, T, Request, Response, ChunkResponse> Instrumented for CustomEvent<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Instrumented for CustomEvent<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Default,
-    T: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
         + Debug
         + Debug,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -529,17 +529,17 @@ where
         inner.send_event();
     }
 
-    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
         let mut inner = self.inner.lock();
-        if inner.event_on != EventOn::ChunkResponse {
+        if inner.event_on != EventOn::EventResponse {
             return;
         }
 
-        if !inner.condition.evaluate_chunk_response(response, ctx) {
+        if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
         if let Some(selectors) = &inner.selectors {
-            let mut new_attributes = selectors.on_chunk_response(response, ctx);
+            let mut new_attributes = selectors.on_event_response(response, ctx);
             inner.attributes.append(&mut new_attributes);
         }
 

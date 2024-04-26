@@ -114,13 +114,13 @@ where
     }
 }
 
-impl<Att, Request, Response, ChunkResponse> Selector for Conditional<Att>
+impl<Att, Request, Response, EventResponse> Selector for Conditional<Att>
 where
-    Att: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
         match &self.condition {
@@ -163,9 +163,9 @@ where
         }
     }
 
-    fn on_chunk_response(
+    fn on_event_response(
         &self,
-        response: &Self::ChunkResponse,
+        response: &Self::EventResponse,
         ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         // We may have got the value from the request.
@@ -174,7 +174,7 @@ where
         match (value, &self.condition) {
             (State::Value(value), Some(condition)) => {
                 // We have a value already, let's see if the condition was evaluated to true.
-                if condition.lock().evaluate_chunk_response(response, ctx) {
+                if condition.lock().evaluate_event_response(response, ctx) {
                     *self.value.lock() = State::Returned;
                     Some(value)
                 } else {
@@ -183,15 +183,15 @@ where
             }
             (State::Pending | State::Returned, Some(condition)) => {
                 // We don't have a value already, let's try to get it from the response if the condition was evaluated to true.
-                if condition.lock().evaluate_chunk_response(response, ctx) {
-                    self.selector.on_chunk_response(response, ctx)
+                if condition.lock().evaluate_event_response(response, ctx) {
+                    self.selector.on_event_response(response, ctx)
                 } else {
                     None
                 }
             }
             (State::Pending, None) => {
                 // We don't have a value already, and there is no condition.
-                self.selector.on_chunk_response(response, ctx)
+                self.selector.on_event_response(response, ctx)
             }
             _ => None,
         }

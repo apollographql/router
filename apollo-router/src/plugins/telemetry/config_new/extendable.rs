@@ -158,14 +158,14 @@ where
     }
 }
 
-impl<A, E, Request, Response, ChunkResponse> Selectors for Extendable<A, E>
+impl<A, E, Request, Response, EventResponse> Selectors for Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
-    E: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
@@ -195,11 +195,11 @@ where
         self.attributes.on_error(error)
     }
 
-    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) -> Vec<KeyValue> {
-        let mut attrs = self.attributes.on_chunk_response(response, ctx);
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_event_response(response, ctx);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
-                .on_chunk_response(response, ctx)
+                .on_event_response(response, ctx)
                 .map(|v| KeyValue::new(key.clone(), v))
         });
         attrs.extend(custom_attributes);

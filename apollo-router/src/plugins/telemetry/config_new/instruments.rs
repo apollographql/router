@@ -421,13 +421,13 @@ where
     }
 }
 
-impl<T, Request, Response, ChunkResponse> Selectors for DefaultedStandardInstrument<T>
+impl<T, Request, Response, EventResponse> Selectors for DefaultedStandardInstrument<T>
 where
-    T: Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    T: Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         match self {
@@ -450,10 +450,10 @@ where
         }
     }
 
-    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) -> Vec<KeyValue> {
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
-            Self::Extendable { attributes } => attributes.on_chunk_response(response, ctx),
+            Self::Extendable { attributes } => attributes.on_event_response(response, ctx),
         }
     }
 }
@@ -536,16 +536,16 @@ where
     condition: Condition<E>,
 }
 
-impl<A, E, Request, Response, ChunkResponse> Selectors for Instrument<A, E>
+impl<A, E, Request, Response, EventResponse> Selectors for Instrument<A, E>
 where
     A: Debug
         + Default
-        + Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
-    E: Debug + Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+        + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_request(request)
@@ -555,12 +555,12 @@ where
         self.attributes.on_response(response)
     }
 
-    fn on_chunk_response(
+    fn on_event_response(
         &self,
-        response: &Self::ChunkResponse,
+        response: &Self::EventResponse,
         ctx: &Context,
     ) -> Vec<opentelemetry_api::KeyValue> {
-        self.attributes.on_chunk_response(response, ctx)
+        self.attributes.on_event_response(response, ctx)
     }
 
     fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
@@ -586,7 +586,7 @@ pub(crate) enum InstrumentType {
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum InstrumentValue<T> {
     Standard(Standard),
-    Chunked(Chunked<T>),
+    Chunked(Event<T>),
     Custom(T),
 }
 
@@ -600,41 +600,41 @@ pub(crate) enum Standard {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Chunked<T> {
+pub(crate) enum Event<T> {
     /// For every chunk sent through http multipart connection
-    #[serde(rename = "chunked_duration")]
+    #[serde(rename = "event_duration")]
     Duration,
     /// For every chunk sent through http multipart connection
-    #[serde(rename = "chunked_unit")]
+    #[serde(rename = "event_unit")]
     Unit,
     /// For every chunk sent through http multipart connection
-    #[serde(rename = "chunked_custom")]
+    #[serde(rename = "event_custom")]
     Custom(T),
 }
 
 pub(crate) trait Instrumented {
     type Request;
     type Response;
-    type ChunkResponse;
+    type EventResponse;
 
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
-    fn on_chunk_response(&self, _response: &Self::ChunkResponse, _ctx: &Context) {}
+    fn on_event_response(&self, _response: &Self::EventResponse, _ctx: &Context) {}
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
-impl<A, B, E, Request, Response, ChunkResponse> Instrumented for Extendable<A, Instrument<B, E>>
+impl<A, B, E, Request, Response, EventResponse> Instrumented for Extendable<A, Instrument<B, E>>
 where
     A: Default
-        + Instrumented<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+        + Instrumented<Request = Request, Response = Response, EventResponse = EventResponse>,
     B: Default
         + Debug
-        + Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
-    E: Debug + Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+        + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         self.attributes.on_request(request);
@@ -644,8 +644,8 @@ where
         self.attributes.on_response(response);
     }
 
-    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
-        self.attributes.on_chunk_response(response, ctx);
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+        self.attributes.on_event_response(response, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -656,7 +656,7 @@ where
 impl Selectors for SubgraphInstrumentsConfig {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
@@ -717,9 +717,9 @@ where
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Chunked::Duration => (None, Increment::ChunkedDuration(Instant::now())),
-                            Chunked::Unit => (None, Increment::ChunkedUnit),
-                            Chunked::Custom(selector) => (
+                            Event::Duration => (None, Increment::ChunkedDuration(Instant::now())),
+                            Event::Unit => (None, Increment::ChunkedUnit),
+                            Event::Custom(selector) => (
                                 Some(Arc::new(selector.clone())),
                                 Increment::ChunkedCustom(None),
                             ),
@@ -751,9 +751,9 @@ where
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Chunked::Duration => (None, Increment::ChunkedDuration(Instant::now())),
-                            Chunked::Unit => (None, Increment::ChunkedUnit),
-                            Chunked::Custom(selector) => (
+                            Event::Duration => (None, Increment::ChunkedDuration(Instant::now())),
+                            Event::Unit => (None, Increment::ChunkedUnit),
+                            Event::Custom(selector) => (
                                 Some(Arc::new(selector.clone())),
                                 Increment::ChunkedCustom(None),
                             ),
@@ -782,16 +782,16 @@ where
     }
 }
 
-impl<Request, Response, ChunkResponse, Attributes, Select> Instrumented
+impl<Request, Response, EventResponse, Attributes, Select> Instrumented
     for CustomInstruments<Request, Response, Attributes, Select>
 where
     Attributes:
-        Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Default,
-    Select: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Debug,
+        Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    Select: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         for counter in &self.counters {
@@ -820,12 +820,12 @@ where
         }
     }
 
-    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
         for counter in &self.counters {
-            counter.on_chunk_response(response, ctx);
+            counter.on_event_response(response, ctx);
         }
         for histogram in &self.histograms {
-            histogram.on_chunk_response(response, ctx);
+            histogram.on_event_response(response, ctx);
         }
     }
 }
@@ -847,7 +847,7 @@ pub(crate) struct RouterInstruments {
 impl Instrumented for RouterInstruments {
     type Request = router::Request;
     type Response = router::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(http_server_request_duration) = &self.http_server_request_duration {
@@ -929,7 +929,7 @@ pub(crate) struct SubgraphInstruments {
 impl Instrumented for SubgraphInstruments {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(http_client_request_duration) = &self.http_client_request_duration {
@@ -1015,16 +1015,16 @@ where
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
-impl<A, T, Request, Response, ChunkResponse> Instrumented for CustomCounter<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Default,
-    T: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
         + Debug
         + Debug,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -1099,17 +1099,17 @@ where
         }
     }
 
-    fn on_chunk_response(&self, response: &Self::ChunkResponse, ctx: &Context) {
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
         // TODO find a trick here to not always execute it
         // Playing with a specific type of increment
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_chunk_response(response, ctx) {
+        if !inner.condition.evaluate_event_response(response, ctx) {
             let _ = inner.counter.take();
             return;
         }
         let mut attrs: Vec<KeyValue> = inner
             .selectors
-            .on_chunk_response(response, ctx)
+            .on_event_response(response, ctx)
             .into_iter()
             .collect();
         attrs.append(&mut inner.attributes);
@@ -1117,7 +1117,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_chunk_response(response, ctx))
+            .and_then(|s| s.on_event_response(response, ctx))
         {
             let new_incr = match inner.increment {
                 Increment::ChunkedCustom(None) => {
@@ -1211,7 +1211,7 @@ struct ActiveRequestsCounterInner {
 impl Instrumented for ActiveRequestsCounter {
     type Request = router::Request;
     type Response = router::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -1303,15 +1303,15 @@ where
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
-impl<A, T, Request, Response, ChunkResponse> Instrumented
+impl<A, T, Request, Response, EventResponse> Instrumented
     for CustomHistogram<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response, ChunkResponse = ChunkResponse> + Default,
-    T: Selector<Request = Request, Response = Response, ChunkResponse = ChunkResponse>,
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
-    type ChunkResponse = ChunkResponse;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();

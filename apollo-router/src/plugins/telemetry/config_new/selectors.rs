@@ -501,7 +501,7 @@ pub(crate) enum SubgraphSelector {
 impl Selector for RouterSelector {
     type Request = router::Request;
     type Response = router::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
         match self {
@@ -594,7 +594,7 @@ impl Selector for RouterSelector {
 impl Selector for SupergraphSelector {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
-    type ChunkResponse = crate::graphql::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &supergraph::Request) -> Option<opentelemetry::Value> {
         match self {
@@ -717,9 +717,9 @@ impl Selector for SupergraphSelector {
         }
     }
 
-    fn on_chunk_response(
+    fn on_event_response(
         &self,
-        response: &Self::ChunkResponse,
+        response: &Self::EventResponse,
         _ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
@@ -772,7 +772,7 @@ impl Selector for SupergraphSelector {
 impl Selector for SubgraphSelector {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
-    type ChunkResponse = ();
+    type EventResponse = ();
 
     fn on_request(&self, request: &subgraph::Request) -> Option<opentelemetry::Value> {
         match self {
