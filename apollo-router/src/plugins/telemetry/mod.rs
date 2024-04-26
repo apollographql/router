@@ -1380,6 +1380,7 @@ impl Telemetry {
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
+                                    result: "".to_string(),
                                     client_name: context
                                         .get(CLIENT_NAME)
                                         .unwrap_or_default()

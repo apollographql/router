@@ -12,7 +12,8 @@ expression: results
             "client_name": "test_client",
             "client_version": "1.0-test",
             "operation_type": "subscription",
-            "operation_subtype": "subscription-request"
+            "operation_subtype": "subscription-request",
+            "result": ""
           },
           "query_latency_stats": {
             "latency": {
