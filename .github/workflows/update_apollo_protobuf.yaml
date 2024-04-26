@@ -23,7 +23,6 @@ jobs:
           branch: create-pull-request/apollo-proto-updates
           team-reviewers: |
             router
-            pulsar
           add-paths: |
             apollo-router/src/plugins/telemetry/proto/reports.proto
           delete-branch: true
