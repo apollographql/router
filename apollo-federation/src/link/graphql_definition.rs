@@ -4,6 +4,7 @@ use crate::error::FederationError;
 use crate::link::argument::{
     directive_optional_string_argument, directive_optional_variable_boolean_argument,
 };
+use apollo_compiler::ast::Value;
 use apollo_compiler::executable::{Directive, Name};
 use apollo_compiler::{name, Node, NodeStr};
 
@@ -56,6 +57,15 @@ pub(crate) enum OperationConditionalKind {
     Skip,
 }
 
+impl OperationConditionalKind {
+    pub(crate) fn name(&self) -> Name {
+        match self {
+            OperationConditionalKind::Include => name!("include"),
+            OperationConditionalKind::Skip => name!("skip"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum BooleanOrVariable {
     Boolean(bool),
@@ -68,5 +78,29 @@ impl Display for BooleanOrVariable {
             BooleanOrVariable::Boolean(b) => b.fmt(f),
             BooleanOrVariable::Variable(name) => name.fmt(f),
         }
+    }
+}
+
+impl BooleanOrVariable {
+    pub(crate) fn to_ast_value(&self) -> Value {
+        match self {
+            BooleanOrVariable::Boolean(b) => Value::Boolean(*b),
+            BooleanOrVariable::Variable(name) => Value::Variable(name.clone()),
+        }
+    }
+}
+
+impl From<BooleanOrVariable> for Value {
+    fn from(b: BooleanOrVariable) -> Self {
+        match b {
+            BooleanOrVariable::Boolean(b) => Value::Boolean(b),
+            BooleanOrVariable::Variable(name) => Value::Variable(name),
+        }
+    }
+}
+
+impl From<BooleanOrVariable> for Node<Value> {
+    fn from(b: BooleanOrVariable) -> Self {
+        Node::new(b.into())
     }
 }

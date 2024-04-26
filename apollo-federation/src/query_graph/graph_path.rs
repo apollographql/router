@@ -407,6 +407,10 @@ impl OpGraphPathContext {
     pub(crate) fn is_empty(&self) -> bool {
         self.conditionals.is_empty()
     }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &OperationConditional> {
+        self.conditionals.iter().map(|x| x.as_ref())
+    }
 }
 
 impl Display for OpGraphPathContext {

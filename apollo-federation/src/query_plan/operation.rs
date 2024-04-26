@@ -527,6 +527,60 @@ pub(crate) enum NormalizedSelection {
 }
 
 impl NormalizedSelection {
+    pub(crate) fn from_normalized_field(
+        field: NormalizedField,
+        sub_selections: Option<NormalizedSelectionSet>,
+    ) -> Self {
+        let field_selection = NormalizedFieldSelection {
+            field,
+            selection_set: sub_selections,
+        };
+        Self::Field(Arc::new(field_selection))
+    }
+
+    pub(crate) fn from_normalized_inline_fragment(
+        inline_fragment: NormalizedInlineFragment,
+        sub_selections: NormalizedSelectionSet,
+    ) -> Self {
+        let inline_fragment_selection = NormalizedInlineFragmentSelection {
+            inline_fragment,
+            selection_set: sub_selections,
+        };
+        Self::InlineFragment(Arc::new(inline_fragment_selection))
+    }
+
+    pub(crate) fn from_element(
+        element: OpPathElement,
+        sub_selections: Option<NormalizedSelectionSet>,
+    ) -> Result<Self, FederationError> {
+        match element {
+            OpPathElement::Field(field) => Ok(Self::from_normalized_field(field, sub_selections)),
+            OpPathElement::InlineFragment(inline_fragment) => {
+                let Some(sub_selections) = sub_selections else {
+                    return Err(FederationError::internal(
+                        "unexpected inline fragment without sub-selections",
+                    ));
+                };
+                Ok(Self::from_normalized_inline_fragment(
+                    inline_fragment,
+                    sub_selections,
+                ))
+            }
+        }
+    }
+
+    pub(crate) fn schema(&self) -> &ValidFederationSchema {
+        match self {
+            NormalizedSelection::Field(field_selection) => &field_selection.field.data().schema,
+            NormalizedSelection::FragmentSpread(fragment_spread_selection) => {
+                &fragment_spread_selection.spread.data().schema
+            }
+            NormalizedSelection::InlineFragment(inline_fragment_selection) => {
+                &inline_fragment_selection.inline_fragment.data().schema
+            }
+        }
+    }
+
     fn directives(&self) -> &Arc<DirectiveList> {
         match self {
             NormalizedSelection::Field(field_selection) => &field_selection.field.data().directives,
@@ -1421,6 +1475,20 @@ impl NormalizedSelectionSet {
             schema,
             type_position,
             selections: Default::default(),
+        }
+    }
+
+    pub(crate) fn from_selection(
+        type_position: CompositeTypeDefinitionPosition,
+        selection: NormalizedSelection,
+    ) -> Self {
+        let schema = selection.schema();
+        let mut selection_map = NormalizedSelectionMap::new();
+        selection_map.insert(selection.clone());
+        Self {
+            schema: schema.clone(),
+            type_position,
+            selections: Arc::new(selection_map),
         }
     }
 
