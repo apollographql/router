@@ -1909,7 +1909,7 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    input_selections.add(edge_conditions);
+    input_selections.merge_into(std::iter::once(edge_conditions.as_ref()))?;
     let new_node =
         &mut FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(

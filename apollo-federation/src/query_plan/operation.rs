@@ -1989,10 +1989,6 @@ impl NormalizedSelectionSet {
         Arc::make_mut(&mut self.selections).add_at_path(path, selection_set)
     }
 
-    pub(crate) fn add(&mut self, _selections: &NormalizedSelectionSet) {
-        todo!()
-    }
-
     fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
         self.selections
             .iter()
