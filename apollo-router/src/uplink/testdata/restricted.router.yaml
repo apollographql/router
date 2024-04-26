@@ -77,3 +77,11 @@ preview_file_uploads:
     multipart:
       enabled: true
       mode: stream
+
+experimental_demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 30
+      max: 256

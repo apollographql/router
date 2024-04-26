@@ -14,7 +14,7 @@ const ROUTER_URL: &str = "http://localhost:4000";
 
 fuzz_target!(|data: &[u8]| {
     let generated_operation = match generate_valid_operation(data, "fuzz/supergraph-fed2.graphql") {
-        Ok(d) => d,
+        Ok((d, _)) => d,
         Err(_err) => {
             return;
         }
@@ -55,7 +55,6 @@ fuzz_target!(|data: &[u8]| {
         }
         let mut file = OpenOptions::new()
             .read(true)
-            .write(true)
             .create(true)
             .append(true)
             .open("router_errors.txt")
@@ -108,7 +107,6 @@ fuzz_target!(|data: &[u8]| {
         if router_response != gateway_response {
             let mut file = OpenOptions::new()
                 .read(true)
-                .write(true)
                 .create(true)
                 .append(true)
                 .open("router_errors.txt")

@@ -12,12 +12,16 @@ You can set conditions for when an [instrument](./instruments) should be mutated
 ## Condition configuration
 Here is an example of a condition on a custom instrument:
 
-```yaml title="future.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
       router:
         my.instrument:
+          value: duration
+          type: counter
+          unit: s
+          description: "my description"
           # ...
           # This instrument will only be mutated if the condition evaluates to true
           condition:
@@ -29,6 +33,17 @@ telemetry:
               - eq:
                   - "foo"
                   - response_header: x-resp-header
+```
+
+#### `exists`
+
+The `exists` condition is testing if [selectors](./selectors) is present.
+
+For example, the following condition checks the value of `x-req-header` exists:
+
+```yaml
+exists:
+  - request_header: x-req-header
 ```
 
 #### `eq`
@@ -105,6 +120,7 @@ The available basic conditions:
 | Condition | Description                                             |
 |----------|----------------------------------------------------------|
 | `eq`     | An equality test between selectors or values             |
+| `exist`  | A check to see if the selectors value exists             |
 | `not`    | A negated equality test between selectors or values      |
 | `all`    | A list of conditions that must all be true               |
 | `any`    | A list of conditions of which at least one must be true  |

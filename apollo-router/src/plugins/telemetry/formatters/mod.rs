@@ -3,11 +3,13 @@ pub(crate) mod json;
 pub(crate) mod text;
 
 use std::collections::HashMap;
-use std::collections::LinkedList;
 use std::fmt;
 use std::time::Instant;
 
 use opentelemetry::sdk::Resource;
+use opentelemetry_api::trace::SpanId;
+use opentelemetry_api::trace::TraceContextExt;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use serde_json::Number;
@@ -18,6 +20,7 @@ use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::registry::SpanRef;
 
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
@@ -25,6 +28,7 @@ use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
+use crate::plugins::telemetry::otel::OtelData;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
@@ -230,7 +234,7 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
     })
 }
 
-pub(crate) fn to_list(resource: Resource) -> LinkedList<(String, serde_json::Value)> {
+pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
     resource
         .into_iter()
         .map(|(k, v)| {
@@ -287,4 +291,28 @@ pub(crate) trait EventFormatter<S> {
     ) -> fmt::Result
     where
         W: std::fmt::Write;
+}
+
+#[inline]
+pub(crate) fn get_trace_and_span_id<S>(span: &SpanRef<S>) -> Option<(TraceId, SpanId)>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    let ext = span.extensions();
+    if let Some(otel_data) = ext.get::<OtelData>() {
+        // The root span is being built and has no parent
+        if let (Some(trace_id), Some(span_id)) =
+            (otel_data.builder.trace_id, otel_data.builder.span_id)
+        {
+            return Some((trace_id, span_id));
+        }
+
+        // Child spans with a valid trace context
+        let span = otel_data.parent_cx.span();
+        let span_context = span.span_context();
+        if span_context.is_valid() {
+            return Some((span_context.trace_id(), span_context.span_id()));
+        }
+    }
+    None
 }

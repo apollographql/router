@@ -1,0 +1,7 @@
+experimental_demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    test:
+      stage: execution_request
+      error: estimated_cost_too_expensive

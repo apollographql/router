@@ -69,7 +69,12 @@ pub struct Request {
     /// ```
     ///
     /// [APQ]: https://www.apollographql.com/docs/apollo-server/performance/apq/
-    #[serde(skip_serializing_if = "Object::is_empty", default)]
+    /// Note we allow null when deserializing as per [graphql-over-http spec](https://graphql.github.io/graphql-over-http/draft/#sel-EALFPCCBCEtC37P)
+    #[serde(
+        skip_serializing_if = "Object::is_empty",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub extensions: Object,
 }
 
@@ -83,19 +88,14 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
-fn as_object<E: Error>(value: Value, null_is_default: bool) -> Result<Object, E> {
+fn as_optional_object<E: Error>(value: Value) -> Result<Object, E> {
     use serde::de::Unexpected;
 
-    let exp = if null_is_default {
-        "a map or null"
-    } else {
-        "a map"
-    };
+    let exp = "a map or null";
     match value {
         Value::Object(object) => Ok(object),
         // Similar to `deserialize_null_default`:
-        Value::Null if null_is_default => Ok(Object::default()),
-        Value::Null => Err(E::invalid_type(Unexpected::Unit, &exp)),
+        Value::Null => Ok(Object::default()),
         Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
         Value::Number(_) => Err(E::invalid_type(Unexpected::Other("a number"), &exp)),
         Value::String(value) => Err(E::invalid_type(Unexpected::Str(value.as_str()), &exp)),
@@ -177,8 +177,8 @@ impl Request {
 
     /// Convert Bytes into a GraphQL [`Request`].
     ///
-    /// An error will be produced in the event that the query string parameters
-    /// cannot be turned into a valid GraphQL `Request`.
+    /// An error will be produced in the event that the bytes array cannot be
+    /// turned into a valid GraphQL `Request`.
     pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
@@ -360,8 +360,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
                             }
                             let seed = serde_json_bytes::value::BytesSeed::new(self.0);
                             let value = map.next_value_seed(seed)?;
-                            let null_is_default = true;
-                            variables = Some(as_object(value, null_is_default)?);
+                            variables = Some(as_optional_object(value)?);
                         }
                         Field::Extensions => {
                             if extensions.is_some() {
@@ -369,8 +368,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
                             }
                             let seed = serde_json_bytes::value::BytesSeed::new(self.0);
                             let value = map.next_value_seed(seed)?;
-                            let null_is_default = false;
-                            extensions = Some(as_object(value, null_is_default)?);
+                            extensions = Some(as_optional_object(value)?);
                         }
                         Field::Other => {
                             let _: serde::de::IgnoredAny = map.next_value()?;
@@ -406,13 +404,10 @@ mod tests {
           "operationName": "aTest",
           "variables": { "arg1": "me" },
           "extensions": {"extension": 1}
-        })
-        .to_string();
-        println!("data: {data}");
-        let result = serde_json::from_str::<Request>(data.as_str());
-        println!("result: {result:?}");
+        });
+        let result = check_deserialization(data);
         assert_eq!(
-            result.unwrap(),
+            result,
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
@@ -424,18 +419,14 @@ mod tests {
 
     #[test]
     fn test_no_variables() {
-        let result = serde_json::from_str::<Request>(
-            json!(
-            {
-              "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-              "operationName": "aTest",
-              "extensions": {"extension": 1}
-            })
-            .to_string()
-            .as_str(),
-        );
+        let result = check_deserialization(json!(
+        {
+          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
+          "operationName": "aTest",
+          "extensions": {"extension": 1}
+        }));
         assert_eq!(
-            result.unwrap(),
+            result,
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
@@ -448,19 +439,15 @@ mod tests {
     // rover sends { "variables": null } when running the introspection query,
     // and possibly running other queries as well.
     fn test_variables_is_null() {
-        let result = serde_json::from_str::<Request>(
-            json!(
-            {
-              "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-              "operationName": "aTest",
-              "variables": null,
-              "extensions": {"extension": 1}
-            })
-            .to_string()
-            .as_str(),
-        );
+        let result = check_deserialization(json!(
+        {
+          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
+          "operationName": "aTest",
+          "variables": null,
+          "extensions": {"extension": 1}
+        }));
         assert_eq!(
-            result.unwrap(),
+            result,
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }")
                 .operation_name("aTest")
@@ -473,20 +460,16 @@ mod tests {
     fn from_urlencoded_query_works() {
         let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
 
-        let expected_result = serde_json::from_str::<Request>(
-            json!(
-            {
-              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-              "extensions": {
-                  "persistedQuery": {
-                      "version": 1,
-                      "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
-                  }
-                }
-            })
-            .to_string()
-            .as_str(),
-        ).unwrap();
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "extensions": {
+              "persistedQuery": {
+                  "version": 1,
+                  "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
+              }
+            }
+        }));
 
         let req = Request::from_urlencoded_query(query_string).unwrap();
 
@@ -497,24 +480,73 @@ mod tests {
     fn from_urlencoded_query_with_variables_works() {
         let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&variables=%7B%22date%22%3A%222022-01-01T00%3A00%3A00%2B00%3A00%22%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
 
-        let expected_result = serde_json::from_str::<Request>(
-            json!(
-            {
-              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-              "variables": {"date": "2022-01-01T00:00:00+00:00"},
-              "extensions": {
-                  "persistedQuery": {
-                      "version": 1,
-                      "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
-                  }
-                }
-            })
-            .to_string()
-            .as_str(),
-        ).unwrap();
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+          "extensions": {
+              "persistedQuery": {
+                  "version": 1,
+                  "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
+              }
+            }
+        }));
 
         let req = Request::from_urlencoded_query(query_string).unwrap();
 
         assert_eq!(expected_result, req);
+    }
+
+    #[test]
+    fn null_extensions() {
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+          "extensions": null
+        }));
+        insta::assert_yaml_snapshot!(expected_result);
+    }
+
+    #[test]
+    fn missing_extensions() {
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+        }));
+        insta::assert_yaml_snapshot!(expected_result);
+    }
+
+    #[test]
+    fn extensions() {
+        let expected_result = check_deserialization(json!(
+        {
+          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+          "variables": {"date": "2022-01-01T00:00:00+00:00"},
+          "extensions": {
+            "something_simple": "else",
+            "something_complex": {
+                "nested": "value"
+            }
+          }
+        }));
+        insta::assert_yaml_snapshot!(expected_result);
+    }
+
+    fn check_deserialization(request: serde_json::Value) -> Request {
+        // check that deserialize_from_bytes agrees with Deserialize impl
+
+        let string = serde_json::to_string(&request).expect("could not serialize request");
+        let string_deserialized =
+            serde_json::from_str(&string).expect("could not deserialize string");
+        let bytes = Bytes::copy_from_slice(string.as_bytes());
+        let bytes_deserialized =
+            Request::deserialize_from_bytes(&bytes).expect("could not deserialize from bytes");
+        assert_eq!(
+            string_deserialized, bytes_deserialized,
+            "string and bytes deserialization did not match"
+        );
+        string_deserialized
     }
 }

@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use apollo_compiler::name;
 use futures::StreamExt;
 use http::Method;
 use router_bridge::planner::UsageReporting;
@@ -23,6 +24,8 @@ use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::SubgraphOperation;
+use crate::query_planner::BridgeQueryPlanner;
 use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
@@ -82,7 +85,8 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
@@ -133,7 +137,8 @@ async fn fetch_includes_operation_name() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(Query::empty()),
     };
 
@@ -190,7 +195,8 @@ async fn fetch_makes_post_requests() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(Query::empty()),
     };
 
@@ -249,16 +255,15 @@ async fn defer() {
             formatted_query_plan: Default::default(),
             root: PlanNode::Defer {
                 primary: Primary {
-                    path: None,
                     subselection: Some("{ t { x } }".to_string()),
                     node: Some(Box::new(PlanNode::Fetch(FetchNode {
-                        service_name: "X".to_string(),
+                        service_name: "X".into(),
                         requires: vec![],
                         variable_usages: vec![],
-                        operation: "{ t { id __typename x } }".to_string(),
-                        operation_name: Some("t".to_string()),
+                        operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
+                        operation_name: Some("t".into()),
                         operation_kind: OperationKind::Query,
-                        id: Some("fetch1".to_string()),
+                        id: Some("fetch1".into()),
                         input_rewrites: None,
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
@@ -267,31 +272,30 @@ async fn defer() {
                 },
                 deferred: vec![DeferredNode {
                     depends: vec![Depends {
-                        id: "fetch1".to_string(),
-                        defer_label: None,
+                        id: "fetch1".into(),
                     }],
                     label: None,
-                    query_path: Path(vec![PathElement::Key("t".to_string())]), 
+                    query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
                     subselection: Some("{ y }".to_string()),
                     node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                        path: Path(vec![PathElement::Key("t".to_string())]),
+                        path: Path(vec![PathElement::Key("t".to_string(), None)]),
                         node: Box::new(PlanNode::Fetch(FetchNode {
-                            service_name: "Y".to_string(),
+                            service_name: "Y".into(),
                             requires: vec![query_planner::selection::Selection::InlineFragment(
                                 query_planner::selection::InlineFragment {
-                                    type_condition: Some("T".into()),
+                                    type_condition: Some(name!("T")),
                                     selections: vec![
                                         query_planner::selection::Selection::Field(
                                             query_planner::selection::Field {
                                                 alias: None,
-                                                name: "id".into(),
+                                                name: name!("id"),
                                                 selections: None,
                                             },
                                         ),
                                         query_planner::selection::Selection::Field(
                                             query_planner::selection::Field {
                                                 alias: None,
-                                                name: "__typename".into(),
+                                                name: name!("__typename"),
                                                 selections: None,
                                             },
                                         ),
@@ -299,10 +303,12 @@ async fn defer() {
                                 },
                             )],
                             variable_usages: vec![],
-                            operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}".to_string(),
+                            operation: SubgraphOperation::from_string(
+                                "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
+                            ),
                             operation_name: None,
                             operation_kind: OperationKind::Query,
-                            id: Some("fetch2".to_string()),
+                            id: Some("fetch2".into()),
                             input_rewrites: None,
                             output_rewrites: None,
                             schema_aware_hash: Default::default(),
@@ -314,7 +320,7 @@ async fn defer() {
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
-            },
+            }.into(),
             query: Arc::new(Query::empty()),
         };
 
@@ -417,7 +423,12 @@ async fn defer_if_condition() {
           }"#;
 
     let schema = include_str!("testdata/defer_clause.graphql");
-    let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    // we need to use the planner here instead of Schema::parse_test because that one uses the router bridge's api_schema function
+    // does not keep the defer directive definition
+    let planner = BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()))
+        .await
+        .unwrap();
+    let schema = planner.schema();
 
     let root: PlanNode =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -427,10 +438,12 @@ async fn defer_if_condition() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(
             Query::parse(
                 query,
+                Some("Me"),
                 &schema,
                 &Configuration::fake_builder().build().unwrap(),
             )
@@ -612,7 +625,8 @@ async fn dependent_mutations() {
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
-        },
+        }
+        .into(),
         query: Arc::new(Query::empty()),
     };
 

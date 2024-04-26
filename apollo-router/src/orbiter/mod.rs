@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use clap::CommandFactory;
-use clap::Parser;
 use http::header::CONTENT_TYPE;
 use http::header::USER_AGENT;
 use jsonschema::output::BasicOutput;
@@ -96,6 +95,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
 
     async fn create<'a>(
         &'a mut self,
+        is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
@@ -103,6 +103,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create(
+                is_telemetry_disabled,
                 configuration.clone(),
                 schema.clone(),
                 previous_router,
@@ -110,10 +111,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
             )
             .await
             .map(|factory| {
-                // TODO: We should have a way to access the original CLI args here so that we can just see what the
-                // value of `anonymous_telemetry_disabled` really is instead of parsing it twice.
-                let telemetry_disabled = Opt::parse().is_telemetry_disabled();
-                if !telemetry_disabled {
+                if !is_telemetry_disabled {
                     let schema = factory.supergraph_creator.schema();
 
                     tokio::task::spawn(async move {
@@ -385,7 +383,7 @@ mod test {
         let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
             .expect("config must be valid");
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -403,7 +401,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(Value::Null);
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -421,7 +419,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(json!({"garbage": "garbage"}));
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {

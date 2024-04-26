@@ -1,5 +1,7 @@
 ---
 title: Traffic shaping in the Apollo Router
+subtitle: ' '
+description: "Tune the performance and reliability of traffic to and from the Apollo Router."
 ---
 
 The Apollo Router provides various features to improve the performance and reliability of
@@ -64,7 +66,7 @@ You can change the default timeout for client requests to the router like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  router: 
+  router:
     timeout: 50s # If client requests to the router take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
@@ -72,7 +74,7 @@ You can change the default timeout for all requests between the router and subgr
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  all: 
+  all:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
@@ -91,7 +93,7 @@ Compression is automatically supported on the client side, depending on the `Acc
 The Apollo Router has _experimental_ support for receiving client query batches:
 
 ```yaml title="router.yaml"
-experimental_batching:
+batching:
   enabled: true
   mode: batch_http_link
 ```
@@ -119,10 +121,16 @@ It currently supports these algorithms: `gzip`, `br`, and `deflate`.
 ```yaml title="router.yaml"
 traffic_shaping:
   all:
-    compression: br # Enable brotli compression for all subgraphs.
+    compression: gzip # Enable gzip compression for all subgraphs.
 ```
 
 Subgraph response decompression is always supported for these algorithms: `gzip`, `br`, and `deflate`.
+
+<Note>
+
+Brotli (`br`) compression is not supported by Apollo Server, due to its underlying Express.js not supporting it out of the box. Therefore, don't configure `br` compression for traffic shaping when using Apollo Server as a subgraph server with the router. 
+
+</Note>
 
 ### Rate limiting
 
@@ -170,11 +178,26 @@ traffic_shaping:
 
 ### HTTP/2
 
-The router supports subgraph connections over
-- HTTP/2 with TLS. This is the default configuration.
+The router supports subgraph connections over:
+- HTTP/1.1
+- HTTP/1.1 with TLS
+- HTTP/2 with TLS
 - HTTP/2 Cleartext protocol (h2c). This uses HTTP/2 over plaintext connections.
 
-To use h2c, the subgraph URL must have the `http` scheme, and the `experimental_http2` option must be set to `http2only`.
+Use the table below to look up the resulting protocol of a subgraph connection, based on the subgraph URL and the `experimental_http2` option:
+
+|                           | URL with `http://` | URL with `https://`         |
+| ------------------------- | ------------------- | --------------------------- |
+| `experimental_http2: disable` | HTTP/1.1           | HTTP/1.1 with TLS           |
+| `experimental_http2: enable`  | HTTP/1.1           | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
+| `experimental_http2: http2only` | h2c              | HTTP/2 with TLS              |
+| `experimental_http2` not set | HTTP/1.1 | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
+
+<Note>
+
+Configuring `experimental_http2: http2only` for a subgraph that doesn't support HTTP/2 results in a failed subgraph connection.
+
+</Note>
 
 ### Ordering
 

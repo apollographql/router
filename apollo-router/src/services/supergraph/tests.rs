@@ -1057,7 +1057,7 @@ async fn subscription_callback_schema_reload() {
 
     let new_schema = format!("{SCHEMA}  ");
     // reload schema
-    let schema = Schema::parse(&new_schema, &configuration).unwrap();
+    let schema = Schema::parse_test(&new_schema, &configuration).unwrap();
     notify.broadcast_schema(Arc::new(schema));
     insta::assert_json_snapshot!(tokio::time::timeout(
         Duration::from_secs(1),
@@ -1312,7 +1312,7 @@ async fn root_typename_with_defer_in_defer() {
     let res = stream.next_response().await.unwrap();
     assert_eq!(
         res.incremental
-            .get(0)
+            .first()
             .unwrap()
             .data
             .as_ref()
