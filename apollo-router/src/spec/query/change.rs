@@ -536,8 +536,7 @@ mod tests {
         assert_eq!(hash(schema1, query), hash(schema2, query));
 
         assert!(
-            hash(schema1, "query { me { id name } }") !=
-            hash(schema1, "query { me { name id } }")
+            hash(schema1, "query { me { id name } }") != hash(schema1, "query { me { name id } }")
         );
     }
 
@@ -1053,10 +1052,7 @@ mod tests {
 
         // this test won't pass until we land a fix for it
         // assert_ne!(hash(schema, query_one), hash(schema, query_two));
-        assert!(
-            hash(schema, query_one).from_hash_query !=
-            hash(schema, query_two).from_hash_query
-        );
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
     }
 
     #[test]
@@ -1073,7 +1069,6 @@ mod tests {
 
         let query_one = "query { a: test }";
         let query_two = "query { b: test }";
-
 
         // this test won't pass until we land a fix for it
         // assert_ne!(hash(schema, query_one), hash(schema, query_two));
