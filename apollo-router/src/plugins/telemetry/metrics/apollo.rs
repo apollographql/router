@@ -1,7 +1,6 @@
 //! Apollo metrics
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use opentelemetry::runtime;
@@ -17,6 +16,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config::MetricsCommon;
@@ -34,10 +34,6 @@ fn default_buckets() -> Vec<f64> {
         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
     ]
 }
-
-// Random unique UUID for the Router. This doesn't actually identify the router, it just allows disambiguation between multiple routers with the same metadata.
-// TBD(tim): maybe this needs to move somewhere else now that we're exporting it?
-pub(crate) static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
 
 impl MetricsConfigurator for Config {
     fn enabled(&self) -> bool {

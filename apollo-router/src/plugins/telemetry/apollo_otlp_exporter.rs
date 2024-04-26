@@ -25,8 +25,8 @@ use url::Url;
 use uuid::Uuid;
 
 use super::tracing::apollo_telemetry::LightSpanData;
+use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
-use crate::plugins::telemetry::metrics::apollo::ROUTER_ID;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 

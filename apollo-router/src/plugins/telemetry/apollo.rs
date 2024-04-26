@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::ops::AddAssign;
+use std::sync::OnceLock;
 use std::time::SystemTime;
 
 use http::header::HeaderName;
@@ -12,6 +13,7 @@ use serde::ser::SerializeMap;
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
+use uuid::Uuid;
 
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
@@ -33,6 +35,9 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
 pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
+
+// Random unique UUID for the Router. This doesn't actually identify the router, it just allows disambiguation between multiple routers with the same metadata.
+pub(crate) static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
