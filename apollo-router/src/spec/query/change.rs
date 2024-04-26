@@ -442,12 +442,14 @@ mod tests {
         }
     }
 
-    // Beware: do not use assert_ne! because it checks for equality
-    impl PartialEq for HashComparator {
-        fn eq(&self, other: &Self) -> bool {
+    // The non equality check is not the same
+    // as one would expect from PartialEq.
+    // This is why HashComparator doesn't implement it.
+    impl HashComparator {
+        fn equals(&self, other: &Self) -> bool {
             self.from_visitor == other.from_visitor && self.from_hash_query == other.from_hash_query
         }
-        fn ne(&self, other: &Self) -> bool {
+        fn doesnt_match(&self, other: &Self) -> bool {
             // This is intentional, we check to prevent BOTH hashes from being equal
             self.from_visitor != other.from_visitor && self.from_hash_query != other.from_hash_query
         }
@@ -525,19 +527,18 @@ mod tests {
         }
         "#;
         let query = "query { me { name } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
         // id is nullable in 1, non nullable in 2
         let query = "query { me { id name } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         // simple normalization
         let query = "query {  moi: me { name   } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
-        assert!(
-            hash(schema1, "query { me { id name } }") != hash(schema1, "query { me { name id } }")
-        );
+        assert!(hash(schema1, "query { me { id name } }")
+            .doesnt_match(&hash(schema1, "query { me { name id } }")));
     }
 
     #[test]
@@ -577,13 +578,13 @@ mod tests {
         }
         "#;
         let query = "query { me { name } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
         let query = "query { me { id name } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { customer { id } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -631,13 +632,13 @@ mod tests {
         "#;
 
         let query = "query { me { id name } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
         let query = "query { customer { id } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { customer { ... on User { name } } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -659,19 +660,19 @@ mod tests {
         "#;
 
         let query = "query { a(i: 0) }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { b }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { b(i: 0)}";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { c(j: 0)}";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { c(i:0, j: 0)}";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -862,10 +863,10 @@ mod tests {
         }
         "#;
         let query = "query { me { name } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { itf { name } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -990,10 +991,10 @@ mod tests {
         }
         "#;
         let query = "query { me { username } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { me { a } }";
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -1032,7 +1033,7 @@ mod tests {
 
         let query = "{ __schema { types { name } } }";
 
-        assert!(hash(schema1, query) != hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -1051,7 +1052,7 @@ mod tests {
         let query_two = "query { a: test(arg: 1) b: test(arg: 3) }";
 
         // this test won't pass until we land a fix for it
-        // assert_ne!(hash(schema, query_one), hash(schema, query_two));
+        // assert!(hash(schema, query_one).doesnt_match(&hash(schema, query_two)));
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
     }
 
@@ -1071,7 +1072,7 @@ mod tests {
         let query_two = "query { b: test }";
 
         // this test won't pass until we land a fix for it
-        // assert_ne!(hash(schema, query_one), hash(schema, query_two));
+        // assert!(hash(schema, query_one).doesnt_match(&hash(schema, query_two)));
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
     }
 }
