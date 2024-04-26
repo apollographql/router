@@ -123,6 +123,37 @@ impl OutputTypeDefinitionPosition {
             OutputTypeDefinitionPosition::Enum(type_) => &type_.type_name,
         }
     }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema ExtendedType, FederationError> {
+        let ty =
+            schema
+                .types
+                .get(self.type_name())
+                .ok_or_else(|| SingleFederationError::Internal {
+                    message: format!("Schema has no type \"{}\"", self),
+                })?;
+        match (ty, self) {
+            (ExtendedType::Object(_), OutputTypeDefinitionPosition::Object(_))
+            | (ExtendedType::Interface(_), OutputTypeDefinitionPosition::Interface(_))
+            | (ExtendedType::Union(_), OutputTypeDefinitionPosition::Union(_))
+            | (ExtendedType::Scalar(_), OutputTypeDefinitionPosition::Scalar(_))
+            | (ExtendedType::Enum(_), OutputTypeDefinitionPosition::Enum(_)) => Ok(ty),
+            _ => Err(SingleFederationError::Internal {
+                message: format!("Schema type \"{}\" is the wrong kind", self),
+            }
+            .into()),
+        }
+    }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema ExtendedType> {
+        self.get(schema).ok()
+    }
 }
 
 impl TryFrom<TypeDefinitionPosition> for OutputTypeDefinitionPosition {

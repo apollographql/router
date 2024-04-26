@@ -1,4 +1,5 @@
 use crate::error::FederationError;
+use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::{
     BooleanOrVariable, DeferDirectiveArguments, OperationConditional, OperationConditionalKind,
@@ -24,13 +25,13 @@ use crate::schema::position::{
 use crate::schema::ValidFederationSchema;
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::schema::Name;
+use apollo_compiler::schema::{ExtendedType, Name};
 use apollo_compiler::NodeStr;
 use indexmap::{IndexMap, IndexSet};
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 use std::fmt::{Display, Formatter, Write};
 use std::hash::Hash;
 use std::ops::Deref;
@@ -2059,12 +2060,105 @@ impl OpGraphPath {
     /// ends up "not panning out" (note that by the time this method is called, we're only looking
     /// at the options for type `I.s`; we do not know yet if `y` is queried next and so cannot tell
     /// if type explosion will be necessary or not).
+    // PORT_NOTE: In the JS code, this method was a free-standing function called "anImplementationIsEntityWithFieldShareable".
     fn has_an_entity_implementation_with_shareable_field(
         &self,
         _source: &NodeStr,
-        _interface_field_definition_position: InterfaceFieldDefinitionPosition,
+        itf: InterfaceFieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        todo!()
+        let valid_schema = self.graph.schema()?;
+        let schema = valid_schema.schema();
+        let fed_spec = get_federation_spec_definition_from_subgraph(valid_schema)?;
+        let key_directive = fed_spec.key_directive_definition(valid_schema)?;
+        let shareable_directive = fed_spec.shareable_directive(valid_schema)?;
+        let comp_type_pos = CompositeTypeDefinitionPosition::Interface(itf.parent());
+        for implem in valid_schema.possible_runtime_types(comp_type_pos)? {
+            let ty = implem.get(schema)?;
+            let field = ty.fields.get(&itf.field_name).ok_or_else(|| {
+                FederationError::internal(
+                    "Unable to find interface field ({itf}) in schema: {schema}",
+                )
+            })?;
+            if !ty.directives.has(&key_directive.name) {
+                continue;
+            }
+            if !field.directives.has(&shareable_directive.name) {
+                continue;
+            }
+
+            // Returning `true` for this method has a cost: it will make us consider type-explosion for `itf`, and this can
+            // sometime lead to a large number of additional paths to explore, which can have a substantial cost. So we want
+            // to limit it if we can avoid it. As it happens, we should return `true` if it is possible that "something"
+            // (some field) in the type of `field` is reachable in _another_ subgraph but no in the one of the current path.
+            // And while it's not trivial to check this in general, there are some easy cases we can eliminate. For instance,
+            // if the type in the current subgraph has only leaf fields, we can check that all other subgraphs reachable
+            // from the implementation have the same set of leaf fields.
+            let base_ty_name = field.ty.inner_named_type();
+            if is_leaf_type(schema, base_ty_name) {
+                continue;
+            }
+            let Some(ty) = schema.get_object(base_ty_name) else {
+                return Ok(true);
+            };
+            if ty
+                .fields
+                .values()
+                .any(|f| !is_leaf_type(schema, f.ty.inner_named_type()))
+            {
+                return Ok(true);
+            }
+            for node in self.graph.nodes_for_type(&ty.name) {
+                let node = self.graph.node_weight(node)?;
+                let tail = self.graph.node_weight(self.tail)?;
+                if node.source == tail.source {
+                    continue;
+                }
+                let Some(src) = self.graph.sources.get(&node.source) else {
+                    return Err(FederationError::internal(format!(
+                        "{node} has no valid schema in QueryGraph: {:?}",
+                        self.graph
+                    )));
+                };
+                let fed_spec = get_federation_spec_definition_from_subgraph(src)?;
+                let shareable_directive = fed_spec.shareable_directive(src)?;
+                let build_err = || {
+                    Err(FederationError::internal(format!(
+                        "{implem} is an object in {} but a {} in {}",
+                        tail.source, node.type_, node.source
+                    )))
+                };
+                let QueryGraphNodeType::SchemaType(node_ty) = &node.type_ else {
+                    return build_err();
+                };
+                let node_ty = node_ty.get(schema)?;
+                let other_fields = match node_ty {
+                    ExtendedType::Object(obj) => &obj.fields,
+                    ExtendedType::Interface(int) => &int.fields,
+                    _ => return build_err(),
+                };
+                let Some(field) = other_fields.get(&itf.field_name) else {
+                    continue;
+                };
+                if !field.directives.has(&shareable_directive.name) {
+                    continue;
+                }
+                let field_ty = field.ty.inner_named_type();
+                if field_ty != base_ty_name
+                    || !(schema.get_object(field_ty).is_some()
+                        || schema.get_interface(field_ty).is_some())
+                {
+                    // We have a genuine difference here, so we should explore type explosion.
+                    return Ok(true);
+                }
+                let names: HashSet<_> = other_fields.keys().collect();
+                if !ty.fields.keys().all(|f| names.contains(&f)) {
+                    // Same, we have a genuine difference.
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
+        Ok(false)
     }
 
     /// For the first element of the pair, the data has the same meaning as in

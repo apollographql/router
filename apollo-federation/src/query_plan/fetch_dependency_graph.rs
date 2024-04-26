@@ -743,6 +743,33 @@ impl FetchDependencyGraph {
             .try_into()
     }
 
+    /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
+    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+        for start_index in self.children_of(node_index) {
+            let mut stack = self.children_of(start_index).collect::<Vec<_>>();
+            while let Some(v) = stack.pop() {
+                for edge in self.graph.edges_connecting(start_index, v) {
+                    acc.insert(edge.id());
+                }
+
+                stack.extend(self.children_of(v));
+            }
+        }
+    }
+
+    /// Do a transitive reduction for edges coming out of the given node.
+    ///
+    /// If any deeply nested child of this node has an edge to any direct child of this node, the
+    /// direct child is removed, as we know it is also reachable through the deeply nested route.
+    fn remove_redundant_edges(&mut self, node_index: NodeIndex) {
+        let mut redundant_edges = HashSet::new();
+        self.collect_redundant_edges(node_index, &mut redundant_edges);
+
+        for edge in redundant_edges {
+            self.graph.remove_edge(edge);
+        }
+    }
+
     /// Do a transitive reduction (https://en.wikipedia.org/wiki/Transitive_reduction) of the graph
     /// We keep it simple and do a DFS from each vertex. The complexity is not amazing, but dependency
     /// graphs between fetch nodes will almost surely never be huge and query planning performance
@@ -752,8 +779,15 @@ impl FetchDependencyGraph {
             return;
         }
 
-        for _node in self.graph.node_weights_mut() {
-            // TODO Reduce: FED-16
+        // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
+        // collected and then they are all removed.
+        let mut redundant_edges = HashSet::new();
+        for node_index in self.graph.node_indices() {
+            self.collect_redundant_edges(node_index, &mut redundant_edges);
+        }
+
+        for edge in redundant_edges {
+            self.graph.remove_edge(edge);
         }
     }
 
