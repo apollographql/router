@@ -28,12 +28,12 @@ mod test {
         // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
         // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
         // 4. Run this test and yank the updated cache key from the redis logs.
-        let known_cache_key = "plan:v2.7.2:af1ee357bc75cfbbcc6adda41089a56e7d1d52f6d44c049739dde2c259314f58:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:2bf7810d3a47b31d8a77ebb09cdc784a3f77306827dc55b06770030a858167c7";
+        let known_cache_key = "plan:v2.7.2:121b9859eba2d8fa6dde0a54b6e3781274cf69f7ffb0af912e92c01c6bfff6ca:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:5c7a72fa35639949328548d77b56dba2e77d0dfa90c19b69978da119e996bb92";
 
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
-        client.wait_for_connect().await?;
+        client.wait_for_connect().await.unwrap();
 
         client.del::<String, _>(known_cache_key).await.unwrap();
 
@@ -53,17 +53,25 @@ mod test {
                         }
                     }
                 }
-            }))?
+            }))
+            .unwrap()
             .schema(include_str!("../fixtures/supergraph.graphql"))
             .build_supergraph()
-            .await?;
+            .await
+            .unwrap();
 
         let request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts { name name2:name } }"#)
             .method(Method::POST)
-            .build()?;
+            .build()
+            .unwrap();
 
-        let _ = supergraph.oneshot(request).await?.next_response().await;
+        let _ = supergraph
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await;
 
         let s: String = match client.get(known_cache_key).await {
             Ok(s) => s,
@@ -116,16 +124,24 @@ mod test {
                         }
                     }
                 }
-            }))?
+            }))
+            .unwrap()
             .schema(include_str!("../fixtures/supergraph.graphql"))
             .build_supergraph()
-            .await?;
+            .await
+            .unwrap();
 
         let request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts { name name2:name } }"#)
             .method(Method::POST)
-            .build()?;
-        let _ = supergraph.oneshot(request).await?.next_response().await;
+            .build()
+            .unwrap();
+        let _ = supergraph
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await;
         let new_exp: i64 = client
             .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
             .await
@@ -135,7 +151,7 @@ mod test {
 
         assert!(exp < new_exp);
 
-        client.quit().await?;
+        client.quit().await.unwrap();
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         Ok(())
@@ -149,10 +165,10 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() -> Result<(), BoxError> {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
-        client.wait_for_connect().await?;
+        client.wait_for_connect().await.unwrap();
 
         let config = json!({
             "apq": {
@@ -172,10 +188,12 @@ mod test {
 
         let router = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
-            .configuration_json(config.clone())?
+            .configuration_json(config.clone())
+            .unwrap()
             .schema(include_str!("../fixtures/supergraph.graphql"))
             .build_router()
-            .await?;
+            .await
+            .unwrap();
 
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
@@ -194,19 +212,22 @@ mod test {
         let request: router::Request = supergraph::Request::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
-            .build()?
+            .build()
+            .unwrap()
             .try_into()
             .unwrap();
 
         let res = router
             .clone()
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .into_graphql_response_stream()
             .await
             .next()
             .await
-            .unwrap()?;
+            .unwrap()
+            .unwrap();
         assert_eq!(
             res.errors.first().unwrap().message,
             "PersistedQueryNotFound"
@@ -220,19 +241,22 @@ mod test {
             .query(r#"{ topProducts { name name2:name } }"#)
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
-            .build()?
+            .build()
+            .unwrap()
             .try_into()
             .unwrap();
 
         let res = router
             .clone()
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .into_graphql_response_stream()
             .await
             .next()
             .await
-            .unwrap()?;
+            .unwrap()
+            .unwrap();
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
 
@@ -243,32 +267,37 @@ mod test {
         // it should have the same connection to Redis, but the in memory cache has been reset
         let router = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
-            .configuration_json(config.clone())?
+            .configuration_json(config.clone())
+            .unwrap()
             .schema(include_str!("../fixtures/supergraph.graphql"))
             .build_router()
-            .await?;
+            .await
+            .unwrap();
 
         // a request with only the hash should succeed because it is stored in Redis
         let request: router::Request = supergraph::Request::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
-            .build()?
+            .build()
+            .unwrap()
             .try_into()
             .unwrap();
 
         let res = router
             .clone()
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .into_graphql_response_stream()
             .await
             .next()
             .await
-            .unwrap()?;
+            .unwrap()
+            .unwrap();
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
 
-        client.quit().await?;
+        client.quit().await.unwrap();
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         Ok(())
@@ -276,10 +305,10 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn entity_cache() -> Result<(), BoxError> {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
-        client.wait_for_connect().await?;
+        client.wait_for_connect().await.unwrap();
 
         let mut subgraphs = MockedSubgraphs::default();
         subgraphs.insert(
@@ -357,7 +386,8 @@ mod test {
                 "include_subgraph_errors": {
                     "all": true
                 }
-            }))?
+            }))
+            .unwrap()
             .extra_plugin(subgraphs)
             .schema(include_str!("../fixtures/supergraph-auth.graphql"))
             .build_supergraph()
@@ -367,24 +397,26 @@ mod test {
         let request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts { name reviews { body } } }"#)
             .method(Method::POST)
-            .build()?;
+            .build()
+            .unwrap();
 
         let response = supergraph
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .next_response()
             .await
             .unwrap();
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:products:Query:07bd08ba4eb8b85451edd3b3aae3c3ad3dc0892d86deedde6e6d53f6415f807f:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-        let s: String = client.get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+        let s: String = client.get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -459,7 +491,8 @@ mod test {
                 "include_subgraph_errors": {
                     "all": true
                 }
-            }))?
+            }))
+            .unwrap()
             .extra_plugin(subgraphs)
             .schema(include_str!("../fixtures/supergraph-auth.graphql"))
             .build_supergraph()
@@ -469,24 +502,26 @@ mod test {
         let request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts(first: 2) { name reviews { body } } }"#)
             .method(Method::POST)
-            .build()?;
+            .build()
+            .unwrap();
 
         let response = supergraph
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .next_response()
             .await
             .unwrap();
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-        client.quit().await?;
+        client.quit().await.unwrap();
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         Ok(())
@@ -494,10 +529,10 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn entity_cache_authorization() -> Result<(), BoxError> {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
-        client.wait_for_connect().await?;
+        client.wait_for_connect().await.unwrap();
 
         let mut subgraphs = MockedSubgraphs::default();
         subgraphs.insert(
@@ -659,7 +694,8 @@ mod test {
                 "include_subgraph_errors": {
                     "all": true
                 }
-            }))?
+            }))
+            .unwrap()
             .extra_plugin(subgraphs)
             .schema(include_str!("../fixtures/supergraph-auth.graphql"))
             .build_supergraph()
@@ -679,19 +715,21 @@ mod test {
             )
             .context(context)
             .method(Method::POST)
-            .build()?;
+            .build()
+            .unwrap();
 
         let response = supergraph
             .clone()
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .next_response()
             .await
             .unwrap();
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:products:Query:07bd08ba4eb8b85451edd3b3aae3c3ad3dc0892d86deedde6e6d53f6415f807f:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -712,7 +750,7 @@ mod test {
         );
 
         let s: String = client
-        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -744,19 +782,21 @@ mod test {
             )
             .context(context)
             .method(Method::POST)
-            .build()?;
+            .build()
+            .unwrap();
 
         let response = supergraph
             .clone()
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .next_response()
             .await
             .unwrap();
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:c75297b98da101021e30020db99a3a11c2f9ac2008de94ce410c47940162e304:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -789,18 +829,20 @@ mod test {
             )
             .context(context)
             .method(Method::POST)
-            .build()?;
+            .build()
+            .unwrap();
 
         let response = supergraph
             .clone()
             .oneshot(request)
-            .await?
+            .await
+            .unwrap()
             .next_response()
             .await
             .unwrap();
         insta::assert_json_snapshot!(response);
 
-        client.quit().await?;
+        client.quit().await.unwrap();
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         Ok(())

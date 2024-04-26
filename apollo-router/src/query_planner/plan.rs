@@ -315,40 +315,43 @@ impl PlanNode {
     pub(crate) fn hash_subqueries(
         &mut self,
         schemas: &HashMap<String, Arc<Valid<apollo_compiler::Schema>>>,
+        supergraph_schema_hash: &str,
     ) {
         match self {
             PlanNode::Fetch(fetch_node) => {
                 if let Some(schema) = schemas.get(&fetch_node.service_name) {
-                    fetch_node.hash_subquery(schema);
+                    fetch_node.hash_subquery(schema, supergraph_schema_hash);
                 }
             }
 
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(schemas, supergraph_schema_hash);
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(schemas, supergraph_schema_hash);
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.hash_subqueries(schemas),
+            PlanNode::Flatten(flatten) => flatten
+                .node
+                .hash_subqueries(schemas, supergraph_schema_hash),
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(schemas, supergraph_schema_hash);
                 }
                 for deferred_node in deferred {
                     if let Some(node) = deferred_node.node.take() {
                         let mut new_node = (*node).clone();
-                        new_node.hash_subqueries(schemas);
+                        new_node.hash_subqueries(schemas, supergraph_schema_hash);
                         deferred_node.node = Some(Arc::new(new_node));
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(schemas, supergraph_schema_hash);
                 }
             }
             PlanNode::Condition {
@@ -357,10 +360,10 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(schemas, supergraph_schema_hash);
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.hash_subqueries(schemas);
+                    node.hash_subqueries(schemas, supergraph_schema_hash);
                 }
             }
         }
