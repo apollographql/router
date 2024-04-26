@@ -85,6 +85,7 @@ impl<'a> QueryHashVisitor<'a> {
     ) -> Result<Vec<u8>, BoxError> {
         let mut visitor = QueryHashVisitor::new(schema, schema_str, executable);
         traverse::document(&mut visitor, executable, operation_name)?;
+        executable.to_string().hash(&mut visitor);
         Ok(visitor.finish())
     }
 
