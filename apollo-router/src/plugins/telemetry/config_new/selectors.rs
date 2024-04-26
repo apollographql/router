@@ -45,6 +45,7 @@ pub(crate) enum OperationName {
     Hash,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -165,6 +166,7 @@ pub(crate) enum RouterSelector {
         on_graphql_error: bool,
     },
     Error {
+        #[allow(dead_code)]
         /// Critical error if it happens
         error: ErrorRepr,
     },
@@ -310,6 +312,7 @@ pub(crate) enum SupergraphSelector {
         r#static: String,
     },
     Error {
+        #[allow(dead_code)]
         /// Critical error if it happens
         error: ErrorRepr,
     },
@@ -515,6 +518,7 @@ pub(crate) enum SubgraphSelector {
         r#static: String,
     },
     Error {
+        #[allow(dead_code)]
         /// Critical error if it happens
         error: ErrorRepr,
     },

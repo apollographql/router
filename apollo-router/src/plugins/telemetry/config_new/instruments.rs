@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use opentelemetry::metrics::Unit;
 use opentelemetry_api::metrics::Counter;
 use opentelemetry_api::metrics::Histogram;
 use opentelemetry_api::metrics::MeterProvider;
@@ -39,7 +40,6 @@ use crate::Context;
 
 const METER_NAME: &str = "apollo/router";
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct InstrumentsConfig {
@@ -458,7 +458,6 @@ where
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphInstruments {}
@@ -472,7 +471,6 @@ impl DefaultForLevel for SupergraphInstruments {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphInstrumentsConfig {
@@ -507,7 +505,6 @@ impl DefaultForLevel for SubgraphInstrumentsConfig {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 pub(crate) struct Instrument<A, E>
 where
@@ -728,7 +725,13 @@ where
                     let counter = CustomCounterInner {
                         increment,
                         condition: instrument.condition.clone(),
-                        counter: Some(meter.f64_counter(instrument_name.clone()).init()),
+                        counter: Some(
+                            meter
+                                .f64_counter(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .init(),
+                        ),
                         attributes: Vec::new(),
                         selector,
                         selectors: instrument.attributes.clone(),
@@ -762,7 +765,13 @@ where
                     let histogram = CustomHistogramInner {
                         increment,
                         condition: instrument.condition.clone(),
-                        histogram: Some(meter.f64_histogram(instrument_name.clone()).init()),
+                        histogram: Some(
+                            meter
+                                .f64_histogram(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .init(),
+                        ),
                         attributes: Vec::new(),
                         selector,
                         selectors: Some(instrument.attributes.clone()),
