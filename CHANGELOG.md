@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.45.0] - 2024-04-22
 
+> **Warning**
+>
+> **This version has a critical bug impacting all users.  See the _Fixes_ in [v1.45.1](https://github.com/apollographql/router/releases/tag/v1.45.1) for details.  We highly recommend using v1.45.1 or v1.43.2 over v1.45.0.**
+
 ## 🚀 Features
 
 ### Query validation process with Rust ([PR #4551](https://github.com/apollographql/router/pull/4551))
@@ -153,6 +157,11 @@ The feature is configured with the `experimental_apollo_metrics_generation_mode`
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4796
 
 # [1.44.0] - 2024-04-12
+
+> **Warning**
+>
+> **This version has a critical bug impacting all users.  See the _Fixes_ in [v1.45.1](https://github.com/apollographql/router/releases/tag/v1.45.1) for details.  We highly recommend using v1.45.1 or v1.43.2 over v1.44.0.**
+
 
 ## 🚀 Features
 

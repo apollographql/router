@@ -1051,8 +1051,12 @@ mod tests {
         let query_one = "query { a: test(arg: 1) b: test(arg: 2) }";
         let query_two = "query { a: test(arg: 1) b: test(arg: 3) }";
 
-        // this test won't pass until we land a fix for it
-        // assert!(hash(schema, query_one).doesnt_match(&hash(schema, query_two)));
+        // This assertion tests an internal hash function that isn't directly
+        // used for the query hash, and we'll need to make it pass to rely
+        // solely on the internal function again.
+        //
+        // assert!(hash(schema, query_one).doesnt_match(&hash(schema,
+        // query_two)));
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
     }
 
@@ -1071,7 +1075,10 @@ mod tests {
         let query_one = "query { a: test }";
         let query_two = "query { b: test }";
 
-        // this test won't pass until we land a fix for it
+        // This assertion tests an internal hash function that isn't directly
+        // used for the query hash, and we'll need to make it pass to rely
+        // solely on the internal function again.
+        //
         // assert!(hash(schema, query_one).doesnt_match(&hash(schema, query_two)));
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
     }
