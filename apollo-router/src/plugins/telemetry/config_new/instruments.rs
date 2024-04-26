@@ -90,6 +90,7 @@ impl InstrumentsConfig {
                             Some(attributes.clone())
                         }
                     },
+                    updated: false,
                 }),
             });
         let http_server_request_body_size =
@@ -121,6 +122,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -154,6 +156,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -214,6 +217,7 @@ impl InstrumentsConfig {
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: None,
                         selectors,
+                        updated: false,
                     }),
                 }
             });
@@ -246,6 +250,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -278,6 +283,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -735,6 +741,7 @@ where
                         attributes: Vec::new(),
                         selector,
                         selectors: instrument.attributes.clone(),
+                        incremented: false,
                     };
 
                     counters.push(CustomCounter {
@@ -775,6 +782,7 @@ where
                         attributes: Vec::new(),
                         selector,
                         selectors: Some(instrument.attributes.clone()),
+                        updated: false,
                     };
 
                     histograms.push(CustomHistogram {
@@ -1022,6 +1030,8 @@ where
     counter: Option<Counter<f64>>,
     condition: Condition<T>,
     attributes: Vec<opentelemetry_api::KeyValue>,
+    // Useful when it's a counter on events to know if we have to count for an event or not
+    incremented: bool,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
@@ -1114,7 +1124,6 @@ where
     fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_event_response(response, ctx) {
-            let _ = inner.counter.take();
             return;
         }
         let mut attrs: Vec<KeyValue> = inner
@@ -1122,7 +1131,7 @@ where
             .on_event_response(response, ctx)
             .into_iter()
             .collect();
-        attrs.append(&mut inner.attributes);
+        attrs.extend(inner.attributes.clone());
 
         if let Some(selected_value) = inner
             .selector
@@ -1155,6 +1164,7 @@ where
             },
         };
 
+        inner.incremented = true;
         if let Some(counter) = &inner.counter {
             counter.add(increment, &attrs);
         }
@@ -1191,6 +1201,9 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
+            if inner.incremented {
+                return;
+            }
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
                     Increment::Unit | Increment::EventUnit => 1f64,
@@ -1311,6 +1324,8 @@ where
     selectors: Option<Arc<Extendable<A, T>>>,
     histogram: Option<Histogram<f64>>,
     attributes: Vec<opentelemetry_api::KeyValue>,
+    // Useful when it's an histogram on events to know if we have to count for an event or not
+    updated: bool,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented
@@ -1401,6 +1416,58 @@ where
         }
     }
 
+    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_event_response(response, ctx) {
+            return;
+        }
+        let mut attrs: Vec<KeyValue> = inner
+            .selectors
+            .as_ref()
+            .map(|s| s.on_event_response(response, ctx).into_iter().collect())
+            .unwrap_or_default();
+        attrs.extend(inner.attributes.clone());
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_event_response(response, ctx))
+        {
+            let new_incr = match inner.increment {
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                _ => {
+                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment: Option<f64> = match &mut inner.increment {
+            Increment::EventUnit => Some(1f64),
+            Increment::EventDuration(instant) => {
+                let incr = Some(instant.elapsed().as_secs_f64());
+                // Need a new instant for the next event
+                *instant = Instant::now();
+                incr
+            }
+            Increment::EventCustom(val) => val.map(|incr| incr as f64),
+            Increment::Unit | Increment::Duration(_) | Increment::Custom(_) => {
+                // Nothing to do because we're incrementing on events
+                return;
+            }
+        };
+
+        inner.updated = true;
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
+            histogram.record(increment, &attrs);
+        }
+    }
+
     fn on_error(&self, error: &BoxError, _ctx: &Context) {
         let mut inner = self.inner.lock();
         let mut attrs: Vec<KeyValue> = inner
@@ -1433,6 +1500,9 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
+            if inner.updated {
+                return;
+            }
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
                     Increment::Unit | Increment::EventUnit => Some(1f64),
