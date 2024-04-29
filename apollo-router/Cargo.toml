@@ -339,6 +339,9 @@ hyperlocal = { version = "0.8.0", default-features = false, features = [
     "server",
 ] }
 
+[profile.dev.package."*"]
+opt-level = 3
+
 [build-dependencies]
 tonic-build = "0.9.2"
 basic-toml = "0.1"
