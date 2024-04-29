@@ -31,7 +31,12 @@ pub(crate) enum Condition<T> {
         left: SelectorOrValue<T>,
         right: SelectorOrValue<T>,
     },
-    // TODO: Range([])
+    /// The middle selection must be between the lower and upper selections. The range is inclusive.
+    Range {
+        lower: SelectorOrValue<T>,
+        middle: SelectorOrValue<T>,
+        upper: SelectorOrValue<T>,
+    },
     /// A condition to check a selection against a selector.
     Exists(T),
     /// All sub-conditions must be true.
@@ -189,6 +194,54 @@ where
                     }
                 }
             }
+            Condition::Range {
+                lower,
+                middle,
+                upper,
+            } => {
+                let lower_att = lower.on_request(request).map(AttributeValue::from);
+                let middle_att = middle.on_request(request).map(AttributeValue::from);
+                let upper_att = upper.on_request(request).map(AttributeValue::from);
+                match (lower_att, middle_att, upper_att) {
+                    (None, None, None) => None,
+                    (Some(l), None, None) => {
+                        *lower = SelectorOrValue::Value(l);
+                        None
+                    }
+                    (None, Some(m), None) => {
+                        *middle = SelectorOrValue::Value(m);
+                        None
+                    }
+                    (None, None, Some(u)) => {
+                        *upper = SelectorOrValue::Value(u);
+                        None
+                    }
+                    (Some(l), Some(m), None) => {
+                        *lower = SelectorOrValue::Value(l);
+                        *middle = SelectorOrValue::Value(m);
+                        None
+                    }
+                    (Some(l), None, Some(u)) => {
+                        *lower = SelectorOrValue::Value(l);
+                        *upper = SelectorOrValue::Value(u);
+                        None
+                    }
+                    (None, Some(m), Some(u)) => {
+                        *middle = SelectorOrValue::Value(m);
+                        *upper = SelectorOrValue::Value(u);
+                        None
+                    }
+                    (Some(l), Some(m), Some(u)) => {
+                        if l <= m && m <= u {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            *self = Condition::False;
+                            Some(false)
+                        }
+                    }
+                }
+            }
             Condition::Exists(exist) => {
                 if exist.on_request(request).is_some() {
                     *self = Condition::True;
@@ -267,6 +320,19 @@ where
                 let left_att = left.on_response(response).map(AttributeValue::from);
                 let right_att = right.on_response(response).map(AttributeValue::from);
                 left_att.zip(right_att).map_or(false, |(l, r)| l <= r)
+            }
+            Condition::Range {
+                lower,
+                middle,
+                upper,
+            } => {
+                let lower_att = lower.on_response(response).map(AttributeValue::from);
+                let middle_att = middle.on_response(response).map(AttributeValue::from);
+                let upper_att = upper.on_response(response).map(AttributeValue::from);
+                lower_att
+                    .zip(middle_att)
+                    .zip(upper_att)
+                    .map_or(false, |((l, m), u)| l <= m && m <= u)
             }
             Condition::Exists(exist) => exist.on_response(response).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_response(response)),
@@ -824,6 +890,19 @@ mod test {
             }
             .evaluate_request(&Some(1i64))
         );
+    }
+
+    #[test]
+    fn test_condition_range() {
+        assert_eq!(
+            Some(true),
+            Condition::<TestSelector>::Range {
+                lower: SelectorOrValue::Value(1i64.into()),
+                middle: SelectorOrValue::Value(2i64.into()),
+                upper: SelectorOrValue::Value(3i64.into())
+            }
+            .evaluate_request(&None)
+        )
     }
 
     #[test]
