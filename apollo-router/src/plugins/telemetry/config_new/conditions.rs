@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
@@ -37,8 +37,8 @@ impl Condition<()> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
@@ -47,7 +47,6 @@ pub(crate) enum SelectorOrValue<T> {
     Selector(T),
 }
 
-#[allow(dead_code)]
 impl<T> Condition<T>
 where
     T: Selector,

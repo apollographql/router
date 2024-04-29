@@ -1197,81 +1197,34 @@ async fn test_operation_arg_always_commas() {
 }
 
 #[test(tokio::test)]
-async fn test_nested_fragments() {
+async fn test_comma_edge_case() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      fragment UnionType1Fragment on UnionType1 {
-        unionType1Field
-      }
-      
-      fragment ObjectResponseFragment on ObjectTypeResponse {
-        intField
-      }
-      
-      fragment EverythingResponseFragment on EverythingResponse {
-        listOfObjects {
-          ...ObjectResponseFragment
-          ... on ObjectTypeResponse {
-            stringField
-          }
+    let query_str = r#"query QueryCommaEdgeCase {
+        enumInputQuery (anotherStr:"",enumInput:SOME_VALUE_1,stringInput:"") {
+          enumResponse
         }
-      }
-      
-      query NestedFragmentQuery {
-        noInputQuery {
-          ...EverythingResponseFragment
-          ... on EverythingResponse {
-            listOfUnions {
-              ...UnionType1Fragment
-              ... on UnionType2 {
-                unionType2Field
-              }
-            }
-          }
-        }
-      }";
+      }"#;
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
     let generated =
-        generate_usage_reporting(&doc, &doc, &Some("NestedFragmentQuery".into()), &schema);
+        generate_usage_reporting(&doc, &doc, &Some("QueryCommaEdgeCase".into()), &schema);
 
-    let expected_sig = "# NestedFragmentQuery\nfragment EverythingResponseFragment on EverythingResponse{listOfObjects{...ObjectResponseFragment...on ObjectTypeResponse{stringField}}}fragment ObjectResponseFragment on ObjectTypeResponse{intField}fragment UnionType1Fragment on UnionType1{unionType1Field}query NestedFragmentQuery{noInputQuery{...EverythingResponseFragment...on EverythingResponse{listOfUnions{...UnionType1Fragment...on UnionType2{unionType2Field}}}}}";
+    let expected_sig = "# QueryCommaEdgeCase\nquery QueryCommaEdgeCase{enumInputQuery(anotherStr:\"\",enumInput:SOME_VALUE_1,stringInput:\"\"){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
         (
             "Query".into(),
             ReferencedFieldsForType {
-                field_names: vec!["noInputQuery".into()],
+                field_names: vec!["enumInputQuery".into()],
                 is_interface: false,
             },
         ),
         (
             "EverythingResponse".into(),
             ReferencedFieldsForType {
-                field_names: vec!["listOfObjects".into(), "listOfUnions".into()],
-                is_interface: false,
-            },
-        ),
-        (
-            "ObjectTypeResponse".into(),
-            ReferencedFieldsForType {
-                field_names: vec!["intField".into(), "stringField".into()],
-                is_interface: false,
-            },
-        ),
-        (
-            "UnionType1".into(),
-            ReferencedFieldsForType {
-                field_names: vec!["unionType1Field".into()],
-                is_interface: false,
-            },
-        ),
-        (
-            "UnionType2".into(),
-            ReferencedFieldsForType {
-                field_names: vec!["unionType2Field".into()],
+                field_names: vec!["enumResponse".into()],
                 is_interface: false,
             },
         ),

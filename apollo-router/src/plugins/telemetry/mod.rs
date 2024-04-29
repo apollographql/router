@@ -48,7 +48,6 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
@@ -60,6 +59,9 @@ use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
 use self::config::TraceIdFormat;
+use self::config_new::events::RouterEvents;
+use self::config_new::events::SubgraphEvents;
+use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
 use self::config_new::instruments::RouterInstruments;
 use self::config_new::instruments::SubgraphInstruments;
@@ -74,6 +76,7 @@ use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::layers::instrument::InstrumentLayer;
@@ -89,7 +92,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
@@ -99,6 +102,7 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::metrics_layer;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
@@ -126,13 +130,15 @@ use crate::ListenAddr;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
-mod config_new;
+pub(crate) mod config_new;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod fmt_layer;
 pub(crate) mod formatters;
 mod logging;
 pub(crate) mod metrics;
+/// Opentelemetry utils
+pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
 mod resource;
@@ -331,7 +337,7 @@ impl Plugin for Telemetry {
                     if !use_legacy_request_span {
                         let span = Span::current();
 
-                        span.set_dyn_attribute(
+                        span.set_span_dyn_attribute(
                             HTTP_REQUEST_METHOD,
                             request.router_request.method().to_string().into(),
                         );
@@ -381,15 +387,21 @@ impl Plugin for Telemetry {
                         .new_router_instruments();
                     custom_instruments.on_request(request);
 
+                    let custom_events: RouterEvents =
+                        config_request.instrumentation.events.new_router_events();
+                    custom_events.on_request(request);
+
                     (
                         custom_attributes,
                         custom_instruments,
+                        custom_events,
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, ctx): (
+                move |(custom_attributes, custom_instruments, custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
+                    RouterEvents,
                     Context,
                 ),
                       fut| {
@@ -401,7 +413,7 @@ impl Plugin for Telemetry {
 
                     async move {
                         let span = Span::current();
-                        span.set_dyn_attributes(custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
 
                         span.record(
@@ -411,7 +423,7 @@ impl Plugin for Telemetry {
 
                         let expose_trace_id = &config.exporters.tracing.response_trace_id;
                         if let Ok(response) = &response {
-                            span.set_dyn_attributes(
+                            span.set_span_dyn_attributes(
                                 config
                                     .instrumentation
                                     .spans
@@ -420,6 +432,7 @@ impl Plugin for Telemetry {
                                     .on_response(response),
                             );
                             custom_instruments.on_response(response);
+                            custom_events.on_response(response);
 
                             if expose_trace_id.enabled {
                                 let header_name = expose_trace_id
@@ -472,10 +485,11 @@ impl Plugin for Telemetry {
                             }
                         } else if let Err(err) = &response {
                             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            span.set_dyn_attributes(
+                            span.set_span_dyn_attributes(
                                 config.instrumentation.spans.router.attributes.on_error(err),
                             );
                             custom_instruments.on_error(err, &ctx);
+                            custom_events.on_error(err, &ctx);
                         }
 
                         response
@@ -564,25 +578,30 @@ impl Plugin for Telemetry {
                     );
                     custom_instruments.on_request(req);
 
-                    (req.context.clone(), custom_instruments, custom_attributes)
+                    let supergraph_events = config.instrumentation.events.new_supergraph_events();
+                    supergraph_events.on_request(req);
+
+                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events)
                 },
-                move |(ctx, custom_instruments, custom_attributes): (Context, SupergraphCustomInstruments, Vec<KeyValue>), fut| {
+                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphCustomInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
 
                     async move {
                         let span = Span::current();
-                        span.set_dyn_attributes(custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         match &result {
                             Ok(resp) => {
-                                span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
+                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
                                 custom_instruments.on_response(resp);
+                                supergraph_events.on_response(resp);
                             },
                             Err(err) => {
-                                span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
+                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
                                 custom_instruments.on_error(err, &ctx);
+                                supergraph_events.on_error(err, &ctx);
                             },
                         }
                         result = Self::update_otel_metrics(
@@ -659,17 +678,21 @@ impl Plugin for Telemetry {
                         .instruments
                         .new_subgraph_instruments();
                     custom_instruments.on_request(sub_request);
+                    let custom_events = config.instrumentation.events.new_subgraph_events();
+                    custom_events.on_request(sub_request);
 
                     (
                         sub_request.context.clone(),
                         custom_instruments,
                         custom_attributes,
+                        custom_events,
                     )
                 },
-                move |(context, custom_instruments, custom_attributes): (
+                move |(context, custom_instruments, custom_attributes, custom_events): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
+                    SubgraphEvents,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
@@ -679,7 +702,7 @@ impl Plugin for Telemetry {
                     let now = Instant::now();
                     async move {
                         let span = Span::current();
-                        span.set_dyn_attributes(custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         let result: Result<SubgraphResponse, BoxError> = f.await;
 
                         match &result {
@@ -689,7 +712,7 @@ impl Plugin for Telemetry {
                                 } else {
                                     span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                                 }
-                                span.set_dyn_attributes(
+                                span.set_span_dyn_attributes(
                                     conf.instrumentation
                                         .spans
                                         .subgraph
@@ -697,14 +720,16 @@ impl Plugin for Telemetry {
                                         .on_response(resp),
                                 );
                                 custom_instruments.on_response(resp);
+                                custom_events.on_response(resp);
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
 
-                                span.set_dyn_attributes(
+                                span.set_span_dyn_attributes(
                                     conf.instrumentation.spans.subgraph.attributes.on_error(err),
                                 );
                                 custom_instruments.on_error(err, &context);
+                                custom_events.on_error(err, &context);
                             }
                         }
 
@@ -1234,6 +1259,11 @@ impl Telemetry {
                         .enumerate()
                         .map(move |(idx, response)| {
                             let has_errors = !response.errors.is_empty();
+                            // Useful for selector in spans/instruments/events
+                            ctx.insert_json_value(
+                                CONTAINS_GRAPHQL_ERROR,
+                                serde_json_bytes::Value::Bool(has_errors),
+                            );
 
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {

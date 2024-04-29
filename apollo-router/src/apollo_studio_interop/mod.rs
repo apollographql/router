@@ -431,12 +431,14 @@ fn format_field(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
         for (index, arg_string) in arg_strings.iter().enumerate() {
             f.write_str(arg_string)?;
 
-            // We only need to insert a separating space it's not the last arg and if the string ends in an alphanumeric character
+            // We only need to insert a separating space it's not the last arg and if the string ends in an alphanumeric character.
+            // If it's a comma, we always need to insert it if it's not the last arg.
             if index < arg_strings.len() - 1
-                && arg_string
-                    .chars()
-                    .last()
-                    .map_or(true, |c| c.is_alphanumeric())
+                && (separator == ","
+                    || arg_string
+                        .chars()
+                        .last()
+                        .map_or(true, |c| c.is_alphanumeric()))
             {
                 f.write_str(separator)?;
             }

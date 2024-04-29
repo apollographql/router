@@ -320,7 +320,8 @@ commands:
             if [[ ! -d "$HOME/.cargo" ]]; then
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
-              ./rustup.sh -y --profile minimal --component clippy --component rustfmt
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt --default-toolchain none
+              $HOME/.cargo/bin/rustc -V
             fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
@@ -344,13 +345,25 @@ commands:
                 command: |
                   rustup target add x86_64-apple-darwin
 
+      - when:
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install nightly Rust to build the fuzzers
+                command: |
+                  rustup install nightly
+
   install_extra_tools:
     steps:
       - run:
           name: Install cargo deny, about, edit
           command: |
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked cargo-deny cargo-about cargo-edit
+              cargo install --locked --version 0.14.21 cargo-deny
+              cargo install --locked --version 0.6.1 cargo-about
+              cargo install --locked --version 0.12.2 cargo-edit
+              cargo install --locked --version 0.12.0 cargo-fuzz
             fi
 
   fetch_dependencies:
@@ -489,6 +502,10 @@ commands:
               key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
               paths:
                 - target
+  fuzz_build:
+    steps:
+      - run: cargo +nightly fuzz build
+
 jobs:
   lint:
     environment:
@@ -543,6 +560,11 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      - when:
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - fuzz_build
 
   test_updated:
     environment:

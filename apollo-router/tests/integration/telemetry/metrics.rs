@@ -59,9 +59,9 @@ async fn test_metrics_reloading() {
         .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
 
-    if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {
-        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{type="metrics",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
-        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{type="traces",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
+        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(120))).await;
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(1))).await;
     }

@@ -29,6 +29,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use url::Url;
 
 use crate::error::Error;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
@@ -209,6 +210,7 @@ where
         )
     }
 }
+
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -225,6 +227,11 @@ pub(super) struct RouterRequestConf {
     pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
+    /// Handles the request without waiting for the coprocessor to respond
+    pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a router request/response stage
@@ -241,7 +248,13 @@ pub(super) struct RouterResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// Handles the response without waiting for the coprocessor to respond
+    pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
+
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -258,6 +271,11 @@ pub(super) struct SubgraphRequestConf {
     pub(super) method: bool,
     /// Send the service name
     pub(super) service_name: bool,
+    /// Handles the request without waiting for the coprocessor to respond
+    pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -274,6 +292,11 @@ pub(super) struct SubgraphResponseConf {
     pub(super) service_name: bool,
     /// Send the http status
     pub(super) status_code: bool,
+    /// Handles the response without waiting for the coprocessor to respond
+    pub(super) detached: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// Configures the externalization plugin
@@ -281,7 +304,8 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
-    url: String,
+    #[schemars(with = "String")]
+    url: Url,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
@@ -319,7 +343,7 @@ impl RouterStage {
         &self,
         http_client: C,
         service: router::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         sdl: Arc<String>,
     ) -> router::BoxService
     where
@@ -332,7 +356,10 @@ impl RouterStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -375,7 +402,10 @@ impl RouterStage {
             let response_config = self.response.clone();
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
-                let coprocessor_url = coprocessor_url.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
 
@@ -454,7 +484,7 @@ impl SubgraphStage {
         &self,
         http_client: C,
         service: subgraph::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         service_name: String,
     ) -> subgraph::BoxService
     where
@@ -468,7 +498,10 @@ impl SubgraphStage {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
             let http_client = http_client.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let service_name = service_name.clone();
             OneShotAsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
@@ -510,8 +543,11 @@ impl SubgraphStage {
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
-                let coprocessor_url = coprocessor_url.clone();
                 let response_config = response_config.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let service_name = service_name.clone();
 
                 async move {
@@ -567,7 +603,7 @@ impl SubgraphStage {
 // -----------------------------------------------------------------------------------------
 async fn process_router_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: router::Request,
     request_config: RouterRequestConf,
@@ -614,6 +650,22 @@ where
         .and_path(path_to_send)
         .method(parts.method.to_string())
         .build();
+
+    if request_config.detached {
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::RouterRequest,
+            );
+        });
+
+        request.router_request = http::Request::from_parts(parts, Body::from(bytes));
+        return Ok(ControlFlow::Continue(request));
+    }
 
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
@@ -720,7 +772,7 @@ where
 
 async fn process_router_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut response: router::Response,
     response_config: RouterResponseConf,
@@ -777,6 +829,81 @@ where
         .and_status_code(status_to_send)
         .and_sdl(sdl_to_send.clone())
         .build();
+
+    if response_config.detached {
+        let context = response.context.clone();
+
+        let http_client2 = http_client.clone();
+        let coprocessor_url2 = coprocessor_url.clone();
+        // Second, call our co-processor and get a reply.
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let guard = context.enter_active_request();
+            let start = Instant::now();
+            let _ = payload.call(http_client.clone(), &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            drop(guard);
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::RouterResponse,
+            );
+        });
+
+        let map_context = response.context.clone();
+        // Map the rest of our body to process subsequent chunks of response
+        let mapped_stream = rest.map(move |deferred_response| {
+            let generator_client = http_client2.clone();
+            let generator_coprocessor_url = coprocessor_url2.clone();
+            let generator_map_context = map_context.clone();
+            let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
+
+            if let Ok(deferred_response) = &deferred_response {
+                let bytes = deferred_response.to_vec();
+                let body_to_send = response_config
+                    .body
+                    .then(|| String::from_utf8(bytes.clone()))
+                    .transpose()
+                    .unwrap();
+                let context_to_send = response_config
+                    .context
+                    .then(|| generator_map_context.clone());
+
+                // Note: We deliberately DO NOT send headers or status_code even if the user has
+                // requested them. That's because they are meaningless on a deferred response and
+                // providing them will be a source of confusion.
+                let payload = Externalizable::router_builder()
+                    .stage(PipelineStep::RouterResponse)
+                    .id(generator_id)
+                    .and_body(body_to_send)
+                    .and_context(context_to_send)
+                    .and_sdl(generator_sdl_to_send)
+                    .build();
+                tokio::task::spawn(async move {
+                    // Second, call our co-processor and get a reply.
+                    tracing::debug!(?payload, "externalized output");
+                    let start = Instant::now();
+                    let _ = payload
+                        .call(generator_client, &generator_coprocessor_url)
+                        .await;
+                    let duration = start.elapsed().as_secs_f64();
+                    tracing::info!(
+                        histogram.apollo.router.operations.coprocessor.duration = duration,
+                        coprocessor.stage = %PipelineStep::RouterResponse,
+                    );
+                });
+            }
+
+            deferred_response
+        });
+
+        // Create our response stream which consists of the bytes from our first body chained with the
+        // rest of the responses in our mapped stream.
+        let final_stream = once(ready(Ok(bytes))).chain(mapped_stream).boxed();
+
+        response.response = http::Response::from_parts(parts, Body::wrap_stream(final_stream));
+        return Ok(response);
+    }
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
@@ -908,7 +1035,7 @@ where
 
 async fn process_subgraph_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut request: subgraph::Request,
     request_config: SubgraphRequestConf,
@@ -950,6 +1077,22 @@ where
         .and_service_name(service_name)
         .and_uri(uri)
         .build();
+
+    if request_config.detached {
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::SubgraphRequest,
+            );
+        });
+
+        request.subgraph_request = http::Request::from_parts(parts, body);
+        return Ok(ControlFlow::Continue(request));
+    }
 
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
@@ -1053,7 +1196,7 @@ where
 
 async fn process_subgraph_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,
@@ -1095,6 +1238,22 @@ where
         .and_status_code(status_to_send)
         .and_service_name(service_name)
         .build();
+
+    if response_config.detached {
+        tokio::task::spawn(async move {
+            tracing::debug!(?payload, "externalized output");
+            let start = Instant::now();
+            let _ = payload.call(http_client, &coprocessor_url).await;
+            let duration = start.elapsed().as_secs_f64();
+            tracing::info!(
+                histogram.apollo.router.operations.coprocessor.duration = duration,
+                coprocessor.stage = %PipelineStep::SubgraphResponse,
+            );
+        });
+
+        response.response = http::Response::from_parts(parts, body);
+        return Ok(response);
+    }
 
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();

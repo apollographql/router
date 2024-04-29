@@ -35,7 +35,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
@@ -44,6 +43,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::Request;
@@ -78,27 +78,28 @@ pub(crate) enum DefaultAttributeRequirementLevel {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterAttributes {
     /// The datadog trace ID.
     /// This can be output in logs and used to correlate traces in Datadog.
     #[serde(rename = "dd.trace_id")]
-    datadog_trace_id: Option<bool>,
+    pub(crate) datadog_trace_id: Option<bool>,
 
     /// The OpenTelemetry trace ID.
     /// This can be output in logs.
     #[serde(rename = "trace_id")]
-    trace_id: Option<bool>,
+    pub(crate) trace_id: Option<bool>,
 
     /// All key values from trace baggage.
-    baggage: Option<bool>,
+    pub(crate) baggage: Option<bool>,
 
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
-    common: HttpCommonAttributes,
+    pub(crate) common: HttpCommonAttributes,
     /// Http server attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
-    server: HttpServerAttributes,
+    pub(crate) server: HttpServerAttributes,
 }
 
 impl DefaultForLevel for RouterAttributes {
@@ -113,7 +114,7 @@ impl DefaultForLevel for RouterAttributes {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(Serialize, PartialEq))]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphAttributes {
     /// The GraphQL document being executed.
@@ -121,13 +122,13 @@ pub(crate) struct SupergraphAttributes {
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "graphql.document")]
-    graphql_document: Option<bool>,
+    pub(crate) graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.name")]
-    graphql_operation_name: Option<bool>,
+    pub(crate) graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -135,7 +136,7 @@ pub(crate) struct SupergraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
-    graphql_operation_type: Option<bool>,
+    pub(crate) graphql_operation_type: Option<bool>,
 }
 
 impl DefaultForLevel for SupergraphAttributes {
@@ -227,6 +228,7 @@ impl DefaultForLevel for SubgraphAttributes {
 /// Common attributes for http server and client.
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpCommonAttributes {
     /// Describes a class of error the operation ended with.
@@ -236,14 +238,14 @@ pub(crate) struct HttpCommonAttributes {
     /// * 500
     /// Requirement level: Conditionally Required: If request has ended with an error.
     #[serde(rename = "error.type")]
-    error_type: Option<bool>,
+    pub(crate) error_type: Option<bool>,
 
     /// The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.request.body.size")]
-    http_request_body_size: Option<bool>,
+    pub(crate) http_request_body_size: Option<bool>,
 
     /// HTTP request method.
     /// Examples:
@@ -252,7 +254,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * HEAD
     /// Requirement level: Required
     #[serde(rename = "http.request.method")]
-    http_request_method: Option<bool>,
+    pub(crate) http_request_method: Option<bool>,
 
     /// Original HTTP method sent by the client in the request line.
     /// Examples:
@@ -261,21 +263,21 @@ pub(crate) struct HttpCommonAttributes {
     /// * foo
     /// Requirement level: Conditionally Required (If and only if it’s different than http.request.method)
     #[serde(rename = "http.request.method.original", skip)]
-    http_request_method_original: Option<bool>,
+    pub(crate) http_request_method_original: Option<bool>,
 
     /// The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.response.body.size")]
-    http_response_body_size: Option<bool>,
+    pub(crate) http_response_body_size: Option<bool>,
 
     /// HTTP response status code.
     /// Examples:
     /// * 200
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "http.response.status_code")]
-    http_response_status_code: Option<bool>,
+    pub(crate) http_response_status_code: Option<bool>,
 
     /// OSI application layer or non-OSI equivalent.
     /// Examples:
@@ -283,7 +285,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * spdy
     /// Requirement level: Recommended: if not default (http).
     #[serde(rename = "network.protocol.name")]
-    network_protocol_name: Option<bool>,
+    pub(crate) network_protocol_name: Option<bool>,
 
     /// Version of the protocol specified in network.protocol.name.
     /// Examples:
@@ -293,7 +295,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * 3
     /// Requirement level: Recommended
     #[serde(rename = "network.protocol.version")]
-    network_protocol_version: Option<bool>,
+    pub(crate) network_protocol_version: Option<bool>,
 
     /// OSI transport layer.
     /// Examples:
@@ -301,7 +303,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * udp
     /// Requirement level: Conditionally Required
     #[serde(rename = "network.transport")]
-    network_transport: Option<bool>,
+    pub(crate) network_transport: Option<bool>,
 
     /// OSI network layer or non-OSI equivalent.
     /// Examples:
@@ -309,7 +311,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * ipv6
     /// Requirement level: Recommended
     #[serde(rename = "network.type")]
-    network_type: Option<bool>,
+    pub(crate) network_type: Option<bool>,
 }
 
 impl DefaultForLevel for HttpCommonAttributes {
@@ -362,6 +364,7 @@ impl DefaultForLevel for HttpCommonAttributes {
 /// Attributes for Http servers
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpServerAttributes {
     /// Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name.
@@ -369,45 +372,45 @@ pub(crate) struct HttpServerAttributes {
     /// * 83.164.160.102
     /// Requirement level: Recommended
     #[serde(rename = "client.address", skip)]
-    client_address: Option<bool>,
+    pub(crate) client_address: Option<bool>,
     /// The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port.
     /// Examples:
     /// * 65123
     /// Requirement level: Recommended
     #[serde(rename = "client.port", skip)]
-    client_port: Option<bool>,
+    pub(crate) client_port: Option<bool>,
     /// The matched route (path template in the format used by the respective server framework).
     /// Examples:
     /// * /graphql
     /// Requirement level: Conditionally Required: If and only if it’s available
     #[serde(rename = "http.route")]
-    http_route: Option<bool>,
+    pub(crate) http_route: Option<bool>,
     /// Local socket address. Useful in case of a multi-IP host.
     /// Examples:
     /// * 10.1.2.80
     /// * /tmp/my.sock
     /// Requirement level: Opt-In
     #[serde(rename = "network.local.address")]
-    network_local_address: Option<bool>,
+    pub(crate) network_local_address: Option<bool>,
     /// Local socket port. Useful in case of a multi-port host.
     /// Examples:
     /// * 65123
     /// Requirement level: Opt-In
     #[serde(rename = "network.local.port")]
-    network_local_port: Option<bool>,
+    pub(crate) network_local_port: Option<bool>,
     /// Peer address of the network connection - IP address or Unix domain socket name.
     /// Examples:
     /// * 10.1.2.80
     /// * /tmp/my.sock
     /// Requirement level: Recommended
     #[serde(rename = "network.peer.address")]
-    network_peer_address: Option<bool>,
+    pub(crate) network_peer_address: Option<bool>,
     /// Peer port number of the network connection.
     /// Examples:
     /// * 65123
     /// Requirement level: Recommended
     #[serde(rename = "network.peer.port")]
-    network_peer_port: Option<bool>,
+    pub(crate) network_peer_port: Option<bool>,
     /// Name of the local HTTP server that received the request.
     /// Examples:
     /// * example.com
@@ -415,7 +418,7 @@ pub(crate) struct HttpServerAttributes {
     /// * /tmp/my.sock
     /// Requirement level: Recommended
     #[serde(rename = "server.address")]
-    server_address: Option<bool>,
+    pub(crate) server_address: Option<bool>,
     /// Port of the local HTTP server that received the request.
     /// Examples:
     /// * 80
@@ -423,19 +426,19 @@ pub(crate) struct HttpServerAttributes {
     /// * 443
     /// Requirement level: Recommended
     #[serde(rename = "server.port")]
-    server_port: Option<bool>,
+    pub(crate) server_port: Option<bool>,
     /// The URI path component
     /// Examples:
     /// * /search
     /// Requirement level: Required
     #[serde(rename = "url.path")]
-    url_path: Option<bool>,
+    pub(crate) url_path: Option<bool>,
     /// The URI query component
     /// Examples:
     /// * q=OpenTelemetry
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "url.query")]
-    url_query: Option<bool>,
+    pub(crate) url_query: Option<bool>,
 
     /// The URI scheme component identifying the used protocol.
     /// Examples:
@@ -443,7 +446,7 @@ pub(crate) struct HttpServerAttributes {
     /// * https
     /// Requirement level: Required
     #[serde(rename = "url.scheme")]
-    url_scheme: Option<bool>,
+    pub(crate) url_scheme: Option<bool>,
 
     /// Value of the HTTP User-Agent header sent by the client.
     /// Examples:
@@ -451,7 +454,7 @@ pub(crate) struct HttpServerAttributes {
     /// * libwww/2.17b3
     /// Requirement level: Recommended
     #[serde(rename = "user_agent.original")]
-    user_agent_original: Option<bool>,
+    pub(crate) user_agent_original: Option<bool>,
 }
 
 impl DefaultForLevel for HttpServerAttributes {
@@ -1009,13 +1012,14 @@ mod test {
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_TYPE;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
     use crate::plugins::telemetry::config_new::Selectors;
+    use crate::plugins::telemetry::otel;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
     #[test]
     fn test_router_trace_attributes() {
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
