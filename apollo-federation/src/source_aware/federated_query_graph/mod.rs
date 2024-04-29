@@ -23,7 +23,7 @@ pub(crate) mod path_tree;
 #[derive(Debug)]
 pub struct FederatedQueryGraph {
     graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
-    supergraph_types_to_root_nodes: IndexMap<NamedType, IndexSet<NodeIndex>>,
+    supergraph_types_to_root_nodes: IndexMap<NamedType, NodeIndex>,
     supergraph_root_kinds_to_types: IndexMap<SchemaRootDefinitionKind, NamedType>,
     self_conditions: Vec<NormalizedSelectionSet>,
     non_trivial_followup_edges: IndexMap<EdgeIndex, IndexSet<EdgeIndex>>,

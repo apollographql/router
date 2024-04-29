@@ -41,6 +41,7 @@ struct IntraSourceQueryGraphBuilder {
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
     is_for_query_planning: bool,
+    non_entity_supergraph_types_to_nodes: IndexMap<NamedType, IndexSet<NodeIndex>>,
     current_source_kind: Option<SourceKind>,
     current_source_id: Option<SourceId>,
 }
