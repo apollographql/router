@@ -187,7 +187,7 @@ impl AuthorizationPlugin {
         } = Self::generate_cache_metadata(
             &doc.executable,
             operation_name,
-            &schema.definitions,
+            schema.supergraph_schema(),
             false,
         );
         if is_authenticated {
@@ -433,9 +433,12 @@ impl AuthorizationPlugin {
         doc: &ast::Document,
         is_authenticated: bool,
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
-        if let Some(mut visitor) =
-            AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map, dry_run)
-        {
+        if let Some(mut visitor) = AuthenticatedVisitor::new(
+            schema.supergraph_schema(),
+            doc,
+            &schema.implementers_map,
+            dry_run,
+        ) {
             let modified_query = transform::document(&mut visitor, doc)
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
@@ -469,7 +472,7 @@ impl AuthorizationPlugin {
         scopes: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = ScopeFilteringVisitor::new(
-            &schema.definitions,
+            schema.supergraph_schema(),
             doc,
             &schema.implementers_map,
             scopes.iter().cloned().collect(),
@@ -504,7 +507,7 @@ impl AuthorizationPlugin {
         policies: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = PolicyFilteringVisitor::new(
-            &schema.definitions,
+            schema.supergraph_schema(),
             doc,
             &schema.implementers_map,
             policies.iter().cloned().collect(),

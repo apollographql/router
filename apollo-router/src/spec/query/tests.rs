@@ -3460,7 +3460,7 @@ fn it_parses_default_floats() {
 
     let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
     let value = schema
-        .definitions
+        .supergraph_schema()
         .get_input_object("WithAllKindsOfFloats")
         .unwrap()
         .fields["a_float_that_doesnt_fit_an_int"]
@@ -5323,7 +5323,6 @@ fn parse_introspection_query() {
 
     let schema = with_supergraph_boilerplate(schema, "Query");
     let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
-    let api_schema = schema.api_schema();
 
     let query = "{
         __type(name: \"Bar\") {
@@ -5336,7 +5335,7 @@ fn parse_introspection_query() {
           }
         }
       }";
-    assert!(Query::parse(query, None, api_schema, &Default::default())
+    assert!(Query::parse(query, None, &schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5351,7 +5350,7 @@ fn parse_introspection_query() {
         }
       }";
 
-    assert!(Query::parse(query, None, api_schema, &Default::default())
+    assert!(Query::parse(query, None, &schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5362,7 +5361,7 @@ fn parse_introspection_query() {
         __typename
       }";
 
-    assert!(Query::parse(query, None, api_schema, &Default::default())
+    assert!(Query::parse(query, None, &schema, &Default::default())
         .unwrap()
         .operations
         .first()
@@ -5836,7 +5835,7 @@ fn filtered_defer_fragment() {
     let ast = Parser::new()
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
-    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 
@@ -5862,7 +5861,7 @@ fn filtered_defer_fragment() {
     let ast = Parser::new()
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
-    let doc = ast.to_executable(&schema.definitions).unwrap();
+    let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
     let (fragments, operations, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 
@@ -5900,7 +5899,7 @@ fn filtered_defer_fragment() {
         &mut response,
         None,
         Object::new(),
-        &schema,
+        schema.api_schema(),
         BooleanValues { bits: 0 },
     );
 
@@ -5910,7 +5909,7 @@ fn filtered_defer_fragment() {
         &mut response,
         None,
         Object::new(),
-        &schema,
+        schema.api_schema(),
         BooleanValues { bits: 0 },
     );
 

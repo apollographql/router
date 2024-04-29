@@ -83,4 +83,5 @@ experimental_demand_control:
   mode: measure
   strategy:
     static_estimated:
+      list_size: 30
       max: 256

@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/plugins/telemetry/fmt_layer.rs
+expression: buff.to_string()
+---
+[timestamp] INFO  http.response.body="{\"foo\": \"bar\"}" http.response.body.size="125" my message kind=my_custom_event
+[timestamp] ERROR  Hello from test http.method="GET"
+[timestamp] INFO  http.request.body="Body(Empty)" http.request.headers="{\"content-length\": \"0\", \"custom-header\": \"val1\", \"x-log-request\": \"log\"}" http.request.method="GET" http.request.uri="http://example.com/" http.request.version="HTTP/1.1"  kind=router.request
+[timestamp] INFO  http.request.body.size="0" my event message kind=my.request_event
+[timestamp] INFO  http.response.body="Body(Full(b\"{\\\"data\\\":{\\\"data\\\":\\\"res\\\"}}\"))" http.response.headers="{\"content-length\": \"25\", \"custom-header\": \"val1\", \"x-log-request\": \"log\"}" http.response.status="200 OK" http.response.version="HTTP/1.1"  kind=router.response
+[timestamp] INFO  http.response.body.size="25" my response event message kind=my.response_event
+[timestamp] INFO  http.request.body="{\"query\":\"query { foo }\"}" http.request.headers="{\"content-type\": \"application/json\", \"x-log-request\": \"log\"}" http.request.method="POST" http.request.uri="http://default/" http.request.version="HTTP/1.1"  kind=supergraph.request
+[timestamp] INFO  my event message kind=my.request.event
+[timestamp] WARN  my response event message kind=my.response_event
+[timestamp] INFO  my event message kind=my.subgraph.request.event
+[timestamp] ERROR  my.custom.attribute="[\"{\"id\":1234,\"name\":\"first_name\"}\",\"{\"id\":567,\"name\":\"second_name\"}\"]" response_status="200" subgraph.name="subgraph" my response event message kind=my.subgraph.response.event
+[timestamp] INFO  my event message kind=my.subgraph.request.event
+[timestamp] ERROR  my.custom.attribute="[[{\"id\":1234,\"name\":\"first_name\"},{\"id\":567,\"name\":\"second_name\"}],{\"foo\":\"bar\"}]" response_status="200" subgraph.name="subgraph_bis" my response event message kind=my.subgraph.response.event
