@@ -624,7 +624,7 @@ impl FetchNode {
     ) {
         let doc = ExecutableDocument::parse(
             Valid::assume_valid_ref(schema),
-            &self.operation.as_serialized().to_string(),
+            self.operation.as_serialized().to_string(),
             "query.graphql",
         )
         // Assume query planing creates a valid document: ignore parse errors

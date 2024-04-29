@@ -635,7 +635,7 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .extract_authorization_metadata(&self.schema.supergraph_schema(), &key);
+            .extract_authorization_metadata(self.schema.supergraph_schema(), &key);
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if matches!(
