@@ -8,6 +8,7 @@
 //! every appear on the input side, while other will only appear on outputs, but it does not hurt
 //! to be future-proof by supporting all types of rewrites on both "sides".
 
+use apollo_compiler::NodeStr;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -42,7 +43,7 @@ pub(crate) struct DataValueSetter {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DataKeyRenamer {
     pub(crate) path: Path,
-    pub(crate) rename_key_to: String,
+    pub(crate) rename_key_to: NodeStr,
 }
 
 impl DataRewrite {
@@ -54,7 +55,9 @@ impl DataRewrite {
                 // `Key` and we ignore other cases (in theory, it could be `Fragment` needs
                 // to be supported someday if we ever need to rewrite full object values,
                 // but that can be added then).
-                if let Some((parent, PathElement::Key(k))) = split_path_last_element(&setter.path) {
+                if let Some((parent, PathElement::Key(k, _))) =
+                    split_path_last_element(&setter.path)
+                {
                     data.select_values_and_paths_mut(schema, &parent, |_path, obj| {
                         if let Some(value) = obj.get_mut(k) {
                             *value = setter.set_value_to.clone()
@@ -65,12 +68,13 @@ impl DataRewrite {
             DataRewrite::KeyRenamer(renamer) => {
                 // As the name implies, this only applies to renaming "keys", so we're
                 // guaranteed the last element is one and can ignore other cases.
-                if let Some((parent, PathElement::Key(k))) = split_path_last_element(&renamer.path)
+                if let Some((parent, PathElement::Key(k, _))) =
+                    split_path_last_element(&renamer.path)
                 {
                     data.select_values_and_paths_mut(schema, &parent, |_path, selected| {
                         if let Some(obj) = selected.as_object_mut() {
                             if let Some(value) = obj.remove(k.as_str()) {
-                                obj.insert(renamer.rename_key_to.clone(), value);
+                                obj.insert(renamer.rename_key_to.as_str(), value);
                             }
                         }
 
@@ -78,7 +82,7 @@ impl DataRewrite {
                             for item in arr {
                                 if let Some(obj) = item.as_object_mut() {
                                     if let Some(value) = obj.remove(k.as_str()) {
-                                        obj.insert(renamer.rename_key_to.clone(), value);
+                                        obj.insert(renamer.rename_key_to.as_str(), value);
                                     }
                                 }
                             }
@@ -156,7 +160,7 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".to_string(),
+            rename_key_to: "testField".into(),
         });
 
         dr.maybe_apply(
@@ -194,7 +198,7 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".to_string(),
+            rename_key_to: "testField".into(),
         });
 
         dr.maybe_apply(

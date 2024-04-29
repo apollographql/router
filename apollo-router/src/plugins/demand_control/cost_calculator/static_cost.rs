@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast::NamedType;
@@ -17,19 +16,28 @@ use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::schema_aware_response::SchemaAwareResponse;
 use super::schema_aware_response::TypedValue;
-use super::CostCalculator;
 use super::DemandControlError;
 use crate::graphql::Response;
+use crate::query_planner::fetch::SubgraphOperation;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 
-pub(crate) struct BasicCostCalculator {
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+pub(crate) struct StaticCostCalculator {
+    list_size: u32,
+    subgraph_schemas: Arc<SubgraphSchemas>,
 }
 
-impl BasicCostCalculator {
+impl StaticCostCalculator {
+    pub(crate) fn new(subgraph_schemas: Arc<SubgraphSchemas>, list_size: u32) -> Self {
+        Self {
+            list_size,
+            subgraph_schemas,
+        }
+    }
+
     /// Scores a field within a GraphQL operation, handling some expected cases where
     /// directives change how the query is fetched. In the case of the federation
     /// directive `@requires`, the cost of the required selection is added to the
@@ -49,11 +57,13 @@ impl BasicCostCalculator {
     /// any deduplication happening in the query planner, and we're estimating an upper
     /// bound for cost anyway.
     fn score_field(
+        &self,
         field: &Field,
-        parent_type_name: &NamedType,
+        parent_type: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
-        if BasicCostCalculator::skipped_by_directives(field) {
+        if StaticCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
         }
 
@@ -66,7 +76,11 @@ impl BasicCostCalculator {
 
         // Determine how many instances we're scoring. If there's no user-provided
         // information, assume lists have 100 items.
-        let instance_count = if field.ty().is_list() { 100.0 } else { 1.0 };
+        let instance_count = if field.ty().is_list() {
+            self.list_size as f64
+        } else {
+            1.0
+        };
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
@@ -75,20 +89,21 @@ impl BasicCostCalculator {
         } else {
             0.0
         };
-        type_cost += BasicCostCalculator::score_selection_set(
+        type_cost += self.score_selection_set(
             &field.selection_set,
             field.ty().inner_named_type(),
             schema,
+            executable,
         )?;
 
         // If the field is marked with `@requires`, the required selection may not be included
         // in the query's selection. Adding that requirement's cost to the field ensures it's
         // accounted for.
         let requirements =
-            RequiresDirective::from_field(field, parent_type_name, schema)?.map(|d| d.fields);
+            RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
         let requirements_cost = match requirements {
             Some(selection_set) => {
-                BasicCostCalculator::score_selection_set(&selection_set, parent_type_name, schema)?
+                self.score_selection_set(&selection_set, parent_type, schema, executable)?
             }
             None => 0.0,
         };
@@ -106,25 +121,42 @@ impl BasicCostCalculator {
         Ok(cost)
     }
 
-    fn score_fragment_spread(_fragment_spread: &FragmentSpread) -> Result<f64, DemandControlError> {
-        Ok(0.0)
+    fn score_fragment_spread(
+        &self,
+        fragment_spread: &FragmentSpread,
+        parent_type: &NamedType,
+        schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
+    ) -> Result<f64, DemandControlError> {
+        let fragment = fragment_spread.fragment_def(executable).ok_or(
+            DemandControlError::QueryParseFailure(format!(
+                "Parsed operation did not have a definition for fragment {}",
+                fragment_spread.fragment_name
+            )),
+        )?;
+        self.score_selection_set(&fragment.selection_set, parent_type, schema, executable)
     }
 
     fn score_inline_fragment(
+        &self,
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
-        BasicCostCalculator::score_selection_set(
+        self.score_selection_set(
             &inline_fragment.selection_set,
             parent_type,
             schema,
+            executable,
         )
     }
 
     fn score_operation(
+        &self,
         operation: &Operation,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
 
@@ -135,39 +167,43 @@ impl BasicCostCalculator {
             )));
         };
 
-        cost += BasicCostCalculator::score_selection_set(
-            &operation.selection_set,
-            root_type_name,
-            schema,
-        )?;
+        cost +=
+            self.score_selection_set(&operation.selection_set, root_type_name, schema, executable)?;
 
         Ok(cost)
     }
 
     fn score_selection(
+        &self,
         selection: &Selection,
         parent_type: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         match selection {
-            Selection::Field(f) => BasicCostCalculator::score_field(f, parent_type, schema),
-            Selection::FragmentSpread(s) => BasicCostCalculator::score_fragment_spread(s),
-            Selection::InlineFragment(i) => BasicCostCalculator::score_inline_fragment(
+            Selection::Field(f) => self.score_field(f, parent_type, schema, executable),
+            Selection::FragmentSpread(s) => {
+                self.score_fragment_spread(s, parent_type, schema, executable)
+            }
+            Selection::InlineFragment(i) => self.score_inline_fragment(
                 i,
                 i.type_condition.as_ref().unwrap_or(parent_type),
                 schema,
+                executable,
             ),
         }
     }
 
     fn score_selection_set(
+        &self,
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
         schema: &Valid<Schema>,
+        executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
-            cost += BasicCostCalculator::score_selection(selection, parent_type_name, schema)?;
+            cost += self.score_selection(selection, parent_type_name, schema, executable)?;
         }
         Ok(cost)
     }
@@ -210,21 +246,19 @@ impl BasicCostCalculator {
 
     fn estimated_cost_of_operation(
         &self,
-        subgraph: &String,
-        operation: &String,
+        subgraph: &str,
+        operation: &SubgraphOperation,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
-        let schema =
-            self.subgraph_schemas
-                .get(subgraph)
-                .ok_or(DemandControlError::QueryParseFailure(format!(
-                    "Query planner did not provide a schema for service {}",
-                    subgraph
-                )))?;
-        let query = ExecutableDocument::parse(schema, operation, "")?;
+        let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Query planner did not provide a schema for service {}",
+                subgraph
+            ))
+        })?;
 
-        Self::estimated(&query, schema)
+        self.estimated(operation.as_parsed(schema), schema)
     }
 
     fn max_score_of_nodes(
@@ -293,28 +327,28 @@ impl BasicCostCalculator {
         }
         Ok(score)
     }
-}
 
-impl CostCalculator for BasicCostCalculator {
-    fn estimated(
+    pub(crate) fn estimated(
+        &self,
         query: &ExecutableDocument,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         if let Some(op) = &query.anonymous_operation {
-            cost += BasicCostCalculator::score_operation(op, schema)?;
+            cost += self.score_operation(op, schema, query)?;
         }
         for (_name, op) in query.named_operations.iter() {
-            cost += BasicCostCalculator::score_operation(op, schema)?;
+            cost += self.score_operation(op, schema, query)?;
         }
         Ok(cost)
     }
 
-    fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
+    pub(crate) fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
         self.score_plan_node(&query_plan.root)
     }
 
-    fn actual(
+    pub(crate) fn actual(
+        &self,
         request: &ExecutableDocument,
         response: &Response,
     ) -> Result<f64, DemandControlError> {
@@ -355,7 +389,9 @@ mod tests {
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        BasicCostCalculator::estimated(&query.executable, &schema.definitions).unwrap()
+        StaticCostCalculator::new(Default::default(), 100)
+            .estimated(&query.executable, schema.supergraph_schema())
+            .unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.
@@ -368,7 +404,9 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        BasicCostCalculator::estimated(&query, &schema).unwrap()
+        StaticCostCalculator::new(Default::default(), 100)
+            .estimated(&query, &schema)
+            .unwrap()
     }
 
     async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
@@ -391,8 +429,9 @@ mod tests {
             _ => panic!("Query planner returned unexpected non-plan content"),
         };
 
-        let calculator = BasicCostCalculator {
+        let calculator = StaticCostCalculator {
             subgraph_schemas: planner.subgraph_schemas(),
+            list_size: 100,
         };
 
         calculator.planned(&query_plan).unwrap()
@@ -402,7 +441,9 @@ mod tests {
         let (_schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
-        BasicCostCalculator::actual(&query.executable, &response).unwrap()
+        StaticCostCalculator::new(Default::default(), 100)
+            .actual(&query.executable, &response)
+            .unwrap()
     }
 
     #[test]
@@ -537,5 +578,22 @@ mod tests {
         assert_eq!(estimated_cost(schema, query), 10200.0);
         assert_eq!(planned_cost(schema, query).await, 10400.0);
         assert_eq!(actual_cost(schema, query, response), 2.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_adjustable_list_cost() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+        let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
+
+        let conservative_estimate = StaticCostCalculator::new(Default::default(), 100)
+            .estimated(&query.executable, schema.supergraph_schema())
+            .unwrap();
+        let narrow_estimate = StaticCostCalculator::new(Default::default(), 5)
+            .estimated(&query.executable, schema.supergraph_schema())
+            .unwrap();
+
+        assert_eq!(conservative_estimate, 10200.0);
+        assert_eq!(narrow_estimate, 35.0);
     }
 }

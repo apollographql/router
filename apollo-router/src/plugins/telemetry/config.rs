@@ -83,7 +83,6 @@ pub(crate) struct Exporters {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Instrumentation {
-    #[serde(skip)]
     /// Event configuration
     pub(crate) events: config_new::events::Events,
     /// Span configuration
