@@ -1,4 +1,3 @@
-use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
 use std::net::IpAddr;
@@ -37,6 +36,7 @@ use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use parking_lot::Mutex;
 use reqwest::Request;
 use serde_json::json;
 use serde_json::Value;
