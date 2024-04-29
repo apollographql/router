@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
@@ -222,13 +221,10 @@ impl Connector {
             ),
         }
     }
-}
 
-impl Display for Connector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub(crate) fn display_name(&self) -> String {
         let ConnectorTransport::HttpJson(tr) = &self.transport;
-        write!(
-            f,
+        format!(
             "{}.{}: {} {}",
             self.origin_subgraph, self.api, tr.method, tr.path_template
         )

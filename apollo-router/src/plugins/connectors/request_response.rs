@@ -625,7 +625,7 @@ pub(super) async fn handle_responses(
                     .message(format!("http error: {}", parts.status))
                     // todo path: ["_entities", i, "???"]
                     .extension_code(format!("{}", parts.status.as_u16()))
-                    .extension("connector", connector.to_string())
+                    .extension("connector", connector.display_name())
                     .build(),
             );
         }

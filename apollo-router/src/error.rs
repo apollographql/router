@@ -240,8 +240,6 @@ pub(crate) enum ServiceBuildError {
     /// schema error: {0}
     Schema(SchemaError),
 
-    /// subgraph instanciation error: {0}
-    SubgraphConnector(ConnectorDirectiveError),
     /// couldn't build Router service: {0}
     ServiceError(BoxError),
 }

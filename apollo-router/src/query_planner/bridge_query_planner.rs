@@ -76,7 +76,6 @@ pub(crate) struct BridgeQueryPlanner {
     enable_authorization_directives: bool,
     subgraph_planners: Arc<HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>>,
     connectors: Option<Arc<HashMap<Arc<String>, Connector>>>,
-    connector_urls: HashMap<Arc<String>, String>,
     _federation_instrument: ObservableGauge<u64>,
 }
 
@@ -448,12 +447,14 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
+        let mut subgraph_schemas = planner.subgraphs().await?;
+
         let connectors = schema
             .source
             .as_ref()
             .map(|source| source.connectors().clone());
 
-        let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
+        let subgraph_planners = if let Some(source) = &schema.source {
             // TODO: arbitrary, going for the js planner until the rust one is ready
             let planner = match &planner {
                 PlannerMode::Js(planner) => planner.clone(),
@@ -470,11 +471,6 @@ impl BridgeQueryPlanner {
             let connector_supergraph_str = connector_supergraph.serialize().to_string();
 
             let mut subgraph_planners = HashMap::new();
-
-            let connector_urls = connectors
-                .iter()
-                .map(|(name, connector)| (name.clone(), connector.to_string()))
-                .collect::<HashMap<_, _>>();
 
             let subgraph_planner = Arc::new(
                 planner
@@ -508,16 +504,22 @@ impl BridgeQueryPlanner {
                     .await?,
             );
 
-            for name in connector_subgraph_names {
-                subgraph_planners.insert(name, subgraph_planner.clone());
+            for subgraph_name in connector_subgraph_names {
+                subgraph_schemas.insert(subgraph_name.to_string(), connector_supergraph.clone());
+                subgraph_planners.insert(subgraph_name, subgraph_planner.clone());
             }
 
-            (subgraph_planners, connector_urls)
-        } else {
-            (Default::default(), Default::default())
-        };
+            for (name, schema_str) in subgraph_planner.subgraphs().await? {
+                let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                    .map_err(|errors| SchemaError::Validate(errors.into()))?;
+                subgraph_schemas.insert(name.clone(), Arc::new(schema));
+                subgraph_planners.insert(Arc::new(name), subgraph_planner.clone());
+            }
 
-        let subgraph_schemas = Arc::new(planner.subgraphs().await?);
+            subgraph_planners
+        } else {
+            Default::default()
+        };
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(
@@ -538,14 +540,13 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
-            subgraph_schemas,
+            subgraph_schemas: Arc::new(subgraph_schemas),
             introspection,
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
             subgraph_planners: Arc::new(subgraph_planners),
             connectors,
-            connector_urls,
         })
     }
 
@@ -603,18 +604,13 @@ impl BridgeQueryPlanner {
             .as_ref()
             .map(|source| source.connectors().clone());
 
-        let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
+        let subgraph_planners = if let Some(source) = &schema.source {
             let connector_supergraph = source.supergraph();
             let connectors = source.connectors();
             let connector_subgraph_names = connector_subgraph_names(&connectors);
             let connector_supergraph_str = connector_supergraph.serialize().to_string();
 
             let mut subgraph_planners = HashMap::new();
-
-            let connector_urls = connectors
-                .iter()
-                .map(|(name, connector)| (name.clone(), connector.to_string()))
-                .collect::<HashMap<_, _>>();
 
             let subgraph_planner = Arc::new(
                 planner
@@ -648,24 +644,22 @@ impl BridgeQueryPlanner {
                     .await?,
             );
 
-            for name in connector_subgraph_names {
-                subgraph_planners.insert(name, subgraph_planner.clone());
+            for subgraph_name in connector_subgraph_names {
+                subgraph_schemas.insert(subgraph_name.to_string(), connector_supergraph.clone());
+                subgraph_planners.insert(dbg!(subgraph_name), subgraph_planner.clone());
             }
 
-            (subgraph_planners, connector_urls)
+            for (name, schema_str) in subgraph_planner.subgraphs().await? {
+                let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
+                    .map_err(|errors| SchemaError::Validate(errors.into()))?;
+                subgraph_schemas.insert(dbg!(name.clone()), Arc::new(schema));
+                subgraph_planners.insert(dbg!(Arc::new(name)), subgraph_planner.clone());
+            }
+
+            subgraph_planners
         } else {
-            (Default::default(), Default::default())
+            Default::default()
         };
-
-        let subgraph_schema_strings = planner.subgraphs().await?;
-        let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
-
-        for (name, schema) in subgraph_schema_strings {
-            subgraph_schemas.insert(
-                name.clone(),
-                Arc::new(Schema::parse_compiler_schema(&schema)?),
-            );
-        }
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await?))
@@ -687,7 +681,6 @@ impl BridgeQueryPlanner {
             _federation_instrument: federation_instrument,
             subgraph_planners: Arc::new(subgraph_planners),
             connectors,
-            connector_urls,
         })
     }
 
@@ -788,7 +781,6 @@ impl BridgeQueryPlanner {
             node.generate_connector_plan(
                 self.schema.as_ref(),
                 &self.subgraph_planners,
-                &self.connector_urls,
                 &self.connectors.clone().unwrap_or_default(),
             )
             .await?;

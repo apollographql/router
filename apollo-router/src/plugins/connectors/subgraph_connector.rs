@@ -147,7 +147,7 @@ impl HTTPConnector {
             .get(LOGGING_DISPLAY_HEADERS)
             .unwrap_or_default()
             .unwrap_or_default();
-        let connector_name = format!("{}", &connector);
+        let connector_name = connector.display_name();
 
         let connector_fetch_span = tracing::info_span!(
             CONNECTOR_FETCH,
@@ -232,7 +232,8 @@ impl HTTPConnector {
 fn make_requests_error(connector: &Connector, err: MakeRequestError) -> BoxError {
     format!(
         "Failed to create requests for connector `{}`: {}",
-        connector, err
+        connector.display_name(),
+        err
     )
     .into()
 }
@@ -240,7 +241,8 @@ fn make_requests_error(connector: &Connector, err: MakeRequestError) -> BoxError
 fn handle_responses_error(connector: &Connector, err: HandleResponseError) -> BoxError {
     format!(
         "Failed to map responses for connector `{}`: {}",
-        connector, err
+        connector.display_name(),
+        err
     )
     .into()
 }

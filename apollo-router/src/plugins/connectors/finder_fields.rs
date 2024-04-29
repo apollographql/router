@@ -26,6 +26,7 @@ use apollo_compiler::schema::Name;
 use itertools::Itertools;
 
 use super::Connector;
+use crate::query_planner::fetch::RestProtocolWrapper;
 use crate::query_planner::QueryPlannerSelection as Selection;
 use crate::spec::Schema;
 
@@ -93,7 +94,7 @@ pub(crate) fn finder_field_for_fetch_node(
     schema: &Schema,
     connectors: &[&Connector],
     requires: &[Selection],
-) -> Option<Name> {
+) -> Option<RestProtocolWrapper> {
     let Some(output_type) = output_type_from_requires(schema, requires) else {
         return None;
     };
@@ -127,9 +128,16 @@ pub(crate) fn finder_field_for_fetch_node(
             }
         })
         .sorted_by_key(|(common_keys, _)| *common_keys)
-        .filter_map(|(_, connector)| connector.finder_field_name())
+        .filter_map(|(_, connector)| {
+            connector
+                .finder_field_name()
+                .map(|finder| (connector.display_name(), finder))
+        })
         .next()
-        .map(|s| Name::new_unchecked(s.as_str().into()))
+        .map(|(connector_service_name, s)| RestProtocolWrapper {
+            connector_service_name,
+            magic_finder_field: Some(s.as_str().to_string()),
+        })
 }
 
 fn flatten_inputs(inputs: &[GraphQLSelection]) -> HashSet<Name> {
@@ -215,7 +223,6 @@ fn flatten_requires(requires: &[Selection]) -> HashSet<Name> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
     use apollo_compiler::schema::Schema;
     use insta::assert_debug_snapshot;
 
@@ -287,8 +294,14 @@ mod tests {
         )
         .unwrap();
 
-        let finder_field = finder_field_for_fetch_node(&schema, &connectors, &requires);
-        assert_eq!(finder_field, Some(name!(_EntityAcrossBoth_a_b)));
+        let rpw = finder_field_for_fetch_node(&schema, &connectors, &requires).unwrap();
+        assert_eq!(
+            rpw,
+            RestProtocolWrapper {
+                connector_service_name: "test".to_string(),
+                magic_finder_field: Some("_EntityAcrossBoth_a_b".to_string())
+            }
+        );
 
         // @requires
 
@@ -316,9 +329,14 @@ mod tests {
         )
         .unwrap();
 
-        let finder_field = finder_field_for_fetch_node(&schema, &connectors, &requires);
-        assert_eq!(finder_field, Some(name!(_TestRequires_weight)));
-
+        let rpw = finder_field_for_fetch_node(&schema, &connectors, &requires).unwrap();
+        assert_eq!(
+            rpw,
+            RestProtocolWrapper {
+                connector_service_name: "test".to_string(),
+                magic_finder_field: Some("_TestRequires_weight".to_string())
+            }
+        );
         // @interface object
 
         let requires: Vec<Selection> = serde_json::from_str(
@@ -354,7 +372,13 @@ mod tests {
         )
         .unwrap();
 
-        let finder_field = finder_field_for_fetch_node(&schema, &connectors, &requires);
-        assert_eq!(finder_field, Some(name!(_TestingInterfaceObject_id)));
+        let rpw = finder_field_for_fetch_node(&schema, &connectors, &requires).unwrap();
+        assert_eq!(
+            rpw,
+            RestProtocolWrapper {
+                connector_service_name: "test".to_string(),
+                magic_finder_field: Some("_TestingInterfaceObject_id".to_string())
+            }
+        );
     }
 }

@@ -155,6 +155,7 @@ pub(crate) enum Protocol {
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RestProtocolWrapper {
+    pub(crate) connector_service_name: String,
     pub(crate) magic_finder_field: Option<String>,
 }
 
@@ -373,7 +374,15 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> &Arc<Valid<ExecutableDocument>> {
         self.operation
-            .as_parsed(&subgraph_schemas[self.service_name.as_str()])
+            .as_parsed(&subgraph_schemas[self.service_name().as_str()])
+    }
+
+    pub(crate) fn service_name(&self) -> NodeStr {
+        match self.protocol.as_ref() {
+            Protocol::GraphQL => self.service_name.clone(),
+            Protocol::RestWrapper(rw) => rw.connector_service_name.clone().into(),
+            Protocol::RestFetch(rf) => rf.connector_service_name.clone().into(),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -645,18 +654,13 @@ impl FetchNode {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn service_name(&self) -> &str {
-        &self.service_name
-    }
-
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
     }
 
     pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas) {
         let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let schema = &subgraph_schemas[self.service_name().as_str()];
 
         if let Ok(hash) = QueryHashVisitor::hash_query(schema, doc, self.operation_name.as_deref())
         {
@@ -670,7 +674,7 @@ impl FetchNode {
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
         let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let schema = &subgraph_schemas[self.service_name().as_str()];
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
             doc,
             self.operation_name.as_deref(),
@@ -786,9 +790,9 @@ impl FetchNode {
         &mut self,
         schema: &Schema,
         subgraph_planners: &HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
-        connector_urls: &HashMap<Arc<String>, String>,
         connectors: &Arc<HashMap<Arc<String>, Connector>>,
-    ) -> Result<Option<(PlanSuccess<QueryPlanResult>, Option<String>)>, QueryPlannerError> {
+    ) -> Result<Option<(PlanSuccess<QueryPlanResult>, RestProtocolWrapper)>, QueryPlannerError>
+    {
         if let Some(planner) = subgraph_planners.get(&self.service_name.to_string()) {
             tracing::debug!(
                 "planning for subgraph '{}' and query '{}'",
@@ -807,22 +811,33 @@ impl FetchNode {
                 })
                 .collect::<Vec<_>>();
 
-            let (operation, magic_finder_field) = if let Some(magic_finder_field) =
+            let (operation, rest_protocol_wrapper) = if let Some(rest_protocol_wrapper) =
                 finder_field_for_fetch_node(
                     schema,
                     &connectors_in_subgraph,
                     self.requires.as_slice(),
                 ) {
-                (
-                    self.operation.replace("_entities", &magic_finder_field),
-                    Some(magic_finder_field),
-                )
+                if let Some(mff) = &rest_protocol_wrapper.magic_finder_field {
+                    (
+                        self.operation.replace("_entities", mff),
+                        rest_protocol_wrapper,
+                    )
+                } else {
+                    (self.operation.clone(), rest_protocol_wrapper)
+                }
             } else {
-                (self.operation.clone(), None)
+                (
+                    self.operation.clone(),
+                    RestProtocolWrapper {
+                        connector_service_name: self.service_name.to_string(),
+                        magic_finder_field: None,
+                    },
+                )
             };
 
             tracing::debug!(
-                "replaced with operation(magic finder field={magic_finder_field:?}): {operation}"
+                "replaced with operation(magic finder field={:?}): {operation}",
+                rest_protocol_wrapper.magic_finder_field.as_ref()
             );
             match planner
                 .plan(
@@ -836,10 +851,10 @@ impl FetchNode {
             {
                 Ok(mut plan) => {
                     if let Some(node) = plan.data.query_plan.node.as_mut() {
-                        node.update_connector_plan(&self.service_name.to_string(), connector_urls);
+                        node.update_connector_plan(&self.service_name.to_string(), connectors);
                     }
 
-                    return Ok(Some((plan, magic_finder_field.map(|s| s.to_string()))));
+                    return Ok(Some((plan, rest_protocol_wrapper)));
                 }
                 Err(err) => {
                     return Err(QueryPlannerError::from(err));
@@ -853,14 +868,15 @@ impl FetchNode {
     pub(crate) fn update_connector_plan(
         &mut self,
         parent_service_name: &String,
-        connector_urls: &HashMap<Arc<String>, String>,
+        connectors: &Arc<HashMap<Arc<String>, Connector>>,
     ) {
         let parent_service_name = parent_service_name.to_string();
-        let connector = connector_urls
-            .get(&self.service_name.to_string())
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-        let service_name = std::mem::replace(&mut self.service_name, connector.into());
+        let connector = connectors.get(&self.service_name.to_string()).unwrap(); // TODO
+                                                                                 // .map(|c| c.name().into())
+                                                                                 // TODO
+                                                                                 // .unwrap_or_else(|| String::new().into());
+        let service_name =
+            std::mem::replace(&mut self.service_name, connector.display_name().into());
         self.protocol = Arc::new(Protocol::RestFetch(RestFetchNode {
             connector_service_name: service_name.to_string(),
             parent_service_name,

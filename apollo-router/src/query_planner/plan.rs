@@ -13,7 +13,6 @@ pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::fetch::FetchNode;
 use super::fetch::Protocol;
-use super::fetch::RestProtocolWrapper;
 use super::subscription::SubscriptionNode;
 use super::QueryPlanResult;
 use crate::error::CacheResolverError;
@@ -390,7 +389,7 @@ impl PlanNode {
             Self::Sequence { nodes, .. } | Self::Parallel { nodes } => {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
-            Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
+            Self::Fetch(fetch) => Box::new(Some(fetch.service_name.as_str()).into_iter()),
             Self::Subscription { primary, rest } => match rest {
                 Some(rest) => Box::new(
                     rest.service_usage()
@@ -490,19 +489,13 @@ impl PlanNode {
         &'a mut self,
         schema: &'a Schema,
         subgraph_planners: &'a HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
-        connector_urls: &'a HashMap<Arc<String>, String>,
         connectors: &'a Arc<HashMap<Arc<String>, Connector>>,
     ) -> future::BoxFuture<Result<(), QueryPlannerError>> {
         Box::pin(async move {
             match self {
                 PlanNode::Fetch(fetch_node) => {
-                    if let Some((plan, magic_finder_field)) = fetch_node
-                        .generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
+                    if let Some((plan, rest_protocol_wrapper)) = fetch_node
+                        .generate_connector_plan(schema, subgraph_planners, connectors)
                         .await?
                     {
                         // replace leaf with connector root
@@ -516,9 +509,7 @@ impl PlanNode {
                             ) {
                                 if let PlanNode::Sequence { connector, .. } = self {
                                     fetch_node.protocol =
-                                        Arc::new(Protocol::RestWrapper(RestProtocolWrapper {
-                                            magic_finder_field,
-                                        }));
+                                        Arc::new(Protocol::RestWrapper(rest_protocol_wrapper));
                                     *connector = Some(fetch_node);
                                 }
                             }
@@ -528,59 +519,34 @@ impl PlanNode {
                 }
                 PlanNode::Sequence { nodes, .. } => {
                     for node in nodes.iter_mut() {
-                        node.generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
-                        .await?;
+                        node.generate_connector_plan(schema, subgraph_planners, connectors)
+                            .await?;
                     }
                     Ok(())
                 }
                 PlanNode::Parallel { nodes } => {
                     for node in nodes.iter_mut() {
-                        node.generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
-                        .await?;
+                        node.generate_connector_plan(schema, subgraph_planners, connectors)
+                            .await?;
                     }
                     Ok(())
                 }
                 PlanNode::Flatten(flatten) => {
                     flatten
                         .node
-                        .generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
+                        .generate_connector_plan(schema, subgraph_planners, connectors)
                         .await
                 }
                 PlanNode::Defer { primary, deferred } => {
                     if let Some(node) = primary.node.as_mut() {
-                        node.generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
-                        .await?;
+                        node.generate_connector_plan(schema, subgraph_planners, connectors)
+                            .await?;
                     }
                     for deferred_node in deferred {
                         if let Some(node) = deferred_node.node.take() {
                             let mut new_node = (*node).clone();
                             new_node
-                                .generate_connector_plan(
-                                    schema,
-                                    subgraph_planners,
-                                    connector_urls,
-                                    connectors,
-                                )
+                                .generate_connector_plan(schema, subgraph_planners, connectors)
                                 .await?;
                             deferred_node.node = Some(Arc::new(new_node));
                         }
@@ -589,13 +555,8 @@ impl PlanNode {
                 }
                 PlanNode::Subscription { primary: _, rest } => {
                     if let Some(node) = rest.as_mut() {
-                        node.generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
-                        .await?;
+                        node.generate_connector_plan(schema, subgraph_planners, connectors)
+                            .await?;
                     }
                     Ok(())
                 }
@@ -605,22 +566,12 @@ impl PlanNode {
                     else_clause,
                 } => {
                     if let Some(node) = if_clause.as_mut() {
-                        node.generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
-                        .await?;
+                        node.generate_connector_plan(schema, subgraph_planners, connectors)
+                            .await?;
                     }
                     if let Some(node) = else_clause.as_mut() {
-                        node.generate_connector_plan(
-                            schema,
-                            subgraph_planners,
-                            connector_urls,
-                            connectors,
-                        )
-                        .await?;
+                        node.generate_connector_plan(schema, subgraph_planners, connectors)
+                            .await?;
                     }
                     Ok(())
                 }
@@ -632,40 +583,36 @@ impl PlanNode {
     pub(crate) fn update_connector_plan<'a>(
         &'a mut self,
         service: &'a String,
-        connector_urls: &'a HashMap<Arc<String>, String>,
+        connectors: &Arc<HashMap<Arc<String>, Connector>>,
     ) {
         match self {
-            PlanNode::Fetch(fetch_node) => {
-                fetch_node.update_connector_plan(service, connector_urls)
-            }
+            PlanNode::Fetch(fetch_node) => fetch_node.update_connector_plan(service, connectors),
             PlanNode::Sequence { nodes, .. } => {
                 for node in nodes.iter_mut() {
-                    node.update_connector_plan(service, connector_urls);
+                    node.update_connector_plan(service, connectors);
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes.iter_mut() {
-                    node.update_connector_plan(service, connector_urls);
+                    node.update_connector_plan(service, connectors);
                 }
             }
-            PlanNode::Flatten(flatten) => {
-                flatten.node.update_connector_plan(service, connector_urls)
-            }
+            PlanNode::Flatten(flatten) => flatten.node.update_connector_plan(service, connectors),
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.update_connector_plan(service, connector_urls);
+                    node.update_connector_plan(service, connectors);
                 }
                 for deferred_node in deferred {
                     if let Some(node) = deferred_node.node.take() {
                         let mut new_node = (*node).clone();
-                        new_node.update_connector_plan(service, connector_urls);
+                        new_node.update_connector_plan(service, connectors);
                         deferred_node.node = Some(Arc::new(new_node));
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.update_connector_plan(service, connector_urls);
+                    node.update_connector_plan(service, connectors);
                 }
             }
             PlanNode::Condition {
@@ -674,10 +621,10 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.update_connector_plan(service, connector_urls);
+                    node.update_connector_plan(service, connectors);
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.update_connector_plan(service, connector_urls);
+                    node.update_connector_plan(service, connectors);
                 }
             }
         }
