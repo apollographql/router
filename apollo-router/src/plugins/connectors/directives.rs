@@ -336,6 +336,8 @@ impl Source {
             join_graph_enum(&connector_graph_names),
         );
 
+        println!("{}", new_schema.serialize());
+
         new_schema
             .validate()
             .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)
