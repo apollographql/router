@@ -1,0 +1,72 @@
+{
+    "mocks": [
+        {
+            "request": {
+                "query":"query Search__searchSubgraph__0{search{__typename ..._generated_onMovieResult2_0 ..._generated_onArticleResult2_0}}fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection{__typename id}fragment _generated_onGallerySection2_0 on GallerySection{__typename id}fragment _generated_onMovieResult2_0 on MovieResult{sections{__typename ..._generated_onEntityCollectionSection2_0 ..._generated_onGallerySection2_0}id}fragment _generated_onArticleResult2_0 on ArticleResult{id sections{__typename ..._generated_onGallerySection2_0 ..._generated_onEntityCollectionSection2_0}}",
+                "operationName":"Search__searchSubgraph__0"
+            },
+            "response": {
+                "data":{
+                    "search":[
+                        {
+                            "__typename":"ArticleResult",
+                            "id":"a7052397-b605-414a-aba4-408d51c8eef0",
+                            "sections":[
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"d0182b8a-a671-4244-ba1c-905274b0d198"
+                                },
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
+                                }
+                            ]
+                        },
+                        {
+                            "__typename":"ArticleResult",
+                            "id":"3a7b08c9-d8c0-4c55-b55d-596a272392e0",
+                            "sections":[
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"f44f584e-5d3d-4466-96f5-9afc3f5d5a54"
+                                },
+                                {
+                                    "__typename":"GallerySection",
+                                    "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
+                                }
+                            ]
+                        },
+                        {
+                            "__typename":"MovieResult",
+                            "id":"c5f4985f-8fb6-4414-a3f5-56f7f58dd043",
+                            "sections":[
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                                },
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                                }
+                            ]
+                        },
+                        {
+                            "__typename":"MovieResult",
+                            "id":"ff140d35-ce5d-48fe-bad7-1cfb2c3e310a",
+                            "sections":[
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                                },
+                                {
+                                    "__typename":"GallerySection",
+                                    "id":"2f772201-42ca-4376-9871-2252cc052262"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

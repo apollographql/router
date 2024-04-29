@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
@@ -24,15 +25,17 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
-use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::events::SupergraphEventResponseLevel;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -51,7 +54,6 @@ use crate::services::execution::QueryPlan;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
@@ -67,7 +69,6 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -252,6 +253,16 @@ async fn service_call(
                     *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                     return Ok(response);
                 }
+                // Now perform query batch analysis
+                let batching = context.extensions().lock().get::<BatchQuery>().cloned();
+                if let Some(batch_query) = batching {
+                    let query_hashes = plan.query_hashes(operation_name.as_deref(), &variables)?;
+                    batch_query
+                        .set_query_hashes(query_hashes)
+                        .await
+                        .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
+                    tracing::debug!("batch registered: {}", batch_query);
+                }
             }
 
             let ClientRequestAccepts {
@@ -328,10 +339,44 @@ async fn service_call(
 
                 let (parts, response_stream) = response.into_parts();
 
-                Ok(SupergraphResponse {
-                    context,
-                    response: http::Response::from_parts(parts, response_stream.boxed()),
-                })
+                let supergraph_response_event = context
+                    .extensions()
+                    .lock()
+                    .get::<SupergraphEventResponseLevel>()
+                    .cloned();
+                match supergraph_response_event {
+                    Some(level) => {
+                        let mut attrs = HashMap::with_capacity(4);
+                        attrs.insert(
+                            "http.response.headers".to_string(),
+                            format!("{:?}", parts.headers),
+                        );
+                        attrs.insert(
+                            "http.response.status".to_string(),
+                            format!("{}", parts.status),
+                        );
+                        attrs.insert(
+                            "http.response.version".to_string(),
+                            format!("{:?}", parts.version),
+                        );
+                        let response_stream = Box::pin(response_stream.inspect(move |resp| {
+                            attrs.insert(
+                                "http.response.body".to_string(),
+                                serde_json::to_string(resp).unwrap_or_default(),
+                            );
+                            log_event(level.0, "supergraph.response", attrs.clone(), "");
+                        }));
+
+                        Ok(SupergraphResponse {
+                            context,
+                            response: http::Response::from_parts(parts, response_stream.boxed()),
+                        })
+                    }
+                    None => Ok(SupergraphResponse {
+                        context,
+                        response: http::Response::from_parts(parts, response_stream.boxed()),
+                    }),
+                }
             }
         }
         // This should never happen because if we have an empty query plan we should have error in errors vec
@@ -605,33 +650,36 @@ async fn plan_query(
     // Some tests do populate the document, so we only do it if it's not already there.
     if !{
         let lock = context.extensions().lock();
-        lock.contains_key::<ParsedDocument>()
+        lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
     } {
-        let doc = Query::parse_document(
+        let doc = crate::spec::Query::parse_document(
             &query_str,
             operation_name.as_deref(),
             &schema,
             &Configuration::default(),
         )
-        .map_err(QueryPlannerError::SpecError)?;
-        Query::check_errors(&doc).map_err(crate::error::QueryPlannerError::from)?;
-        Query::validate_query(&doc).map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().lock().insert::<ParsedDocument>(doc);
+        .map_err(crate::error::QueryPlannerError::from)?;
+        context
+            .extensions()
+            .lock()
+            .insert::<crate::services::layers::query_analysis::ParsedDocument>(doc);
     }
 
-    planning
+    let qpr = planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context)
+                .context(context.clone())
                 .build(),
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
             "otel.kind" = "INTERNAL"
         ))
-        .await
+        .await?;
+
+    Ok(qpr)
 }
 
 fn clone_supergraph_request(

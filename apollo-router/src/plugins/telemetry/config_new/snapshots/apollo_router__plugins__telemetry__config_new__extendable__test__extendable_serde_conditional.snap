@@ -1,0 +1,72 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/extendable.rs
+expression: o
+---
+Extendable {
+    attributes: RouterAttributes {
+        datadog_trace_id: None,
+        trace_id: None,
+        baggage: None,
+        common: HttpCommonAttributes {
+            error_type: None,
+            http_request_body_size: None,
+            http_request_method: Some(
+                true,
+            ),
+            http_request_method_original: None,
+            http_response_body_size: None,
+            http_response_status_code: Some(
+                true,
+            ),
+            network_protocol_name: None,
+            network_protocol_version: None,
+            network_transport: None,
+            network_type: None,
+        },
+        server: HttpServerAttributes {
+            client_address: None,
+            client_port: None,
+            http_route: None,
+            network_local_address: None,
+            network_local_port: None,
+            network_peer_address: None,
+            network_peer_port: None,
+            server_address: None,
+            server_port: None,
+            url_path: Some(
+                true,
+            ),
+            url_query: None,
+            url_scheme: None,
+            user_agent_original: None,
+        },
+    },
+    custom: {
+        "http.request.header.x-my-header": Conditional {
+            selector: RequestHeader {
+                request_header: "x-my-header",
+                redact: None,
+                default: None,
+            },
+            condition: None,
+            value: Mutex {
+                data: Pending,
+            },
+        },
+        "http.request.header.x-not-present": Conditional {
+            selector: RequestHeader {
+                request_header: "x-not-present",
+                redact: None,
+                default: Some(
+                    String(
+                        "nope",
+                    ),
+                ),
+            },
+            condition: None,
+            value: Mutex {
+                data: Pending,
+            },
+        },
+    },
+}

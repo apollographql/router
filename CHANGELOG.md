@@ -4,6 +4,349 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.45.0] - 2024-04-22
+
+## 🚀 Features
+
+### Query validation process with Rust ([PR #4551](https://github.com/apollographql/router/pull/4551))
+
+The router has been updated with a new Rust-based query validation process using `apollo-compiler` from the `apollo-rs` project. It replaces the Javascript implementation in the query planner. It improves query planner performance by moving the validation out of the query planner and into the router service, which frees up space in the query planner cache. 
+
+Because validation now happens earlier in the router service and not in the query planner, error paths in the query planner are no longer encountered. Some messages in error responses returned from invalid queries should now be more clear.
+
+We've tested the new validation process by running it for months in production, concurrently with the JavaScript implementation, and have now completely transitioned to the Rust-based implementation.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4551
+
+### Add support for SHA256 hashing in Rhai ([Issue #4939](https://github.com/apollographql/router/issues/4939))
+
+The router supports a new `sha256` module to create SHA256 hashes in Rhai scripts. The module supports the `sha256::digest` function.
+
+An example script that uses the module:
+
+```rs
+fn supergraph_service(service){
+    service.map_request(|request|{
+        log_info("hello world");
+        let sha = sha256::digest("hello world");
+        log_info(sha);
+    });
+}
+```
+
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4940
+
+### Subgraph support for query batching ([Issue #2002](https://github.com/apollographql/router/issues/2002))
+
+As an extension to the ongoing work to support [client-side query batching in the router](https://github.com/apollographql/router/issues/126), the router now supports batching of subgraph requests. Each subgraph batch request retains the same external format as a client batch request. This optimization reduces the number of round-trip requests from the router to subgraphs.
+
+Also, batching in the router is now a generally available feature: the `experimental_batching` router configuration option has been deprecated and is replaced by the `batching` option.
+
+Previously, the router preserved the concept of a batch until a `RouterRequest` finished processing. From that point, the router converted each batch request item into a separate `SupergraphRequest`, and the router planned and executed those requests concurrently within the router, then reassembled them into a batch of `RouterResponse` to return to the client. Now with the implementation in this release, the concept of a batch is extended so that batches are issued to configured subgraphs (all or named). Each batch request item is planned and executed separately, but the queries issued to subgraphs are optimally assembled into batches which observe the query constraints of the various batch items.
+
+To configure subgraph batching, you can enable `batching.subgraph.all` for all subgraphs. You can also enable batching per subgraph with `batching.subgraph.subgraphs.*`. For example:
+
+```yaml
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Enable batching on all subgraphs
+    all:
+      enabled: true
+```
+
+```yaml
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    # Disable batching on all subgraphs
+    all:
+      enabled: false
+    # Configure (override) batching support per subgraph
+    subgraphs:
+      subgraph_1:
+        enabled: true
+      subgraph_2:
+        enabled: true
+```
+
+Note: `all` can be overridden by `subgraphs`. This applies in general for all router subgraph configuration options.
+
+To learn more, see [query batching in Apollo docs](https://www.apollographql.com/docs/router/executing-operations/query-batching/).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4661
+
+## 🐛 Fixes
+
+### Update `rustls` to v0.21.11, the latest v0.21.x patch ([PR #4993](https://github.com/apollographql/router/pull/4993))
+
+While the Router **does** use `rustls`, [RUSTSEC-2024-0336] (also known as [CVE-2024-32650] and [GHSA-6g7w-8wpp-frhj]) **DOES NOT affect the Router** since it uses `tokio-rustls` which is specifically called out in the advisory as **unaffected**.
+
+Despite the lack of impact, we update `rustls` version v0.21.10 to [rustls v0.21.11] which includes a patch.
+
+[RUSTSEC-2024-0336]: https://rustsec.org/advisories/RUSTSEC-2024-0336.html
+[CVE-2024-32650]: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-32650
+[GHSA-6g7w-8wpp-frhj]: https://github.com/advisories/GHSA-6g7w-8wpp-frhj
+[rustls v0.21.11]: https://github.com/rustls/rustls/releases/tag/v%2F0.21.11
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/4993
+
+### Performance improvements for Apollo usage report field generation ([PR 4951](https://github.com/apollographql/router/pull/4951))
+
+The performance of generating Apollo usage report signatures, stats keys, and referenced fields has been improved.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4951
+
+### Apply alias rewrites to arrays ([PR #4958](https://github.com/apollographql/router/pull/4958))
+
+The automatic aliasing rules introduced in [#2489](https://github.com/apollographql/router/pull/2489) to support `@interfaceObject` are now properly applied to lists.
+
+By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/4958
+
+### Fix compatibility of coprocessor metric creation ([PR #4930](https://github.com/apollographql/router/pull/4930))
+
+Previously, the router's execution stage created coprocessor metrics differently than other stages. This produced metrics with slight incompatibilities.
+
+This release fixes the issue by creating coprocessor metrics in the same way as all other stages.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4930
+
+## 📚 Documentation
+
+### Documentation updates for caching and metrics instruments ([PR #4872](https://github.com/apollographql/router/pull/4872))
+
+Router documentation has been updated for a couple topics:
+- [Performance improvements vs. stability concerns](https://www.apollographql.com/docs/router/configuration/in-memory-caching#performance-improvements-vs-stability) when using the router's operation cache
+- [Overview of standard and custom metrics instruments](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/instruments)
+
+By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/4872
+
+## 🧪 Experimental
+
+### Experimental: Introduce a pool of query planners ([PR #4897](https://github.com/apollographql/router/pull/4897))
+
+The router supports a new experimental feature: a pool of query planners to parallelize query planning.
+
+You can configure query planner pools with the `supergraph.query_planning.experimental_parallelism` option:
+
+```yaml
+supergraph:
+  query_planning:
+    experimental_parallelism: auto # number of available CPUs
+```
+
+Its value is the number of query planners that run in parallel, and its default value is `1`. You can set it to the special value `auto` to automatically set it equal to the number of available CPUs.
+
+You can discuss and comment about query planner pools in this [GitHub discussion](https://github.com/apollographql/router/discussions/4917).
+
+By [@xuorig](https://github.com/xuorig) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/4897
+
+### Experimental: Rust implementation of Apollo usage report field generation ([PR 4796](https://github.com/apollographql/router/pull/4796))
+
+The router supports a new experimental Rust implementation for generating the stats report keys and referenced fields that are sent in Apollo usage reports. This implementation is one part of the effort to replace the router-bridge with native Rust code.
+
+The feature is configured with the `experimental_apollo_metrics_generation_mode` setting. We recommend that you use its default value, so we can verify that it generates the same payloads as the previous implementation.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4796
+
+# [1.44.0] - 2024-04-12
+
+## 🚀 Features
+
+### Add details to `router service call failed` errors ([Issue #4899](https://github.com/apollographql/router/issues/4899))
+
+The router now includes more details in `router service call failed` error messages to improve their understandability and debuggability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4900
+
+### Support exporting metrics via OTLP HTTP ([Issue #4559](https://github.com/apollographql/router/issues/4559))
+
+In addition to exporting metrics via OTLP/gRPC, the router now supports exporting metrics via OTLP/HTTP.
+
+You can enable exporting via OTLP/HTTP by setting the `protocol` key to `http` in your `router.yaml`:
+
+```
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        protocol: http
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4842
+
+### Add support of instruments in configuration for telemetry ([Issue #4319](https://github.com/apollographql/router/issues/4319))
+
+Add support for custom and standard instruments through the configuration file. You'll be able to add your own custom metrics just using the configuration file. They may:
+- be conditional
+- get values from selectors, for instance headers, context or body
+- have different types like `histogram` or `counter`.
+
+Example:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: true
+        acme.request.duration:
+          value: duration
+          type: counter
+          unit: kb
+          description: "my description"
+          attributes:
+            http.response.status_code: true
+            "my_attribute":
+              response_header: "x-my-header"
+
+      supergraph:
+        acme.graphql.requests:
+          value: unit
+          type: counter
+          unit: count
+          description: "supergraph requests"
+
+      subgraph:
+        acme.graphql.subgraph.errors:
+          value: unit
+          type: counter
+          unit: count
+          description: "my description"
+```
+
+[Documentation](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/instruments)
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4771
+
+### Reuse cached query plans across schema updates ([Issue #4834](https://github.com/apollographql/router/issues/4834))
+
+The router now supports an experimental feature to reuse schema aware query hashing—introduced with the [entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching/) feature—to cache query plans. It reduces the amount of work when reloading the router. The hash of the cache stays the same for a query across schema updates if the schema updates don't change the query. If query planner [cache warm-up](https://www.apollographql.com/docs/router/configuration/in-memory-caching/#cache-warm-up) is configured, the router can reuse previous cache entries for which the hash does not change, consequently reducing both CPU usage and reload duration.
+
+You can enable reuse of cached query plans by setting the `supergraph.query_planning.experimental_reuse_query_plans` option:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    warmed_up_queries: 100
+    experimental_reuse_query_plans: true
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4883
+
+### Set a default TTL for query plans ([Issue #4473](https://github.com/apollographql/router/issues/4473))
+
+The router has updated the default TTL for query plan caches. The new default TTL is 30 days. With the previous default being an infinite duration, the new finite default better supports the fact that the router updates caches with schema updates.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4588
+
+## 🐛 Fixes
+
+### Replace null separator in cache key with `:` to match Redis convention ([PR #4886](https://github.com/apollographql/router/pull/4886))
+
+To conform with Redis convention, the router now uses `:` instead of null as the separator in cache keys. This conformance helps to properly display cache keys in nested form in Redis clients.
+
+This PR (#4886) updates the separator for APQ cache keys. Another PR (#4583) updates the separator for query plan cache keys.
+
+By [@tapaderster](https://github.com/tapaderster) in https://github.com/apollographql/router/pull/4886
+
+### Make 'router' user the owner of the docker image's /dist/data directory ([PR #4898](https://github.com/apollographql/router/pull/4898))
+
+Since we made our images more secure, we run our router process as user 'router'. If we are running under 'heaptrack', e.g.: in a debug image, then we cannot write to /dist/data because it is owned by 'root'.
+
+This changes the ownership of /dist/data from 'root' to 'router' to allow writes to succeed.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4898
+
+### Accept `extensions: null` in a GraphQL request ([Issue #3388](https://github.com/apollographql/router/issues/3388))
+
+In GraphQL requests, `extensions` is an optional map.
+Passing an explicit `null` was incorrectly considered a parse error.
+Now it is equivalent to omiting that field entirely, or to passing an empty map.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/4911
+
+### Require Cache-Control header for entity cache ([Issue #4880](https://github.com/apollographql/router/issues/4880))
+
+Previously, the router's entity cache plugin didn't use a subgraph's `Cache-Control` header to decide whether to store a response. Instead, it cached all responses.
+
+Now, the router's entity cache plugin expects a `Cache-Control` header from a subgraph. If a subgraph does not provide it, the aggregated `Cache-Control` header sent to the client will contain `no-store`.
+
+Additionally, the router now verifies that a TTL is configured for all subgraphs, either globally or for each subgraph configuration.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4882
+
+### Helm: include all standard labels in pod spec ([PR #4862](https://github.com/apollographql/router/pull/4862))
+
+The templates for the router's Helm chart have been updated so that the  `helm.sh/chart`, `app.kubernetes.io/version`, and `app.kubernetes.io/managed-by` labels are now included on pods, as they already were for all other resources created by the Helm chart.
+
+The specific change to the template is that the pod spec template now uses the `router.labels` template function instead of the `router.selectorLabels` template function. This allows you to remove a label from the selector without removing it from resource metadata by overriding the `router.selectorLabels` and `router.labels` functions and moving the label from the former to the latter.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4862
+
+### Persisted queries return 4xx errors ([PR #4887](https://github.com/apollographql/router/pull/4887))
+
+Previously, sending an invalid persisted query request could return a 200 status code to the client when they should have returned errors. These requests now return errors as 4xx status codes:
+
+- Sending a PQ ID that is unknown returns 404 (Not Found).
+- Sending freeform GraphQL when no freeform GraphQL is allowed returns
+  400 (Bad Request).
+- Sending both a PQ ID and freeform GraphQL in the same request (if the
+  APQ feature is not also enabled) returns 400 (Bad Request).
+- Sending freeform GraphQL that is not in the safelist when the safelist
+  is enabled returns (403 Forbidden).
+- A particular internal error that shouldn't happen returns 500 (Internal
+  Server Error).
+
+  By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/4887
+
+## 📃 Configuration
+
+### Add `generate_query_fragments` configuration option ([PR #4885](https://github.com/apollographql/router/pull/4885))
+
+Add a new `supergraph` configuration option `generate_query_fragments`. When set to `true`, the query planner will extract inline fragments into fragment definitions before sending queries to subgraphs. This can significantly reduce the size of the query sent to subgraphs, but may increase the time it takes to plan the query. Note that this option and `reuse_query_fragments` are mutually exclusive; if both are set to `true`, `generate_query_fragments` will take precedence.
+
+An example router configuration:
+
+```yaml title="router.yaml"
+supergraph:
+  generate_query_fragments: true
+```
+
+By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apollographql/router/pull/4885
+
+## 🛠 Maintenance
+
+### Fix integration test warning on macOS ([PR #4919](https://github.com/apollographql/router/pull/4919))
+
+Previously, integration tests of the router on macOS could produce the warning messages:
+
+```
+warning: unused import: `common::Telemetry`
+ --> apollo-router/tests/integration/mod.rs:4:16
+  |
+4 | pub(crate) use common::Telemetry;
+  |                ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `common::ValueExt`
+ --> apollo-router/tests/integration/mod.rs:5:16
+  |
+5 | pub(crate) use common::ValueExt;
+  |                ^^^^^^^^^^^^^^^^
+```
+
+That issue is now resolved. 
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4919
+
+
+
 # [1.43.2] - 2024-04-03
 
 ## 🐛 Fixes

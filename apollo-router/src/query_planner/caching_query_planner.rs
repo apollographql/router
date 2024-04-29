@@ -40,7 +40,6 @@ use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -228,16 +227,18 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let err_res = Query::check_errors(&doc);
-                if let Err(error) = err_res {
-                    let e = Arc::new(QueryPlannerError::SpecError(error));
-                    tokio::spawn(async move {
-                        entry.insert(Err(e)).await;
-                    });
-                    continue;
-                }
+                let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
+                    Ok(doc) => doc,
+                    Err(error) => {
+                        let e = Arc::new(QueryPlannerError::SpecError(error));
+                        tokio::spawn(async move {
+                            entry.insert(Err(e)).await;
+                        });
+                        continue;
+                    }
+                };
 
-                let schema = &self.schema.api_schema().definitions;
+                let schema = self.schema.api_schema();
                 if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
                     query = modified_query.to_string();
                 }
@@ -366,10 +367,11 @@ where
         let doc = match request.context.extensions().lock().get::<ParsedDocument>() {
             None => {
                 return Err(CacheResolverError::RetrievalError(Arc::new(
-                    QueryPlannerError::SpecError(SpecError::ParsingError(
+                    // TODO: dedicated error variant?
+                    QueryPlannerError::SpecError(SpecError::TransformError(
                         "missing parsed document".to_string(),
                     )),
-                )))
+                )));
             }
             Some(d) => d.clone(),
         };
@@ -397,7 +399,7 @@ where
                 context,
             } = request;
 
-            let schema = &self.schema.api_schema().definitions;
+            let schema = self.schema.api_schema();
             if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
                 query = modified_query.to_string();
             }
@@ -414,25 +416,6 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    let err_res = Query::check_errors(&doc);
-
-                    if let Err(error) = err_res {
-                        request
-                            .context
-                            .extensions()
-                            .lock()
-                            .insert(Arc::new(UsageReporting {
-                                stats_report_key: error.get_error_key().to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            }));
-                        let e = Arc::new(QueryPlannerError::SpecError(error));
-                        let err = e.clone();
-                        tokio::spawn(async move {
-                            entry.insert(Err(err)).await;
-                        });
-                        return Err(CacheResolverError::RetrievalError(e));
-                    }
-
                     let res = self.delegate.ready().await?.call(request).await;
 
                     match res {
@@ -447,11 +430,12 @@ where
                                 });
                             }
 
+                            // This will be overridden when running in ApolloMetricsGenerationMode::New mode
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                                 context
                                     .extensions()
                                     .lock()
-                                    .insert(plan.usage_reporting.clone());
+                                    .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                             }
                             Ok(QueryPlannerResponse {
                                 content,
@@ -489,7 +473,7 @@ where
                         context
                             .extensions()
                             .lock()
-                            .insert(plan.usage_reporting.clone());
+                            .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
                     }
 
                     Ok(QueryPlannerResponse::builder()
@@ -504,14 +488,16 @@ where
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(pe.usage_reporting.clone());
+                                .insert::<Arc<UsageReporting>>(Arc::new(
+                                    pe.usage_reporting.clone(),
+                                ));
                         }
                         QueryPlannerError::SpecError(e) => {
                             request
                                 .context
                                 .extensions()
                                 .lock()
-                                .insert(Arc::new(UsageReporting {
+                                .insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
                                     stats_report_key: e.get_error_key().to_string(),
                                     referenced_fields_by_type: HashMap::new(),
                                 }));
@@ -547,19 +533,28 @@ const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut hasher = Sha256::new();
+        hasher.update(self.operation.as_deref().unwrap_or("-"));
+        let operation = hex::encode(hasher.finalize());
+
+        let mut hasher = Sha256::new();
         hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
         let metadata = hex::encode(hasher.finalize());
 
-        write!(f, "plan:{}:{}:{}", FEDERATION_VERSION, self.hash, metadata,)
+        write!(
+            f,
+            "plan:{}:{}:{}:{}",
+            FEDERATION_VERSION, self.hash, operation, metadata,
+        )
     }
 }
 
 impl Hash for CachingQueryKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash.0.hash(state);
+        self.operation.hash(state);
         self.metadata.hash(state);
         self.plan_options.hash(state);
     }
@@ -641,19 +636,15 @@ mod tests {
         });
 
         let configuration = Arc::new(crate::Configuration::default());
-        let schema = Arc::new(
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
-        );
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse_test(schema, &configuration).unwrap());
 
         let mut planner =
-            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new())
+            CachingQueryPlanner::new(delegate, schema.clone(), &configuration, IndexMap::new())
                 .await
                 .unwrap();
 
         let configuration = Configuration::default();
-
-        let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let doc1 = Query::parse_document(
             "query Me { me { username } }",
@@ -734,7 +725,7 @@ mod tests {
         let configuration = Configuration::default();
 
         let schema =
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+            Schema::parse_test(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let doc = Query::parse_document(
             "query Me { me { username } }",

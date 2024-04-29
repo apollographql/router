@@ -59,6 +59,9 @@ pub struct Prepare {
     /// Skip the license check
     #[clap(long)]
     skip_license_check: bool,
+    /// It's a pre-release so skip the changelog generation
+    #[clap(long)]
+    pre_release: bool,
 
     /// The new version that is being created OR to bump (major|minor|patch|current).
     version: Version,
@@ -109,7 +112,9 @@ impl Prepare {
             self.update_helm_charts(&version)?;
             self.update_docs(&version)?;
             self.docker_files(&version)?;
-            self.finalize_changelog(&version)?;
+            if !self.pre_release {
+                self.finalize_changelog(&version)?;
+            }
         }
 
         Ok(())

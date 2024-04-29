@@ -68,7 +68,7 @@ impl Plugin for Record {
             storage_path: storage_path.clone().into(),
             schema: Arc::new(Schema::parse(
                 init.supergraph_sdl.clone().as_str(),
-                &Configuration::default(),
+                &Default::default(),
             )?),
         };
 

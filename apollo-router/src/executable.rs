@@ -1,5 +1,6 @@
 //! Main entry point for CLI command to start server.
 
+use std::cell::Cell;
 use std::env;
 use std::ffi::OsStr;
 use std::fmt;
@@ -712,14 +713,22 @@ fn setup_panic_handler() {
     std::panic::set_hook(Box::new(move |e| {
         if show_backtraces {
             let backtrace = std::backtrace::Backtrace::capture();
-            tracing::error!("{}\n{:?}", e, backtrace)
+            tracing::error!("{}\n{}", e, backtrace)
         } else {
             tracing::error!("{}", e)
         }
-        // Once we've panic'ed the behaviour of the router is non-deterministic
-        // We've logged out the panic details. Terminate with an error code
-        std::process::exit(1);
+        if !USING_CATCH_UNWIND.get() {
+            // Once we've panic'ed the behaviour of the router is non-deterministic
+            // We've logged out the panic details. Terminate with an error code
+            std::process::exit(1);
+        }
     }));
+}
+
+// TODO: once the Rust query planner does not use `todo!()` anymore,
+// remove this and the use of `catch_unwind` to call it.
+thread_local! {
+    pub(crate) static USING_CATCH_UNWIND: Cell<bool> = const { Cell::new(false) };
 }
 
 static COPIED: AtomicBool = AtomicBool::new(false);
