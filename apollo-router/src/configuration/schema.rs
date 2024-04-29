@@ -84,26 +84,16 @@ pub(crate) fn validate_yaml_configuration(
         }
     })?;
 
-    static SCHEMA: OnceLock<Result<JSONSchema, ConfigurationError>> = OnceLock::new();
-    let schema = SCHEMA
-        .get_or_init(|| {
-            serde_json::to_value(generate_config_schema())
-                .map_err(|e| ConfigurationError::InvalidConfiguration {
-                    message: "failed to parse schema",
-                    error: e.to_string(),
-                })
-                .and_then(|schema| {
-                    JSONSchema::options()
-                        .with_draft(Draft::Draft7)
-                        .compile(&schema)
-                        .map_err(|e| ConfigurationError::InvalidConfiguration {
-                            message: "failed to compile schema",
-                            error: e.to_string(),
-                        })
-                })
-        })
-        .as_ref()
-        .map_err(|e| e.clone())?;
+    static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
+    let schema = SCHEMA.get_or_init(|| {
+        let config_schema = serde_json::to_value(generate_config_schema())
+            .expect("failed to parse configuration schema");
+
+        JSONSchema::options()
+            .with_draft(Draft::Draft7)
+            .compile(&config_schema)
+            .expect("failed to compile configuration schema")
+    });
 
     if migration == Mode::Upgrade {
         let upgraded = upgrade_configuration(&yaml, true)?;
@@ -241,7 +231,7 @@ pub(crate) fn validate_yaml_configuration(
     }
 
     let mut config: Configuration = serde_json::from_value(expanded_yaml.clone())
-        .map_err(|e| ConfigurationError::DeserializeConfigError(e.to_string()))?;
+        .map_err(ConfigurationError::DeserializeConfigError)?;
 
     // ------------- Check for unknown fields at runtime ----------------
     // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`
