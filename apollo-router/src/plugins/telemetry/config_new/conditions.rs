@@ -611,6 +611,12 @@ mod test {
             }
             .evaluate_request(&Some(1i64))
         );
+
+        assert!(Condition::<TestSelector>::Gt {
+            left: SelectorOrValue::Value(2i64.into()),
+            right: SelectorOrValue::Value(1i64.into())
+        }
+        .evaluate_response(&None));
     }
 
     #[test]
@@ -704,6 +710,18 @@ mod test {
             }
             .evaluate_request(&Some(1i64))
         );
+
+        assert!(Condition::<TestSelector>::Gte {
+            left: SelectorOrValue::Value(2i64.into()),
+            right: SelectorOrValue::Value(1i64.into())
+        }
+        .evaluate_response(&None));
+
+        assert!(Condition::<TestSelector>::Gte {
+            left: SelectorOrValue::Value(1i64.into()),
+            right: SelectorOrValue::Value(1i64.into())
+        }
+        .evaluate_response(&None));
     }
 
     #[test]
@@ -797,6 +815,12 @@ mod test {
             }
             .evaluate_request(&Some(1i64))
         );
+
+        assert!(Condition::<TestSelector>::Lt {
+            left: SelectorOrValue::Value(1i64.into()),
+            right: SelectorOrValue::Value(2i64.into())
+        }
+        .evaluate_response(&None));
     }
 
     #[test]
@@ -890,6 +914,18 @@ mod test {
             }
             .evaluate_request(&Some(1i64))
         );
+
+        assert!(Condition::<TestSelector>::Lte {
+            left: SelectorOrValue::Value(1i64.into()),
+            right: SelectorOrValue::Value(2i64.into())
+        }
+        .evaluate_response(&None));
+
+        assert!(Condition::<TestSelector>::Lte {
+            left: SelectorOrValue::Value(1i64.into()),
+            right: SelectorOrValue::Value(1i64.into())
+        }
+        .evaluate_response(&None));
     }
 
     #[test]
@@ -902,7 +938,14 @@ mod test {
                 upper: SelectorOrValue::Value(3i64.into())
             }
             .evaluate_request(&None)
-        )
+        );
+
+        assert!(Condition::<TestSelector>::Range {
+            lower: SelectorOrValue::Value(1i64.into()),
+            middle: SelectorOrValue::Value(2i64.into()),
+            upper: SelectorOrValue::Value(3i64.into())
+        }
+        .evaluate_response(&None))
     }
 
     #[test]
