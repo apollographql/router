@@ -11,18 +11,22 @@ use crate::plugins::telemetry::config_new::Selector;
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
     Eq([SelectorOrValue<T>; 2]),
+    /// The left selection must be greater than the right selection.
     Gt {
         left: SelectorOrValue<T>,
         right: SelectorOrValue<T>,
     },
+    /// The left selection must be greater than or equal to the right selection.
     Gte {
         left: SelectorOrValue<T>,
         right: SelectorOrValue<T>,
     },
+    /// The left selection must be less than the right selection.
     Lt {
         left: SelectorOrValue<T>,
         right: SelectorOrValue<T>,
     },
+    /// The left selection must be less than or equal to the right selection.
     Lte {
         left: SelectorOrValue<T>,
         right: SelectorOrValue<T>,
@@ -90,202 +94,98 @@ where
                 }
             },
             Condition::Gt { left, right } => {
-                match (left.on_request(request), right.on_request(request)) {
+                let left_att = left.on_request(request).map(AttributeValue::from);
+                let right_att = right.on_request(request).map(AttributeValue::from);
+                match (left_att, right_att) {
                     (None, None) => None,
-                    (None, Some(r)) => {
-                        *right = SelectorOrValue::Value(r.into());
-                        None
-                    }
                     (Some(l), None) => {
-                        *left = SelectorOrValue::Value(l.into());
+                        *left = SelectorOrValue::Value(l);
                         None
                     }
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => {
-                        if l > r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => {
-                        if l > r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => {
-                        if l > r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::String(l)), Some(Value::String(r))) => {
-                        if l > r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
+                    (None, Some(r)) => {
+                        *right = SelectorOrValue::Value(r);
+                        None
                     }
                     (Some(l), Some(r)) => {
-                        *left = SelectorOrValue::Value(l.into());
-                        *right = SelectorOrValue::Value(r.into());
-                        Some(false)
+                        if l > r {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            *self = Condition::False;
+                            Some(false)
+                        }
                     }
                 }
             }
             Condition::Gte { left, right } => {
-                match (left.on_request(request), right.on_request(request)) {
+                let left_att = left.on_request(request).map(AttributeValue::from);
+                let right_att = right.on_request(request).map(AttributeValue::from);
+                match (left_att, right_att) {
                     (None, None) => None,
-                    (None, Some(r)) => {
-                        *right = SelectorOrValue::Value(r.into());
-                        None
-                    }
                     (Some(l), None) => {
-                        *left = SelectorOrValue::Value(l.into());
+                        *left = SelectorOrValue::Value(l);
                         None
                     }
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => {
-                        if l >= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => {
-                        if l >= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => {
-                        if l >= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::String(l)), Some(Value::String(r))) => {
-                        if l >= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
+                    (None, Some(r)) => {
+                        *right = SelectorOrValue::Value(r);
+                        None
                     }
                     (Some(l), Some(r)) => {
-                        *left = SelectorOrValue::Value(l.into());
-                        *right = SelectorOrValue::Value(r.into());
-                        Some(false)
+                        if l >= r {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            *self = Condition::False;
+                            Some(false)
+                        }
                     }
                 }
             }
             Condition::Lt { left, right } => {
-                match (left.on_request(request), right.on_request(request)) {
+                let left_att = left.on_request(request).map(AttributeValue::from);
+                let right_att = right.on_request(request).map(AttributeValue::from);
+                match (left_att, right_att) {
                     (None, None) => None,
-                    (None, Some(r)) => {
-                        *right = SelectorOrValue::Value(r.into());
-                        None
-                    }
                     (Some(l), None) => {
-                        *left = SelectorOrValue::Value(l.into());
+                        *left = SelectorOrValue::Value(l);
                         None
                     }
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => {
-                        if l < r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => {
-                        if l < r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => {
-                        if l < r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::String(l)), Some(Value::String(r))) => {
-                        if l < r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
+                    (None, Some(r)) => {
+                        *right = SelectorOrValue::Value(r);
+                        None
                     }
                     (Some(l), Some(r)) => {
-                        *left = SelectorOrValue::Value(l.into());
-                        *right = SelectorOrValue::Value(r.into());
-                        Some(false)
+                        if l < r {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            *self = Condition::False;
+                            Some(false)
+                        }
                     }
                 }
             }
             Condition::Lte { left, right } => {
-                match (left.on_request(request), right.on_request(request)) {
+                let left_att = left.on_request(request).map(AttributeValue::from);
+                let right_att = right.on_request(request).map(AttributeValue::from);
+                match (left_att, right_att) {
                     (None, None) => None,
-                    (None, Some(r)) => {
-                        *right = SelectorOrValue::Value(r.into());
-                        None
-                    }
                     (Some(l), None) => {
-                        *left = SelectorOrValue::Value(l.into());
+                        *left = SelectorOrValue::Value(l);
                         None
                     }
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => {
-                        if l <= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => {
-                        if l <= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => {
-                        if l <= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    (Some(Value::String(l)), Some(Value::String(r))) => {
-                        if l <= r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
+                    (None, Some(r)) => {
+                        *right = SelectorOrValue::Value(r);
+                        None
                     }
                     (Some(l), Some(r)) => {
-                        *left = SelectorOrValue::Value(l.into());
-                        *right = SelectorOrValue::Value(r.into());
-                        Some(false)
+                        if l <= r {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            *self = Condition::False;
+                            Some(false)
+                        }
                     }
                 }
             }
@@ -349,48 +249,24 @@ where
                 left == right
             }
             Condition::Gt { left, right } => {
-                match (left.on_response(response), right.on_response(response)) {
-                    (None, None) => true,
-                    (Some(_), None) | (None, Some(_)) => false,
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => l > r,
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => l > r,
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => l > r,
-                    (Some(Value::String(l)), Some(Value::String(r))) => l > r,
-                    (Some(_), Some(_)) => false,
-                }
+                let left_att = left.on_response(response).map(AttributeValue::from);
+                let right_att = right.on_response(response).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
             }
             Condition::Gte { left, right } => {
-                match (left.on_response(response), right.on_response(response)) {
-                    (None, None) => true,
-                    (Some(_), None) | (None, Some(_)) => false,
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => l >= r,
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => l >= r,
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => l >= r,
-                    (Some(Value::String(l)), Some(Value::String(r))) => l >= r,
-                    (Some(_), Some(_)) => false,
-                }
+                let left_att = left.on_response(response).map(AttributeValue::from);
+                let right_att = right.on_response(response).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l >= r)
             }
             Condition::Lt { left, right } => {
-                match (left.on_response(response), right.on_response(response)) {
-                    (None, None) => true,
-                    (Some(_), None) | (None, Some(_)) => false,
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => l < r,
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => l < r,
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => l < r,
-                    (Some(Value::String(l)), Some(Value::String(r))) => l < r,
-                    (Some(_), Some(_)) => false,
-                }
+                let left_att = left.on_response(response).map(AttributeValue::from);
+                let right_att = right.on_response(response).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
             }
             Condition::Lte { left, right } => {
-                match (left.on_response(response), right.on_response(response)) {
-                    (None, None) => true,
-                    (Some(_), None) | (None, Some(_)) => false,
-                    (Some(Value::Bool(l)), Some(Value::Bool(r))) => l <= r,
-                    (Some(Value::F64(l)), Some(Value::F64(r))) => l <= r,
-                    (Some(Value::I64(l)), Some(Value::I64(r))) => l <= r,
-                    (Some(Value::String(l)), Some(Value::String(r))) => l <= r,
-                    (Some(_), Some(_)) => false,
-                }
+                let left_att = left.on_response(response).map(AttributeValue::from);
+                let right_att = right.on_response(response).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l <= r)
             }
             Condition::Exists(exist) => exist.on_response(response).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_response(response)),
