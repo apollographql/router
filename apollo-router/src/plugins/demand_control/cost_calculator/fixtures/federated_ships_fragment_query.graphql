@@ -3,11 +3,15 @@ fragment nameAndLicense on User {
     name
 }
 
+fragment identifiedOwner on Ship {
+    owner {
+        ...nameAndLicense
+    }
+}
+
 {
     ships {
-        owner {
-            ...nameAndLicense
-        }
+        ...identifiedOwner
     }
     users {
         ...nameAndLicense
