@@ -294,7 +294,6 @@ impl Variables {
             let representations = Value::Array(Vec::from_iter(values));
 
             variables.insert("representations", representations);
-
             Some(Variables {
                 variables,
                 inverted_paths,
@@ -481,7 +480,10 @@ impl FetchNode {
         response: graphql::Response,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
-            let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
+            let entities_path = Path(vec![json_ext::PathElement::Key(
+                "_entities".to_string(),
+                None,
+            )]);
 
             let mut errors: Vec<Error> = vec![];
             for mut error in response.errors {
@@ -567,11 +569,12 @@ impl FetchNode {
 
             (Value::Null, errors)
         } else {
-            let current_slice = if current_dir.last() == Some(&json_ext::PathElement::Flatten) {
-                &current_dir.0[..current_dir.0.len() - 1]
-            } else {
-                &current_dir.0[..]
-            };
+            let current_slice =
+                if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
+                    &current_dir.0[..current_dir.0.len() - 1]
+                } else {
+                    &current_dir.0[..]
+                };
 
             let errors: Vec<Error> = response
                 .errors

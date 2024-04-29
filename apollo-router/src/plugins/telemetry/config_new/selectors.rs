@@ -4,16 +4,17 @@ use jsonpath_rust::JsonPathFinder;
 use jsonpath_rust::JsonPathInst;
 use schemars::JsonSchema;
 use serde::Deserialize;
-#[cfg(test)]
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
@@ -24,6 +25,7 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum TraceIdFormat {
     /// Open Telemetry trace ID, a hex string.
@@ -33,7 +35,7 @@ pub(crate) enum TraceIdFormat {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -43,7 +45,7 @@ pub(crate) enum OperationName {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
@@ -51,7 +53,7 @@ pub(crate) enum Query {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ResponseStatus {
     /// The http status code.
@@ -61,7 +63,7 @@ pub(crate) enum ResponseStatus {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -69,6 +71,7 @@ pub(crate) enum OperationKind {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
     /// A header from the request
@@ -142,10 +145,18 @@ pub(crate) enum RouterSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        on_graphql_error: bool,
+    },
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SupergraphSelector {
     OperationName {
@@ -252,9 +263,20 @@ pub(crate) enum SupergraphSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
+    /// Cost attributes
+    #[allow(dead_code)]
+    Cost {
+        /// The cost value to select, one of: estimated, actual, delta.
+        cost: CostValue,
+    },
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
+#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 #[derivative(Debug)]
 pub(crate) enum SubgraphSelector {
@@ -312,7 +334,7 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseData {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_data: JsonPathInst,
         #[serde(skip)]
@@ -325,7 +347,7 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseErrors {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_errors: JsonPathInst,
         #[serde(skip)]
@@ -448,6 +470,10 @@ pub(crate) enum SubgraphSelector {
         default: Option<String>,
     },
     Static(String),
+    StaticField {
+        /// A static string value
+        r#static: String,
+    },
 }
 
 impl Selector for RouterSelector {
@@ -486,6 +512,7 @@ impl Selector for RouterSelector {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // Related to Response
             _ => None,
         }
@@ -519,15 +546,23 @@ impl Selector for RouterSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
+            }
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -613,6 +648,7 @@ impl Selector for SupergraphSelector {
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For response
             _ => None,
         }
@@ -647,12 +683,22 @@ impl Selector for SupergraphSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::Cost { cost } => {
+                let extensions = response.context.extensions().lock();
+                extensions
+                    .get::<CostContext>()
+                    .map(|cost_result| match cost {
+                        CostValue::Estimated => cost_result.estimated.into(),
+                        CostValue::Actual => cost_result.actual.into(),
+                        CostValue::Delta => cost_result.delta().into(),
+                        CostValue::Result => cost_result.result.into(),
+                    })
+            }
             // For request
             _ => None,
         }
@@ -794,6 +840,7 @@ impl Selector for SubgraphSelector {
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
 
             // For response
             _ => None,
@@ -885,12 +932,11 @@ impl Selector for SubgraphSelector {
                 ..
             } => response
                 .context
-                .get::<_, serde_json_bytes::Value>(response_context)
-                .ok()
-                .flatten()
+                .get_json_value(response_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
         }
