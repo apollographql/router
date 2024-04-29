@@ -619,13 +619,18 @@ impl FetchNode {
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        schema: &apollo_compiler::Schema,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
-        let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let doc = ExecutableDocument::parse(
+            Valid::assume_valid_ref(schema),
+            &self.operation.as_serialized().to_string(),
+            "query.graphql",
+        )
+        // Assume query planing creates a valid document: ignore parse errors
+        .unwrap_or_else(|invalid| invalid.partial);
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
-            doc,
+            &doc,
             self.operation_name.as_deref(),
             schema,
             !self.requires.is_empty(),
