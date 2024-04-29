@@ -103,7 +103,6 @@ pub(crate) fn validate_yaml_configuration(
                 })
         })
         .as_ref()
-        .map(|schema| schema)
         .map_err(|e| e.clone())?;
 
     if migration == Mode::Upgrade {
