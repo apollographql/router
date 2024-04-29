@@ -540,6 +540,7 @@ The `response` object includes the following fields:
 ```
 response.context
 response.id
+response.status_code
 response.headers
 response.body.label
 response.body.data
@@ -617,4 +618,18 @@ let error_to_add = #{
 // Add this error to any existing errors
 response.body.errors += error_to_add;
 print(`${response.body.errors}`); // logs the response errors
+```
+
+### `response.status_code.to_string()`
+
+Convert response status code as a string
+
+### `response.status_code.to_number()`
+
+Convert response status code as a number in order to compare it
+
+```rhai
+if response.status_code.to_number() == 200 {
+    print(`ok`);
+}
 ```

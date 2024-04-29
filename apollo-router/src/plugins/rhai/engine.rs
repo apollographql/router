@@ -16,6 +16,7 @@ use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::Method;
+use http::StatusCode;
 use http::Uri;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
@@ -215,6 +216,34 @@ mod router_method {
     #[rhai_fn(name = "!=", pure)]
     pub(crate) fn method_not_equal_comparator(method: &mut Method, other: &str) -> bool {
         method.as_str().to_uppercase() != other.to_uppercase()
+    }
+}
+
+#[export_module]
+mod status_code {
+    pub(crate) type StatusCode = http::StatusCode;
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn status_code_to_string(status_code: &mut StatusCode) -> String {
+        status_code.as_str().to_string()
+    }
+
+    #[rhai_fn(name = "to_number", pure)]
+    pub(crate) fn status_code_to_number(status_code: &mut StatusCode) -> i64 {
+        status_code.as_u16() as i64
+    }
+
+    #[rhai_fn(name = "==", pure)]
+    pub(crate) fn status_code_equal_comparator(status_code: &mut StatusCode, other: i64) -> bool {
+        status_code.as_u16() as i64 == other
+    }
+
+    #[rhai_fn(name = "!=", pure)]
+    pub(crate) fn status_code_not_equal_comparator(
+        status_code: &mut StatusCode,
+        other: i64,
+    ) -> bool {
+        status_code.as_u16() as i64 != other
     }
 }
 
@@ -1425,6 +1454,13 @@ macro_rules! register_rhai_router_interface {
                 }
             );
 
+            $engine.register_get(
+                "status_code",
+                |obj: &mut SharedMut<$base::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.response.status()))
+                }
+            );
+
             $engine.register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
@@ -1457,6 +1493,13 @@ macro_rules! register_rhai_interface {
                 "context",
                 |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
+                }
+            );
+
+            $engine.register_get(
+                "status_code",
+                |obj: &mut SharedMut<$base::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.response.status()))
                 }
             );
 
@@ -1632,6 +1675,7 @@ impl Rhai {
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
         combine_with_exported_module!(&mut module, "method", router_method);
+        combine_with_exported_module!(&mut module, "status_code", status_code);
         combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);

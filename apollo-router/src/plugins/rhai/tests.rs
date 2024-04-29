@@ -486,7 +486,11 @@ async fn it_can_process_subgraph_response() {
 
     // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
     // happy
-    let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
+    let response = Arc::new(Mutex::new(Some(
+        subgraph::Response::fake_builder()
+            .status_code(StatusCode::OK)
+            .build(),
+    )));
 
     // Call our rhai test function. If it return an error, the test failed.
     let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(

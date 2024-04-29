@@ -123,6 +123,12 @@ fn process_execution_response(response) {
 
 fn process_subgraph_response(response) {
     process_common_response(response);
+    if type_of(response.status_code) != "http::status::StatusCode" {
+        throw(`status_code: expected: "i32", actual: ${type_of(response.status_code)}`);
+    }
+    if response.status_code.to_number() != 200 {
+        throw(`status_code: expected: 200, actual: ${response.status_code}`);
+    }
 }
 
 fn process_subgraph_response_om_forbidden(response) {
