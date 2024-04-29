@@ -1,9 +1,13 @@
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
@@ -77,7 +81,7 @@ pub struct IntegrationTest {
     subscriber_client: Dispatch,
 
     _subgraph_overrides: HashMap<String, String>,
-    pub bind_address: SocketAddr,
+    pub bind_address: Arc<Mutex<Option<SocketAddr>>>,
 }
 
 struct TracedResponder {
@@ -272,18 +276,8 @@ impl IntegrationTest {
         // Add a default override for products, if not specified
         subgraph_overrides.entry("products".into()).or_insert(url);
 
-        // Bind to a random port
-        // Note: This might still fail if a different process binds to the port found here
-        // before the router is started.
-        // Note: We need the nested scope so that the listener gets dropped once its address
-        // is resolved.
-        let bind_address = {
-            let bound = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            bound.local_addr().unwrap()
-        };
-
         // Insert the overrides into the config
-        let config_str = merge_overrides(&config, &subgraph_overrides, &bind_address);
+        let config_str = merge_overrides(&config, &subgraph_overrides);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -327,7 +321,7 @@ impl IntegrationTest {
             supergraph,
             _subgraphs: subgraphs,
             _subgraph_overrides: subgraph_overrides,
-            bind_address,
+            bind_address: Arc::new(Mutex::new(None)),
             _tracer_provider_client: tracer_provider_client,
             subscriber_client,
             _tracer_provider_subgraph: tracer_provider_subgraph,
@@ -381,6 +375,7 @@ impl IntegrationTest {
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
         let collect_stdio = self.collect_stdio.take();
+        let bind_address = self.bind_address.clone();
         // We need to read from stdout otherwise we will hang
         task::spawn(async move {
             let mut collected = Vec::new();
@@ -407,6 +402,23 @@ impl IntegrationTest {
                         ))
                     }
                 }
+
+                if let Some(index) = line.find("GraphQL endpoint") {
+                    if let Some(suffix) = line.find(" 🚀") {
+                        let msg = &line[index..suffix];
+                        if let Some(msg) = msg.strip_prefix("GraphQL endpoint exposed at ") {
+                            let url = url::Url::parse(msg).expect("invalid URL");
+                            let addr = SocketAddr::new(
+                                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                                url.port().unwrap(),
+                            );
+
+                            let mut guard = bind_address.lock();
+                            *guard = Some(addr);
+                        }
+                    }
+                }
+
                 let _ = stdio_tx.send(line).await;
             }
             if let Some((sender, _version_line_re)) = collect_stdio {
@@ -443,7 +455,7 @@ impl IntegrationTest {
     pub async fn update_config(&self, yaml: &str) {
         tokio::fs::write(
             &self.test_config_location,
-            &merge_overrides(yaml, &self._subgraph_overrides, &self.bind_address),
+            &merge_overrides(yaml, &self._subgraph_overrides),
         )
         .await
         .expect("must be able to write config");
@@ -500,7 +512,7 @@ impl IntegrationTest {
         let telemetry = self.telemetry.clone();
 
         let query = query.clone();
-        let url = format!("http://{}", self.bind_address);
+        let url = format!("http://{}", self.bind_address.lock().clone().unwrap());
 
         async move {
             let span = info_span!("client_request");
@@ -547,7 +559,7 @@ impl IntegrationTest {
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
         let query = query.clone();
-        let url = format!("http://{}", self.bind_address);
+        let url = format!("http://{}", self.bind_address.lock().clone().unwrap());
 
         async move {
             let client = reqwest::Client::new();
@@ -594,7 +606,7 @@ impl IntegrationTest {
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
 
-        let url = format!("http://{}", self.bind_address);
+        let url = format!("http://{}", self.bind_address.lock().clone().unwrap());
         async move {
             let span = info_span!("client_raw_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
@@ -653,7 +665,10 @@ impl IntegrationTest {
         let _span_guard = span.enter();
 
         let mut request = client
-            .post(format!("http://{}", self.bind_address))
+            .post(format!(
+                "http://{}",
+                self.bind_address.lock().clone().unwrap()
+            ))
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
             .header("apollographql-client-name", "custom_name")
@@ -682,7 +697,10 @@ impl IntegrationTest {
         let client = reqwest::Client::new();
 
         let request = client
-            .get(format!("http://{}/metrics", self.bind_address))
+            .get(format!(
+                "http://{}/metrics",
+                self.bind_address.lock().clone().unwrap()
+            ))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .build()
@@ -909,11 +927,7 @@ impl ValueExt for Value {
 ///
 /// The test harness needs some options to be present for it to work, so this
 /// function allows patching any config to include the needed values.
-fn merge_overrides(
-    yaml: &str,
-    subgraph_overrides: &HashMap<String, String>,
-    bind_addr: &SocketAddr,
-) -> String {
+fn merge_overrides(yaml: &str, subgraph_overrides: &HashMap<String, String>) -> String {
     // Parse the config as yaml
     let mut config: Value = serde_yaml::from_str(yaml).unwrap();
 
@@ -948,7 +962,7 @@ fn merge_overrides(
                 o.insert(
                     "supergraph".to_string(),
                     serde_json::json!({
-                        "listen": bind_addr.to_string(),
+                        "listen": "127.0.0.1:0".to_string(),
                     }),
                 );
             }
@@ -956,7 +970,7 @@ fn merge_overrides(
         Some(supergraph_conf) => {
             supergraph_conf.insert(
                 "listen".to_string(),
-                serde_json::Value::String(bind_addr.to_string()),
+                serde_json::Value::String("127.0.0.1:0".to_string()),
             );
         }
     }
@@ -976,7 +990,7 @@ fn merge_overrides(
     {
         prom_config.insert(
             "listen".to_string(),
-            serde_json::Value::String(bind_addr.to_string()),
+            serde_json::Value::String("127.0.0.1:0".to_string()),
         );
     }
 
@@ -986,8 +1000,7 @@ fn merge_overrides(
         .expect("config should be an object")
         .insert(
             "health_check".to_string(),
-            json!({"listen": bind_addr.to_string()}),
+            json!({"listen": "127.0.0.1:0".to_string()}),
         );
-
     serde_yaml::to_string(&config).unwrap()
 }
