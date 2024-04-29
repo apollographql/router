@@ -93,9 +93,12 @@ impl StrategyFactory {
 
     pub(crate) fn create(&self) -> Strategy {
         let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
-            StrategyConfig::StaticEstimated { max } => Arc::new(StaticEstimated {
+            StrategyConfig::StaticEstimated { list_size, max } => Arc::new(StaticEstimated {
                 max: *max,
-                cost_calculator: StaticCostCalculator::new(self.subgraph_schemas.clone()),
+                cost_calculator: StaticCostCalculator::new(
+                    self.subgraph_schemas.clone(),
+                    *list_size,
+                ),
             }),
             #[cfg(test)]
             StrategyConfig::Test { stage, error } => Arc::new(test::Test {

@@ -82,6 +82,8 @@ pub(crate) enum StrategyConfig {
     /// - Scalar: 0
     /// - Enum: 0
     StaticEstimated {
+        /// The assumed length of lists returned by the operation.
+        list_size: u32,
         /// The maximum cost of a query
         max: f64,
     },
