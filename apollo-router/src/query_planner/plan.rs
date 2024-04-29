@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
@@ -412,7 +413,7 @@ impl PlanNode {
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        schema: &Valid<apollo_compiler::Schema>,
         key: &CacheKeyMetadata,
     ) {
         match self {

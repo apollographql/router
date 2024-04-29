@@ -1062,7 +1062,7 @@ impl QueryPlan {
 
     fn extract_authorization_metadata(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        schema: &Valid<apollo_compiler::Schema>,
         key: &CacheKeyMetadata,
     ) {
         if let Some(node) = self.node.as_mut() {

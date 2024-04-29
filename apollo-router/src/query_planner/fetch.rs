@@ -619,11 +619,11 @@ impl FetchNode {
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        schema: &Valid<apollo_compiler::Schema>,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
         let doc = ExecutableDocument::parse(
-            Valid::assume_valid_ref(schema),
+            schema,
             self.operation.as_serialized().to_string(),
             "query.graphql",
         )
