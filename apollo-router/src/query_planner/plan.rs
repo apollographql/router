@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::NodeStr;
+use futures::future;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
@@ -26,7 +27,6 @@ use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::spec::Query;
 use crate::spec::Schema;
-use futures::future;
 
 /// A planner key.
 ///

@@ -202,7 +202,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             } else {
                 Some(
                     output_rewrites
-                        .into_iter()
+                        .iter()
                         .map(|fdr| fdr.as_ref().into())
                         .collect(),
                 )

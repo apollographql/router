@@ -21,13 +21,13 @@
 /// by number of required input fields in common with the entity reference.
 use std::collections::HashSet;
 
-use crate::spec::Schema;
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_compiler::schema::Name;
 use itertools::Itertools;
 
 use super::Connector;
 use crate::query_planner::QueryPlannerSelection as Selection;
+use crate::spec::Schema;
 
 // --- finder fields for connectors --------------------------------------------
 
@@ -255,7 +255,9 @@ mod tests {
     #[test]
     fn test_finder_field_for_fetch_node() {
         let schema = crate::spec::Schema::parse(SCHEMA, &Default::default()).unwrap();
-        let source = Source::new(&Schema::parse(SCHEMA, "test_supergraph.graphql").unwrap()).unwrap().unwrap();
+        let source = Source::new(&Schema::parse(SCHEMA, "test_supergraph.graphql").unwrap())
+            .unwrap()
+            .unwrap();
         let connectors = source.connectors();
         let connectors = connectors.values().collect::<Vec<_>>();
 

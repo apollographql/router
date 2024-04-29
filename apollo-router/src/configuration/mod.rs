@@ -308,7 +308,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: ad_hoc.batching,
             preview_connectors: ad_hoc.preview_connectors,
 
-
             // serde(skip)
             notify,
             uplink: None,
