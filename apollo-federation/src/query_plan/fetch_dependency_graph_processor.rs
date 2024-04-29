@@ -346,7 +346,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             } else {
                 Some(defer_info.label.clone())
             },
-            query_path: (&defer_info.path.full_path).try_into()?,
+            query_path: defer_info.path.full_path.as_ref().try_into()?,
             // Note that if the deferred block has nested @defer,
             // then the `value` is going to be a `DeferNode`
             // and we'll use it's own `subselection`, so we don't need it here.

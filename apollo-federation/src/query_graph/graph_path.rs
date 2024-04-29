@@ -330,6 +330,49 @@ impl OpPathElement {
             OpPathElement::InlineFragment(inline_fragment) => inline_fragment.as_path_element(),
         }
     }
+
+    pub(crate) fn defer_directive_args(&self) -> Option<DeferDirectiveArguments> {
+        match self {
+            OpPathElement::Field(_) => None, // @defer cannot be on field at the moment
+            OpPathElement::InlineFragment(inline_fragment) => inline_fragment
+                .data()
+                .defer_directive_arguments()
+                .ok()
+                .flatten(),
+        }
+    }
+
+    /// Returns this fragment element but with any @defer directive on it removed.
+    ///
+    /// This method will return `None` if, upon removing @defer, the fragment has no conditions nor
+    /// any remaining applied directives (meaning that it carries no information whatsoever and can be
+    /// ignored).
+    pub(crate) fn without_defer(&self) -> Option<Self> {
+        match self {
+            Self::Field(_) => Some(self.clone()), // unchanged
+            Self::InlineFragment(inline_fragment) => {
+                let updated_directives: DirectiveList = inline_fragment
+                    .data()
+                    .directives
+                    .get_all("defer")
+                    .cloned()
+                    .collect();
+                if inline_fragment.data().type_condition_position.is_none()
+                    && updated_directives.is_empty()
+                {
+                    return None;
+                }
+                if inline_fragment.data().directives.len() == updated_directives.len() {
+                    Some(self.clone())
+                } else {
+                    // PORT_NOTE: We won't need to port `this.copyAttachementsTo(updated);` line here
+                    // since `with_updated_directives` clones the whole `self` and thus sibling
+                    // type names should be copied as well.
+                    Some(self.with_updated_directives(updated_directives))
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn selection_of_element(

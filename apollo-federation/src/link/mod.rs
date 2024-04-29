@@ -10,7 +10,7 @@ use std::str;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 
-mod argument;
+pub(crate) mod argument;
 pub mod database;
 pub(crate) mod federation_spec_definition;
 pub(crate) mod graphql_definition;
