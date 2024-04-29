@@ -234,7 +234,8 @@ mod test {
             SupergraphAttributes {
                 graphql_document: None,
                 graphql_operation_name: Some(true),
-                graphql_operation_type: Some(true)
+                graphql_operation_type: Some(true),
+                cost: Default::default()
             }
         );
         assert_eq!(
