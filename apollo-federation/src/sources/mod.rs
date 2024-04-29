@@ -1,27 +1,35 @@
 use crate::error::FederationError;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
-use crate::source_aware::federated_query_graph::SelfConditionIndex;
+use crate::source_aware::federated_query_graph::graph_path::{
+    ConditionResolutionId, OperationPathElement,
+};
+use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
+use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
+use crate::source_aware::query_plan::{FetchDataPathElement, QueryPlanCost};
 use crate::sources::connect::{
     ConnectFederatedAbstractFieldQueryGraphEdge, ConnectFederatedAbstractQueryGraphNode,
     ConnectFederatedConcreteFieldQueryGraphEdge, ConnectFederatedConcreteQueryGraphNode,
-    ConnectFederatedEnumQueryGraphNode, ConnectFederatedLookupQueryGraphEdge,
-    ConnectFederatedQueryGraph, ConnectFederatedQueryGraphBuilder,
-    ConnectFederatedScalarQueryGraphNode, ConnectFederatedTypeConditionQueryGraphEdge,
-    ConnectFetchNode, ConnectId,
+    ConnectFederatedEnumQueryGraphNode, ConnectFederatedQueryGraph,
+    ConnectFederatedQueryGraphBuilder, ConnectFederatedScalarQueryGraphNode,
+    ConnectFederatedSourceEnterQueryGraphEdge, ConnectFederatedTypeConditionQueryGraphEdge,
+    ConnectFetchDependencyGraph, ConnectFetchDependencyGraphNode, ConnectFetchNode, ConnectId,
+    ConnectPath,
 };
 use crate::sources::graphql::{
     GraphqlFederatedAbstractFieldQueryGraphEdge, GraphqlFederatedAbstractQueryGraphNode,
     GraphqlFederatedConcreteFieldQueryGraphEdge, GraphqlFederatedConcreteQueryGraphNode,
-    GraphqlFederatedEnumQueryGraphNode, GraphqlFederatedLookupQueryGraphEdge,
-    GraphqlFederatedQueryGraph, GraphqlFederatedQueryGraphBuilder,
-    GraphqlFederatedScalarQueryGraphNode, GraphqlFederatedTypeConditionQueryGraphEdge,
-    GraphqlFetchNode, GraphqlId,
+    GraphqlFederatedEnumQueryGraphNode, GraphqlFederatedQueryGraph,
+    GraphqlFederatedQueryGraphBuilder, GraphqlFederatedScalarQueryGraphNode,
+    GraphqlFederatedSourceEnterQueryGraphEdge, GraphqlFederatedTypeConditionQueryGraphEdge,
+    GraphqlFetchDependencyGraph, GraphqlFetchDependencyGraphNode, GraphqlFetchNode, GraphqlId,
+    GraphqlPath,
 };
 use crate::ValidFederationSubgraph;
 use apollo_compiler::NodeStr;
 use enum_dispatch::enum_dispatch;
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::NodeIndex;
+use indexmap::IndexMap;
+use petgraph::graph::EdgeIndex;
+use std::sync::Arc;
 
 pub mod connect;
 pub mod graphql;
@@ -35,7 +43,6 @@ pub(crate) enum SourceKind {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) enum SourceId {
-    Root,
     Graphql(GraphqlId),
     Connect(ConnectId),
 }
@@ -60,7 +67,6 @@ pub(crate) enum SourceFederatedAbstractQueryGraphNode {
 
 #[derive(Debug)]
 pub(crate) enum SourceFederatedConcreteQueryGraphNode {
-    Root,
     Graphql(GraphqlFederatedConcreteQueryGraphNode),
     Connect(ConnectFederatedConcreteQueryGraphNode),
 }
@@ -96,9 +102,9 @@ pub(crate) enum SourceFederatedTypeConditionQueryGraphEdge {
 }
 
 #[derive(Debug)]
-pub(crate) enum SourceFederatedLookupQueryGraphEdge {
-    Graphql(GraphqlFederatedLookupQueryGraphEdge),
-    Connect(ConnectFederatedLookupQueryGraphEdge),
+pub(crate) enum SourceFederatedSourceEnterQueryGraphEdge {
+    Graphql(GraphqlFederatedSourceEnterQueryGraphEdge),
+    Connect(ConnectFederatedSourceEnterQueryGraphEdge),
 }
 
 #[enum_dispatch(SourceFederatedQueryGraphBuilderApi)]
@@ -113,13 +119,7 @@ pub(crate) trait SourceFederatedQueryGraphBuilderApi {
         &self,
         subgraph: ValidFederationSubgraph,
         builder: &mut impl IntraSourceQueryGraphBuilderApi,
-    ) -> Result<Vec<FederatedLookupTailData>, FederationError>;
-}
-
-pub(crate) struct FederatedLookupTailData {
-    tail: NodeIndex,
-    self_conditions: IndexSet<SelfConditionIndex>,
-    source_data: SourceFederatedLookupQueryGraphEdge,
+    ) -> Result<(), FederationError>;
 }
 
 pub(crate) struct SourceFederatedQueryGraphBuilders {
@@ -132,11 +132,99 @@ impl SourceFederatedQueryGraphBuilders {
     }
 
     fn process_subgraph_schemas(
+        &self,
         _subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
         _builder: &mut impl IntraSourceQueryGraphBuilderApi,
-    ) -> Result<Vec<FederatedLookupTailData>, FederationError> {
+    ) -> Result<(), FederationError> {
         todo!()
     }
+}
+
+#[derive(Debug)]
+#[enum_dispatch(SourceFetchDependencyGraphApi)]
+pub(crate) enum SourceFetchDependencyGraph {
+    Graphql(GraphqlFetchDependencyGraph),
+    Connect(ConnectFetchDependencyGraph),
+}
+
+#[enum_dispatch]
+pub(crate) trait SourceFetchDependencyGraphApi {
+    fn can_reuse_node(
+        &self,
+        query_graph: Arc<FederatedQueryGraph>,
+        merge_at: &[FetchDataPathElement],
+        source_enter_edge: EdgeIndex,
+        source_data: &SourceFetchDependencyGraphNode,
+        path_tree_edges: Vec<FederatedPathTreeChildKey>,
+    ) -> Result<Vec<FederatedPathTreeChildKey>, FederationError>;
+
+    fn add_node(
+        &self,
+        query_graph: Arc<FederatedQueryGraph>,
+        merge_at: &[FetchDataPathElement],
+        source_enter_edge: EdgeIndex,
+        self_condition_resolution: Option<ConditionResolutionId>,
+    ) -> Result<SourceFetchDependencyGraphNode, FederationError>;
+
+    fn new_path(
+        &self,
+        query_graph: Arc<FederatedQueryGraph>,
+        merge_at: &[FetchDataPathElement],
+        source_enter_edge: EdgeIndex,
+        self_condition_resolution: Option<ConditionResolutionId>,
+    ) -> Result<SourcePath, FederationError>;
+
+    fn add_path(
+        &self,
+        source_path: SourcePath,
+        source_data: &mut SourceFetchDependencyGraphNode,
+    ) -> Result<(), FederationError>;
+
+    fn to_cost(
+        &self,
+        query_graph: Arc<FederatedQueryGraph>,
+        source_id: SourceId,
+        source_data: &SourceFetchDependencyGraphNode,
+    ) -> Result<QueryPlanCost, FederationError>;
+
+    fn to_plan_node(
+        &self,
+        query_graph: Arc<FederatedQueryGraph>,
+        source_id: SourceId,
+        source_data: &SourceFetchDependencyGraphNode,
+        fetch_count: u32,
+    ) -> Result<SourceFetchNode, FederationError>;
+}
+
+#[derive(Debug)]
+pub(crate) struct SourceFetchDependencyGraphs {
+    builders: IndexMap<SourceKind, SourceFetchDependencyGraph>,
+}
+
+#[derive(Debug)]
+pub(crate) enum SourceFetchDependencyGraphNode {
+    Graphql(GraphqlFetchDependencyGraphNode),
+    Connect(ConnectFetchDependencyGraphNode),
+}
+
+#[derive(Debug)]
+#[enum_dispatch(SourcePathApi)]
+pub(crate) enum SourcePath {
+    Graphql(GraphqlPath),
+    Connect(ConnectPath),
+}
+
+#[enum_dispatch]
+pub(crate) trait SourcePathApi {
+    fn source_id(&self) -> &SourceId;
+
+    fn add_operation_element(
+        &self,
+        query_graph: Arc<FederatedQueryGraph>,
+        operation_element: Arc<OperationPathElement>,
+        edge: Option<EdgeIndex>,
+        self_condition_resolutions: IndexMap<SelfConditionIndex, ConditionResolutionId>,
+    ) -> Result<SourcePath, FederationError>;
 }
 
 #[derive(Debug)]

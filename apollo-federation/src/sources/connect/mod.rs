@@ -6,19 +6,30 @@ mod url_path_template;
 use crate::error::FederationError;
 use crate::schema::position::{
     EnumTypeDefinitionPosition, ObjectFieldDefinitionPosition,
-    ObjectOrInterfaceFieldDirectivePosition, ObjectOrInterfaceTypeDefinitionPosition,
-    ObjectTypeDefinitionPosition, ScalarTypeDefinitionPosition,
+    ObjectOrInterfaceFieldDirectivePosition, ObjectTypeDefinitionPosition,
+    ScalarTypeDefinitionPosition,
 };
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+use crate::source_aware::federated_query_graph::graph_path::{
+    ConditionResolutionId, OperationPathElement,
+};
+use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
+use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
+use crate::source_aware::query_plan::{FetchDataPathElement, QueryPlanCost};
 use crate::sources::connect::selection_parser::{PathSelection, Property, SubSelection};
-use crate::sources::{FederatedLookupTailData, SourceFederatedQueryGraphBuilderApi};
+use crate::sources::{
+    SourceFederatedQueryGraphBuilderApi, SourceFetchDependencyGraphApi,
+    SourceFetchDependencyGraphNode, SourceFetchNode, SourceId, SourcePath, SourcePathApi,
+};
 use crate::ValidFederationSubgraph;
 use apollo_compiler::executable::{Name, Value};
 use apollo_compiler::NodeStr;
 use indexmap::{IndexMap, IndexSet};
+use petgraph::graph::EdgeIndex;
 pub use selection_parser::ApplyTo;
 pub use selection_parser::ApplyToError;
 pub use selection_parser::Selection;
+use std::sync::Arc;
 pub use url_path_template::URLPathTemplate;
 
 pub(crate) use spec::ConnectSpecDefinition;
@@ -107,9 +118,9 @@ pub(crate) enum ConnectFederatedConcreteFieldQueryGraphEdge {
 pub(crate) struct ConnectFederatedTypeConditionQueryGraphEdge;
 
 #[derive(Debug)]
-pub(crate) enum ConnectFederatedLookupQueryGraphEdge {
+pub(crate) enum ConnectFederatedSourceEnterQueryGraphEdge {
     ConnectParent {
-        subgraph_type: ObjectOrInterfaceTypeDefinitionPosition,
+        subgraph_type: ObjectTypeDefinitionPosition,
     },
 }
 
@@ -120,7 +131,95 @@ impl SourceFederatedQueryGraphBuilderApi for ConnectFederatedQueryGraphBuilder {
         &self,
         _subgraph: ValidFederationSubgraph,
         _builder: &mut impl IntraSourceQueryGraphBuilderApi,
-    ) -> Result<Vec<FederatedLookupTailData>, FederationError> {
+    ) -> Result<(), FederationError> {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConnectFetchDependencyGraph;
+
+impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
+    fn can_reuse_node(
+        &self,
+        _query_graph: Arc<FederatedQueryGraph>,
+        _merge_at: &[FetchDataPathElement],
+        _source_enter_edge: EdgeIndex,
+        _source_data: &SourceFetchDependencyGraphNode,
+        _path_tree_edges: Vec<FederatedPathTreeChildKey>,
+    ) -> Result<Vec<FederatedPathTreeChildKey>, FederationError> {
+        todo!()
+    }
+
+    fn add_node(
+        &self,
+        _query_graph: Arc<FederatedQueryGraph>,
+        _merge_at: &[FetchDataPathElement],
+        _source_enter_edge: EdgeIndex,
+        _self_condition_resolution: Option<ConditionResolutionId>,
+    ) -> Result<SourceFetchDependencyGraphNode, FederationError> {
+        todo!()
+    }
+
+    fn new_path(
+        &self,
+        _query_graph: Arc<FederatedQueryGraph>,
+        _merge_at: &[FetchDataPathElement],
+        _source_enter_edge: EdgeIndex,
+        _self_condition_resolution: Option<ConditionResolutionId>,
+    ) -> Result<SourcePath, FederationError> {
+        todo!()
+    }
+
+    fn add_path(
+        &self,
+        _source_path: SourcePath,
+        _source_data: &mut SourceFetchDependencyGraphNode,
+    ) -> Result<(), FederationError> {
+        todo!()
+    }
+
+    fn to_cost(
+        &self,
+        _query_graph: Arc<FederatedQueryGraph>,
+        _source_id: SourceId,
+        _source_data: &SourceFetchDependencyGraphNode,
+    ) -> Result<QueryPlanCost, FederationError> {
+        todo!()
+    }
+
+    fn to_plan_node(
+        &self,
+        _query_graph: Arc<FederatedQueryGraph>,
+        _source_id: SourceId,
+        _source_data: &SourceFetchDependencyGraphNode,
+        _fetch_count: u32,
+    ) -> Result<SourceFetchNode, FederationError> {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConnectFetchDependencyGraphNode {
+    arguments: IndexMap<Name, Value>,
+    selection: Selection,
+}
+
+#[derive(Debug)]
+pub(crate) struct ConnectPath;
+
+impl SourcePathApi for ConnectPath {
+    fn source_id(&self) -> &SourceId {
+        todo!()
+    }
+
+    fn add_operation_element(
+        &self,
+        _query_graph: Arc<FederatedQueryGraph>,
+        _operation_element: Arc<OperationPathElement>,
+        _edge: Option<EdgeIndex>,
+        _self_condition_resolutions: IndexMap<SelfConditionIndex, ConditionResolutionId>,
+    ) -> Result<SourcePath, FederationError> {
         todo!()
     }
 }

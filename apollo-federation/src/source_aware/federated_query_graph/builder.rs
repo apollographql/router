@@ -5,7 +5,8 @@ use crate::sources::{
     SourceFederatedAbstractFieldQueryGraphEdge, SourceFederatedConcreteFieldQueryGraphEdge,
     SourceFederatedConcreteQueryGraphNode, SourceFederatedEnumQueryGraphNode,
     SourceFederatedQueryGraphBuilders, SourceFederatedQueryGraphs,
-    SourceFederatedScalarQueryGraphNode, SourceFederatedTypeConditionQueryGraphEdge, SourceId,
+    SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnterQueryGraphEdge,
+    SourceFederatedTypeConditionQueryGraphEdge, SourceId,
 };
 use crate::ValidFederationSubgraph;
 use apollo_compiler::schema::{Name, NamedType};
@@ -104,5 +105,12 @@ pub(crate) trait IntraSourceQueryGraphBuilderApi {
         head: NodeIndex,
         tail: NodeIndex,
         source_data: SourceFederatedTypeConditionQueryGraphEdge,
+    ) -> Result<EdgeIndex, FederationError>;
+
+    fn add_source_enter_edge(
+        &mut self,
+        tail: NodeIndex,
+        self_conditions: Option<SelfConditionIndex>,
+        source_data: SourceFederatedSourceEnterQueryGraphEdge,
     ) -> Result<EdgeIndex, FederationError>;
 }
