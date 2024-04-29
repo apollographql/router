@@ -2,8 +2,8 @@ use apollo_compiler::schema::Name;
 use apollo_compiler::{name, NodeStr};
 use indexmap::IndexMap;
 
+use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::sources::connect::selection_parser::Selection;
-use crate::sources::connect::url_path_template::URLPathTemplate;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
@@ -40,12 +40,12 @@ pub(crate) struct SourceDirectiveArguments {
     pub(crate) name: NodeStr,
 
     /// Common HTTP options
-    pub(crate) http: HTTPArguments,
+    pub(crate) http: SourceHTTPArguments,
 }
 
 /// Common HTTP options for a connector [SourceSpecDefinition]
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct HTTPArguments {
+pub(crate) struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
     pub(crate) base_url: NodeStr,
 
@@ -57,10 +57,11 @@ pub(crate) struct HTTPArguments {
 /// Map of HTTP header names to configuration options
 #[cfg_attr(test, derive(Debug))]
 #[derive(derive_more::Deref, Default)]
-pub(crate) struct HTTPHeaderMappings(pub(super) IndexMap<NodeStr, Option<HTTPHeaderOption>>);
+pub(crate) struct HTTPHeaderMappings(pub(crate) IndexMap<NodeStr, Option<HTTPHeaderOption>>);
 
 /// Configuration option for an HTTP header
 #[cfg_attr(test, derive(Debug))]
+#[derive(Clone)]
 pub(crate) enum HTTPHeaderOption {
     /// The alias for the header name used when making a request
     ///
@@ -77,19 +78,24 @@ pub(crate) enum HTTPHeaderOption {
 /// Refer to [ConnectSpecDefinition] for more info.
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct ConnectDirectiveArguments {
+    pub(crate) position: ObjectOrInterfaceFieldDirectivePosition,
+
     /// The upstream source for shared connector configuration.
     ///
     /// Must match the `name` argument of a @source directive in this schema.
     pub(crate) source: Option<NodeStr>,
 
-    /// Upstream protocol configuration for this request
-    pub(crate) connector: Connector,
+    /// HTTP options for this connector
+    ///
+    /// Marked as optional in the GraphQL schema to allow for future transports,
+    /// but is currently required.
+    pub(crate) http: Option<ConnectHTTPArguments>,
 
     /// Fields to extract from the upstream JSON response.
     ///
     /// Uses the JSONSelection syntax to define a mapping of connector response to
     /// GraphQL schema.
-    pub(crate) selection: Option<Selection>,
+    pub(crate) selection: Selection,
 
     /// Entity resolver marker
     ///
@@ -99,24 +105,14 @@ pub(crate) struct ConnectDirectiveArguments {
     pub(crate) entity: bool,
 }
 
-/// The type of connector to use when making the upstream request
-#[cfg_attr(test, derive(Debug))]
-pub(crate) enum Connector {
-    /// HTTP REST endpoint
-    Http(ConnectHTTPArguments),
-}
-
 /// The HTTP arguments needed for a connect request
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct ConnectHTTPArguments {
-    /// The HTTP verb for the connect request
-    pub(crate) method: HTTPMethod,
-
-    /// The URL to query, along with template parameters
-    ///
-    /// Can be a full URL or a partial path. If it's a partial path, it will be
-    /// appended to an associated `baseURL` from the related @source.
-    pub(crate) url: URLPathTemplate,
+    pub(crate) get: Option<String>,
+    pub(crate) post: Option<String>,
+    pub(crate) patch: Option<String>,
+    pub(crate) put: Option<String>,
+    pub(crate) delete: Option<String>,
 
     /// Request body
     ///
@@ -129,14 +125,4 @@ pub(crate) struct ConnectHTTPArguments {
     ///
     /// Overrides headers from the associated @source by name.
     pub(crate) headers: HTTPHeaderMappings,
-}
-
-/// The HTTP arguments needed for a connect request
-#[cfg_attr(test, derive(Debug))]
-pub(crate) enum HTTPMethod {
-    Get,
-    Post,
-    Patch,
-    Put,
-    Delete,
 }

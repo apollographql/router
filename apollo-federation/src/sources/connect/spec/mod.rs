@@ -2,7 +2,16 @@ mod directives;
 mod schema;
 mod type_and_directive_specifications;
 
-use apollo_compiler::{ast::Directive, name, Schema};
+pub(crate) use directives::extract_connect_directive_arguments;
+pub(crate) use directives::extract_source_directive_arguments;
+pub(crate) use schema::ConnectHTTPArguments;
+pub(crate) use schema::HTTPHeaderOption;
+pub(crate) use schema::SourceHTTPArguments;
+
+use apollo_compiler::{
+    ast::{Directive, Name},
+    name, Schema,
+};
 use lazy_static::lazy_static;
 
 use crate::{
@@ -11,9 +20,12 @@ use crate::{
         database::links_metadata,
         spec::{Identity, Url, Version, APOLLO_SPEC_DOMAIN},
         spec_definition::{SpecDefinition, SpecDefinitions},
+        Link,
     },
     schema::FederationSchema,
 };
+
+use self::schema::{CONNECT_DIRECTIVE_NAME_IN_SPEC, SOURCE_DIRECTIVE_NAME_IN_SPEC};
 
 pub(crate) struct ConnectSpecDefinition {
     url: Url,
@@ -79,6 +91,14 @@ impl ConnectSpecDefinition {
         };
 
         type_and_directive_specifications::check_or_add(&link, schema)
+    }
+
+    pub(crate) fn source_directive_name(link: &Link) -> Name {
+        link.directive_name_in_schema(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn connect_directive_name(link: &Link) -> Name {
+        link.directive_name_in_schema(&CONNECT_DIRECTIVE_NAME_IN_SPEC)
     }
 }
 

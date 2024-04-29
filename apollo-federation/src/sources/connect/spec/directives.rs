@@ -10,21 +10,76 @@ use indexmap::{
 
 use crate::{
     error::FederationError,
+    schema::{
+        position::{
+            ObjectOrInterfaceFieldDefinitionPosition, ObjectOrInterfaceFieldDirectivePosition,
+        },
+        FederationSchema,
+    },
     sources::connect::{
         selection_parser::Selection,
         spec::schema::{CONNECT_HTTP_ARGUMENT_NAME, CONNECT_SOURCE_ARGUMENT_NAME},
-        url_path_template::URLPathTemplate,
     },
 };
 
 use super::schema::{
-    ConnectDirectiveArguments, ConnectHTTPArguments, Connector, HTTPArguments, HTTPHeaderMappings,
-    HTTPHeaderOption, HTTPMethod, SourceDirectiveArguments, CONNECT_BODY_ARGUMENT_NAME,
+    ConnectDirectiveArguments, ConnectHTTPArguments, HTTPHeaderMappings, HTTPHeaderOption,
+    SourceDirectiveArguments, SourceHTTPArguments, CONNECT_BODY_ARGUMENT_NAME,
     CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME, CONNECT_SELECTION_ARGUMENT_NAME,
     HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME, HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME,
     HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME, SOURCE_BASE_URL_ARGUMENT_NAME,
     SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME, SOURCE_NAME_ARGUMENT_NAME,
 };
+
+pub(crate) fn extract_source_directive_arguments(
+    schema: &FederationSchema,
+    name: &Name,
+) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
+    let Ok(directive_refs) = schema.referencers().get_directive(name) else {
+        return Ok(vec![]);
+    };
+
+    let schema_directive_pos = directive_refs.schema.as_ref().unwrap();
+
+    let schema_def = schema_directive_pos.get(schema.schema());
+
+    schema_def
+        .directives
+        .iter()
+        .filter(|directive| directive.name == *name)
+        .map(SourceDirectiveArguments::try_from)
+        .collect()
+}
+
+pub(crate) fn extract_connect_directive_arguments(
+    schema: &FederationSchema,
+    name: &Name,
+) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
+    let Ok(directive_refs) = schema.referencers().get_directive(name) else {
+        return Ok(vec![]);
+    };
+
+    directive_refs
+        .object_fields
+        .iter()
+        .flat_map(|pos| {
+            let object_field = pos.get(schema.schema()).unwrap();
+            object_field
+                .directives
+                .iter()
+                .enumerate()
+                .filter(|(_, directive)| directive.name == *name)
+                .map(move |(i, directive)| {
+                    let directive_pos = ObjectOrInterfaceFieldDirectivePosition {
+                        field: ObjectOrInterfaceFieldDefinitionPosition::Object(pos.clone()),
+                        directive_name: directive.name.clone(),
+                        directive_index: i,
+                    };
+                    ConnectDirectiveArguments::from_position_and_directive(directive_pos, directive)
+                })
+        })
+        .collect()
+}
 
 /// Internal representation of the object type pairs
 type ObjectNode = [(Name, Node<Value>)];
@@ -54,7 +109,7 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
                     .value
                     .as_object()
                     .expect("`http` field in `@source` directive is not an object");
-                let http_value = HTTPArguments::try_from(http_value)?;
+                let http_value = SourceHTTPArguments::try_from(http_value)?;
 
                 http = Some(http_value);
             } else {
@@ -70,7 +125,7 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
     }
 }
 
-impl TryFrom<&ObjectNode> for HTTPArguments {
+impl TryFrom<&ObjectNode> for SourceHTTPArguments {
     type Error = FederationError;
 
     // TODO: This does not currently do validation
@@ -178,16 +233,16 @@ impl TryFrom<&[Node<Value>]> for HTTPHeaderMappings {
     }
 }
 
-impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
-    type Error = FederationError;
-
-    // TODO: This does not currently do validation
-    fn try_from(value: &Node<Directive>) -> Result<Self, Self::Error> {
+impl ConnectDirectiveArguments {
+    fn from_position_and_directive(
+        position: ObjectOrInterfaceFieldDirectivePosition,
+        value: &Node<Directive>,
+    ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut source = None;
-        let mut connector = None;
+        let mut http = None;
         let mut selection = None;
         let mut entity = None;
         for arg in args {
@@ -201,18 +256,11 @@ impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
 
                 source = Some(source_value.clone());
             } else if arg_name == CONNECT_HTTP_ARGUMENT_NAME.as_str() {
-                // Make sure that we haven't seen a connector already
-                if connector.is_some() {
-                    panic!("`@source` directive has multiple connectors specified");
-                }
-
                 let http_value = arg
                     .value
                     .as_object()
                     .expect("`http` field in `@connect` directive is not an object");
-                let http_value = ConnectHTTPArguments::try_from(http_value)?;
-
-                connector = Some(Connector::Http(http_value));
+                http = Some(ConnectHTTPArguments::try_from(http_value)?);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg
                     .value
@@ -238,9 +286,10 @@ impl TryFrom<&Node<Directive>> for ConnectDirectiveArguments {
         }
 
         Ok(Self {
+            position,
             source,
-            connector: connector.expect("`@connect` directive is missing a connector"),
-            selection,
+            http,
+            selection: selection.expect("`@connect` directive is missing a selection"),
             entity: entity.unwrap_or_default(),
         })
     }
@@ -250,8 +299,11 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
     type Error = FederationError;
 
     fn try_from(values: &ObjectNode) -> Result<Self, Self::Error> {
-        // Iterate over all of the argument pairs and fill in what we need
-        let mut method_and_url = None;
+        let mut get = None;
+        let mut post = None;
+        let mut patch = None;
+        let mut put = None;
+        let mut delete = None;
         let mut body = None;
         let mut headers = None;
         for (name, value) in values {
@@ -274,32 +326,35 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                     .as_list()
                     .map(HTTPHeaderMappings::try_from)
                     .transpose()?;
-            } else {
-                // We need to (potentially) map any arbitrary keys to an HTTP verb
-                let method = match name {
-                    "GET" => HTTPMethod::Get,
-                    "POST" => HTTPMethod::Post,
-                    "PATCH" => HTTPMethod::Patch,
-                    "PUT" => HTTPMethod::Put,
-                    "DELETE" => HTTPMethod::Delete,
-                    _ => unreachable!(
-                        "unknown argument in `@source` directive's `http` field: {name}"
-                    ),
-                };
-
-                // If we have a valid verb, then we need to grab (and parse) the URL template for it
-                let url = value.as_str().expect("supplied HTTP template URL in `@connect` directive's `http` field is not a string");
-                let url = URLPathTemplate::parse(url).expect("supplied HTTP template URL in `@connect` directive's `http` field is not valid");
-
-                method_and_url = Some((method, url));
+            } else if name == "GET" {
+                get = Some(value.as_str().expect(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                ).to_string());
+            } else if name == "POST" {
+                post = Some(value.as_str().expect(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                ).to_string());
+            } else if name == "PATCH" {
+                patch = Some(value.as_str().expect(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                ).to_string());
+            } else if name == "PUT" {
+                put = Some(value.as_str().expect(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                ).to_string());
+            } else if name == "DELETE" {
+                delete = Some(value.as_str().expect(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                ).to_string());
             }
         }
 
-        let (method, url) = method_and_url
-            .expect("missing an HTTP verb and endpoint in `@connect` directive's `http` field");
         Ok(Self {
-            method,
-            url,
+            get,
+            post,
+            patch,
+            put,
+            delete,
             body,
             headers: headers.unwrap_or_default(),
         })
@@ -308,14 +363,13 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::Schema;
+    use apollo_compiler::{name, Schema};
 
     use crate::{
         query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph,
         schema::FederationSchema,
         sources::connect::spec::schema::{
-            ConnectDirectiveArguments, SourceDirectiveArguments, CONNECT_DIRECTIVE_NAME_IN_SPEC,
-            SOURCE_DIRECTIVE_NAME_IN_SPEC,
+            SourceDirectiveArguments, CONNECT_DIRECTIVE_NAME_IN_SPEC, SOURCE_DIRECTIVE_NAME_IN_SPEC,
         },
         ValidFederationSubgraphs,
     };
@@ -432,32 +486,32 @@ mod tests {
         insta::assert_debug_snapshot!(
             sources.unwrap(),
             @r###"
-            [
-                SourceDirectiveArguments {
-                    name: "json",
-                    http: HTTPArguments {
-                        base_url: "https://jsonplaceholder.typicode.com/",
-                        headers: HTTPHeaderMappings(
-                            {
-                                "X-Auth-Token": Some(
-                                    As(
-                                        "AuthToken",
-                                    ),
+        [
+            SourceDirectiveArguments {
+                name: "json",
+                http: SourceHTTPArguments {
+                    base_url: "https://jsonplaceholder.typicode.com/",
+                    headers: HTTPHeaderMappings(
+                        {
+                            "X-Auth-Token": Some(
+                                As(
+                                    "AuthToken",
                                 ),
-                                "user-agent": Some(
-                                    Value(
-                                        [
-                                            "Firefox",
-                                        ],
-                                    ),
+                            ),
+                            "user-agent": Some(
+                                Value(
+                                    [
+                                        "Firefox",
+                                    ],
                                 ),
-                                "X-From-Env": None,
-                            },
-                        ),
-                    },
+                            ),
+                            "X-From-Env": None,
+                        },
+                    ),
                 },
-            ]
-            "###
+            },
+        ]
+        "###
         );
     }
 
@@ -467,120 +521,101 @@ mod tests {
         let subgraph = subgraphs.get("connectors").unwrap();
         let schema = &subgraph.schema;
 
-        // Try to extract the source information from the valid schema
-        // TODO: This should probably be handled by the rest of the stack
-        let connects = schema
-            .referencers()
-            .get_directive(&CONNECT_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap();
-
         // Extract the connects from the schema definition and map them to their `Connect` equivalent
-        // TODO: We can safely assume that a connect can only be on object fields, right?
-        let connects: Result<Vec<_>, _> = connects
-            .object_fields
-            .iter()
-            .flat_map(|field| field.get(schema.schema()).unwrap().directives.iter())
-            .map(ConnectDirectiveArguments::try_from)
-            .collect();
+        let connects = super::extract_connect_directive_arguments(schema, &name!(connect));
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
             @r###"
         [
             ConnectDirectiveArguments {
+                position: ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.users),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
                 source: Some(
                     "json",
                 ),
-                connector: Http(
+                http: Some(
                     ConnectHTTPArguments {
-                        method: Get,
-                        url: URLPathTemplate {
-                            path: [
-                                ParameterValue {
-                                    parts: [
-                                        Text(
-                                            "users",
-                                        ),
-                                    ],
-                                },
-                            ],
-                            query: {},
-                        },
+                        get: Some(
+                            "/users",
+                        ),
+                        post: None,
+                        patch: None,
+                        put: None,
+                        delete: None,
                         body: None,
                         headers: HTTPHeaderMappings(
                             {},
                         ),
                     },
                 ),
-                selection: Some(
-                    Named(
-                        SubSelection {
-                            selections: [
-                                Field(
-                                    None,
-                                    "id",
-                                    None,
-                                ),
-                                Field(
-                                    None,
-                                    "name",
-                                    None,
-                                ),
-                            ],
-                            star: None,
-                        },
-                    ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "id",
+                                None,
+                            ),
+                            Field(
+                                None,
+                                "name",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
                 ),
                 entity: false,
             },
             ConnectDirectiveArguments {
+                position: ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.posts),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
                 source: Some(
                     "json",
                 ),
-                connector: Http(
+                http: Some(
                     ConnectHTTPArguments {
-                        method: Get,
-                        url: URLPathTemplate {
-                            path: [
-                                ParameterValue {
-                                    parts: [
-                                        Text(
-                                            "posts",
-                                        ),
-                                    ],
-                                },
-                            ],
-                            query: {},
-                        },
+                        get: Some(
+                            "/posts",
+                        ),
+                        post: None,
+                        patch: None,
+                        put: None,
+                        delete: None,
                         body: None,
                         headers: HTTPHeaderMappings(
                             {},
                         ),
                     },
                 ),
-                selection: Some(
-                    Named(
-                        SubSelection {
-                            selections: [
-                                Field(
-                                    None,
-                                    "id",
-                                    None,
-                                ),
-                                Field(
-                                    None,
-                                    "title",
-                                    None,
-                                ),
-                                Field(
-                                    None,
-                                    "body",
-                                    None,
-                                ),
-                            ],
-                            star: None,
-                        },
-                    ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "id",
+                                None,
+                            ),
+                            Field(
+                                None,
+                                "title",
+                                None,
+                            ),
+                            Field(
+                                None,
+                                "body",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
                 ),
                 entity: false,
             },
