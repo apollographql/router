@@ -359,28 +359,15 @@ commands:
       - run:
           name: Install cargo deny, about, edit
           command: |
-            if [[ ! -f "$HOME/.cargo/bin/cargo-binstall$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --version 1.6.4 cargo-binstall
-            fi
-
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo binstall --no-confirm --locked --version 0.14.21 cargo-deny
-            fi
-
-            if [[ ! -f "$HOME/.cargo/bin/cargo-about$EXECUTABLE_SUFFIX" ]]; then
-              cargo binstall --no-confirm --locked --version 0.6.1 cargo-about
-            fi
-
-            if [[ ! -f "$HOME/.cargo/bin/cargo-edit$EXECUTABLE_SUFFIX" ]]; then
-              cargo binstall --no-confirm --locked --version 0.12.2 cargo-edit
-            fi
-
-            if [[ ! -f "$HOME/.cargo/bin/cargo-fuzz$EXECUTABLE_SUFFIX" ]]; then
-              cargo binstall --no-confirm --locked --version 0.12.0 cargo-fuzz
+              cargo install --locked --version 0.14.21 cargo-deny
+              cargo install --locked --version 0.6.1 cargo-about
+              cargo install --locked --version 0.12.2 cargo-edit
+              cargo install --locked --version 0.12.0 cargo-fuzz
             fi
 
             if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
-              cargo binstall --no-confirm --locked --version 0.9.70 cargo-nextest
+              cargo install --locked --version 0.9.70 cargo-nextest
             fi
 
   fetch_dependencies:
