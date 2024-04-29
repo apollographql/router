@@ -31,14 +31,13 @@ use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
 use schemars::JsonSchema;
 use serde::Deserialize;
-#[cfg(test)]
-use serde::Serialize;
 use tower::BoxError;
 use tracing::Span;
 
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::plugins::telemetry::config_new::cost::SupergraphCostAttributes;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -114,7 +113,7 @@ impl DefaultForLevel for RouterAttributes {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphAttributes {
     /// The GraphQL document being executed.
@@ -137,6 +136,10 @@ pub(crate) struct SupergraphAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
     pub(crate) graphql_operation_type: Option<bool>,
+
+    /// Cost attributes for the operation being executed
+    #[serde(flatten)]
+    pub(crate) cost: SupergraphCostAttributes,
 }
 
 impl DefaultForLevel for SupergraphAttributes {
@@ -894,8 +897,10 @@ impl Selectors for SupergraphAttributes {
         attrs
     }
 
-    fn on_response(&self, _response: &supergraph::Response) -> Vec<KeyValue> {
-        Vec::default()
+    fn on_response(&self, response: &supergraph::Response) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        attrs.append(&mut self.cost.on_response(response));
+        attrs
     }
 
     fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {

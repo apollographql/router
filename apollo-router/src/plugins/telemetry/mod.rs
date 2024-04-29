@@ -65,7 +65,6 @@ use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
 use self::config_new::instruments::RouterInstruments;
 use self::config_new::instruments::SubgraphInstruments;
-use self::config_new::instruments::SupergraphCustomInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -92,6 +91,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -573,9 +573,10 @@ impl Plugin for Telemetry {
                 move |req: &SupergraphRequest| {
                     let custom_attributes = config.instrumentation.spans.supergraph.attributes.on_request(req);
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
-                    let custom_instruments = SupergraphCustomInstruments::new(
-                        &config.instrumentation.instruments.supergraph.custom,
-                    );
+                    let custom_instruments = config
+                        .instrumentation
+                        .instruments
+                        .new_supergraph_instruments();
                     custom_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
@@ -583,7 +584,7 @@ impl Plugin for Telemetry {
 
                     (req.context.clone(), custom_instruments, custom_attributes, supergraph_events)
                 },
-                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphCustomInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
+                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -922,7 +923,7 @@ impl Telemetry {
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
-        custom_instruments: SupergraphCustomInstruments,
+        custom_instruments: SupergraphInstruments,
         custom_events: SupergraphEvents,
     ) -> Result<SupergraphResponse, BoxError> {
         let mut metric_attrs = {

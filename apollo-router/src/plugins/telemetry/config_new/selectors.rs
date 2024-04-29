@@ -4,8 +4,6 @@ use jsonpath_rust::JsonPathFinder;
 use jsonpath_rust::JsonPathInst;
 use schemars::JsonSchema;
 use serde::Deserialize;
-#[cfg(test)]
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
@@ -14,7 +12,9 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
@@ -36,7 +36,7 @@ pub(crate) enum TraceIdFormat {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -47,7 +47,7 @@ pub(crate) enum OperationName {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ErrorRepr {
     // /// The error code if available
@@ -57,7 +57,7 @@ pub(crate) enum ErrorRepr {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
@@ -65,7 +65,7 @@ pub(crate) enum Query {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ResponseStatus {
     /// The http status code.
@@ -75,7 +75,7 @@ pub(crate) enum ResponseStatus {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -315,6 +315,12 @@ pub(crate) enum SupergraphSelector {
         #[allow(dead_code)]
         /// Critical error if it happens
         error: ErrorRepr,
+    },
+    /// Cost attributes
+    #[allow(dead_code)]
+    Cost {
+        /// The cost value to select, one of: estimated, actual, delta.
+        cost: CostValue,
     },
 }
 
@@ -753,7 +759,7 @@ impl Selector for SupergraphSelector {
     fn on_event_response(
         &self,
         response: &Self::EventResponse,
-        _ctx: &Context,
+        ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::ResponseData {
@@ -797,6 +803,17 @@ impl Selector for SupergraphSelector {
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::Cost { cost } => {
+                let extensions = ctx.extensions().lock();
+                extensions
+                    .get::<CostContext>()
+                    .map(|cost_result| match cost {
+                        CostValue::Estimated => cost_result.estimated.into(),
+                        CostValue::Actual => cost_result.actual.into(),
+                        CostValue::Delta => cost_result.delta().into(),
+                        CostValue::Result => cost_result.result.into(),
+                    })
+            }
             _ => None,
         }
     }
