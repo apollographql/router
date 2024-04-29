@@ -4,9 +4,9 @@ use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfCondit
 use crate::sources::{
     SourceFederatedAbstractFieldQueryGraphEdge, SourceFederatedConcreteFieldQueryGraphEdge,
     SourceFederatedConcreteQueryGraphNode, SourceFederatedEnumQueryGraphNode,
-    SourceFederatedQueryGraphBuilders, SourceFederatedQueryGraphs,
+    SourceFederatedQueryGraph, SourceFederatedQueryGraphBuilders,
     SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnterQueryGraphEdge,
-    SourceFederatedTypeConditionQueryGraphEdge, SourceId,
+    SourceFederatedTypeConditionQueryGraphEdge, SourceId, SourceKind,
 };
 use crate::ValidFederationSubgraph;
 use apollo_compiler::schema::{Name, NamedType};
@@ -18,7 +18,7 @@ struct FederatedQueryGraphBuilder {
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
     subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
-    for_query_planning: bool,
+    is_for_query_planning: bool,
     source_data: SourceFederatedQueryGraphBuilders,
 }
 
@@ -26,7 +26,7 @@ impl FederatedQueryGraphBuilder {
     pub(crate) fn new(
         _supergraph_schema: ValidFederationSchema,
         _api_schema: ValidFederationSchema,
-        _for_query_planning: bool,
+        _is_for_query_planning: bool,
     ) -> Result<Self, FederationError> {
         todo!()
     }
@@ -40,11 +40,13 @@ struct IntraSourceQueryGraphBuilder {
     graph: FederatedQueryGraph,
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
-    for_query_planning: bool,
+    is_for_query_planning: bool,
+    current_source_kind: Option<SourceKind>,
+    current_source_id: Option<SourceId>,
 }
 
 pub(crate) trait IntraSourceQueryGraphBuilderApi {
-    fn source_query_graph(&mut self) -> &mut SourceFederatedQueryGraphs;
+    fn source_query_graph(&mut self) -> Result<&mut SourceFederatedQueryGraph, FederationError>;
 
     fn is_for_query_planning(&self) -> bool;
 

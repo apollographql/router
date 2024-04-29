@@ -36,7 +36,6 @@ pub mod graphql;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) enum SourceKind {
-    Root,
     Graphql,
     Connect,
 }
@@ -53,10 +52,14 @@ impl SourceId {
     }
 }
 
+pub(crate) enum SourceFederatedQueryGraph {
+    Graphql(GraphqlFederatedQueryGraph),
+    Connect(ConnectFederatedQueryGraph),
+}
+
 #[derive(Debug)]
 pub(crate) struct SourceFederatedQueryGraphs {
-    graphql: GraphqlFederatedQueryGraph,
-    connect: ConnectFederatedQueryGraph,
+    graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>,
 }
 
 #[derive(Debug)]
