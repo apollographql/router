@@ -8,7 +8,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::metrics;
-use crate::plugins::demand_control::CostResult;
+use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -58,22 +58,22 @@ impl Selectors for SupergraphCostAttributes {
         let mut attrs = Vec::with_capacity(4);
 
         if let Some(true) = self.cost_estimated {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostResult>() {
+            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
                 attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
             }
         }
         if let Some(true) = self.cost_actual {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostResult>() {
+            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
                 attrs.push(KeyValue::new("cost.actual", cost_result.actual));
             }
         }
         if let Some(true) = self.cost_delta {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostResult>() {
+            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
                 attrs.push(KeyValue::new("cost.delta", cost_result.delta()));
             }
         }
         if let Some(true) = self.cost_result {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostResult>() {
+            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
                 attrs.push(KeyValue::new("cost.result", cost_result.result));
             }
         }
@@ -257,7 +257,7 @@ pub(crate) enum CostValue {
 
 #[cfg(test)]
 mod test {
-    use crate::plugins::demand_control::CostResult;
+    use crate::plugins::demand_control::CostContext;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
     use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -336,8 +336,8 @@ mod test {
         let context = Context::new();
         {
             let mut extensions = context.extensions().lock();
-            extensions.insert(CostResult::default());
-            let cost_result = extensions.get_or_default_mut::<CostResult>();
+            extensions.insert(CostContext::default());
+            let cost_result = extensions.get_or_default_mut::<CostContext>();
             cost_result.estimated = 100.0;
             cost_result.actual = 10.0;
             cost_result.result = "COST_TOO_EXPENSIVE"

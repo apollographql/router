@@ -12,7 +12,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
-use crate::plugins::demand_control::CostResult;
+use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
@@ -691,7 +691,7 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::Cost { cost } => {
                 let extensions = response.context.extensions().lock();
                 extensions
-                    .get::<CostResult>()
+                    .get::<CostContext>()
                     .map(|cost_result| match cost {
                         CostValue::Estimated => cost_result.estimated.into(),
                         CostValue::Actual => cost_result.actual.into(),

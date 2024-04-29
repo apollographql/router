@@ -36,14 +36,14 @@ use crate::services::subgraph;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-/// The results of cost calculations for use in telemetry
-pub(crate) struct CostResult {
+/// The cost calculation information stored in context for use in telemetry and other plugins that need to know what cost was calculated.
+pub(crate) struct CostContext {
     pub(crate) estimated: f64,
     pub(crate) actual: f64,
     pub(crate) result: &'static str,
 }
 
-impl Default for CostResult {
+impl Default for CostContext {
     fn default() -> Self {
         Self {
             estimated: 0.0,
@@ -53,7 +53,7 @@ impl Default for CostResult {
     }
 }
 
-impl CostResult {
+impl CostContext {
     pub(crate) fn delta(&self) -> f64 {
         self.estimated - self.actual
     }

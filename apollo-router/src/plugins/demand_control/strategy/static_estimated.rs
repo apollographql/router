@@ -3,7 +3,7 @@ use apollo_compiler::ExecutableDocument;
 use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
-use crate::plugins::demand_control::CostResult;
+use crate::plugins::demand_control::CostContext;
 use crate::plugins::demand_control::DemandControlError;
 use crate::services::execution;
 use crate::services::subgraph;
@@ -21,7 +21,7 @@ impl StrategyImpl for StaticEstimated {
             .planned(&request.query_plan)
             .and_then(|cost| {
                 let mut extensions = request.context.extensions().lock();
-                let cost_result = extensions.get_or_default_mut::<CostResult>();
+                let cost_result = extensions.get_or_default_mut::<CostContext>();
                 cost_result.estimated = cost;
                 if cost > self.max {
                     Err(
@@ -57,7 +57,7 @@ impl StrategyImpl for StaticEstimated {
         if response.data.is_some() {
             let cost = self.cost_calculator.actual(request, response)?;
             let mut extensions = context.extensions().lock();
-            let cost_result = extensions.get_or_default_mut::<CostResult>();
+            let cost_result = extensions.get_or_default_mut::<CostContext>();
             cost_result.actual = cost;
         }
         Ok(())
