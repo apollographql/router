@@ -4,6 +4,8 @@ expression: body
 ---
 data: ~
 errors:
-  - message: Query estimated cost exceeded configured maximum
+  - message: query estimated cost 2 exceeded configured maximum 1
     extensions:
+      cost.estimated: 2
+      cost.max: 1
       code: COST_ESTIMATED_TOO_EXPENSIVE
