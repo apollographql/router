@@ -385,6 +385,18 @@ impl From<&'static str> for AttributeValue {
     }
 }
 
+impl From<bool> for AttributeValue {
+    fn from(value: bool) -> Self {
+        AttributeValue::Bool(value)
+    }
+}
+
+impl From<f64> for AttributeValue {
+    fn from(value: f64) -> Self {
+        AttributeValue::F64(value)
+    }
+}
+
 impl From<i64> for AttributeValue {
     fn from(value: i64) -> Self {
         AttributeValue::I64(value)
