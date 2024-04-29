@@ -56,24 +56,17 @@ impl Selectors for SupergraphCostAttributes {
 
     fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
-
-        if let Some(true) = self.cost_estimated {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
+        if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
+            if let Some(true) = self.cost_estimated {
                 attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
             }
-        }
-        if let Some(true) = self.cost_actual {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
+            if let Some(true) = self.cost_actual {
                 attrs.push(KeyValue::new("cost.actual", cost_result.actual));
             }
-        }
-        if let Some(true) = self.cost_delta {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
+            if let Some(true) = self.cost_delta {
                 attrs.push(KeyValue::new("cost.delta", cost_result.delta()));
             }
-        }
-        if let Some(true) = self.cost_result {
-            if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
+            if let Some(true) = self.cost_result {
                 attrs.push(KeyValue::new("cost.result", cost_result.result));
             }
         }
