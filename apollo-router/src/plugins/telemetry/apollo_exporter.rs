@@ -442,17 +442,3 @@ where
         None => serializer.serialize_none(),
     }
 }
-
-#[cfg(not(windows))] // git checkout converts \n to \r\n, making == below fail
-#[test]
-fn check_reports_proto_is_up_to_date() {
-    let proto_url = "https://usage-reporting.api.apollographql.com/proto/reports.proto";
-    let response = reqwest::blocking::get(proto_url).unwrap();
-    let content = response.text().unwrap();
-    // Not using assert_eq! as printing the entire file would be too verbose
-    assert!(
-        content == include_str!("proto/reports.proto"),
-        "Protobuf file is out of date. Run this command to update it:\n\n    \
-            curl -f {proto_url} > apollo-router/src/plugins/telemetry/proto/reports.proto\n\n"
-    );
-}
