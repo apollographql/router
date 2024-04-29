@@ -123,6 +123,7 @@ impl PlanNode {
 
             match self {
                 PlanNode::Sequence { nodes } => {
+                    tracing::debug!("here PlanNode::Sequence");
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {
@@ -147,6 +148,7 @@ impl PlanNode {
                     .await
                 }
                 PlanNode::Parallel { nodes } => {
+                    tracing::debug!("here PlanNode::Parallel");
                     value = Value::default();
                     errors = Vec::new();
                     async {
@@ -175,6 +177,8 @@ impl PlanNode {
                     .await
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
+                    tracing::debug!("here PlanNode::FlattenNode");
+                    
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
                     let current_dir = current_dir.join(path.remove_empty_key_root());
                     let (v, err) = node
@@ -218,6 +222,7 @@ impl PlanNode {
                     value = Value::default();
                 }
                 PlanNode::Fetch(fetch_node) => {
+                    tracing::debug!("here PlanNode::Fetch");
                     let fetch_time_offset =
                         parameters.context.created_at.elapsed().as_nanos() as i64;
 
@@ -230,9 +235,11 @@ impl PlanNode {
                         .get::<CanceledRequest>()
                         .is_some()
                     {
+                        tracing::debug!("fetch node errors");
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
+                        tracing::debug!("fetch node fetching");
                         let (v, e) = fetch_node
                             .fetch_node(parameters, parent_value, current_dir)
                             .instrument(tracing::info_span!(

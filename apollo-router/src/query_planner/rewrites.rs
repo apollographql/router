@@ -58,6 +58,7 @@ impl DataRewrite {
                 if let Some((parent, PathElement::Key(k, _))) =
                     split_path_last_element(&setter.path)
                 {
+                    tracing::info!("REWRITES 1 {} {}", k, parent);
                     data.select_values_and_paths_mut(schema, &parent, |_path, obj| {
                         if let Some(value) = obj.get_mut(k) {
                             *value = setter.set_value_to.clone()
