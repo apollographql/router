@@ -2389,6 +2389,38 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "preview_connectors": {
+      "description": "Connectors configuration",
+      "default": {
+        "subgraphs": {}
+      },
+      "type": "object",
+      "properties": {
+        "subgraphs": {
+          "description": "Per subgraph configuration",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "description": "Configuration for a source API",
+              "type": "object",
+              "properties": {
+                "override_url": {
+                  "description": "Override the base URL for the API",
+                  "default": null,
+                  "type": "string",
+                  "format": "uri",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "preview_entity_cache": {
       "description": "Configuration for entity caching",
       "type": "object",
