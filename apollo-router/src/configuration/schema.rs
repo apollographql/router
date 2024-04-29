@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
+use std::sync::OnceLock;
 
 use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
@@ -82,19 +83,28 @@ pub(crate) fn validate_yaml_configuration(
             error: e.to_string(),
         }
     })?;
-    let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
-        ConfigurationError::InvalidConfiguration {
-            message: "failed to parse schema",
-            error: e.to_string(),
-        }
-    })?;
-    let schema = JSONSchema::options()
-        .with_draft(Draft::Draft7)
-        .compile(&schema)
-        .map_err(|e| ConfigurationError::InvalidConfiguration {
-            message: "failed to compile schema",
-            error: e.to_string(),
-        })?;
+
+    static SCHEMA: OnceLock<Result<JSONSchema, ConfigurationError>> = OnceLock::new();
+    let schema = SCHEMA
+        .get_or_init(|| {
+            serde_json::to_value(generate_config_schema())
+                .map_err(|e| ConfigurationError::InvalidConfiguration {
+                    message: "failed to parse schema",
+                    error: e.to_string(),
+                })
+                .and_then(|schema| {
+                    JSONSchema::options()
+                        .with_draft(Draft::Draft7)
+                        .compile(&schema)
+                        .map_err(|e| ConfigurationError::InvalidConfiguration {
+                            message: "failed to compile schema",
+                            error: e.to_string(),
+                        })
+                })
+        })
+        .as_ref()
+        .map(|schema| schema)
+        .map_err(|e| e.clone())?;
 
     if migration == Mode::Upgrade {
         let upgraded = upgrade_configuration(&yaml, true)?;
@@ -232,7 +242,7 @@ pub(crate) fn validate_yaml_configuration(
     }
 
     let mut config: Configuration = serde_json::from_value(expanded_yaml.clone())
-        .map_err(ConfigurationError::DeserializeConfigError)?;
+        .map_err(|e| ConfigurationError::DeserializeConfigError(e.to_string()))?;
 
     // ------------- Check for unknown fields at runtime ----------------
     // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`

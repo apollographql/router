@@ -74,7 +74,7 @@ static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// Configuration error.
-#[derive(Debug, Error, Display)]
+#[derive(Debug, Clone, Error, Display)]
 #[non_exhaustive]
 pub enum ConfigurationError {
     /// could not expand variable: {key}, {cause}
@@ -94,7 +94,7 @@ pub enum ConfigurationError {
         error: String,
     },
     /// could not deserialize configuration: {0}
-    DeserializeConfigError(serde_json::Error),
+    DeserializeConfigError(String),
 
     /// APOLLO_ROUTER_CONFIG_SUPPORTED_MODES must be of the format env,file,... Possible modes are 'env' and 'file'.
     InvalidExpansionModeConfig,
