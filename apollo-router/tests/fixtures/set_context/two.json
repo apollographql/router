@@ -1,0 +1,20 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "query": "query Query__two__2($representations:[_Any!]!){_entities(representations:$representations){...on U{k}}}",
+        "operationName": "Query__two__2",
+        "variables": { "representations": [{ "__typename": "U", "id": "1" }] }
+      },
+      "response": {
+        "data": {
+          "_entities": [
+            {
+              "k": "k value"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

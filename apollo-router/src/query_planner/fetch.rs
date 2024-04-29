@@ -7,6 +7,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
+use json_ext::PathElement;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -15,6 +16,8 @@ use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
+use super::rewrites::DataKeyRenamer;
+use super::rewrites::DataRewrite;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
 use crate::error::Error;
@@ -257,6 +260,32 @@ impl Variables {
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
+        let input_rewrites = if let Some(ir) = input_rewrites {
+            Some(
+                ir.into_iter()
+                    .map(|item| {
+                        if let DataRewrite::KeyRenamer(dr) = item {
+                            if dr.path == Path(vec![PathElement::Key("prop".to_string(), None)]) {
+                                return DataRewrite::KeyRenamer({
+                                    DataKeyRenamer {
+                                        path: Path(vec![
+                                            PathElement::Key("t".to_string(), None),
+                                            PathElement::Key("prop".to_string(), None),
+                                        ]),
+                                        rename_key_to: dr.rename_key_to.clone()
+                                    }
+                                });
+                            }
+                        }
+                        item.clone()
+                    })
+                    .collect(),
+            )
+        } else {
+            input_rewrites.clone()
+        };
+
+        dbg!(&input_rewrites);
         let body = request.body();
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
@@ -273,7 +302,7 @@ impl Variables {
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 let mut value = execute_selection_set(value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
-                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                    rewrites::apply_rewrites(schema, &mut value, &input_rewrites);
                     match values.get_index_of(&value) {
                         Some(index) => {
                             inverted_paths[index].push(path.clone());

@@ -1,0 +1,39 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "query": "query Query__one__0{t{prop id u{id}}}",
+        "operationName": "Query__one__0"
+      },
+      "response": {
+        "data": {
+          "t": {
+            "prop": "prop value",
+            "id": "1",
+            "u": {
+              "id": "1"
+            }
+          }
+        }
+      }
+    },
+    {
+        "request": {
+          "query": "query Query__one__0{t{prop id u{__typename id}}}",
+          "operationName": "Query__one__0"
+        },
+        "response": {
+          "data": {
+            "t": {
+              "prop": "prop value",
+              "id": "1",
+              "u": {
+                "__typename": "U",
+                "id": "1"
+              }
+            }
+          }
+        }
+      }
+  ]
+}
