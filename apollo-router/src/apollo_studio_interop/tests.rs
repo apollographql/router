@@ -1197,7 +1197,7 @@ async fn test_operation_arg_always_commas() {
 }
 
 #[test(tokio::test)]
-async fn test_comma_edge_case() {
+async fn test_comma_separator_always() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
     let query_str = r#"query QueryCommaEdgeCase {
@@ -1310,6 +1310,84 @@ async fn test_nested_fragments() {
             "UnionType2".into(),
             ReferencedFieldsForType {
                 field_names: vec!["unionType2Field".into()],
+                is_interface: false,
+            },
+        ),
+    ]);
+
+    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+#[test(tokio::test)]
+async fn test_mutation_space() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      mutation Test_Mutation_Space($arg1withalongnamegoeshere0123456789: Boolean) {
+        mutation2(id: \"x\") {
+          updateCheckConfiguration(arg1: $arg1withalongnamegoeshere0123456789, arg2: false)
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_usage_reporting(&doc, &doc, &Some("Test_Mutation_Space".into()), &schema);
+
+    let expected_sig = "# Test_Mutation_Space\nmutation Test_Mutation_Space($arg1withalongnamegoeshere0123456789:Boolean){mutation2(id:\"\"){updateCheckConfiguration(arg1:$arg1withalongnamegoeshere0123456789 arg2:false)}}";
+    let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        (
+            "Mutation".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["mutation2".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "TestGraphResponse2".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["updateCheckConfiguration".into()],
+                is_interface: false,
+            },
+        ),
+    ]);
+
+    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+#[test(tokio::test)]
+async fn test_mutation_comma() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      mutation Test_Mutation_Comma($arg1withalongnamegoeshere012345678: Boolean) {
+        mutation2(id: \"x\") {
+          updateCheckConfiguration(arg1: $arg1withalongnamegoeshere012345678, arg2: false)
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_usage_reporting(&doc, &doc, &Some("Test_Mutation_Comma".into()), &schema);
+
+    let expected_sig = "# Test_Mutation_Comma\nmutation Test_Mutation_Comma($arg1withalongnamegoeshere012345678:Boolean){mutation2(id:\"\"){updateCheckConfiguration(arg1:$arg1withalongnamegoeshere012345678,arg2:false)}}";
+    let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        (
+            "Mutation".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["mutation2".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "TestGraphResponse2".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["updateCheckConfiguration".into()],
                 is_interface: false,
             },
         ),

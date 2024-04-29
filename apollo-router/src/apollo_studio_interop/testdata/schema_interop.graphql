@@ -146,6 +146,10 @@ type Mutation
   @join__type(graph: MAIN)
 {
   noInputMutation: EverythingResponse!
+  graph(id: ID!): TestGraphResponse!
+  mutation2(id: ID!): TestGraphResponse2!
+  mutation3(id: ID!): TestGraphResponse3!
+  mutation4(id1: ID!, id2: ID!): ID!
 }
 
 input NestedEnumInputType
@@ -201,6 +205,24 @@ type SortResponse
   zzz: Int
   aaa: Int
   CCC: Int
+}
+
+type TestGraphResponse
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(downgradeDefaultValueChange: Boolean, downgradeStaticChecks: Boolean): Int!
+}
+
+type TestGraphResponse2
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(arg1: Boolean, arg2: Boolean): Int!
+}
+
+type TestGraphResponse3
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(arg1: String, arg2: String, arg3: String): Int!
 }
 
 type Subscription
