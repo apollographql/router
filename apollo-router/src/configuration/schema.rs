@@ -1,5 +1,8 @@
 //! Configuration schema generation and validation
 
+use apollo_compiler::ast::FragmentDefinition;
+use apollo_compiler::Schema;
+use std::any::Any;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
@@ -9,8 +12,10 @@ use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
-use schemars::gen::SchemaSettings;
+use schemars::gen::{GenVisitor, SchemaSettings};
 use schemars::schema::RootSchema;
+use schemars::visit::Visitor;
+use tower::BoxError;
 use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
@@ -25,12 +30,26 @@ pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
+#[derive(Debug, Clone)]
+struct MyVisitor;
+
+impl Visitor for MyVisitor {
+    fn visit_schema(&mut self, schema: &mut schemars::schema::Schema) {
+        if let schemars::schema::Schema::Object(o) = schema {
+            if let Some(reference) = &mut o.reference {
+                *reference = reference.replace("<", "_").replace(">", "_");
+            }
+        }
+    }
+}
+
 /// Generate a JSON schema for the configuration.
 pub(crate) fn generate_config_schema() -> RootSchema {
     let settings = SchemaSettings::draft07().with(|s| {
         s.option_nullable = true;
         s.option_add_null_type = false;
-        s.inline_subschemas = true;
+        s.inline_subschemas = false;
+        s.visitors = vec![Box::new(MyVisitor)]
     });
 
     // Manually patch up the schema
@@ -89,10 +108,15 @@ pub(crate) fn validate_yaml_configuration(
         let config_schema = serde_json::to_value(generate_config_schema())
             .expect("failed to parse configuration schema");
 
-        JSONSchema::options()
+        let result = JSONSchema::options()
             .with_draft(Draft::Draft7)
-            .compile(&config_schema)
-            .expect("failed to compile configuration schema")
+            .compile(&config_schema);
+        match result {
+            Ok(schema) => schema,
+            Err(e) => {
+                panic!("failed to compile configuration schema: {}", e)
+            }
+        }
     });
 
     if migration == Mode::Upgrade {
