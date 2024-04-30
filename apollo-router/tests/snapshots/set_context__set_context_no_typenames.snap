@@ -3,30 +3,15 @@ source: apollo-router/tests/set_context.rs
 expression: response
 ---
 {
-  "data": null,
-  "extensions": {
-    "valueCompletion": [
-      {
-        "message": "Cannot return null for non-nullable field U.field",
-        "path": [
-          "t",
-          "u"
-        ]
-      },
-      {
-        "message": "Cannot return null for non-nullable field T.u",
-        "path": [
-          "t",
-          "u"
-        ]
-      },
-      {
-        "message": "Cannot return null for non-nullable field T!.t",
-        "path": [
-          "t"
-        ]
+  "data": {
+    "t": {
+      "id": "1",
+      "u": {
+        "field": 1234
       }
-    ],
+    }
+  },
+  "extensions": {
     "apolloQueryPlan": {
       "object": {
         "kind": "QueryPlan",
@@ -37,14 +22,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "Subgraph1",
               "variableUsages": [],
-              "operation": "query Query__Subgraph1__0{t{prop id u{id}}}",
+              "operation": "query Query__Subgraph1__0{t{prop id u{__typename id}}}",
               "operationName": "Query__Subgraph1__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "0c11d75a9caa25f012a22034f3deff983b512276d0405e155bd83a459d803b72",
+              "schemaAwareHash": "cd8e038b3a8b1edee46de7d9f4b75d8acd76315f9ce94353f9d4d36e88fd6da7",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -106,7 +91,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          prop\n          id\n          u {\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }
