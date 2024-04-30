@@ -1398,6 +1398,127 @@ async fn test_mutation_comma() {
 }
 
 #[test(tokio::test)]
+async fn test_comma_lower_bound() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      query TestCommaLowerBound($arg: String, $slightlyTooLongName1234: String) {
+        manyArgsQuery(arg1: $arg, arg2: $arg, arg3: $arg, arg4: $slightlyTooLongName1234) {
+          enumResponse
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_usage_reporting(&doc, &doc, &Some("TestCommaLowerBound".into()), &schema);
+
+    let expected_sig = "# TestCommaLowerBound\nquery TestCommaLowerBound($arg:String,$slightlyTooLongName1234:String){manyArgsQuery(arg1:$arg arg2:$arg arg3:$arg arg4:$slightlyTooLongName1234){enumResponse}}";
+    let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        (
+            "Query".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["manyArgsQuery".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "EverythingResponse".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["enumResponse".into()],
+                is_interface: false,
+            },
+        ),
+    ]);
+
+    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+#[test(tokio::test)]
+async fn test_comma_upper_bound() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      query TestCommaUpperBound($arg: String, $slightlyTooLongName12345: String) {
+        manyArgsQuery(arg1: $arg, arg2: $arg, arg3: $arg, arg4: $slightlyTooLongName12345) {
+          enumResponse
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_usage_reporting(&doc, &doc, &Some("TestCommaUpperBound".into()), &schema);
+
+    let expected_sig = "# TestCommaUpperBound\nquery TestCommaUpperBound($arg:String,$slightlyTooLongName12345:String){manyArgsQuery(arg1:$arg arg2:$arg arg3:$arg arg4:$slightlyTooLongName12345){enumResponse}}";
+    let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        (
+            "Query".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["manyArgsQuery".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "EverythingResponse".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["enumResponse".into()],
+                is_interface: false,
+            },
+        ),
+    ]);
+
+    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+
+#[test(tokio::test)]
+async fn test_underscore() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      query UnderscoreQuery($arg2_: String, $_arg3_: String) { 
+        underscoreQuery(arg_: \"x\", _arg2: $arg2_, _arg3_: $_arg3_) {
+          _
+          _name
+          _name_
+          name_
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_usage_reporting(&doc, &doc, &Some("UnderscoreQuery".into()), &schema);
+
+    let expected_sig = "# UnderscoreQuery\nquery UnderscoreQuery($_arg3_:String,$arg2_:String){underscoreQuery(_arg2:$arg2_,_arg3_:$_arg3_,arg_:\"\"){_ _name _name_ name_}}";
+    let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
+        (
+            "Query".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["underscoreQuery".into()],
+                is_interface: false,
+            },
+        ),
+        (
+            "UnderscoreResponse".into(),
+            ReferencedFieldsForType {
+                field_names: vec!["_".into(), "_name".into(), "_name_".into(), "name_".into()],
+                is_interface: false,
+            },
+        ),
+    ]);
+
+    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+#[test(tokio::test)]
 async fn test_compare() {
     let source = ComparableUsageReporting {
         result: UsageReporting {
