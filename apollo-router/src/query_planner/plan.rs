@@ -10,6 +10,7 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::configuration::Batching;
 use crate::error::CacheResolverError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -78,10 +79,12 @@ impl QueryPlan {
 
     pub(crate) fn query_hashes(
         &self,
+        batching_config: Batching,
         operation: Option<&str>,
         variables: &Object,
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
-        self.root.query_hashes(operation, variables, &self.query)
+        self.root
+            .query_hashes(batching_config, operation, variables, &self.query)
     }
 }
 
@@ -217,6 +220,7 @@ impl PlanNode {
     /// details and don't use _ so that future node types must be handled here.
     pub(crate) fn query_hashes(
         &self,
+        batching_config: Batching,
         operation: Option<&str>,
         variables: &Object,
         query: &Query,
@@ -237,8 +241,10 @@ impl PlanNode {
                         new_targets.extend(nodes);
                     }
                     PlanNode::Fetch(node) => {
-                        // If requires.is_empty() we can batch it!
-                        if node.requires.is_empty() {
+                        // If requires.is_empty() we may be able to batch it!
+                        if node.requires.is_empty()
+                            && batching_config.batch_include(&node.service_name)
+                        {
                             query_hashes.push(node.schema_aware_hash.clone());
                         }
                     }
