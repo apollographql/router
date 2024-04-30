@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::Schema;
+use schemars::schema::{ObjectValidation, Schema, SchemaObject, SubschemaValidation};
 use schemars::JsonSchema;
 use serde::de::Error;
 use serde::de::MapAccess;
@@ -132,16 +132,39 @@ where
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        let mut attributes = gen.subschema_for::<A>();
+        let attributes = gen.subschema_for::<A>();
         let custom = gen.subschema_for::<HashMap<String, E>>();
-        if let Schema::Object(schema) = &mut attributes {
-            if let Some(object) = &mut schema.object {
-                object.additional_properties =
-                    custom.into_object().object().additional_properties.clone();
-            }
-        }
+        Schema::Object(SchemaObject {
+            metadata: None,
+            instance_type: None,
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: Some(Box::new(SubschemaValidation {
+                all_of: Some(vec![attributes]),
+                any_of: None,
+                one_of: None,
+                not: None,
+                if_schema: None,
+                then_schema: None,
+                else_schema: None,
+            })),
+            number: None,
+            string: None,
+            array: None,
+            object: Some(Box::new(ObjectValidation {
+                additional_properties: Some(Box::new(custom)),
+                property_names: None,
+                min_properties: None,
+                required: Default::default(),
+                properties: Default::default(),
+                max_properties: None,
+                pattern_properties: Default::default(),
+            })),
 
-        attributes
+            reference: None,
+            extensions: Default::default(),
+        })
     }
 }
 

@@ -6,6 +6,7 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
+use std::mem;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
@@ -13,8 +14,8 @@ use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use schemars::gen::{GenVisitor, SchemaSettings};
-use schemars::schema::RootSchema;
-use schemars::visit::Visitor;
+use schemars::schema::{RootSchema, SchemaObject};
+use schemars::visit::{visit_root_schema, visit_schema_object, Visitor};
 use tower::BoxError;
 use yaml_rust::scanner::Marker;
 
@@ -34,12 +35,19 @@ const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 struct MyVisitor;
 
 impl Visitor for MyVisitor {
-    fn visit_schema(&mut self, schema: &mut schemars::schema::Schema) {
-        if let schemars::schema::Schema::Object(o) = schema {
-            if let Some(reference) = &mut o.reference {
-                *reference = reference.replace("<", "_").replace(">", "_");
-            }
+    fn visit_root_schema(&mut self, root: &mut RootSchema) {
+        visit_root_schema(self, root);
+        root.definitions = mem::take(&mut root.definitions)
+            .into_iter()
+            .map(|(k, v)| (k.replace(" ", "_"), v))
+            .collect();
+    }
+    fn visit_schema_object(&mut self, schema: &mut SchemaObject) {
+        if let Some(reference) = &mut schema.reference {
+            *reference = reference.replace(" ", "_");
         }
+
+        visit_schema_object(self, schema);
     }
 }
 
