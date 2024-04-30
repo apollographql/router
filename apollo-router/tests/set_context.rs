@@ -60,6 +60,45 @@ async fn test_set_context() {
     insta::assert_json_snapshot!(response);
 }
 
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_context_no_typenames() {
+    let harness = setup_from_mocks(
+        json! {{
+            "experimental_type_conditioned_fetching": true,
+            // will make debugging easier
+            "plugins": {
+                "experimental.expose_query_plan": true
+            },
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }},
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    );
+    let supergraph_service = harness.build_supergraph().await.unwrap();
+    let request = supergraph::Request::fake_builder()
+        .query(QUERY_NO_TYPENAMES.to_string())
+        .header("Apollo-Expose-Query-Plan", "true")
+        .variables(Default::default())
+        .build()
+        .expect("expecting valid request");
+
+    let response = supergraph_service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+
 fn setup_from_mocks(
     configuration: serde_json::Value,
     mocks: &[(&'static str, &'static str)],
@@ -97,6 +136,14 @@ static QUERY: &str = r#"query Query {
       id
       u {
         __typename
+        field
+      }
+    }
+  }"#;
+  static QUERY_NO_TYPENAMES: &str = r#"query Query {
+    t {
+      id
+      u {
         field
       }
     }

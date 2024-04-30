@@ -1,0 +1,112 @@
+---
+source: apollo-router/tests/set_context.rs
+expression: response
+---
+{
+  "data": null,
+  "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Cannot return null for non-nullable field U.field",
+        "path": [
+          "t",
+          "u"
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field T.u",
+        "path": [
+          "t",
+          "u"
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field T!.t",
+        "path": [
+          "t"
+        ]
+      }
+    ],
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Fetch",
+              "serviceName": "Subgraph1",
+              "variableUsages": [],
+              "operation": "query Query__Subgraph1__0{t{prop id u{id}}}",
+              "operationName": "Query__Subgraph1__0",
+              "operationKind": "query",
+              "id": null,
+              "inputRewrites": null,
+              "outputRewrites": null,
+              "contextRewrites": null,
+              "schemaAwareHash": "0c11d75a9caa25f012a22034f3deff983b512276d0405e155bd83a459d803b72",
+              "authorization": {
+                "is_authenticated": false,
+                "scopes": [],
+                "policies": []
+              }
+            },
+            {
+              "kind": "Flatten",
+              "path": [
+                "t",
+                "u"
+              ],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "Subgraph1",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "U",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      }
+                    ]
+                  }
+                ],
+                "variableUsages": [
+                  "Subgraph1_U_field_a"
+                ],
+                "operation": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
+                "operationName": "Query__Subgraph1__1",
+                "operationKind": "query",
+                "id": null,
+                "inputRewrites": null,
+                "outputRewrites": null,
+                "contextRewrites": [
+                  {
+                    "kind": "KeyRenamer",
+                    "path": [
+                      "..",
+                      "prop"
+                    ],
+                    "renameKeyTo": "Subgraph1_U_field_a"
+                  }
+                ],
+                "schemaAwareHash": "82ac499d9905065a835b1ad324b824367a513c6eb3e3b9c0364dd6bd31edb384",
+                "authorization": {
+                  "is_authenticated": false,
+                  "scopes": [],
+                  "policies": []
+                }
+              }
+            }
+          ]
+        }
+      },
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          prop\n          id\n          u {\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
+    }
+  }
+}

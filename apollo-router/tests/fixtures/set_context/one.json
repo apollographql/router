@@ -21,6 +21,23 @@
     },
     {
       "request": {
+        "query": "query Query__Subgraph1__0{t{prop id u{id}}}",
+        "operationName": "Query__Subgraph1__0"
+      },
+      "response": {
+        "data": {
+          "t": {
+            "prop": "prop value",
+            "id": "1",
+            "u": {
+              "id": "1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
         "query": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{__typename id field(a:$Subgraph1_U_field_a)}}}",
         "operationName": "Query__Subgraph1__1",
         "variables": {
