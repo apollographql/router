@@ -269,6 +269,49 @@ fn data_at_path<'v>(data: &'v Value, path: &Vec<PathElement>) -> Option<&'v Valu
     v
 }
 
+fn merge_context_path(current_dir: &Path, context_path: &Path) -> Vec<PathElement> {
+    let mut i = 0;
+    let mut j = current_dir.len();
+    // iterate over the context_path(i), every time we encounter a '..', we want 
+    // to go up one level in the current_dir(j)
+    while i < context_path.len() {
+        match &context_path.0[i] {
+            PathElement::Key(e,_) => {
+                let mut found = false;
+                if e == ".." {
+                    while !found {
+                        j -= 1;
+                        match current_dir.0[j] {
+                            PathElement::Key(_,_) => {
+                                found = true;
+                            },
+                            _ => {},
+                        }
+                    }
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    
+    let mut return_path: Vec<PathElement> = current_dir
+        .iter()
+        .take(j)
+        .map(|e| e.clone())
+        .collect();
+    
+    context_path
+        .iter()
+        .skip(i)
+        .for_each(|e| {
+            return_path.push(e.clone());
+        });
+    return_path
+}
+
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
@@ -287,49 +330,27 @@ impl Variables {
         if let Some(crw) = context_rewrites {
             crw.iter().for_each(|rewrite| {
                 if let DataRewrite::KeyRenamer(item) = rewrite {
-                    let up_count = item.path.iter().enumerate().find_map(|(index, p)| match p {
-                        PathElement::Key(key, _) => {
-                            if key != ".." {
-                                Some(index)
-                            } else {
-                                None
-                            }
+                    dbg!(&current_dir, &item.path);
+                    let data_path = merge_context_path(&current_dir, &item.path);
+
+                    let value = data_at_path(data, &data_path);
+                    let dp: Path = Path(data_path.into_iter().collect());
+                    let rewrite_with_updated_path = DataRewrite::KeyRenamer({
+                        DataKeyRenamer {
+                            path: dp,
+                            rename_key_to: item.rename_key_to.clone(),
                         }
-                        _ => Some(index),
                     });
-
-                    // dbg!(&current_dir);
-                    if let Some(count) = up_count {
-                        let mut data_path: Vec<PathElement> = current_dir
-                            .iter()
-                            .take(current_dir.len() - count)
-                            .map(|e| e.clone())
-                            .collect();
-                        item.path
-                            .iter()
-                            .skip(count)
-                            .for_each(|elem| data_path.push(elem.clone()));
-                        let value = data_at_path(data, &data_path);
-                        // dbg!(&data_path);
-                        // dbg!(&data);
-                        let dp: Path = Path(data_path.into_iter().collect());
-                        let rewrite_with_updated_path = DataRewrite::KeyRenamer({
-                            DataKeyRenamer {
-                                path: dp,
-                                rename_key_to: item.rename_key_to.clone(),
-                            }
-                        });
-
-                        if let Some(v) = value {
-                            // TODO: not great
-                            let mut new_value = v.clone();
-                            rewrites::apply_single_rewrite(
-                                schema,
-                                &mut new_value,
-                                &rewrite_with_updated_path,
-                            );
-                            context_variables.insert(item.rename_key_to.clone(), new_value);
-                        }
+                    dbg!(&rewrite_with_updated_path, &value);
+                    if let Some(v) = value {
+                        // TODO: not great
+                        let mut new_value = v.clone();
+                        rewrites::apply_single_rewrite(
+                            schema,
+                            &mut new_value,
+                            &rewrite_with_updated_path,
+                        );
+                        context_variables.insert(item.rename_key_to.clone(), new_value);
                     }
                 }
             });

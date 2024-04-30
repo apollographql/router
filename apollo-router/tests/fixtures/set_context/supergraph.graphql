@@ -92,6 +92,7 @@ enum link__Purpose {
 
 type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
   t: T! @join__field(graph: SUBGRAPH1)
+  tList: [T]! @join__field(graph: SUBGRAPH1)
   a: Int! @join__field(graph: SUBGRAPH2)
 }
 
@@ -100,6 +101,7 @@ type T
   @context(name: "Subgraph1__context") {
   id: ID!
   u: U!
+  uList: [U]!
   prop: String!
 }
 
