@@ -56,7 +56,6 @@ impl Default for CostContext {
 
 impl CostContext {
     pub(crate) fn delta(&self) -> f64 {
-        dbg!(&self);
         self.estimated - self.actual
     }
 

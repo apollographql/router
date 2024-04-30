@@ -1175,12 +1175,13 @@ where
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner
+        let attrs: Vec<KeyValue> = inner
             .selectors
             .on_event_response(response, ctx)
             .into_iter()
             .collect();
-        attrs.extend(inner.attributes.clone());
+        inner.attributes.extend(attrs);
+
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -1223,7 +1224,7 @@ where
 
         inner.incremented = true;
         if let Some(counter) = &inner.counter {
-            counter.add(increment, &attrs);
+            counter.add(increment, &inner.attributes);
         }
     }
 
@@ -1432,12 +1433,12 @@ where
             }
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner
+        let attrs: Vec<KeyValue> = inner
             .selectors
             .as_ref()
             .map(|s| s.on_response(response).into_iter().collect())
             .unwrap_or_default();
-        attrs.append(&mut inner.attributes);
+        inner.attributes.extend(attrs);
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -1469,7 +1470,7 @@ where
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
-            histogram.record(increment, &attrs);
+            histogram.record(increment, &inner.attributes);
         }
     }
 

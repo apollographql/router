@@ -153,6 +153,7 @@ impl CostInstrumentsConfig {
                 Some(attributes.clone())
             }
         };
+
         CustomHistogram {
             inner: Mutex::new(CustomHistogramInner {
                 increment: Increment::EventCustom(None),
@@ -269,6 +270,7 @@ pub(crate) enum CostValue {
 
 #[cfg(test)]
 mod test {
+    use crate::context::OPERATION_NAME;
     use crate::plugins::demand_control::CostContext;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
     use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
@@ -348,10 +350,20 @@ mod test {
         let instruments = config.to_instruments();
         make_request(&instruments);
 
-        assert_histogram_sum!("cost.delta", 90.0, cost.result = "COST_TOO_EXPENSIVE");
+        assert_histogram_sum!(
+            "cost.delta",
+            90.0,
+            cost.result = "COST_TOO_EXPENSIVE",
+            graphql.operation.name = "Test"
+        );
 
         make_request(&instruments);
-        assert_histogram_sum!("cost.delta", 180.0, cost.result = "COST_TOO_EXPENSIVE");
+        assert_histogram_sum!(
+            "cost.delta",
+            180.0,
+            cost.result = "COST_TOO_EXPENSIVE",
+            graphql.operation.name = "Test"
+        );
     }
 
     fn config(config: &'static str) -> CostInstrumentsConfig {
@@ -372,6 +384,7 @@ mod test {
             cost_result.actual = 10.0;
             cost_result.result = "COST_TOO_EXPENSIVE"
         }
+        let _ = context.insert(OPERATION_NAME, "Test".to_string()).unwrap();
         instruments.on_request(
             &supergraph::Request::fake_builder()
                 .context(context.clone())
