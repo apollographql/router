@@ -76,9 +76,8 @@ For example, the following condition checks the response status code is greater 
 
 ```yaml
 gt:
-  left:
-    response_status: code
-  right: 299
+  - response_status: code
+  - 299
 ```
 
 Values may be of types `string`, `number` or `boolean`.
