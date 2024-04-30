@@ -68,6 +68,21 @@ eq:
 
 Values may be of types `string`, `number` or `boolean`.
 
+#### `gt`
+
+The `gt` condition checks that one value is greater than another.
+
+For example, the following condition checks the response status code is greater than 299:
+
+```yaml
+gt:
+  left:
+    response_status: code
+  right: 299
+```
+
+Values may be of types `string`, `number` or `boolean`.
+
 #### `not`
 
 The `not` condition is a negation of the nested condition.
@@ -120,6 +135,7 @@ The available basic conditions:
 | Condition | Description                                             |
 |----------|----------------------------------------------------------|
 | `eq`     | An equality test between selectors or values             |
+| `gt`     | An inequality test between selectors or values           |
 | `exist`  | A check to see if the selectors value exists             |
 | `not`    | A negated equality test between selectors or values      |
 | `all`    | A list of conditions that must all be true               |
