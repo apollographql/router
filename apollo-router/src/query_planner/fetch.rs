@@ -607,12 +607,20 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas) {
+    pub(crate) fn hash_subquery(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+        supergraph_schema_hash: &str,
+    ) {
         let doc = self.parsed_operation(subgraph_schemas);
         let schema = &subgraph_schemas[self.service_name.as_str()];
 
-        if let Ok(hash) = QueryHashVisitor::hash_query(schema, doc, self.operation_name.as_deref())
-        {
+        if let Ok(hash) = QueryHashVisitor::hash_query(
+            schema,
+            supergraph_schema_hash,
+            doc,
+            self.operation_name.as_deref(),
+        ) {
             self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
     }
