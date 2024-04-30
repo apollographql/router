@@ -1164,7 +1164,7 @@ where
 
         if increment != 0.0 {
             if let Some(counter) = &inner.counter {
-                counter.add(increment, &inner.attrs);
+                counter.add(increment, &inner.attributes);
             }
             inner.incremented = true;
         }
