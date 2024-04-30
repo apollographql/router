@@ -19,7 +19,7 @@ use std::sync::Arc;
 // Typescript doesn't have a native way of associating equality/hash functions with types, so they
 // were passed around manually. This isn't the case with Rust, where we instead implement trigger
 // equality via `PartialEq` and `Hash`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PathTree<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -74,7 +74,7 @@ impl OpPathTree {
     pub(crate) fn from_op_paths(
         graph: Arc<QueryGraph>,
         node: NodeIndex,
-        paths: &[(&OpGraphPath, &Arc<NormalizedSelectionSet>)],
+        paths: &[(&OpGraphPath, Option<&Arc<NormalizedSelectionSet>>)],
     ) -> Result<Self, FederationError> {
         assert!(
             !paths.is_empty(),
@@ -166,7 +166,7 @@ where
         node: NodeIndex,
         graph_paths_and_selections: Vec<(
             impl Iterator<Item = GraphPathItem<'inputs, TTrigger, TEdge>>,
-            &'inputs Arc<NormalizedSelectionSet>,
+            Option<&'inputs Arc<NormalizedSelectionSet>>,
         )>,
     ) -> Result<Self, FederationError>
     where
@@ -184,7 +184,8 @@ where
 
         struct PathTreeChildInputs<'inputs, GraphPathIter> {
             conditions: Option<Arc<OpPathTree>>,
-            sub_paths_and_selections: Vec<(GraphPathIter, &'inputs Arc<NormalizedSelectionSet>)>,
+            sub_paths_and_selections:
+                Vec<(GraphPathIter, Option<&'inputs Arc<NormalizedSelectionSet>>)>,
         }
 
         let mut local_selection_sets = Vec::new();
@@ -192,7 +193,9 @@ where
         for (mut graph_path_iter, selection) in graph_paths_and_selections {
             let Some((generic_edge, trigger, conditions)) = graph_path_iter.next() else {
                 // End of an input `GraphPath`
-                local_selection_sets.push(selection.clone());
+                if let Some(selection) = selection {
+                    local_selection_sets.push(selection.clone());
+                }
                 continue;
             };
             let for_edge = match merged.entry(generic_edge) {
@@ -277,7 +280,7 @@ where
             })
     }
 
-    fn merge(self: &Arc<Self>, other: &Arc<Self>) -> Arc<Self> {
+    pub(crate) fn merge(self: &Arc<Self>, other: &Arc<Self>) -> Arc<Self> {
         if Arc::ptr_eq(self, other) {
             return self.clone();
         }
@@ -503,7 +506,10 @@ mod tests {
                 .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
-        let paths = vec![(&path1, &selection_set), (&path2, &selection_set)];
+        let paths = vec![
+            (&path1, Some(&selection_set)),
+            (&path2, Some(&selection_set)),
+        ];
         let path_tree =
             OpPathTree::from_op_paths(query_graph.to_owned(), NodeIndex::new(0), &paths).unwrap();
         let computed = path_tree.to_string();

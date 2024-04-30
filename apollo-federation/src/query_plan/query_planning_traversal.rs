@@ -11,8 +11,10 @@ use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::{QueryGraph, QueryGraphNodeType};
 use crate::query_plan::fetch_dependency_graph::{compute_nodes_for_tree, FetchDependencyGraph};
 use crate::query_plan::fetch_dependency_graph_processor::{
-    FetchDependencyGraphToCostProcessor, FetchDependencyGraphToQueryPlanProcessor,
+    FetchDependencyGraphProcessor, FetchDependencyGraphToCostProcessor,
+    FetchDependencyGraphToQueryPlanProcessor,
 };
+use crate::query_plan::generate::{generate_all_plans_and_find_best, PlanBuilder};
 use crate::query_plan::operation::{
     NormalizedOperation, NormalizedSelection, NormalizedSelectionSet,
 };
@@ -101,7 +103,7 @@ pub(crate) struct BestQueryPlanInfo {
     /// The fetch dependency graph for this query plan.
     pub fetch_dependency_graph: FetchDependencyGraph,
     /// The path tree for the closed branch options chosen for this query plan.
-    pub path_tree: OpPathTree,
+    pub path_tree: Arc<OpPathTree>,
     /// The cost of this query plan.
     pub cost: QueryPlanCost,
 }
@@ -116,7 +118,8 @@ impl BestQueryPlanInfo {
                 None,
                 0,
             ),
-            path_tree: OpPathTree::new(parameters.federated_query_graph.clone(), parameters.head),
+            path_tree: OpPathTree::new(parameters.federated_query_graph.clone(), parameters.head)
+                .into(),
             cost: Default::default(),
         }
     }
@@ -438,6 +441,27 @@ impl<'a> QueryPlanningTraversal<'a> {
         todo!()
     }
 
+    fn cost(
+        &mut self,
+        dependency_graph: &mut FetchDependencyGraph,
+    ) -> Result<i64, FederationError> {
+        let (main, deferred) = dependency_graph.process(self.cost_processor, self.root_kind)?;
+        if deferred.is_empty() {
+            Ok(main)
+        } else {
+            let Some(primary_selection) =
+                dependency_graph.defer_tracking.primary_selection.as_ref()
+            else {
+                // PORT_NOTE: The JS version unwraps here.
+                return Err(FederationError::internal(
+                    "Primary selection not set in fetch dependency graph",
+                ));
+            };
+            self.cost_processor
+                .reduce_defer(main, primary_selection, deferred)
+        }
+    }
+
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
         if self.closed_branches.is_empty() {
             return Ok(());
@@ -446,7 +470,94 @@ impl<'a> QueryPlanningTraversal<'a> {
         self.sort_options_in_closed_branches()?;
         self.reduce_options_if_needed();
 
-        todo!() // the rest of the owl
+        // debug log
+        // self.closed_branches
+        //     .iter()
+        //     .enumerate()
+        //     .for_each(|(i, branch)| {
+        //         println!("{i}:");
+        //         branch.0.iter().for_each(|path| {
+        //             println!("  - {path}");
+        //         });
+        //     });
+
+        // Note that usually we'll have a majority of branches with just one option. We can group them in
+        // a PathTree first with no fuss. When then need to do a cartesian product between this created
+        // tree an other branches however to build the possible plans and chose.
+
+        // find the index of the branch with only one path in self.closed_branches.
+        let sole_path_branch_index = self
+            .closed_branches
+            .iter()
+            .position(|branch| branch.0.len() == 1)
+            .unwrap_or(self.closed_branches.len());
+        // first_group: the first half of branches that have multiple choices.
+        // second_group: the second half starting with a branch that has only one choice.
+        let (first_group, second_group) = self.closed_branches.split_at(sole_path_branch_index);
+
+        let initial_tree;
+        let mut initial_dependency_graph = self.new_dependency_graph();
+        let federated_query_graph = &self.parameters.federated_query_graph;
+        let root = &self.parameters.head;
+        if second_group.is_empty() {
+            // Unfortunately, all branches have more than one choices.
+            initial_tree = OpPathTree::new(federated_query_graph.clone(), *root);
+        } else {
+            // Build a tree with the second group's paths.
+            let single_choice_branches: Vec<_> = second_group
+                .iter()
+                .flat_map(|b| &b.0)
+                .flat_map(|cp| cp.flatten())
+                .collect();
+            initial_tree = OpPathTree::from_op_paths(
+                federated_query_graph.clone(),
+                *root,
+                &single_choice_branches,
+            )?;
+            self.updated_dependency_graph(&mut initial_dependency_graph, &initial_tree)?;
+            if first_group.is_empty() {
+                // Well, we have the only possible plan; it's also the best.
+                let cost = self.cost(&mut initial_dependency_graph)?;
+                self.best_plan = BestQueryPlanInfo {
+                    fetch_dependency_graph: initial_dependency_graph,
+                    path_tree: initial_tree.into(),
+                    cost,
+                }
+                .into();
+                return Ok(());
+            }
+        }
+
+        // Build trees from the first group
+        let other_trees: Vec<Vec<Option<Arc<OpPathTree>>>> = first_group
+            .iter()
+            .map(|b| {
+                b.0.iter()
+                    .map(|opt| {
+                        OpPathTree::from_op_paths(
+                            federated_query_graph.clone(),
+                            *root,
+                            &Vec::from_iter(opt.flatten()),
+                        )
+                        .ok()
+                        .map(Arc::new)
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let (best, cost) = generate_all_plans_and_find_best(
+            (initial_dependency_graph, Arc::new(initial_tree)),
+            other_trees,
+            /*plan_builder*/ self,
+        )?;
+        self.best_plan = BestQueryPlanInfo {
+            fetch_dependency_graph: best.0,
+            path_tree: best.1,
+            cost,
+        }
+        .into();
+        Ok(())
     }
 
     /// Remove closed branches that are known to be overridden by others.
@@ -774,10 +885,63 @@ impl<'a> QueryPlanningTraversal<'a> {
         match best_plan_opt {
             Some(best_plan) => Ok(ConditionResolution::Satisfied {
                 cost: best_plan.cost,
-                path_tree: Some(Arc::new(best_plan.path_tree)),
+                path_tree: Some(best_plan.path_tree),
             }),
             None => Ok(ConditionResolution::unsatisfied_conditions()),
         }
+    }
+}
+
+impl PlanBuilder<(FetchDependencyGraph, Arc<OpPathTree>), Arc<OpPathTree>>
+    for QueryPlanningTraversal<'_>
+{
+    fn add_to_plan(
+        &mut self,
+        (plan_graph, plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
+        tree: Arc<OpPathTree>,
+    ) -> (FetchDependencyGraph, Arc<OpPathTree>) {
+        let mut updated_graph = plan_graph.clone();
+        let result = self.updated_dependency_graph(&mut updated_graph, &tree);
+        if result.is_ok() {
+            let updated_tree = plan_tree.merge(&tree);
+            (updated_graph, updated_tree)
+        } else {
+            // Failed to update. Return the original plan.
+            (updated_graph, plan_tree.clone())
+        }
+    }
+
+    fn compute_plan_cost(
+        &mut self,
+        (plan_graph, _): &mut (FetchDependencyGraph, Arc<OpPathTree>),
+    ) -> Result<QueryPlanCost, FederationError> {
+        self.cost(plan_graph)
+    }
+
+    fn on_plan_generated(
+        &self,
+        (_, _plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
+        _cost: QueryPlanCost,
+        _prev_cost: Option<QueryPlanCost>,
+    ) {
+        // debug log
+        // if prev_cost.is_none() {
+        //     print!("Computed plan with cost {}: {}", cost, plan_tree);
+        // } else if cost > prev_cost.unwrap() {
+        //     print!(
+        //         "Ignoring plan with cost {} (a better plan with cost {} exists): {}",
+        //         cost,
+        //         prev_cost.unwrap(),
+        //         plan_tree
+        //     );
+        // } else {
+        //     print!(
+        //         "Found better with cost {} (previous had cost {}): {}",
+        //         cost,
+        //         prev_cost.unwrap(),
+        //         plan_tree
+        //     );
+        // }
     }
 }
 

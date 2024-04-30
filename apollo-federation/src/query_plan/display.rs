@@ -1,39 +1,7 @@
 use super::*;
+use crate::indented_display::{write_indented_lines, State};
 use apollo_compiler::executable;
 use std::fmt;
-
-pub(crate) struct State<'fmt, 'fmt2> {
-    indent_level: usize,
-    output: &'fmt mut fmt::Formatter<'fmt2>,
-}
-
-impl State<'_, '_> {
-    fn write<T: fmt::Display>(&mut self, value: T) -> fmt::Result {
-        write!(self.output, "{}", value)
-    }
-
-    fn new_line(&mut self) -> fmt::Result {
-        self.write("\n")?;
-        for _ in 0..self.indent_level {
-            self.write("  ")?
-        }
-        Ok(())
-    }
-
-    fn indent_no_new_line(&mut self) {
-        self.indent_level += 1;
-    }
-
-    fn indent(&mut self) -> fmt::Result {
-        self.indent_no_new_line();
-        self.new_line()
-    }
-
-    fn dedent(&mut self) -> fmt::Result {
-        self.indent_level -= 1;
-        self.new_line()
-    }
-}
 
 impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
@@ -264,7 +232,7 @@ impl PrimaryDeferBlock {
                 state.write(
                     sub_selection
                         .serialize()
-                        .initial_indent_level(state.indent_level),
+                        .initial_indent_level(state.indent_level()),
                 )?;
                 if node.is_some() {
                     state.write(":")?;
@@ -345,7 +313,7 @@ fn write_operation(
         state.write(
             operation
                 .serialize()
-                .initial_indent_level(state.indent_level),
+                .initial_indent_level(state.indent_level()),
         )?
     }
     for fragment in operation_document.fragments.values() {
@@ -353,7 +321,7 @@ fn write_operation(
         state.write(
             fragment
                 .serialize()
-                .initial_indent_level(state.indent_level),
+                .initial_indent_level(state.indent_level()),
         )?
     }
     Ok(())
@@ -370,25 +338,9 @@ fn write_selections(
     }
     state.write("{")?;
     write_indented_lines(state, selections, |state, sel| {
-        state.write(sel.serialize().initial_indent_level(state.indent_level))
+        state.write(sel.serialize().initial_indent_level(state.indent_level()))
     })?;
     state.write("}")
-}
-
-fn write_indented_lines<T>(
-    state: &mut State<'_, '_>,
-    values: &[T],
-    mut write_line: impl FnMut(&mut State<'_, '_>, &T) -> fmt::Result,
-) -> fmt::Result {
-    if !values.is_empty() {
-        state.indent_no_new_line();
-        for value in values {
-            state.new_line()?;
-            write_line(state, value)?;
-        }
-        state.dedent()?;
-    }
-    Ok(())
 }
 
 impl fmt::Display for FetchDataPathElement {
@@ -421,7 +373,7 @@ macro_rules! impl_display {
         $(
             impl fmt::Display for $Ty {
                 fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    self.write_indented(&mut State { indent_level: 0, output })
+                    self.write_indented(&mut State::new(output))
                 }
             }
         )+

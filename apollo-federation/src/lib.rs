@@ -3,6 +3,7 @@
 mod api_schema;
 mod compat;
 pub mod error;
+mod indented_display;
 pub mod link;
 pub mod merge;
 pub mod query_graph;
