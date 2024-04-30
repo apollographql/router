@@ -2,15 +2,17 @@
   "mocks": [
     {
       "request": {
-        "query": "query Query__one__0{t{prop id u{id}}}",
-        "operationName": "Query__one__0"
+        "query": "query Query__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+        "operationName": "Query__Subgraph1__0"
       },
       "response": {
         "data": {
           "t": {
+            "__typename": "T",
             "prop": "prop value",
             "id": "1",
             "u": {
+              "__typename": "U",
               "id": "1"
             }
           }
@@ -18,22 +20,25 @@
       }
     },
     {
-        "request": {
-          "query": "query Query__one__0{t{prop id u{__typename id}}}",
-          "operationName": "Query__one__0"
-        },
-        "response": {
-          "data": {
-            "t": {
-              "prop": "prop value",
+      "request": {
+        "query": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{__typename id field(a:$Subgraph1_U_field_a)}}}",
+        "operationName": "Query__Subgraph1__1",
+        "variables": {
+          "Subgraph1_U_field_a": "prop value",
+          "representations": [{ "__typename": "U", "id": "1" }]
+        }
+      },
+      "response": {
+        "data": {
+          "_entities": [
+            {
+              "__typename": "U",
               "id": "1",
-              "u": {
-                "__typename": "U",
-                "id": "1"
-              }
+              "field": 1234
             }
-          }
+          ]
         }
       }
+    }
   ]
 }

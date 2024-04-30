@@ -282,11 +282,8 @@ impl Variables {
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        // TODO: remove these clones we're in the hot path
-        let mut input_rewrites = input_rewrites.clone().unwrap_or_default();
         let mut context_variables: HashMap<NodeStr, Value> = Default::default();
         // apply context_rewrites
-        dbg!(&context_rewrites);
         if let Some(crw) = context_rewrites {
             crw.iter().for_each(|rewrite| {
                 if let DataRewrite::KeyRenamer(item) = rewrite {
@@ -338,7 +335,6 @@ impl Variables {
             });
         }
 
-        let input_rewrites = &Some(input_rewrites);
         let body = request.body();
         let mut variables: serde_json_bytes::Map<serde_json_bytes::ByteString, Value> =
             Object::with_capacity(1 + variable_usages.len());
@@ -356,11 +352,9 @@ impl Variables {
             let mut values: IndexSet<Value> = IndexSet::new();
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                dbg!(&requires);
                 let mut value = execute_selection_set(value, requires, schema, None);
-                dbg!(&value);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
-                    rewrites::apply_rewrites(schema, &mut value, &input_rewrites);
+                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
                         Some(index) => {
                             inverted_paths[index].push(path.clone());

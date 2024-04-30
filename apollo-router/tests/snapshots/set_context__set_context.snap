@@ -3,30 +3,17 @@ source: apollo-router/tests/set_context.rs
 expression: response
 ---
 {
-  "data": null,
-  "extensions": {
-    "valueCompletion": [
-      {
-        "message": "Cannot return null for non-nullable field U.field",
-        "path": [
-          "t",
-          "u"
-        ]
-      },
-      {
-        "message": "Cannot return null for non-nullable field T.u",
-        "path": [
-          "t",
-          "u"
-        ]
-      },
-      {
-        "message": "Cannot return null for non-nullable field T!.t",
-        "path": [
-          "t"
-        ]
+  "data": {
+    "t": {
+      "__typename": "T",
+      "id": "1",
+      "u": {
+        "__typename": "U",
+        "field": 1234
       }
-    ],
+    }
+  },
+  "extensions": {
     "apolloQueryPlan": {
       "object": {
         "kind": "QueryPlan",
@@ -35,16 +22,16 @@ expression: response
           "nodes": [
             {
               "kind": "Fetch",
-              "serviceName": "one",
+              "serviceName": "Subgraph1",
               "variableUsages": [],
-              "operation": "query Query__one__0{t{prop id u{id}}}",
-              "operationName": "Query__one__0",
+              "operation": "query Query__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+              "operationName": "Query__Subgraph1__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "0c11d75a9caa25f012a22034f3deff983b512276d0405e155bd83a459d803b72",
+              "schemaAwareHash": "2a8f649a16b50733cc9918606128e13ea8e101604969209cc0df7e0306121118",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -59,7 +46,7 @@ expression: response
               ],
               "node": {
                 "kind": "Fetch",
-                "serviceName": "one",
+                "serviceName": "Subgraph1",
                 "requires": [
                   {
                     "kind": "InlineFragment",
@@ -77,10 +64,10 @@ expression: response
                   }
                 ],
                 "variableUsages": [
-                  "one_U_field_a"
+                  "Subgraph1_U_field_a"
                 ],
-                "operation": "query Query__one__1($representations:[_Any!]!$one_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$one_U_field_a)}}}",
-                "operationName": "Query__one__1",
+                "operation": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{__typename id field(a:$Subgraph1_U_field_a)}}}",
+                "operationName": "Query__Subgraph1__1",
                 "operationKind": "query",
                 "id": null,
                 "inputRewrites": null,
@@ -92,10 +79,10 @@ expression: response
                       "..",
                       "prop"
                     ],
-                    "renameKeyTo": "one_U_field_a"
+                    "renameKeyTo": "Subgraph1_U_field_a"
                   }
                 ],
-                "schemaAwareHash": "2116d92c6c7512fbed7dc7b4fe41a49ceaf01df2362bb49c025b6316230cce74",
+                "schemaAwareHash": "cbf8f9ce0545296f3305797769f5761b58367c4b25608467fc335c9d62df8cb1",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -106,7 +93,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"one\") {\n      {\n        t {\n          prop\n          id\n          u {\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"one\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $one_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            __typename\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

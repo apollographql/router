@@ -37,8 +37,8 @@ async fn test_set_context() {
             }
         }},
         &[
-            ("one", include_str!("fixtures/set_context/one.json")),
-            ("two", include_str!("fixtures/set_context/two.json")),
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
@@ -90,10 +90,13 @@ fn setup_from_mocks(
         .extra_plugin(mocked_subgraphs)
 }
 
+// TODO[clenfest]: figure out why i need __typename here?
 static QUERY: &str = r#"query Query {
     t {
+      __typename
       id
       u {
+        __typename
         field
       }
     }

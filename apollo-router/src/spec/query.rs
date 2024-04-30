@@ -793,6 +793,7 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
+        dbg!(&selection_set, &input, &output, &path);
         for selection in selection_set {
             match selection {
                 Selection::Field {
