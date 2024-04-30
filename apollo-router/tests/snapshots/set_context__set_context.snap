@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/set_context.rs
-assertion_line: 60
 expression: response
 ---
 {

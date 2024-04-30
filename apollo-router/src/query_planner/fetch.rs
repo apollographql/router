@@ -285,37 +285,36 @@ impl Variables {
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        match context_rewrites {
-            Some(crw) => {
-                crw.iter().for_each(|rewrite| {
-                    if let DataRewrite::KeyRenamer(item) = rewrite {
-                        let up_count = item.path.iter().enumerate().find_map(|(index, p)|  match p {
-                            PathElement::Key(key, _) => if key != ".." { Some(index) } else { None },
-                            _ => Some(index),
-                        });
-                        
-                        dbg!(&current_dir);
-                        if let Some(count) = up_count {
-                            let mut data_path: Vec<PathElement> = current_dir.iter().take(current_dir.len() - count).map(|e| e.clone()).collect();
-                            item.path.iter().skip(count).for_each(|elem| data_path.push(elem.clone()));                            
-                            dbg!(&data_path);
-                            dbg!(&data);
-                            let value = path_to_data(data, &data_path);
-                            let dp: Path = Path(data_path.into_iter().collect());
-                            let rewrite_with_updated_path = DataRewrite::KeyRenamer({
-                                DataKeyRenamer {
-                                    path: dp,
-                                    rename_key_to: item.rename_key_to.clone(),
-                                }
-                            });
-                            if let Some(mut v) = value {
-                                rewrites::apply_single_rewrite(schema, &mut v, &rewrite_with_updated_path);
+        // apply context_rewrites
+        dbg!(&context_rewrites);
+        if let Some(crw) = context_rewrites {
+            crw.iter().for_each(|rewrite| {
+                if let DataRewrite::KeyRenamer(item) = rewrite {
+                    let up_count = item.path.iter().enumerate().find_map(|(index, p)|  match p {
+                        PathElement::Key(key, _) => if key != ".." { Some(index) } else { None },
+                        _ => Some(index),
+                    });
+
+                    dbg!(&current_dir);
+                    if let Some(count) = up_count {
+                        let mut data_path: Vec<PathElement> = current_dir.iter().take(current_dir.len() - count).map(|e| e.clone()).collect();
+                        item.path.iter().skip(count).for_each(|elem| data_path.push(elem.clone()));                            
+                        dbg!(&data_path);
+                        dbg!(&data);
+                        let value = path_to_data(data, &data_path);
+                        let dp: Path = Path(data_path.into_iter().collect());
+                        let rewrite_with_updated_path = DataRewrite::KeyRenamer({
+                            DataKeyRenamer {
+                                path: dp,
+                                rename_key_to: item.rename_key_to.clone(),
                             }
+                        });
+                        if let Some(mut v) = value {
+                            rewrites::apply_single_rewrite(schema, &mut v, &rewrite_with_updated_path);
                         }
                     }
-                });
-            }
-            None => {}
+                }
+            });
         }
 
         dbg!(&input_rewrites);
