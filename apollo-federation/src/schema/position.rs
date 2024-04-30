@@ -1,5 +1,6 @@
 use crate::error::{FederationError, SingleFederationError};
 use crate::link::database::links_metadata;
+use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec_definition::SpecDefinition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::schema::referencer::{
@@ -308,6 +309,15 @@ impl CompositeTypeDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema ExtendedType> {
         self.get(schema).ok()
+    }
+
+    pub(crate) fn is_interface_object_type(&self, schema: &Schema) -> bool {
+        let Ok(ExtendedType::Object(obj_type_def)) = self.get(schema) else {
+            return false;
+        };
+        obj_type_def
+            .directives
+            .has(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC.as_str())
     }
 }
 

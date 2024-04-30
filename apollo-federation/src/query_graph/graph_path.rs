@@ -330,6 +330,49 @@ impl OpPathElement {
             OpPathElement::InlineFragment(inline_fragment) => inline_fragment.as_path_element(),
         }
     }
+
+    pub(crate) fn defer_directive_args(&self) -> Option<DeferDirectiveArguments> {
+        match self {
+            OpPathElement::Field(_) => None, // @defer cannot be on field at the moment
+            OpPathElement::InlineFragment(inline_fragment) => inline_fragment
+                .data()
+                .defer_directive_arguments()
+                .ok()
+                .flatten(),
+        }
+    }
+
+    /// Returns this fragment element but with any @defer directive on it removed.
+    ///
+    /// This method will return `None` if, upon removing @defer, the fragment has no conditions nor
+    /// any remaining applied directives (meaning that it carries no information whatsoever and can be
+    /// ignored).
+    pub(crate) fn without_defer(&self) -> Option<Self> {
+        match self {
+            Self::Field(_) => Some(self.clone()), // unchanged
+            Self::InlineFragment(inline_fragment) => {
+                let updated_directives: DirectiveList = inline_fragment
+                    .data()
+                    .directives
+                    .get_all("defer")
+                    .cloned()
+                    .collect();
+                if inline_fragment.data().type_condition_position.is_none()
+                    && updated_directives.is_empty()
+                {
+                    return None;
+                }
+                if inline_fragment.data().directives.len() == updated_directives.len() {
+                    Some(self.clone())
+                } else {
+                    // PORT_NOTE: We won't need to port `this.copyAttachementsTo(updated);` line here
+                    // since `with_updated_directives` clones the whole `self` and thus sibling
+                    // type names should be copied as well.
+                    Some(self.with_updated_directives(updated_directives))
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn selection_of_element(
@@ -406,6 +449,10 @@ impl OpGraphPathContext {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.conditionals.is_empty()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &OperationConditional> {
+        self.conditionals.iter().map(|x| x.as_ref())
     }
 }
 
@@ -1846,10 +1893,9 @@ impl OpGraphPath {
                 "Unexpectedly found federated root node as tail",
             ));
         };
-        let Ok(tail_type_pos): Result<CompositeTypeDefinitionPosition, _> =
-            tail_type_pos.clone().try_into()
+        let Ok(tail_type_pos) = CompositeTypeDefinitionPosition::try_from(tail_type_pos.clone())
         else {
-            return Ok(self.clone());
+            return Ok(path);
         };
         let typename_field = NormalizedField::new(NormalizedFieldData {
             schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
@@ -1859,12 +1905,17 @@ impl OpGraphPath {
             directives: Arc::new(Default::default()),
             sibling_typename: None,
         });
-        let Some(_edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
+        let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
             ));
         };
-        todo!()
+        path.add(
+            typename_field.into(),
+            Some(edge),
+            ConditionResolution::no_conditions(),
+            None,
+        )
     }
 
     /// Remove all trailing downcast edges and `None` edges.

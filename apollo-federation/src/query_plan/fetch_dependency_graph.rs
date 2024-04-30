@@ -11,22 +11,25 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphPro
 use crate::query_plan::operation::normalized_field_selection::{
     NormalizedField, NormalizedFieldData,
 };
+use crate::query_plan::operation::normalized_inline_fragment_selection::{
+    NormalizedInlineFragment, NormalizedInlineFragmentData,
+};
 use crate::query_plan::operation::{
     NormalizedOperation, NormalizedSelection, NormalizedSelectionSet, RebasedFragments,
-    TYPENAME_FIELD,
+    SelectionId, TYPENAME_FIELD,
 };
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::{FetchDataRewrite, QueryPlanCost};
+use crate::query_plan::{FetchDataRewrite, FetchDataValueSetter, QueryPlanCost};
 use crate::schema::position::{
     CompositeTypeDefinitionPosition, FieldDefinitionPosition, ObjectTypeDefinitionPosition,
     SchemaRootDefinitionKind,
 };
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::{ANY_SCALAR_NAME, ENTITIES_QUERY};
-use apollo_compiler::ast::{OperationType, Type};
+use apollo_compiler::ast::{Argument, Directive, OperationType, Type};
 use apollo_compiler::executable::{self, VariableDefinition};
 use apollo_compiler::schema::{self, Name};
-use apollo_compiler::{Node, NodeStr};
+use apollo_compiler::{name, Node, NodeStr};
 use indexmap::{IndexMap, IndexSet};
 use petgraph::stable_graph::{EdgeIndex, NodeIndex, StableDiGraph};
 use petgraph::visit::EdgeRef;
@@ -189,23 +192,16 @@ pub(crate) struct DeferTracking {
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredInfo {
     pub(crate) label: DeferRef,
-    pub(crate) path: FetchDependencyGraphPath,
+    pub(crate) path: FetchDependencyGraphNodePath,
     pub(crate) sub_selection: NormalizedSelectionSet,
     pub(crate) deferred: IndexSet<DeferRef>,
     pub(crate) dependencies: IndexSet<DeferRef>,
 }
 
 // TODO: Write docstrings
-#[derive(Debug, Clone)]
-pub(crate) struct FetchDependencyGraphPath {
-    pub(crate) full_path: OpPath,
-    pub(crate) path_in_node: OpPath,
-    pub(crate) response_path: Vec<FetchDataPathElement>,
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FetchDependencyGraphNodePath {
-    full_path: Arc<OpPath>,
+    pub(crate) full_path: Arc<OpPath>,
     path_in_node: Arc<OpPath>,
     response_path: Vec<FetchDataPathElement>,
 }
@@ -1135,15 +1131,37 @@ impl FetchDependencyGraphNode {
         supergraph_schema: &ValidFederationSchema,
         selection: &NormalizedSelectionSet,
         rewrites: impl IntoIterator<Item = Arc<FetchDataRewrite>>,
-    ) {
+    ) -> Result<(), FederationError> {
         let inputs = self.inputs.get_or_insert_with(|| {
             Arc::new(FetchInputs {
                 selection_sets_per_parent_type: Default::default(),
                 supergraph_schema: supergraph_schema.clone(),
             })
         });
-        Arc::make_mut(inputs).add(selection);
+        Arc::make_mut(inputs).add(selection)?;
+        self.on_inputs_updated();
         Arc::make_mut(&mut self.input_rewrites).extend(rewrites);
+        Ok(())
+    }
+
+    // PORT_NOTE: This corresponds to the `GroupInputs.onUpdateCallback` in the JS codebase.
+    //            The callback is an optional value that is set only if the `inputs` is non-null
+    //            in the `FetchGroup` constructor.
+    //            In Rust version, the `self.inputs` is checked every time the `inputs` is updated,
+    //            assuming `self.inputs` won't be changed from None to Some in the middle of its
+    //            lifetime.
+    fn on_inputs_updated(&mut self) {
+        if self.inputs.is_some() {
+            // (Original comment from the JS codebase with a minor adjustment for Rust version):
+            // We're trying to avoid the full recomputation of `is_useless` when we're already
+            // shown that the node is known useful (if it is shown useless, the node is removed,
+            // so we're not caching that result but it's ok). And `is_useless` basically checks if
+            // `inputs.contains(selection)`, so if a group is shown useful, it means that there
+            // is some selections not in the inputs, but as long as we add to selections (and we
+            // never remove from selections), then this won't change. Only changing inputs may
+            // require some recomputation.
+            self.is_known_useful = false;
+        }
     }
 
     pub(crate) fn cost(&mut self) -> Result<QueryPlanCost, FederationError> {
@@ -1527,12 +1545,29 @@ impl FetchInputs {
         }
     }
 
-    fn add(&self, selection: &NormalizedSelectionSet) {
+    fn add(&mut self, selection: &NormalizedSelectionSet) -> Result<(), FederationError> {
         assert_eq!(
             selection.schema, self.supergraph_schema,
             "Inputs selections must be based on the supergraph schema"
         );
-        todo!()
+        let type_selections = self
+            .selection_sets_per_parent_type
+            .entry(selection.type_position.clone())
+            .or_insert_with(|| {
+                Arc::new(NormalizedSelectionSet::empty(
+                    selection.schema.clone(),
+                    selection.type_position.clone(),
+                ))
+            });
+        Arc::make_mut(type_selections).merge_into(std::iter::once(selection))
+        // PORT_NOTE: `onUpdateCallback` call is moved to `FetchDependencyGraphNode::on_inputs_updated`.
+    }
+
+    fn add_all(&mut self, other: &Self) -> Result<(), FederationError> {
+        for selections in other.selection_sets_per_parent_type.values() {
+            self.add(selections)?;
+        }
+        Ok(())
     }
 
     fn to_selection_set_nodes(
@@ -1598,7 +1633,7 @@ impl DeferTracking {
         &mut self,
         defer_context: &DeferContext,
         defer_args: &DeferDirectiveArguments,
-        path: FetchDependencyGraphPath,
+        path: FetchDependencyGraphNodePath,
         parent_type: CompositeTypeDefinitionPosition,
     ) {
         // Having the primary selection undefined means that @defer handling is actually disabled, so there's no need to track anything.
@@ -1692,7 +1727,7 @@ impl DeferredInfo {
     fn empty(
         schema: ValidFederationSchema,
         label: DeferRef,
-        path: FetchDependencyGraphPath,
+        path: FetchDependencyGraphNodePath,
         parent_type: CompositeTypeDefinitionPosition,
     ) -> Self {
         Self {
@@ -1909,16 +1944,25 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    input_selections.add(edge_conditions);
+    input_selections.merge_into(std::iter::once(edge_conditions.as_ref()))?;
     let new_node =
         &mut FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
         &dependency_graph.supergraph_schema,
-        &wrap_input_selections(&input_type, &input_selections, new_context),
-        compute_input_rewrites_on_key_fetch(input_type.type_name(), &dest_type)
-            .into_iter()
-            .flatten(),
-    );
+        &wrap_input_selections(
+            &dependency_graph.supergraph_schema,
+            &input_type,
+            input_selections,
+            new_context,
+        ),
+        compute_input_rewrites_on_key_fetch(
+            &dependency_graph.supergraph_schema,
+            input_type.type_name(),
+            &dest_type,
+        )
+        .into_iter()
+        .flatten(),
+    )?;
 
     // We also ensure to get the __typename of the current type in the "original" node.
     let node =
@@ -1947,7 +1991,7 @@ fn compute_nodes_for_key_resolution<'a>(
                 &dependency_graph.supergraph_schema,
                 &dest_type,
                 new_context,
-            )),
+            )?),
         context: new_context,
         defer_context: updated_defer_context,
     })
@@ -2044,7 +2088,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
                 &dependency_graph.supergraph_schema,
                 &dest_type.into(),
                 new_context,
-            )),
+            )?),
 
         context: new_context,
         defer_context: updated_defer_context,
@@ -2069,7 +2113,7 @@ fn compute_nodes_for_op_path_element<'a>(
             operation,
             &stack_item.defer_context,
             &stack_item.node_path,
-        );
+        )?;
         // We've now removed any @defer.
         // If the operation contains other directives or a non-trivial type condition,
         // we need to preserve it and so we add operation.
@@ -2141,7 +2185,7 @@ fn compute_nodes_for_op_path_element<'a>(
             None,
         )
     }
-    let (Some(updated_operation), updated_defer_context) = extract_defer_from_operation(
+    let Ok((Some(updated_operation), updated_defer_context)) = extract_defer_from_operation(
         dependency_graph,
         operation,
         &stack_item.defer_context,
@@ -2236,36 +2280,197 @@ fn compute_nodes_for_op_path_element<'a>(
     Ok(updated)
 }
 
-fn wrap_input_selections(
-    _wrapping_type: &CompositeTypeDefinitionPosition,
-    _selections: &NormalizedSelectionSet,
-    _context: &OpGraphPathContext,
-) -> NormalizedSelectionSet {
-    todo!() // Port `wrapInputsSelections` in `buildPlan.ts`
+/// A helper function to wrap the `initial` value with nested conditions from `context`.
+fn wrap_selection_with_type_and_conditions<T>(
+    supergraph_schema: &ValidFederationSchema,
+    wrapping_type: &CompositeTypeDefinitionPosition,
+    context: &OpGraphPathContext,
+    initial: T,
+    mut wrap_in_fragment: impl FnMut(NormalizedInlineFragment, T) -> T,
+) -> T {
+    // PORT_NOTE: `unwrap` is used below, but the JS version asserts in `FragmentElement`'s constructor
+    // as well. However, there was a comment that we should add some validation, which is restated below.
+    // TODO: remove the `unwrap` with proper error handling, and ensure we have some intersection
+    // between the wrapping_type type and the new type condition.
+    let type_condition: CompositeTypeDefinitionPosition = supergraph_schema
+        .get_type(wrapping_type.type_name().clone())
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    if context.is_empty() {
+        // PORT_NOTE: JS code looks for type condition in the wrapping type's schema based on
+        // the name of wrapping type. Not sure why.
+        return wrap_in_fragment(
+            NormalizedInlineFragment::new(NormalizedInlineFragmentData {
+                schema: supergraph_schema.clone(),
+                parent_type_position: wrapping_type.clone(),
+                type_condition_position: Some(type_condition.clone()),
+                directives: Default::default(), // None
+                selection_id: SelectionId::new(),
+            }),
+            initial,
+        );
+    }
+
+    // We wrap type-casts around `initial` value along with @include/@skip directive.
+    // Note that we use the same type condition on all nested fragments. However,
+    // except for the first one, we could well also use fragments with no type condition.
+    // The reason we do the former is mostly to preserve the older behavior, but the latter
+    // would technically produce slightly smaller query plans.
+    // TODO: Next major revision may consider changing this as stated above.
+    context.iter().fold(initial, |acc, cond| {
+        let directive = Directive {
+            name: cond.kind.name(),
+            arguments: vec![Argument {
+                name: name!("if"),
+                value: cond.value.clone().into(),
+            }
+            .into()],
+        };
+        wrap_in_fragment(
+            NormalizedInlineFragment::new(NormalizedInlineFragmentData {
+                schema: supergraph_schema.clone(),
+                parent_type_position: wrapping_type.clone(),
+                type_condition_position: Some(type_condition.clone()),
+                directives: Arc::new([directive].into_iter().collect()),
+                selection_id: SelectionId::new(),
+            }),
+            acc,
+        )
+    })
 }
 
-fn compute_input_rewrites_on_key_fetch(
-    _input_type_name: &str,
-    _dest_type: &CompositeTypeDefinitionPosition,
-) -> Option<Vec<Arc<FetchDataRewrite>>> {
-    todo!() // Port `computeInputRewritesOnKeyFetch`
+fn wrap_input_selections(
+    supergraph_schema: &ValidFederationSchema,
+    wrapping_type: &CompositeTypeDefinitionPosition,
+    selections: NormalizedSelectionSet,
+    context: &OpGraphPathContext,
+) -> NormalizedSelectionSet {
+    wrap_selection_with_type_and_conditions(
+        supergraph_schema,
+        wrapping_type,
+        context,
+        selections,
+        |fragment, sub_selections| {
+            /* creates a new selection set of the form:
+               {
+                   ... on <fragment's parent type> {
+                       <sub_selections>
+                   }
+               }
+            */
+            let parent_type_position = fragment.data().parent_type_position.clone();
+            let selection =
+                NormalizedSelection::from_normalized_inline_fragment(fragment, sub_selections);
+            NormalizedSelectionSet::from_selection(parent_type_position, selection)
+        },
+    )
 }
 
 fn create_fetch_initial_path(
-    _supergraph_schema: &ValidFederationSchema,
-    _dest_type: &CompositeTypeDefinitionPosition,
-    _new_context: &OpGraphPathContext,
-) -> Arc<OpPath> {
-    todo!() // Port `createFetchInitialPath`
+    supergraph_schema: &ValidFederationSchema,
+    dest_type: &CompositeTypeDefinitionPosition,
+    context: &OpGraphPathContext,
+) -> Result<Arc<OpPath>, FederationError> {
+    // We make sure that all `OperationPath` are based on the supergraph as `OperationPath` is
+    // really about path on the input query/overall supergraph data (most other places already do
+    // this as the elements added to the operation path are from the input query, but this is
+    // an exception when we create an element from an type that may/usually will not be from the
+    // supergraph). Doing this make sure we can rely on things like checking subtyping between
+    // the types of a given path.
+    let rebased_type: CompositeTypeDefinitionPosition = supergraph_schema
+        .get_type(dest_type.type_name().clone())
+        .and_then(|res| res.try_into())?;
+    Ok(Arc::new(wrap_selection_with_type_and_conditions(
+        supergraph_schema,
+        &rebased_type,
+        context,
+        Default::default(),
+        |fragment, sub_path| {
+            // Return an OpPath of the form: [<fragment>, ...<sub_path>]
+            let front = vec![Arc::new(fragment.into())];
+            OpPath(front.into_iter().chain(sub_path.0).collect())
+        },
+    )))
 }
 
+fn compute_input_rewrites_on_key_fetch(
+    supergraph_schema: &ValidFederationSchema,
+    input_type_name: &NodeStr,
+    dest_type: &CompositeTypeDefinitionPosition,
+) -> Option<Vec<Arc<FetchDataRewrite>>> {
+    // When we send a fetch to a subgraph, the inputs __typename must essentially match `dest_type`
+    // so the proper __resolveReference is called. If `dest_type` is a "normal" object type, that's
+    // going to be fine by default, but if `dest_type` is an interface in the supergraph (meaning
+    // that it is either an interface or an interface object), then the underlying object might
+    // have a __typename that is the concrete implementation type of the object, and we need to
+    // rewrite it.
+    if dest_type.is_interface_type()
+        || dest_type.is_interface_object_type(supergraph_schema.schema())
+    {
+        // rewrite path: [ ... on <input_type_name>, __typename ]
+        let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());
+        let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD.into());
+        let rewrite = FetchDataRewrite::ValueSetter(FetchDataValueSetter {
+            path: vec![type_cond, typename_field_elem],
+            set_value_to: dest_type.type_name().to_string().into(),
+        });
+        Some(vec![Arc::new(rewrite)])
+    } else {
+        None
+    }
+}
+
+/// Returns an updated pair of (`operation`, `defer_context`) after the `defer` directive removed.
+/// - The updated operation can be `None`, if operation is no longer necessary.
 fn extract_defer_from_operation(
-    _dependency_graph: &mut FetchDependencyGraph,
-    _operation: &OpPathElement,
-    _defer_context: &DeferContext,
-    _node_path: &FetchDependencyGraphNodePath,
-) -> (Option<OpPathElement>, DeferContext) {
-    todo!() // Port `extractDeferFromOperation`
+    dependency_graph: &mut FetchDependencyGraph,
+    operation: &OpPathElement,
+    defer_context: &DeferContext,
+    node_path: &FetchDependencyGraphNodePath,
+) -> Result<(Option<OpPathElement>, DeferContext), FederationError> {
+    let defer_args = operation.defer_directive_args();
+    let Some(defer_args) = defer_args else {
+        let updated_path_to_defer_parent = defer_context
+            .path_to_defer_parent
+            .with_pushed(operation.clone().into());
+        let updated_context = DeferContext {
+            path_to_defer_parent: updated_path_to_defer_parent.into(),
+            // Following fields are identical to those of `defer_context`.
+            current_defer_ref: defer_context.current_defer_ref.clone(),
+            active_defer_ref: defer_context.active_defer_ref.clone(),
+            is_part_of_query: defer_context.is_part_of_query,
+        };
+        return Ok((Some(operation.clone()), updated_context));
+    };
+
+    let updated_defer_ref = defer_args.label().ok_or_else(||
+        // PORT_NOTE: The original TypeScript code has an assertion here.
+        FederationError::internal(
+                    "All defers should have a label at this point",
+                ))?;
+    let updated_operation = operation.without_defer();
+    let updated_path_to_defer_parent = match updated_operation {
+        None => Default::default(), // empty OpPath
+        Some(ref updated_operation) => OpPath(vec![Arc::new(updated_operation.clone())]),
+    };
+
+    dependency_graph.defer_tracking.register_defer(
+        defer_context,
+        &defer_args,
+        node_path.clone(),
+        operation.parent_type_position(),
+    );
+
+    let updated_context = DeferContext {
+        current_defer_ref: Some(updated_defer_ref.into()),
+        path_to_defer_parent: updated_path_to_defer_parent.into(),
+        // Following fields are identical to those of `defer_context`.
+        active_defer_ref: defer_context.active_defer_ref.clone(),
+        is_part_of_query: defer_context.is_part_of_query,
+    };
+    Ok((updated_operation, updated_context))
 }
 
 fn handle_requires(
@@ -2279,5 +2484,5 @@ fn handle_requires(
 ) -> Result<(NodeIndex, FetchDependencyGraphNodePath), FederationError> {
     // PORT_NOTE: instead of returing IDs of created nodes they should be inserted directly
     // in the `created_nodes` set passed by mutable reference.
-    todo!() // Port `handleRequires`
+    todo!() // Port `handleRequires` (FED-25)
 }
