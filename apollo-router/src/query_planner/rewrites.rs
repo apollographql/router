@@ -107,11 +107,7 @@ pub(crate) fn apply_rewrites(
     }
 }
 
-pub(crate) fn apply_single_rewrite(
-    schema: &Schema,
-    value: &mut Value,
-    rewrite: &DataRewrite,
-) {
+pub(crate) fn apply_single_rewrite(schema: &Schema, value: &mut Value, rewrite: &DataRewrite) {
     rewrite.maybe_apply(schema, value);
 }
 

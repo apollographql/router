@@ -126,7 +126,7 @@ pub(crate) struct FetchNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
-    
+
     // Optionally describes a number of "rewrites" to apply to the data that has already been received further up the tree
     pub(crate) context_rewrites: Option<Vec<rewrites::DataRewrite>>,
 
@@ -251,10 +251,7 @@ pub(crate) struct Variables {
     pub(crate) inverted_paths: Vec<Vec<Path>>,
 }
 
-fn path_to_data(
-    data: &Value,
-    path: &Vec<PathElement>
-) -> Option<Value> {
+fn data_at_path<'v>(data: &'v Value, path: &Vec<PathElement>) -> Option<&'v Value> {
     // TODO: We will have fragments with type conditions that need to be dealt with, but it's not working just yet
     let v = match &path[0] {
         PathElement::Fragment(s) => data.get(s),
@@ -266,10 +263,10 @@ fn path_to_data(
     if path.len() > 1 {
         if let Some(val) = v {
             let remaining_path = path.iter().skip(1).cloned().collect();
-            return path_to_data(val, &remaining_path);
+            return data_at_path(val, &remaining_path);
         }
     }
-    v.cloned()
+    v
 }
 
 impl Variables {
@@ -285,23 +282,39 @@ impl Variables {
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
+        // TODO: remove these clones we're in the hot path
+        let mut input_rewrites = input_rewrites.clone().unwrap_or_default();
+        let mut context_variables: HashMap<NodeStr, Value> = Default::default();
         // apply context_rewrites
         dbg!(&context_rewrites);
         if let Some(crw) = context_rewrites {
             crw.iter().for_each(|rewrite| {
                 if let DataRewrite::KeyRenamer(item) = rewrite {
-                    let up_count = item.path.iter().enumerate().find_map(|(index, p)|  match p {
-                        PathElement::Key(key, _) => if key != ".." { Some(index) } else { None },
+                    let up_count = item.path.iter().enumerate().find_map(|(index, p)| match p {
+                        PathElement::Key(key, _) => {
+                            if key != ".." {
+                                Some(index)
+                            } else {
+                                None
+                            }
+                        }
                         _ => Some(index),
                     });
 
-                    dbg!(&current_dir);
+                    // dbg!(&current_dir);
                     if let Some(count) = up_count {
-                        let mut data_path: Vec<PathElement> = current_dir.iter().take(current_dir.len() - count).map(|e| e.clone()).collect();
-                        item.path.iter().skip(count).for_each(|elem| data_path.push(elem.clone()));                            
-                        dbg!(&data_path);
-                        dbg!(&data);
-                        let value = path_to_data(data, &data_path);
+                        let mut data_path: Vec<PathElement> = current_dir
+                            .iter()
+                            .take(current_dir.len() - count)
+                            .map(|e| e.clone())
+                            .collect();
+                        item.path
+                            .iter()
+                            .skip(count)
+                            .for_each(|elem| data_path.push(elem.clone()));
+                        let value = data_at_path(data, &data_path);
+                        // dbg!(&data_path);
+                        // dbg!(&data);
                         let dp: Path = Path(data_path.into_iter().collect());
                         let rewrite_with_updated_path = DataRewrite::KeyRenamer({
                             DataKeyRenamer {
@@ -309,25 +322,36 @@ impl Variables {
                                 rename_key_to: item.rename_key_to.clone(),
                             }
                         });
-                        if let Some(mut v) = value {
-                            rewrites::apply_single_rewrite(schema, &mut v, &rewrite_with_updated_path);
+
+                        if let Some(v) = value {
+                            // TODO: not great
+                            let mut new_value = v.clone();
+                            rewrites::apply_single_rewrite(
+                                schema,
+                                &mut new_value,
+                                &rewrite_with_updated_path,
+                            );
+                            context_variables.insert(item.rename_key_to.clone(), new_value);
                         }
                     }
                 }
             });
         }
 
-        dbg!(&input_rewrites);
+        let input_rewrites = &Some(input_rewrites);
         let body = request.body();
+        let mut variables: serde_json_bytes::Map<serde_json_bytes::ByteString, Value> =
+            Object::with_capacity(1 + variable_usages.len());
+        variables.extend(context_variables.iter().map(|(key, value)| {
+            (key.as_str().into(), value.clone())
+        }));
+        variables.extend(variable_usages.iter().filter_map(|key| {
+            body.variables
+                .get_key_value(key.as_str())
+                .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+        }));
+
         if !requires.is_empty() {
-            let mut variables = Object::with_capacity(1 + variable_usages.len());
-
-            variables.extend(variable_usages.iter().filter_map(|key| {
-                body.variables
-                    .get_key_value(key.as_str())
-                    .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-            }));
-
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::new();
 
@@ -380,7 +404,7 @@ impl Variables {
                 variables: variable_usages
                     .iter()
                     .filter_map(|key| {
-                        body.variables
+                        variables
                             .get_key_value(key.as_str())
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
