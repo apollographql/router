@@ -36,4 +36,13 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
     {{- end }}
+    {{- range .Values.autoscaling.containerBased }}
+    - type: ContainerResource
+      containerResource:
+        container: {{ .name }}
+        name: {{ .type }}
+        target:
+          type: Utilization
+          averageUtilization: {{ .targetUtilizationPercentage }}
+    {{- end }}
 {{- end }}

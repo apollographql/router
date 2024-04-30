@@ -14,7 +14,7 @@ Fetch(
         input_rewrites: None,
         output_rewrites: None,
         schema_aware_hash: QueryHash(
-            "8d5fa7b9c03ada5f622a0b8904666d3209ffc753a1ae3a647cc1c61b6892f220",
+            "a4ab3ffe0fd7863aea8cd1e85d019d2c64ec0351d62f9759bed3c9dc707ea315",
         ),
         authorization: CacheKeyMetadata {
             is_authenticated: false,

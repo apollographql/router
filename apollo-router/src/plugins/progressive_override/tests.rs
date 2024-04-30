@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::Document;
 use tower::ServiceExt;
 
 use crate::metrics::FutureMetricsExt;
@@ -13,7 +12,6 @@ use crate::plugins::progressive_override::ProgressiveOverridePlugin;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::router;
 use crate::services::supergraph;
 use crate::services::RouterResponse;
@@ -135,12 +133,14 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    // plugin depends on the parsed document being in the context so we'll add
-    // it ourselves for testing purposes
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
-        ..Default::default()
-    });
+    let schema = crate::spec::Schema::parse_test(
+        include_str!("./testdata/supergraph.graphql"),
+        &Default::default(),
+    )
+    .unwrap();
+    let parsed_doc =
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
+            .unwrap();
 
     let context = Context::new();
     context
@@ -206,10 +206,14 @@ async fn plugin_supergraph_service_trims_0pc_label() {
 }
 
 async fn get_json_query_plan(query: &str) -> serde_json::Value {
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
-        ..Default::default()
-    });
+    let schema = crate::spec::Schema::parse_test(
+        include_str!("./testdata/supergraph.graphql"),
+        &Default::default(),
+    )
+    .unwrap();
+    let parsed_doc =
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
+            .unwrap();
 
     let context: Context = Context::new();
     context
@@ -277,12 +281,14 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    // plugin depends on the parsed document being in the context so we'll add
-    // it ourselves for testing purposes
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: Document::parse(query, "query.graphql").unwrap(),
-        ..Default::default()
-    });
+    let schema = crate::spec::Schema::parse_test(
+        include_str!("./testdata/supergraph.graphql"),
+        &Default::default(),
+    )
+    .unwrap();
+    let parsed_doc =
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
+            .unwrap();
 
     let context = Context::new();
     context

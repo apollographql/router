@@ -7,6 +7,7 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
+use tracing::Instrument;
 
 use self::codec::BrotliEncoder;
 use self::codec::DeflateEncoder;
@@ -72,90 +73,94 @@ impl Compressor {
 where {
         let (tx, rx) = mpsc::channel(10);
 
-        tokio::task::spawn(async move {
-            while let Some(data) = stream.next().await {
-                match data {
-                    Err(e) => {
-                        if (tx.send(Err(e.into())).await).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(data) => {
-                        // the buffer needs at least 10 bytes for a gzip header if we use gzip, then more
-                        // room to store the data itself
-                        let mut buf = BytesMut::zeroed(GZIP_HEADER_LEN + data.len());
-
-                        let mut partial_input = PartialBuffer::new(&*data);
-                        let mut partial_output = PartialBuffer::new(&mut buf);
-                        loop {
-                            if let Err(e) = self.encode(&mut partial_input, &mut partial_output) {
-                                let _ = tx.send(Err(e.into())).await;
+        tokio::task::spawn(
+            async move {
+                while let Some(data) = stream.next().await {
+                    match data {
+                        Err(e) => {
+                            if (tx.send(Err(e.into())).await).is_err() {
                                 return;
                             }
+                        }
+                        Ok(data) => {
+                            // the buffer needs at least 10 bytes for a gzip header if we use gzip, then more
+                            // room to store the data itself
+                            let mut buf = BytesMut::zeroed(GZIP_HEADER_LEN + data.len());
 
-                            if !partial_input.unwritten().is_empty() {
-                                // there was not enough space in the output buffer to compress everything,
-                                // so we resize and add more data
-                                if partial_output.unwritten().is_empty() {
-                                    partial_output.extend(partial_input.unwritten().len() / 10);
+                            let mut partial_input = PartialBuffer::new(&*data);
+                            let mut partial_output = PartialBuffer::new(&mut buf);
+                            loop {
+                                if let Err(e) = self.encode(&mut partial_input, &mut partial_output)
+                                {
+                                    let _ = tx.send(Err(e.into())).await;
+                                    return;
                                 }
-                            } else {
-                                loop {
-                                    match self.flush(&mut partial_output) {
-                                        Err(e) => {
-                                            let _ = tx.send(Err(e.into())).await;
-                                            return;
-                                        }
-                                        Ok(flushed) => {
-                                            if flushed {
-                                                break;
+
+                                if !partial_input.unwritten().is_empty() {
+                                    // there was not enough space in the output buffer to compress everything,
+                                    // so we resize and add more data
+                                    if partial_output.unwritten().is_empty() {
+                                        partial_output.extend(partial_input.unwritten().len() / 10);
+                                    }
+                                } else {
+                                    loop {
+                                        match self.flush(&mut partial_output) {
+                                            Err(e) => {
+                                                let _ = tx.send(Err(e.into())).await;
+                                                return;
                                             }
-                                            if partial_output.unwritten().is_empty() {
-                                                partial_output
-                                                    .extend(partial_output.written().len());
+                                            Ok(flushed) => {
+                                                if flushed {
+                                                    break;
+                                                }
+                                                if partial_output.unwritten().is_empty() {
+                                                    partial_output
+                                                        .extend(partial_output.written().len());
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                let len = partial_output.written().len();
-                                let _ = partial_output.into_inner();
-                                buf.resize(len, 0);
+                                    let len = partial_output.written().len();
+                                    let _ = partial_output.into_inner();
+                                    buf.resize(len, 0);
 
-                                if (tx.send(Ok(buf.freeze())).await).is_err() {
-                                    return;
+                                    if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                        return;
+                                    }
+                                    break;
                                 }
+                            }
+                        }
+                    }
+                }
+
+                loop {
+                    let buf = BytesMut::zeroed(1024);
+                    let mut partial_output = PartialBuffer::new(buf);
+
+                    match self.finish(&mut partial_output) {
+                        Err(e) => {
+                            let _ = tx.send(Err(e.into())).await;
+                            break;
+                        }
+                        Ok(is_flushed) => {
+                            let len = partial_output.written().len();
+
+                            let mut buf = partial_output.into_inner();
+                            buf.resize(len, 0);
+                            if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                return;
+                            }
+                            if is_flushed {
                                 break;
                             }
                         }
                     }
                 }
             }
-
-            loop {
-                let buf = BytesMut::zeroed(1024);
-                let mut partial_output = PartialBuffer::new(buf);
-
-                match self.finish(&mut partial_output) {
-                    Err(e) => {
-                        let _ = tx.send(Err(e.into())).await;
-                        break;
-                    }
-                    Ok(is_flushed) => {
-                        let len = partial_output.written().len();
-
-                        let mut buf = partial_output.into_inner();
-                        buf.resize(len, 0);
-                        if (tx.send(Ok(buf.freeze())).await).is_err() {
-                            return;
-                        }
-                        if is_flushed {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
+            .instrument(tracing::debug_span!("body_compression")),
+        );
         ReceiverStream::new(rx)
     }
 }

@@ -29,7 +29,7 @@ pub(crate) struct CacheControl {
     #[serde(skip_serializing_if = "is_false", default)]
     proxy_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    no_store: bool,
+    pub(super) no_store: bool,
     #[serde(skip_serializing_if = "is_false", default)]
     private: bool,
     #[serde(skip_serializing_if = "is_false", default)]
@@ -278,7 +278,11 @@ impl CacheControl {
     pub(crate) fn should_store(&self) -> bool {
         // FIXME: should we add support for must-understand?
         // public will be the default case
-        !(self.no_store || self.private)
+        !self.no_store
+    }
+
+    pub(crate) fn private(&self) -> bool {
+        self.private
     }
 
     // We don't support revalidation yet

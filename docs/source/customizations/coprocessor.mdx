@@ -5,7 +5,7 @@ description: Customize your router's behavior in any language
 
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-<EnterpriseFeature />
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 With **external coprocessing**, you can hook into the Apollo Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 
@@ -87,6 +87,7 @@ coprocessor:
   router:
     request:
       headers: false
+      # url: http://127.0.0.1:8082 # the URL can be overriden per coprocessor stage
 ```
 
 In this case, the `RouterService` only sends a coprocessor request whenever it receives a client request. The coprocessor request body includes _no_ data related to the client request (only "control" data, which is [covered below](#coprocessor-request-format)).
@@ -825,8 +826,11 @@ When `stage` is `SupergraphResponse`, if present and `true` then there will be s
 
 An object mapping of all HTTP header names and values for the corresponding request or response.
 
+Ensure headers are handled like HTTP headers in general. For example, normalize header case before your coprocessor operates on them. 
+
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `headers`, the router replaces the existing headers with that value.
-⚠️ `content-length` sent by Coprocessors are discarded by the router. (Wrong `content-length` values could lead to failure for HTTP requests to be sent)
+
+> The router discards any `content-length` headers sent by coprocessors because incorrect `content-length` values can lead to HTTP request failures.
 
 </td>
 </tr>

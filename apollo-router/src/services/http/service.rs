@@ -4,9 +4,6 @@ use std::task::Poll;
 use std::time::Duration;
 
 use ::serde::Deserialize;
-use async_compression::tokio::write::BrotliEncoder;
-use async_compression::tokio::write::GzipEncoder;
-use async_compression::tokio::write::ZlibEncoder;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::Stream;
@@ -14,18 +11,19 @@ use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
-use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_rustls::HttpsConnector;
+#[cfg(unix)]
+use hyperlocal::UnixConnector;
 use opentelemetry::global;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
-use tokio::io::AsyncWriteExt;
+use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -33,13 +31,14 @@ use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionBody;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::HttpRequest;
 use super::HttpResponse;
+use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
@@ -51,6 +50,12 @@ use crate::Context;
 
 type HTTPClient =
     Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
+#[cfg(unix)]
+type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, Body>>;
+#[cfg(unix)]
+type MixedClient = Either<HTTPClient, UnixHTTPClient>;
+#[cfg(not(unix))]
+type MixedClient = HTTPClient;
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -86,7 +91,9 @@ pub(crate) struct HttpClientService {
     // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
-    client: HTTPClient,
+    http_client: HTTPClient,
+    #[cfg(unix)]
+    unix_client: UnixHTTPClient,
     service: Arc<String>,
 }
 
@@ -152,9 +159,13 @@ impl HttpClientService {
             .http2_only(http2 == Http2Config::Http2Only)
             .build(connector);
         Ok(Self {
-            client: ServiceBuilder::new()
+            http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
+            #[cfg(unix)]
+            unix_client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(hyper::Client::builder().build(UnixConnector)),
             service: Arc::new(service.into()),
         })
     }
@@ -210,7 +221,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.client
+        self.http_client
             .poll_ready(cx)
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
@@ -234,6 +245,16 @@ impl tower::Service<HttpRequest> for HttpClientService {
             }
         });
 
+        #[cfg(unix)]
+        let client = match schema_uri.scheme().map(|s| s.as_str()) {
+            Some("unix") => Either::B(self.unix_client.clone()),
+            _ => Either::A(self.http_client.clone()),
+        };
+        #[cfg(not(unix))]
+        let client = self.http_client.clone();
+
+        let service_name = self.service.clone();
+
         let path = schema_uri.path();
 
         let http_req_span = tracing::info_span!("http_request",
@@ -253,41 +274,31 @@ impl tower::Service<HttpRequest> for HttpClientService {
             );
         });
 
-        let client = self.client.clone();
-        let service_name = self.service.clone();
+        let (parts, body) = http_request.into_parts();
+
+        let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+        let opt_compressor = content_encoding
+            .as_ref()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+
+        let body = match opt_compressor {
+            None => body,
+            Some(compressor) => Body::wrap_stream(compressor.process(body)),
+        };
+        let mut http_request = http::Request::from_parts(parts, body);
+
+        http_request
+            .headers_mut()
+            .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
+
+        let signing_params = context
+            .extensions()
+            .lock()
+            .get::<SigningParamsConfig>()
+            .cloned();
+
         Box::pin(async move {
-            let (parts, body) = http_request.into_parts();
-            let body = hyper::body::to_bytes(body).await.map_err(|err| {
-                tracing::error!(compress_error = format!("{err:?}").as_str());
-
-                FetchError::CompressionError {
-                    service: service_name.to_string(),
-                    reason: err.to_string(),
-                }
-            })?;
-            let compressed_body = compress(body, &parts.headers)
-                .instrument(tracing::debug_span!("body_compression"))
-                .await
-                .map_err(|err| {
-                    tracing::error!(compress_error = format!("{err:?}").as_str());
-
-                    FetchError::CompressionError {
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    }
-                })?;
-            let mut http_request = http::Request::from_parts(parts, Body::from(compressed_body));
-
-            http_request
-                .headers_mut()
-                .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
-
-            let signing_params = context
-                .extensions()
-                .lock()
-                .get::<SigningParamsConfig>()
-                .cloned();
-
             let http_request = if let Some(signing_params) = signing_params {
                 signing_params.sign(http_request, &service_name).await?
             } else {
@@ -323,7 +334,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 }
 
 async fn do_fetch(
-    mut client: HTTPClient,
+    mut client: MixedClient,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
@@ -347,47 +358,17 @@ async fn do_fetch(
     ))
 }
 
-pub(crate) async fn compress(body: Bytes, headers: &HeaderMap) -> Result<Bytes, BoxError> {
-    let content_encoding = headers.get(&CONTENT_ENCODING);
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str()? {
-            "br" => {
-                let mut br_encoder = BrotliEncoder::new(Vec::new());
-                br_encoder.write_all(&body).await?;
-                br_encoder.shutdown().await?;
-
-                Ok(br_encoder.into_inner().into())
-            }
-            "gzip" => {
-                let mut gzip_encoder = GzipEncoder::new(Vec::new());
-                gzip_encoder.write_all(&body).await?;
-                gzip_encoder.shutdown().await?;
-
-                Ok(gzip_encoder.into_inner().into())
-            }
-            "deflate" => {
-                let mut df_encoder = ZlibEncoder::new(Vec::new());
-                df_encoder.write_all(&body).await?;
-                df_encoder.shutdown().await?;
-
-                Ok(df_encoder.into_inner().into())
-            }
-            "identity" => Ok(body),
-            unknown => {
-                tracing::error!("unknown content-encoding value '{:?}'", unknown);
-                Err(BoxError::from(format!(
-                    "unknown content-encoding value '{unknown:?}'",
-                )))
-            }
-        },
-        None => Ok(body),
-    }
-}
-
 pin_project! {
     pub(crate) struct BodyStream<B: hyper::body::HttpBody> {
         #[pin]
         inner: DecompressionBody<B>
+    }
+}
+
+impl<B: hyper::body::HttpBody> BodyStream<B> {
+    /// Create a new `BodyStream`.
+    pub(crate) fn new(body: DecompressionBody<B>) -> Self {
+        Self { inner: body }
     }
 }
 

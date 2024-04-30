@@ -7,9 +7,8 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.deduplication.: false
-          opt.max_opened.: true
-          opt.mode.callback.: true
-          opt.mode.passthrough.: true
-          opt.queue_capacity.: true
-
+          opt.deduplication: false
+          opt.max_opened: true
+          opt.mode.callback: true
+          opt.mode.passthrough: true
+          opt.queue_capacity: true

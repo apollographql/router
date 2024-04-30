@@ -1,16 +1,4 @@
 //! Logic for loading configuration in to an object model
-pub(crate) mod cors;
-pub(crate) mod expansion;
-mod experimental;
-pub(crate) mod metrics;
-mod persisted_queries;
-mod schema;
-pub(crate) mod subgraph;
-#[cfg(test)]
-mod tests;
-mod upgrade;
-mod yaml;
-
 use std::fmt;
 use std::io;
 use std::io::BufReader;
@@ -58,20 +46,26 @@ use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
-#[cfg(not(test))]
-use crate::notification::RouterBroadcasts;
 use crate::plugin::plugins;
-#[cfg(not(test))]
 use crate::plugins::subscription::SubscriptionConfig;
-#[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-#[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
+pub(crate) mod cors;
+pub(crate) mod expansion;
+mod experimental;
+pub(crate) mod metrics;
+mod persisted_queries;
+mod schema;
+pub(crate) mod subgraph;
+#[cfg(test)]
+mod tests;
+mod upgrade;
+mod yaml;
+
 // TODO: Talk it through with the teams
-#[cfg(not(test))]
 static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
 
 static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -164,13 +158,17 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the GraphQL validation implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
-
     /// Set the API schema generation implementation to use.
     #[serde(default)]
     pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
+
+    /// Set the Apollo usage report signature and referenced field generation implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
+
+    /// Set the query planner implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_query_planner_mode: QueryPlannerMode,
 
     /// Plugin configuration
     #[serde(default)]
@@ -190,7 +188,11 @@ pub struct Configuration {
 
     /// Batching configuration.
     #[serde(default)]
-    pub(crate) experimental_batching: Batching,
+    pub(crate) batching: Batching,
+
+    /// Type conditioned fetching configuration.
+    #[serde(default)]
+    pub(crate) experimental_type_conditioned_fetching: bool,
 }
 
 impl PartialEq for Configuration {
@@ -199,11 +201,11 @@ impl PartialEq for Configuration {
     }
 }
 
-/// GraphQL validation modes.
+/// API schema generation modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum GraphQLValidationMode {
+pub(crate) enum ApiSchemaMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
@@ -214,11 +216,26 @@ pub(crate) enum GraphQLValidationMode {
     Both,
 }
 
-/// API schema generation modes.
+/// Apollo usage report signature and referenced field generation modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum ApiSchemaMode {
+pub(crate) enum ApolloMetricsGenerationMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
+    #[default]
+    Both,
+}
+
+/// Query planner modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum QueryPlannerMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
@@ -250,33 +267,47 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             tls: Tls,
             apq: Apq,
             persisted_queries: PersistedQueries,
-            #[serde(skip)]
-            uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
-            experimental_graphql_validation_mode: GraphQLValidationMode,
-            experimental_batching: Batching,
+            batching: Batching,
+            experimental_type_conditioned_fetching: bool,
+            experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
+            experimental_api_schema_generation_mode: ApiSchemaMode,
+            experimental_query_planner_mode: QueryPlannerMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
-        Configuration::builder()
-            .health_check(ad_hoc.health_check)
-            .sandbox(ad_hoc.sandbox)
-            .homepage(ad_hoc.homepage)
-            .supergraph(ad_hoc.supergraph)
-            .cors(ad_hoc.cors)
-            .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
-            .apollo_plugins(ad_hoc.apollo_plugins.plugins)
-            .tls(ad_hoc.tls)
-            .apq(ad_hoc.apq)
-            .persisted_query(ad_hoc.persisted_queries)
-            .operation_limits(ad_hoc.limits)
-            .chaos(ad_hoc.experimental_chaos)
-            .uplink(ad_hoc.uplink)
-            .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
-            .experimental_batching(ad_hoc.experimental_batching)
-            .build()
-            .map_err(|e| serde::de::Error::custom(e.to_string()))
+        let notify = Configuration::notify(&ad_hoc.apollo_plugins.plugins)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+
+        // Use a struct literal instead of a builder to ensure this is exhaustive
+        Configuration {
+            health_check: ad_hoc.health_check,
+            sandbox: ad_hoc.sandbox,
+            homepage: ad_hoc.homepage,
+            supergraph: ad_hoc.supergraph,
+            cors: ad_hoc.cors,
+            tls: ad_hoc.tls,
+            apq: ad_hoc.apq,
+            persisted_queries: ad_hoc.persisted_queries,
+            limits: ad_hoc.limits,
+            experimental_chaos: ad_hoc.experimental_chaos,
+            experimental_api_schema_generation_mode: ad_hoc.experimental_api_schema_generation_mode,
+            experimental_apollo_metrics_generation_mode: ad_hoc
+                .experimental_apollo_metrics_generation_mode,
+            experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
+            experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
+            plugins: ad_hoc.plugins,
+            apollo_plugins: ad_hoc.apollo_plugins,
+            batching: ad_hoc.batching,
+
+            // serde(skip)
+            notify,
+            uplink: None,
+            validated_yaml: None,
+        }
+        .validate()
+        .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }
 
@@ -286,12 +317,12 @@ fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
-// This isn't dead code! we use it in buildstructor's fake_new
-#[allow(dead_code)]
+#[cfg(test)]
 fn test_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
 
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
@@ -304,28 +335,18 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
-        notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
-        experimental_batching: Option<Batching>,
+        experimental_type_conditioned_fetching: Option<bool>,
+        batching: Option<Batching>,
+        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
-        #[cfg(not(test))]
-        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
-            Some(plugin_conf) => {
-                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
-                    .map_err(|err| ConfigurationError::PluginConfiguration {
-                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
-                        error: format!("{err:?}"),
-                    })?;
-                conf.queue_capacity
-            }
-            None => None,
-        };
+        let notify = Self::notify(&apollo_plugins)?;
 
         let conf = Self {
             validated_yaml: Default::default(),
@@ -338,8 +359,11 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
-            experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
+            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
+                .unwrap_or_default(),
+            experimental_apollo_metrics_generation_mode:
+                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -348,15 +372,47 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
-            #[cfg(test)]
-            notify: notify.unwrap_or_default(),
-            #[cfg(not(test))]
-            notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
-                .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
+            batching: batching.unwrap_or_default(),
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
+                .unwrap_or_default(),
+            notify,
         };
 
         conf.validate()
+    }
+}
+
+impl Configuration {
+    fn notify(
+        apollo_plugins: &Map<String, Value>,
+    ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
+        if cfg!(test) {
+            return Ok(Notify::for_tests());
+        }
+        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
+            Some(plugin_conf) => {
+                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
+                    .map_err(|err| ConfigurationError::PluginConfiguration {
+                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
+                        error: format!("{err:?}"),
+                    })?;
+                conf.queue_capacity
+            }
+            None => None,
+        };
+        Ok(Notify::builder()
+            .and_queue_size(notify_queue_cap)
+            .ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS))
+            .heartbeat_error_message(
+                graphql::Response::builder()
+                .errors(vec![
+                    graphql::Error::builder()
+                    .message("the connection has been closed because it hasn't heartbeat for a while")
+                    .extension_code("SUBSCRIPTION_HEARTBEAT_ERROR")
+                    .build()
+                ])
+                .build()
+            ).build())
     }
 }
 
@@ -386,9 +442,11 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
-        experimental_batching: Option<Batching>,
+        batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        experimental_type_conditioned_fetching: Option<bool>,
+        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -399,9 +457,11 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
                 .unwrap_or_default(),
+            experimental_apollo_metrics_generation_mode:
+                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -413,7 +473,9 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
+                .unwrap_or_default(),
+            batching: batching.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -498,6 +560,15 @@ impl Configuration {
                     error: "either set persisted_queries.log_unknown: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
             }
+        }
+
+        if self.experimental_query_planner_mode == QueryPlannerMode::New
+            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
+                error: "either change to some other query planner mode, or change to new metrics generation".into()
+            });
         }
 
         Ok(self)
@@ -610,11 +681,44 @@ pub(crate) struct Supergraph {
     #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: Option<bool>,
 
+    /// Enable QP generation of fragments for subgraph requests
+    /// Default: false
+    pub(crate) generate_query_fragments: bool,
+
     /// Set to false to disable defer support
     pub(crate) defer_support: bool,
 
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
+
+    /// abort request handling when the client drops the connection.
+    /// Default: false.
+    /// When set to true, some parts of the request pipeline like telemetry will not work properly,
+    /// but request handling will stop immediately when the client connection is closed.
+    pub(crate) early_cancel: bool,
+
+    /// Log a message if the client closes the connection before the response is sent.
+    /// Default: false.
+    pub(crate) experimental_log_on_broken_pipe: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub(crate) enum AvailableParallelism {
+    Auto(Auto),
+    Fixed(NonZeroUsize),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Auto {
+    Auto,
+}
+
+impl Default for AvailableParallelism {
+    fn default() -> Self {
+        Self::Fixed(NonZeroUsize::new(1).expect("cannot fail"))
+    }
 }
 
 fn default_defer_support() -> bool {
@@ -631,6 +735,9 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        generate_query_fragments: Option<bool>,
+        early_cancel: Option<bool>,
+        experimental_log_on_broken_pipe: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -638,7 +745,18 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments,
+            reuse_query_fragments: generate_query_fragments.and_then(|v|
+                if v {
+                    if reuse_query_fragments.is_some_and(|v| v) {
+                        // warn the user that both are enabled and it's overridden
+                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
+                    }
+                    Some(false)
+                } else { reuse_query_fragments }
+            ),
+            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or_default(),
+            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
     }
 }
@@ -654,6 +772,9 @@ impl Supergraph {
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         reuse_query_fragments: Option<bool>,
+        generate_query_fragments: Option<bool>,
+        early_cancel: Option<bool>,
+        experimental_log_on_broken_pipe: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -661,7 +782,18 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments,
+            reuse_query_fragments: generate_query_fragments.and_then(|v|
+                if v {
+                    if reuse_query_fragments.is_some_and(|v| v) {
+                        // warn the user that both are enabled and it's overridden
+                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
+                    }
+                    Some(false)
+                } else { reuse_query_fragments }
+            ),
+            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or_default(),
+            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
     }
 }
@@ -848,7 +980,7 @@ impl Default for Apq {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
-    pub(crate) cache: Cache,
+    pub(crate) cache: QueryPlanCache,
     /// Warms up the cache on reloads by running the query plan over
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
@@ -878,6 +1010,79 @@ pub(crate) struct QueryPlanning {
     ///
     /// The default value is None, which specifies no limit.
     pub(crate) experimental_paths_limit: Option<u32>,
+
+    /// If cache warm up is configured, this will allow the router to keep a query plan created with
+    /// the old schema, if it determines that the schema update does not affect the corresponding query
+    pub(crate) experimental_reuse_query_plans: bool,
+
+    /// Set the size of a pool of workers to enable query planning parallelism.
+    /// Default: 1.
+    pub(crate) experimental_parallelism: AvailableParallelism,
+}
+
+impl QueryPlanning {
+    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
+        match self.experimental_parallelism {
+            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
+            AvailableParallelism::Fixed(n) => Ok(n),
+        }
+    }
+}
+
+/// Cache configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct QueryPlanCache {
+    /// Configures the in memory cache (always active)
+    pub(crate) in_memory: InMemoryCache,
+    /// Configures and activates the Redis cache
+    pub(crate) redis: Option<QueryPlanRedisCache>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Redis cache configuration
+pub(crate) struct QueryPlanRedisCache {
+    /// List of URLs to the Redis cluster
+    pub(crate) urls: Vec<url::Url>,
+
+    /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
+    pub(crate) username: Option<String>,
+    /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
+    pub(crate) password: Option<String>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// Redis request timeout (default: 2ms)
+    pub(crate) timeout: Option<Duration>,
+
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_query_plan_cache_ttl"
+    )]
+    #[schemars(with = "Option<String>", default = "default_query_plan_cache_ttl")]
+    /// TTL for entries
+    pub(crate) ttl: Duration,
+
+    /// namespace used to prefix Redis keys
+    pub(crate) namespace: Option<String>,
+
+    #[serde(default)]
+    /// TLS client configuration
+    pub(crate) tls: Option<TlsClient>,
+
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
+
+    #[serde(default = "default_reset_ttl")]
+    /// When a TTL is set on a key, reset it when reading the data from that key
+    pub(crate) reset_ttl: bool,
+}
+
+fn default_query_plan_cache_ttl() -> Duration {
+    // Default TTL set to 30 days
+    Duration::from_secs(86400 * 30)
 }
 
 /// Cache configuration
@@ -888,6 +1093,15 @@ pub(crate) struct Cache {
     pub(crate) in_memory: InMemoryCache,
     /// Configures and activates the Redis cache
     pub(crate) redis: Option<RedisCache>,
+}
+
+impl From<QueryPlanCache> for Cache {
+    fn from(value: QueryPlanCache) -> Self {
+        Cache {
+            in_memory: value.in_memory,
+            redis: value.redis.map(Into::into),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -934,6 +1148,38 @@ pub(crate) struct RedisCache {
     #[serde(default)]
     /// TLS client configuration
     pub(crate) tls: Option<TlsClient>,
+
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to Redis
+    pub(crate) required_to_start: bool,
+
+    #[serde(default = "default_reset_ttl")]
+    /// When a TTL is set on a key, reset it when reading the data from that key
+    pub(crate) reset_ttl: bool,
+}
+
+fn default_required_to_start() -> bool {
+    false
+}
+
+impl From<QueryPlanRedisCache> for RedisCache {
+    fn from(value: QueryPlanRedisCache) -> Self {
+        RedisCache {
+            urls: value.urls,
+            username: value.username,
+            password: value.password,
+            timeout: value.timeout,
+            ttl: Some(value.ttl),
+            namespace: value.namespace,
+            tls: value.tls,
+            required_to_start: value.required_to_start,
+            reset_ttl: value.reset_ttl,
+        }
+    }
+}
+
+fn default_reset_ttl() -> bool {
+    true
 }
 
 /// TLS related configuration options.
@@ -1383,4 +1629,42 @@ pub(crate) struct Batching {
 
     /// Batching mode
     pub(crate) mode: BatchingMode,
+
+    /// Subgraph options for batching
+    pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
+}
+
+/// Common options for configuring subgraph batching
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+pub(crate) struct CommonBatchingConfig {
+    /// Whether this batching config should be enabled
+    pub(crate) enabled: bool,
+}
+
+impl Batching {
+    // Check if we should enable batching for a particular subgraph (service_name)
+    pub(crate) fn batch_include(&self, service_name: &str) -> bool {
+        match &self.subgraph {
+            Some(subgraph_batching_config) => {
+                // Override by checking if all is enabled
+                if subgraph_batching_config.all.enabled {
+                    // If it is, require:
+                    // - no subgraph entry OR
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .map_or(true, |x| x.enabled)
+                } else {
+                    // If it isn't, require:
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .is_some_and(|x| x.enabled)
+                }
+            }
+            None => false,
+        }
+    }
 }

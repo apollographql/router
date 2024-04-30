@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/request.rs
+expression: expected_result
+---
+query: "{ topProducts { upc name reviews { id product { name } author { id name } } } }"
+variables:
+  date: "2022-01-01T00:00:00+00:00"
+extensions:
+  something_simple: else
+  something_complex:
+    nested: value

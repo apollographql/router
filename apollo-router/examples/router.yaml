@@ -1,0 +1,13 @@
+supergraph:
+  listen: 0.0.0.0:4100
+  introspection: true
+  query_planning:
+    experimental_parallelism: auto # or any number
+plugins:
+  experimental.expose_query_plan: true
+  apollo-test.do_not_execute: true
+experimental_graphql_validation_mode: both
+sandbox:
+  enabled: true
+homepage:
+  enabled: false

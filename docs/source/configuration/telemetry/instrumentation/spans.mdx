@@ -37,11 +37,11 @@ Spans may have attributes attached to them from the Apollo Router pipeline. Thes
 
 Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
 
-<EnterpriseFeature>
+<PremiumFeatureFeature>
 
-Granular customization of attributes on spans is an Enterprise Feature that requires a [GraphOS Enterprise plan](/graphos/enterprise/).
+Granular customization of attributes on spans requires a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
 
-</EnterpriseFeature>
+</PremiumFeatureFeature>
 
 The attributes that are available depend on the service of the pipeline.
 
@@ -56,6 +56,24 @@ telemetry:
           # Custom attributes
           "my_attribute":
             response_header: "x-my-header"
+```
+
+You can also have [conditions](./conditions) on custom attributes using [selectors](./selectors). You can only have conditions on a selector at the same execution level.
+Example you can't have a condition on `response_header` if you want to set an attribute from `request_header`.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instrumentation:
+    spans: 
+      router: 
+        attributes:    
+          on_error: 
+            response_status: reason
+            condition:
+              not:
+                eq:
+                - response_status: code
+                - 200
 ```
 
 ### `default_attribute_requirement_level`
@@ -153,6 +171,18 @@ telemetry:
           http.request.method: false
           # ...
   
+          # Conditional custom attribute
+          otel.status_description: # You can conditionally put a status description attribute on your span if it respect the condition
+            static: "there was an error"
+            condition: # http response status code != 200 or it contains a graphql error in the payload
+              any:
+              - not:
+                  eq:
+                  - response_status: code
+                  - 200
+              - eq:
+                - on_graphql_error
+                - true
           # Custom attributes
           "acme.custom_1":
             trace_id: datadog
@@ -178,7 +208,7 @@ telemetry:
 |---------------------------------------|---------------------------------------------------------------------------|--------------------------------|------------------------------------------|
 | `<attribute-name>`                    |                                                                           |                                | The name of the custom attribute.        |
 | `attributes`                          | [standard attributes](./standard-attributes)\|[selectors](./selectors)    |                                | The attributes of the span.              |
+| `condition`                           | [conditions](./conditions)                                                |                                | The condition for adding a custom attribute. |
 | `default_attribute_requirement_level` | `required`\|`recommended`                                                 | `required`                     | The default attribute requirement level. |
-| `legacy_request_span`                 | `true`\|`false`                                                           |                                | Include the `request` span in traces.    |
 | `mode`                                | `spec_compliant` \| `deprecated`                                          | `deprecated`                   | The attributes of the span.              |
 

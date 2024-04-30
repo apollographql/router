@@ -7,7 +7,6 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.router.cache.in_memory.: true
-          opt.router.cache.redis.: true
-          opt.subgraph.: true
-
+          opt.router.cache.in_memory: true
+          opt.router.cache.redis: true
+          opt.subgraph: true

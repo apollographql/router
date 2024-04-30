@@ -20,8 +20,9 @@ use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use url::Url;
 
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::Context;
@@ -265,7 +266,7 @@ where
         }
     }
 
-    pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
+    pub(crate) async fn call<C>(self, mut client: C, url: &Url) -> Result<Self, BoxError>
     where
         C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
             + Clone
@@ -276,7 +277,7 @@ where
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
 
         let mut request = hyper::Request::builder()
-            .uri(uri)
+            .uri(&url.to_string())
             .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")

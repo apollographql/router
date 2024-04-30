@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::NodeStr;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
@@ -13,9 +14,11 @@ use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
+use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -98,7 +101,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
-    pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
+    pub(crate) deferred_fetches: &'a HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
@@ -173,7 +176,7 @@ impl PlanNode {
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
-                    let current_dir = current_dir.join(path);
+                    let current_dir = current_dir.join(path.remove_empty_key_root());
                     let (v, err) = node
                         .execute_recursively(
                             parameters,
@@ -188,7 +191,6 @@ impl PlanNode {
                             "otel.kind" = "INTERNAL"
                         ))
                         .await;
-
                     value = v;
                     errors = err;
                 }
@@ -218,32 +220,41 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     let fetch_time_offset =
                         parameters.context.created_at.elapsed().as_nanos() as i64;
-                    let (v, e) = fetch_node
-                        .fetch_node(parameters, parent_value, current_dir)
-                        .instrument(tracing::info_span!(
-                            FETCH_SPAN_NAME,
-                            "otel.kind" = "INTERNAL",
-                            "apollo.subgraph.name" = fetch_node.service_name.as_str(),
-                            "apollo_private.sent_time_offset" = fetch_time_offset
-                        ))
-                        .await;
-                    value = v;
-                    errors = e;
+
+                    // The client closed the connection, we are still executing the request pipeline,
+                    // but we won't send unused trafic to subgraph
+                    if parameters
+                        .context
+                        .extensions()
+                        .lock()
+                        .get::<CanceledRequest>()
+                        .is_some()
+                    {
+                        value = Value::Object(Object::default());
+                        errors = Vec::new();
+                    } else {
+                        let (v, e) = fetch_node
+                            .fetch_node(parameters, parent_value, current_dir)
+                            .instrument(tracing::info_span!(
+                                FETCH_SPAN_NAME,
+                                "otel.kind" = "INTERNAL",
+                                "apollo.subgraph.name" = fetch_node.service_name.as_str(),
+                                "apollo_private.sent_time_offset" = fetch_time_offset
+                            ))
+                            .await;
+                        value = v;
+                        errors = e;
+                    }
                 }
                 PlanNode::Defer {
-                    primary:
-                        Primary {
-                            path: _primary_path,
-                            node,
-                            ..
-                        },
+                    primary: Primary { node, .. },
                     deferred,
                 } => {
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {
                         let mut deferred_fetches: HashMap<
-                            String,
+                            NodeStr,
                             broadcast::Sender<(Value, Vec<Error>)>,
                         > = HashMap::new();
                         let mut futures = Vec::new();
@@ -392,7 +403,7 @@ impl DeferredNode {
         parent_value: &Value,
         sender: mpsc::Sender<Response>,
         primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
-        deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
+        deferred_fetches: &mut HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> impl Future<Output = ()> {
         let mut deferred_receivers = Vec::new();
 
@@ -421,7 +432,7 @@ impl DeferredNode {
         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
         let deferred_inner = self.node.clone();
         let deferred_path = self.query_path.clone();
-        let label = self.label.clone();
+        let label = self.label.as_ref().map(|l| l.to_string());
         let tx = sender;
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();

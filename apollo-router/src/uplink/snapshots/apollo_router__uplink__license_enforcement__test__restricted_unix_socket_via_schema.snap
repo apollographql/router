@@ -1,0 +1,9 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+expression: report.to_string()
+---
+Schema features:
+* @join__Graph.url
+  https://specs.apollo.dev/join/v0.3
+
+Unix socket support for subgraph requests is restricted to Enterprise users

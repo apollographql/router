@@ -1,0 +1,60 @@
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+      propagation:
+        jaeger: true
+      common:
+        service_name: router
+        sampler: always_on
+      jaeger:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        agent:
+          endpoint: default
+    logging:
+      experimental_when_header:
+        - name: apollo-router-log-request
+          value: test
+          headers: true # default: false
+          body: true # default: false
+        # log request for all requests coming from Iphones
+        - name: custom-header
+          match: ^foo.*
+          headers: true
+  instrumentation:
+    spans:
+      mode: deprecated
+      router:
+        attributes:
+          http.request.method: true
+          http.response.status_code: true
+          url.path: true
+          "http.request.header.x-my-header":
+            request_header: "x-my-header"
+          "http.request.header.x-not-present":
+            request_header: "x-not-present"
+            default: nope
+          "http.request.header.x-my-header-condition":
+            request_header: "x-my-header"
+            condition:
+              eq:
+                - request_header: "head"
+                - "test"
+      supergraph:
+        attributes:
+          graphql.operation.name: true
+          graphql.operation.type: true
+          graphql.document: true
+      subgraph:
+        attributes:
+          subgraph.graphql.operation.type: true
+          subgraph.name: true
+
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true

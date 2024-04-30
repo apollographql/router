@@ -1,0 +1,3 @@
+supergraph:
+  query_planning:
+    experimental_parallelism: 10 

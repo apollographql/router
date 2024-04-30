@@ -4,6 +4,8 @@ subtitle: Collect observable data to monitor your router and supergraph
 description: Observe and monitor the health and performance of the Apollo Router and the supergraph by collecting and exporting telemetry logs, metrics, and traces
 ---
 
+import TelemetryPerformanceNote from '../../../shared/telemetry-performance.mdx';
+
 In this overview, learn about:
 - How Apollo Router telemetry enables supergraph observability and debuggability
 - What data is captured in the router's logs, metrics, and traces
@@ -94,15 +96,17 @@ Logs can be consumed by [logging exporters](./exporters/logging/overview) and as
 
 ### Metrics and instruments
 
-Metrics monitor aggregate information about the Apollo Router. Metrics include histograms, gauges, and counts. An individual metric is called an **instrument**. Examples of instruments include:
+Metrics are measurements of the router's behavior that can be exported and monitored. Different kinds of metrics include histograms, gauges, and counts. 
+
+Metrics can be consumed by _exporters_. See [Metrics exporters](./exporters/metrics/overview) for an overview of supported exporters.
+
+An individual metric is called an _instrument_. Example instruments of the router include:
 
 * Number of received requests 
 * Histogram of request durations
 * Number of in-flight requests
 
-You can find a full list of instruments in the [instrument documentation](./instrumentation/standard-instruments).
-
-Metrics can be consumed via [metrics exporters](./exporters/metrics/overview).
+See [Instruments](./instrumentation/instruments) for an overview of available instruments and a guide for configuring and customizing instruments.
 
 ### Traces and spans
 
@@ -141,8 +145,14 @@ Example attributes include:
 
 You can use [standard attributes](./instrumentation/standard-attributes) or [selectors](./instrumentation/selectors) as span attributes.
 
-<EnterpriseFeature>
+<PremiumFeature>
 
-[Custom attributes for spans](./instrumentation/spans/#attributes) is an Enterprise Feature that requires a [GraphOS Enterprise plan](/graphos/enterprise/).
+[Custom attributes for spans](./instrumentation/spans/#attributes) require a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
 
-</EnterpriseFeature>
+</PremiumFeature>
+
+## Best practices
+
+### Balancing telemetry and router performance
+
+<TelemetryPerformanceNote/>

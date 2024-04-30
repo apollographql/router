@@ -1,0 +1,73 @@
+---
+title: Errors
+subtitle: Error and status codes returned by the Apollo Router
+description: Error codes and HTTP response status codes returned by the Apollo Router
+---
+
+Learn about error codes and HTTP response status codes returned by the Apollo Router.
+
+## Status codes
+
+<PropertyList kind="errCodes">
+<Property name="400" short="Bad request">
+
+A request failed GraphQL validation or failed to be parsed.
+
+</Property>
+<Property name="401" short="Unauthorized">
+
+Requests may receive this response in two cases:
+
+- For a client request that requires authentication, the client's JWT failed verification.
+- For a non-client subscription endpoint calling a subscription callback URL, the router couldn't find a matching subscription identifier between its registered subscriptions and a subscription event.
+
+</Property>
+<Property name="405" short="Method not allowed">
+
+A request used an unallowed HTTP method.
+
+<Note> 
+
+Both mutations and subscriptions must use POST.
+
+</Note>
+
+</Property>
+<Property name="406" short="Not acceptable">
+
+A request's HTTP `Accept` header didn't contain any of the router's supported mime-types: 
+- `application/json`
+- `application/graphql-response+json`
+- `multipart/mixed;deferSpec=20220824`
+- `multipart/mixed;subscriptionSpec=1.0`.
+
+</Property>
+
+<Property name="429" short="Too many requests">
+
+Request traffic exceeded configured rate limits. See [client side traffic shaping](./configuration/traffic-shaping/#client-side-traffic-shaping).
+
+</Property>
+<Property name="499" short="Request canceled by client">
+
+The request was canceled because the client closed the connection, possibly due to a client side timeout.
+
+</Property>
+<Property name="500" short="Internal server error">
+
+The router encountered an unexpected issue. [Report](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) this possible bug to the router team.
+
+</Property>
+
+<Property name="504" short="Request timed out">
+
+The request was not able to complete within a configured amount of time.  See [client side traffic shaping timeouts](./configuration/traffic-shaping/#timeouts).
+
+</Property>
+</PropertyList>
+
+<Note>
+
+You can create Rhai scripts that throw custom status codes. See [Terminating client requests](./customizations/rhai-api#terminating-client-requests) to learn more.
+
+</Note>
