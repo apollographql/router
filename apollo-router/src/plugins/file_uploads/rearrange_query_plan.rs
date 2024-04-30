@@ -379,7 +379,8 @@ mod tests {
             "nodes": [
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
           }
         }));
 
@@ -405,7 +406,8 @@ mod tests {
               "elseClause":  fake_fetch("uploads2", vec!["file"]),
             },
             fake_fetch("uploads3", vec!["file"]),
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -450,7 +452,8 @@ mod tests {
               // error about variables inside subscription instead of internal error.
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
            }
         }));
 
@@ -498,7 +501,8 @@ mod tests {
                   // error about variables inside deffered instead of internal error.
                   fake_fetch("uploads1", vec!["file2"]),
                   fake_fetch("uploads2", vec!["file1"])
-                ]
+                ],
+                "connector": null
               }))
           ],
         }));
@@ -525,7 +529,8 @@ mod tests {
             "nodes": [
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
           })),
           "deferred":  []
         }));
@@ -551,7 +556,8 @@ mod tests {
               "deferred":  []
             },
             fake_fetch("uploads2", vec!["file"]),
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -594,7 +600,8 @@ mod tests {
             "nodes": [
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
           },
         }));
 
@@ -619,7 +626,8 @@ mod tests {
               "node": fake_fetch("uploads1", vec!["file"]),
             },
             fake_fetch("uploads2", vec!["file"]),
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -641,7 +649,8 @@ mod tests {
           "nodes": [
             fake_fetch("uploads1", vec!["file1"]),
             fake_fetch("uploads2", vec!["file2"])
-          ]
+          ],
+          "connector": null
         });
         let query_plan = fake_query_plan(root_json.clone());
 
@@ -662,7 +671,8 @@ mod tests {
           "nodes": [
             fake_fetch("uploads1", vec!["file2"]),
             fake_fetch("uploads2", vec!["file1"])
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -682,7 +692,8 @@ mod tests {
           "nodes": [
             fake_fetch("uploads1", vec!["files1"]),
             fake_fetch("uploads2", vec!["files2"])
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -705,7 +716,8 @@ mod tests {
             fake_fetch("uploads2", vec!["file2", "file3"]),
             fake_fetch("uploads3", vec!["file1"]),
             fake_fetch("uploads4", vec!["file2", "file4"])
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -777,7 +789,8 @@ mod tests {
               "nodes": [
                 fake_fetch("uploads1", vec!["file1"]),
                 fake_fetch("uploads2", vec!["file2"])
-              ]
+              ],
+              "connector": null
             })
         );
     }
@@ -811,7 +824,8 @@ mod tests {
                   "nodes": [
                     fake_fetch("uploads1", vec!["file1"]),
                     fake_fetch("uploads2", vec!["file2"])
-                  ]
+                  ],
+                  "connector": null
                 }
               ]
             })
@@ -842,7 +856,8 @@ mod tests {
               "nodes": [
                 fake_fetch("uploads2", vec!["file0"]),
                 fake_fetch("uploads1", vec!["file1"])
-              ]
+              ],
+              "connector": null
             })
         );
     }
