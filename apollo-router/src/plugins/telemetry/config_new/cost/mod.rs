@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::instruments::Increment;
 use crate::metrics;
 use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
@@ -15,7 +16,6 @@ use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
-use crate::plugins::telemetry::config_new::instruments::Increment::Unit;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::Selectors;
@@ -155,7 +155,7 @@ impl CostInstrumentsConfig {
         };
         CustomHistogram {
             inner: Mutex::new(CustomHistogramInner {
-                increment: Unit,
+                increment: Increment::EventCustom(None),
                 condition: Condition::True,
                 histogram: Some(meter.f64_histogram(name).init()),
                 attributes: Vec::with_capacity(nb_attributes),
@@ -280,27 +280,36 @@ mod test {
     fn test_default_estimated() {
         let config = config(include_str!("fixtures/cost_estimated.router.yaml"));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0);
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.estimated", 200.0);
     }
 
     #[test]
     fn test_default_actual() {
         let config = config(include_str!("fixtures/cost_actual.router.yaml"));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0);
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.actual", 20.0);
     }
 
     #[test]
     fn test_default_delta() {
         let config = config(include_str!("fixtures/cost_delta.router.yaml"));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.delta", 90.0);
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.delta", 180.0);
     }
 
     #[test]
@@ -309,9 +318,12 @@ mod test {
             "fixtures/cost_estimated_with_attributes.router.yaml"
         ));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0, cost.result = "COST_TOO_EXPENSIVE");
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.estimated", 200.0, cost.result = "COST_TOO_EXPENSIVE");
     }
 
     #[test]
@@ -320,9 +332,12 @@ mod test {
             "fixtures/cost_actual_with_attributes.router.yaml"
         ));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0, cost.result = "COST_TOO_EXPENSIVE");
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.actual", 20.0, cost.result = "COST_TOO_EXPENSIVE");
     }
 
     #[test]
@@ -331,9 +346,12 @@ mod test {
             "fixtures/cost_delta_with_attributes.router.yaml"
         ));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.delta", 90.0, cost.result = "COST_TOO_EXPENSIVE");
+
+        make_request(&instruments);
+        assert_histogram_sum!("cost.delta", 180.0, cost.result = "COST_TOO_EXPENSIVE");
     }
 
     fn config(config: &'static str) -> CostInstrumentsConfig {
@@ -344,7 +362,7 @@ mod test {
             .expect("config")
     }
 
-    fn make_request(instruments: CostInstruments) {
+    fn make_request(instruments: &CostInstruments) {
         let context = Context::new();
         {
             let mut extensions = context.extensions().lock();
@@ -362,9 +380,11 @@ mod test {
         );
         instruments.on_response(
             &supergraph::Response::fake_builder()
-                .context(context)
+                .context(context.clone())
                 .build()
                 .expect("response"),
         );
+
+        instruments.on_event_response(&crate::graphql::Response::default(), &context);
     }
 }

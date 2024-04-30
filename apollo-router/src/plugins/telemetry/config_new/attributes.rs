@@ -48,6 +48,7 @@ use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::Context;
 
 pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
 pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
@@ -900,6 +901,16 @@ impl Selectors for SupergraphAttributes {
     fn on_response(&self, response: &supergraph::Response) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
         attrs.append(&mut self.cost.on_response(response));
+        attrs
+    }
+
+    fn on_event_response(
+        &self,
+        response: &Self::EventResponse,
+        context: &Context,
+    ) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        attrs.append(&mut self.cost.on_event_response(response, context));
         attrs
     }
 

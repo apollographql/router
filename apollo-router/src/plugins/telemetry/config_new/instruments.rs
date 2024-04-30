@@ -1047,6 +1047,7 @@ pub(crate) type SubgraphCustomInstruments =
     CustomInstruments<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
 
 // ---------------- Counter -----------------------
+#[derive(Debug)]
 pub(crate) enum Increment {
     Unit,
     EventUnit,
@@ -1098,15 +1099,15 @@ where
         }
         inner.attributes = inner.selectors.on_request(request).into_iter().collect();
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
-            let new_incr = match inner.increment {
+            let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
-                _ => {
-                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
                 }
             };
@@ -1133,15 +1134,15 @@ where
             .as_ref()
             .and_then(|s| s.on_response(response))
         {
-            let new_incr = match inner.increment {
+            let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
-                _ => {
-                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
                 }
             };
@@ -1161,8 +1162,11 @@ where
             }
         };
 
-        if let Some(counter) = inner.counter.take() {
-            counter.add(increment, &attrs);
+        if increment != 0.0 {
+            if let Some(counter) = &inner.counter {
+                counter.add(increment, &attrs);
+            }
+            inner.incremented = true;
         }
     }
 
@@ -1177,36 +1181,44 @@ where
             .into_iter()
             .collect();
         attrs.extend(inner.attributes.clone());
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
             .and_then(|s| s.on_event_response(response, ctx))
         {
-            let new_incr = match inner.increment {
+            let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
-                _ => {
-                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
                 }
             };
             inner.increment = new_incr;
         }
 
-        let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit => 1f64,
-            Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                instant.elapsed().as_secs_f64()
+        let increment = match &mut inner.increment {
+            Increment::EventUnit => 1f64,
+            Increment::EventDuration(instant) => {
+                let incr = instant.elapsed().as_secs_f64();
+                // Set it to new instant for the next event
+                *instant = Instant::now();
+                incr
             }
-            Increment::Custom(val) | Increment::EventCustom(val) => match val {
-                Some(incr) => incr as f64,
-                None => 0f64,
-            },
+            Increment::Custom(val) | Increment::EventCustom(val) => {
+                let incr = match val {
+                    Some(incr) => *incr as f64,
+                    None => 0f64,
+                };
+                // Set it to None again for the next event
+                *val = None;
+                incr
+            }
+            _ => 0f64,
         };
 
         inner.incremented = true;
@@ -1393,15 +1405,15 @@ where
             inner.attributes = selectors.on_request(request).into_iter().collect();
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
-            let new_incr = match inner.increment {
+            let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
-                _ => {
-                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
                 }
             };
@@ -1431,15 +1443,15 @@ where
             .as_ref()
             .and_then(|s| s.on_response(response))
         {
-            let new_incr = match inner.increment {
+            let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
-                _ => {
-                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or ChunkedCustom, please open an issue");
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
                 }
             };
@@ -1477,15 +1489,15 @@ where
             .as_ref()
             .and_then(|s| s.on_event_response(response, ctx))
         {
-            let new_incr = match inner.increment {
+            let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
-                _ => {
-                    ::tracing::warn!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue");
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
                 }
             };
@@ -1500,13 +1512,17 @@ where
                 *instant = Instant::now();
                 incr
             }
-            Increment::EventCustom(val) => val.map(|incr| incr as f64),
+            Increment::EventCustom(val) => {
+                let incr = val.map(|incr| incr as f64);
+                // Set it to None again
+                *val = None;
+                incr
+            }
             Increment::Unit | Increment::Duration(_) | Increment::Custom(_) => {
                 // Nothing to do because we're incrementing on events
                 return;
             }
         };
-
         inner.updated = true;
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &attrs);
@@ -1832,6 +1848,19 @@ mod tests {
                                 }
                             }
                         },
+                        "acme.request.on_graphql_data": {
+                            "value": {
+                                "response_data": "$.price"
+                            },
+                            "type": "counter",
+                            "unit": "$",
+                            "description": "my description",
+                            "attributes": {
+                                "response.data": {
+                                    "response_data": "$.*"
+                                }
+                            }
+                        },
                         "acme.query": {
                             "value": "unit",
                             "type": "counter",
@@ -1886,6 +1915,9 @@ mod tests {
             custom_instruments.on_response(&supergraph_response);
             custom_instruments.on_event_response(
                 &graphql::Response::builder()
+                    .data(json!({
+                        "price": 500
+                    }))
                     .errors(vec![graphql::Error::builder()
                         .message("nope")
                         .extension_code("NOPE")
@@ -1901,6 +1933,7 @@ mod tests {
                 1.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
+            assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let supergraph_req = supergraph::Request::fake_builder()
@@ -1926,6 +1959,9 @@ mod tests {
             custom_instruments.on_response(&supergraph_response);
             custom_instruments.on_event_response(
                 &graphql::Response::builder()
+                    .data(json!({
+                        "price": 500
+                    }))
                     .errors(vec![graphql::Error::builder()
                         .message("nope")
                         .extension_code("NOPE")
@@ -1941,6 +1977,7 @@ mod tests {
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
+            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let supergraph_req = supergraph::Request::fake_builder()
@@ -1974,6 +2011,7 @@ mod tests {
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
+            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
         }
         .with_metrics()
         .await;
