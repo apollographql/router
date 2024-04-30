@@ -187,12 +187,15 @@ Each Apollo Router service has a corresponding function that a Rhai script can d
 
 ##### `RouterService`
 
+`router_service`
 </td>
 <td>
 
 Runs at the very beginning and very end of the HTTP request lifecycle.
 
 For example, [JWT authentication](../configuration/authn-jwt) is performed within the `RouterService`.
+
+Define `router_service` if your customization needs to interact with HTTP `context` and `headers`. It doesn't support access to the `body` property (see [this GitHub issue](https://github.com/apollographql/router/issues/3642) for details).
 
 </td>
 </tr>

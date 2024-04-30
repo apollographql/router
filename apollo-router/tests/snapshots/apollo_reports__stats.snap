@@ -119,7 +119,6 @@ traces_per_query:
         field_names:
           - name
         is_interface: false
-    internal_traces_contributing_to_stats: []
     query_metadata: ~
 end_time: "[end_time]"
 operation_count: 0
@@ -128,4 +127,3 @@ operation_count_by_type:
     subtype: ""
     operation_count: 1
 traces_pre_aggregated: true
-

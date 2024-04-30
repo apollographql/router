@@ -5,8 +5,8 @@ use opentelemetry::KeyValue;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
@@ -15,6 +15,8 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+mod conditional;
+mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
 pub(crate) mod extendable;
@@ -128,6 +130,10 @@ macro_rules! impl_to_otel_value {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
                                     value.iter().filter_map(|v| v.as_bool()).collect(),
                                 )))
+                            } else if value.iter().all(|v| v.is_object()) {
+                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                                    value.iter().map(|v| v.to_string().into()).collect(),
+                                )))
                             } else if value.iter().all(|v| v.is_string()) {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::String(
                                     value
@@ -137,10 +143,11 @@ macro_rules! impl_to_otel_value {
                                         .collect(),
                                 )))
                             } else {
-                                None
+                                Some(serde_json::to_string(value).ok()?.into())
                             }
                         }
-                        _ => None,
+                        $type::Object(value) => Some(serde_json::to_string(value).ok()?.into()),
+                        _ => None
                     }
                 }
             }
@@ -179,6 +186,7 @@ mod test {
     use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::config_new::DatadogId;
     use crate::plugins::telemetry::config_new::ToOtelValue;
+    use crate::plugins::telemetry::otel;
 
     #[test]
     fn dd_convert() {
@@ -190,7 +198,7 @@ mod test {
     #[test]
     fn test_trace_id() {
         // Create a span with a trace ID
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
@@ -212,7 +220,7 @@ mod test {
     #[test]
     fn test_baggage() {
         // Create a span with a trace ID
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
@@ -262,7 +270,13 @@ mod test {
         );
 
         // Arrays must be uniform
-        assert!(json!(["1", 1]).maybe_to_otel_value().is_none());
-        assert!(json!([1.0, 1]).maybe_to_otel_value().is_none());
+        assert_eq!(
+            json!(["1", 1]).maybe_to_otel_value(),
+            Some(r#"["1",1]"#.to_string().into())
+        );
+        assert_eq!(
+            json!([1.0, 1]).maybe_to_otel_value(),
+            Some(r#"[1.0,1]"#.to_string().into())
+        );
     }
 }

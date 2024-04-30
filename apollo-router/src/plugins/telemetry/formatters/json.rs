@@ -10,7 +10,6 @@ use serde::ser::Serializer as _;
 use serde_json::Serializer;
 use tracing_core::Event;
 use tracing_core::Subscriber;
-use tracing_opentelemetry::OtelData;
 use tracing_serde::AsSerde;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -20,9 +19,11 @@ use super::get_trace_and_span_id;
 use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
+use crate::plugins::telemetry::otel::OtelData;
 
 #[derive(Debug)]
 pub(crate) struct Json {
@@ -234,6 +235,16 @@ where
                             .serialize_entry("span_id", &span_id.to_string())
                             .unwrap_or(());
                     }
+                };
+                let event_attributes = {
+                    let mut extensions = span.extensions_mut();
+                    let mut otel_data = extensions.get_mut::<OtelData>();
+                    otel_data.as_mut().and_then(|od| od.event_attributes.take())
+                };
+                if let Some(event_attributes) = event_attributes {
+                    for (key, value) in event_attributes {
+                        serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
+                    }
                 }
             }
 
@@ -368,9 +379,10 @@ mod test {
     use tracing_subscriber::Layer;
     use tracing_subscriber::Registry;
 
-    use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
-    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+    use crate::plugins::telemetry::dynamic_attribute::DynSpanAttributeLayer;
+    use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
+    use crate::plugins::telemetry::otel;
 
     struct RequiresDatadogLayer;
     impl<S> Layer<S> for RequiresDatadogLayer
@@ -393,7 +405,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root", dd.trace_id = "1234");
                 let _root_span = root_span.enter();
@@ -407,11 +419,11 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(DynAttributeLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(DynSpanAttributeLayer)
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
-                root_span.set_dyn_attribute("dd.trace_id".into(), "1234".into());
+                root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
                 let _root_span = root_span.enter();
                 tracing::info!("test");
             },
@@ -424,8 +436,8 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(DynAttributeLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(DynSpanAttributeLayer)
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 let _root_span = root_span.enter();

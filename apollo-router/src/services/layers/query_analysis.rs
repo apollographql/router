@@ -68,12 +68,7 @@ impl QueryAnalysisLayer {
         query: &str,
         operation_name: Option<&str>,
     ) -> Result<ParsedDocument, SpecError> {
-        Query::parse_document(
-            query,
-            operation_name,
-            self.schema.api_schema(),
-            &self.configuration,
-        )
+        Query::parse_document(query, operation_name, &self.schema, &self.configuration)
     }
 
     pub(crate) async fn supergraph_request(

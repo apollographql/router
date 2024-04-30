@@ -41,7 +41,7 @@ pub(crate) mod test {
     use tracing_core::Subscriber;
     use tracing_subscriber::layer::SubscriberExt;
 
-    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+    use crate::plugins::telemetry::dynamic_attribute::DynSpanAttributeLayer;
 
     pub(crate) struct SnapshotSubscriber {
         buffer: Arc<Mutex<Vec<u8>>>,
@@ -104,7 +104,7 @@ pub(crate) mod test {
 
             tracing_subscriber::registry::Registry::default()
                 .with(level)
-                .with(DynAttributeLayer::new())
+                .with(DynSpanAttributeLayer::new())
                 .with(
                     tracing_subscriber::fmt::Layer::default()
                         .json()
