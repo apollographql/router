@@ -1126,8 +1126,8 @@ where
             }
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
-        attrs.append(&mut inner.attributes);
+        let attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
+        inner.attributes.extend(attrs);
 
         if let Some(selected_value) = inner
             .selector
@@ -1164,7 +1164,7 @@ where
 
         if increment != 0.0 {
             if let Some(counter) = &inner.counter {
-                counter.add(increment, &attrs);
+                counter.add(increment, &inner.attrs);
             }
             inner.incremented = true;
         }
