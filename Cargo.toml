@@ -59,9 +59,6 @@ reqwest = { version = "0.11.24", default-features = false, features = [
     "stream",
 ] }
 
-# note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.18+v2.7.2"
-
 schemars = { version = "0.8.16", features = ["url"] }
 serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_json = { version = "1.0.114", features = [

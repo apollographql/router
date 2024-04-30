@@ -189,7 +189,11 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
                     .iter()
                     .filter_map(|e| match e {
                         next::QueryPathElement::Field(field) => Some(
-                            crate::graphql::JsonPathElement::Key(field.response_key().to_string()),
+                            // TODO: type conditioned fetching once it s available in the rust planner
+                            crate::graphql::JsonPathElement::Key(
+                                field.response_key().to_string(),
+                                None,
+                            ),
                         ),
                         next::QueryPathElement::InlineFragment(inline) => {
                             inline.type_condition.as_ref().map(|cond| {
@@ -291,8 +295,9 @@ impl From<&'_ next::FetchDataKeyRenamer> for rewrites::DataKeyRenamer {
 impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
     fn from(value: &'_ next::FetchDataPathElement) -> Self {
         match value {
-            next::FetchDataPathElement::Key(value) => Self::Key(value.to_string()),
-            next::FetchDataPathElement::AnyIndex => Self::Flatten,
+            // TODO: Type conditioned fetching once it's available in the rust planner
+            next::FetchDataPathElement::Key(value) => Self::Key(value.to_string(), None),
+            next::FetchDataPathElement::AnyIndex => Self::Flatten(None),
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
         }
     }

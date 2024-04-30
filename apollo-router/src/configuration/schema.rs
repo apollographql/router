@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
+use std::sync::OnceLock;
 
 use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
@@ -82,19 +83,17 @@ pub(crate) fn validate_yaml_configuration(
             error: e.to_string(),
         }
     })?;
-    let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
-        ConfigurationError::InvalidConfiguration {
-            message: "failed to parse schema",
-            error: e.to_string(),
-        }
-    })?;
-    let schema = JSONSchema::options()
-        .with_draft(Draft::Draft7)
-        .compile(&schema)
-        .map_err(|e| ConfigurationError::InvalidConfiguration {
-            message: "failed to compile schema",
-            error: e.to_string(),
-        })?;
+
+    static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
+    let schema = SCHEMA.get_or_init(|| {
+        let config_schema = serde_json::to_value(generate_config_schema())
+            .expect("failed to parse configuration schema");
+
+        JSONSchema::options()
+            .with_draft(Draft::Draft7)
+            .compile(&config_schema)
+            .expect("failed to compile configuration schema")
+    });
 
     if migration == Mode::Upgrade {
         let upgraded = upgrade_configuration(&yaml, true)?;
@@ -251,6 +250,10 @@ pub(crate) fn validate_yaml_configuration(
         .collect();
 
     if !unknown_fields.is_empty() {
+        // If you end up here while contributing,
+        // It might mean you forgot to update
+        // `impl<'de> serde::Deserialize<'de> for Configuration
+        // In `/apollo-router/src/configuration/mod.rs`
         return Err(ConfigurationError::InvalidConfiguration {
             message: "unknown fields",
             error: format!(

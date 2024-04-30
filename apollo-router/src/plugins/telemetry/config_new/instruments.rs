@@ -26,6 +26,8 @@ use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::cost::CostInstruments;
+use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -37,7 +39,7 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
 
-const METER_NAME: &str = "apollo/router";
+pub(crate) const METER_NAME: &str = "apollo/router";
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
@@ -50,8 +52,10 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) router:
         Extendable<RouterInstrumentsConfig, Instrument<RouterAttributes, RouterSelector>>,
     /// Supergraph service instruments. For more information see documentation on Router lifecycle.
-    pub(crate) supergraph:
-        Extendable<SupergraphInstruments, Instrument<SupergraphAttributes, SupergraphSelector>>,
+    pub(crate) supergraph: Extendable<
+        SupergraphInstrumentsConfig,
+        Instrument<SupergraphAttributes, SupergraphSelector>,
+    >,
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
     pub(crate) subgraph:
         Extendable<SubgraphInstrumentsConfig, Instrument<SubgraphAttributes, SubgraphSelector>>,
@@ -185,6 +189,13 @@ impl InstrumentsConfig {
             http_server_response_body_size,
             http_server_active_requests,
             custom: CustomInstruments::new(&self.router.custom),
+        }
+    }
+
+    pub(crate) fn new_supergraph_instruments(&self) -> SupergraphInstruments {
+        SupergraphInstruments {
+            cost: self.supergraph.attributes.cost.to_instruments(),
+            custom: CustomInstruments::new(&self.supergraph.custom),
         }
     }
 
@@ -362,7 +373,7 @@ impl DefaultForLevel for ActiveRequestsAttributes {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, untagged)]
-enum DefaultedStandardInstrument<T> {
+pub(crate) enum DefaultedStandardInstrument<T> {
     #[default]
     Unset,
     Bool(bool),
@@ -372,7 +383,7 @@ enum DefaultedStandardInstrument<T> {
 }
 
 impl<T> DefaultedStandardInstrument<T> {
-    fn is_enabled(&self) -> bool {
+    pub(crate) fn is_enabled(&self) -> bool {
         match self {
             Self::Unset => false,
             Self::Bool(enabled) => *enabled,
@@ -453,9 +464,12 @@ where
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct SupergraphInstruments {}
+pub(crate) struct SupergraphInstrumentsConfig {
+    #[serde(flatten)]
+    pub(crate) cost: CostInstrumentsConfig,
+}
 
-impl DefaultForLevel for SupergraphInstruments {
+impl DefaultForLevel for SupergraphInstrumentsConfig {
     fn defaults_for_level(
         &mut self,
         _requirement_level: DefaultAttributeRequirementLevel,
@@ -830,6 +844,31 @@ impl Instrumented for RouterInstruments {
     }
 }
 
+pub(crate) struct SupergraphInstruments {
+    cost: CostInstruments,
+    custom: SupergraphCustomInstruments,
+}
+
+impl Instrumented for SupergraphInstruments {
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+
+    fn on_request(&self, request: &Self::Request) {
+        self.cost.on_request(request);
+        self.custom.on_request(request);
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        self.cost.on_response(response);
+        self.custom.on_response(response);
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        self.cost.on_error(error, ctx);
+        self.custom.on_error(error, ctx);
+    }
+}
+
 pub(crate) struct SubgraphInstruments {
     http_client_request_duration: Option<
         CustomHistogram<
@@ -917,7 +956,7 @@ pub(crate) type SubgraphCustomInstruments =
     CustomInstruments<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
 
 // ---------------- Counter -----------------------
-enum Increment {
+pub(crate) enum Increment {
     Unit,
     Duration(Instant),
     Custom(Option<i64>),
@@ -1122,25 +1161,25 @@ impl Drop for ActiveRequestsCounter {
 
 // ---------------- Histogram -----------------------
 
-struct CustomHistogram<Request, Response, A, T>
+pub(crate) struct CustomHistogram<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response>,
 {
-    inner: Mutex<CustomHistogramInner<Request, Response, A, T>>,
+    pub(crate) inner: Mutex<CustomHistogramInner<Request, Response, A, T>>,
 }
 
-struct CustomHistogramInner<Request, Response, A, T>
+pub(crate) struct CustomHistogramInner<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response>,
 {
-    increment: Increment,
-    condition: Condition<T>,
-    selector: Option<Arc<T>>,
-    selectors: Option<Arc<Extendable<A, T>>>,
-    histogram: Option<Histogram<f64>>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) increment: Increment,
+    pub(crate) condition: Condition<T>,
+    pub(crate) selector: Option<Arc<T>>,
+    pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(crate) histogram: Option<Histogram<f64>>,
+    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
 impl<A, T, Request, Response> Instrumented for CustomHistogram<Request, Response, A, T>

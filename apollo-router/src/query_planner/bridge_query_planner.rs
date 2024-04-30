@@ -190,6 +190,7 @@ impl PlannerMode {
                         .query_planning
                         .experimental_paths_limit,
                 }),
+                type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
             },
         )
         .await?;
@@ -495,6 +496,8 @@ impl BridgeQueryPlanner {
                                 .query_planning
                                 .experimental_paths_limit,
                         }),
+                        type_conditioned_fetching: configuration
+                            .experimental_type_conditioned_fetching,
                     },
                 )
                 .await?,
@@ -628,7 +631,7 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .hash_subqueries(&self.subgraph_schemas);
+            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl);
         plan_success
             .data
             .query_plan
@@ -827,8 +830,8 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 Some(d) => d,
             };
 
-            let schema = this.schema.api_schema();
-            match add_defer_labels(schema, &doc.ast) {
+            let api_schema = this.schema.api_schema();
+            match add_defer_labels(api_schema, &doc.ast) {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::TransformError(
                         e.to_string(),
@@ -836,10 +839,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 }
                 Ok(modified_query) => {
                     let executable_document = modified_query
-                        .to_executable_validate(schema)
+                        .to_executable_validate(api_schema)
+                        // Assume transformation creates a valid document: ignore conversion errors
                         .map_err(|e| SpecError::ValidationError(e.into()))?;
                     let hash = QueryHashVisitor::hash_query(
-                        schema,
+                        this.schema.supergraph_schema(),
+                        &this.schema.raw_sdl,
                         &executable_document,
                         operation_name.as_deref(),
                     )
@@ -959,6 +964,7 @@ impl BridgeQueryPlanner {
                 .map_err(|e| SpecError::ValidationError(e.into()))?;
             let hash = QueryHashVisitor::hash_query(
                 self.schema.supergraph_schema(),
+                &self.schema.raw_sdl,
                 &executable_document,
                 key.operation_name.as_deref(),
             )
@@ -1051,9 +1057,13 @@ pub(super) struct QueryPlan {
 }
 
 impl QueryPlan {
-    fn hash_subqueries(&mut self, subgraph_schemas: &SubgraphSchemas) {
+    fn hash_subqueries(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+        supergraph_schema_hash: &str,
+    ) {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(subgraph_schemas);
+            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
         }
     }
 
