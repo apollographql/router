@@ -25,7 +25,7 @@ executors:
       - image: cimg/redis:7.2.4
       - image: jaegertracing/all-in-one:1.54.0
       - image: openzipkin/zipkin:2.23.2
-    resource_class: xlarge
+    resource_class: large
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
@@ -39,7 +39,7 @@ executors:
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2024.01.1
-    resource_class: arm.xlarge
+    resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
@@ -56,7 +56,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "14.2.0"
-    resource_class: macos.m1.medium.gen1
+    resource_class: macos.m1.small.gen1
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2022.08.1"
@@ -65,7 +65,7 @@ executors:
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2022.08.1"
-    resource_class: windows.xlarge
+    resource_class: windows.large
     shell: bash.exe --login -eo pipefail
 
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
