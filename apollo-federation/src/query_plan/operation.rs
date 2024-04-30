@@ -937,6 +937,23 @@ impl Selection {
         self.with_updated_selection_set(Some(new_sub_selection))
     }
 
+    pub(crate) fn with_updated_directives(
+        &self,
+        directives: executable::DirectiveList,
+    ) -> Result<Self, FederationError> {
+        match self {
+            Selection::Field(field) => Ok(Selection::Field(Arc::new(
+                field.with_updated_directives(directives),
+            ))),
+            Selection::InlineFragment(inline_fragment) => Ok(Selection::InlineFragment(Arc::new(
+                inline_fragment.with_updated_directives(directives),
+            ))),
+            Selection::FragmentSpread(_) => {
+                Err(FederationError::internal("unexpected fragment spread"))
+            }
+        }
+    }
+
     pub(crate) fn containment(
         &self,
         other: &Selection,
@@ -1115,6 +1132,16 @@ mod normalized_field_selection {
             Self {
                 field: self.field.clone(),
                 selection_set,
+            }
+        }
+
+        pub(crate) fn with_updated_directives(
+            &self,
+            directives: executable::DirectiveList,
+        ) -> Self {
+            Self {
+                field: self.field.with_updated_directives(directives),
+                selection_set: self.selection_set.clone(),
             }
         }
 
@@ -1686,6 +1713,16 @@ mod normalized_inline_fragment_selection {
             Self {
                 inline_fragment: self.inline_fragment.clone(),
                 selection_set,
+            }
+        }
+
+        pub(crate) fn with_updated_directives(
+            &self,
+            directives: executable::DirectiveList,
+        ) -> Self {
+            Self {
+                inline_fragment: self.inline_fragment.with_updated_directives(directives),
+                selection_set: self.selection_set.clone(),
             }
         }
 

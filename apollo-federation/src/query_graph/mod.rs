@@ -360,6 +360,14 @@ impl QueryGraph {
         })
     }
 
+    pub(crate) fn edge_head_weight(
+        &self,
+        edge: EdgeIndex,
+    ) -> Result<&QueryGraphNode, FederationError> {
+        let (_, head_id) = self.edge_endpoints(edge)?;
+        self.node_weight(head_id)
+    }
+
     pub(crate) fn edge_endpoints(
         &self,
         edge: EdgeIndex,
@@ -577,6 +585,49 @@ impl QueryGraph {
             }
         }
         Ok(false)
+    }
+
+    pub(crate) fn locally_satisfiable_key(
+        &self,
+        edge_index: EdgeIndex,
+    ) -> Result<Option<SelectionSet>, FederationError> {
+        let edge_head = self.edge_head_weight(edge_index)?;
+        let QueryGraphNodeType::SchemaType(type_position) = &edge_head.type_ else {
+            return Err(FederationError::internal("Unable to compute locally_satisfiable_key. Edge head was unexpectedly pointing to a federated root type"));
+        };
+        let Some(subgraph_schema) = self.sources.get(&edge_head.source) else {
+            return Err(FederationError::internal(format!(
+                "Could not find subgraph source {}",
+                edge_head.source
+            )));
+        };
+        let Some(metadata) = subgraph_schema.subgraph_metadata() else {
+            return Err(FederationError::internal(format!(
+                "Could not find federation metadata for source {}",
+                edge_head.source
+            )));
+        };
+        let key_directive_definition = metadata
+            .federation_spec_definition()
+            .key_directive_definition(subgraph_schema)?;
+        let external_metadata = metadata.external_metadata();
+        let composite_type_position: CompositeTypeDefinitionPosition =
+            type_position.clone().try_into()?;
+        let type_ = composite_type_position.get(subgraph_schema.schema())?;
+        for key in type_.directives().get_all(&key_directive_definition.name) {
+            let key_value = metadata
+                .federation_spec_definition()
+                .key_directive_arguments(key)?;
+            let selection = parse_field_set(
+                subgraph_schema,
+                composite_type_position.type_name().clone(),
+                &key_value.fields,
+            )?;
+            if !external_metadata.selects_any_external_field(&selection)? {
+                return Ok(Some(selection));
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
