@@ -300,14 +300,14 @@ impl Source {
     /// types and fields from the original schema and adds directives to associate
     /// them with the appropriate connector.
     fn generate_connector_supergraph(
-        schema: &Schema,
+        supergraph_schema: &Schema,
         connectors: &HashMap<Arc<String>, Connector>,
     ) -> Result<Valid<Schema>, ConnectorSupergraphError> {
-        let mut new_schema = Schema::new();
-        copy_definitions(schema, &mut new_schema);
+        let mut inner_supergraph_schema = Schema::new();
+        copy_definitions(supergraph_schema, &mut inner_supergraph_schema);
 
         /* enum name -> subgraph name  */
-        let origin_subgraph_map = graph_enum_map(schema)
+        let origin_subgraph_map = graph_enum_map(supergraph_schema)
             .ok_or_else(|| {
                 ConnectorSupergraphError::InvalidOuterSupergraph("missing join__Graph enum".into())
             })?
@@ -318,11 +318,15 @@ impl Source {
         let mut changes = Vec::new();
         // sorted for stable SDL generation
         for connector in connectors.values().sorted_by_key(|c| c.name.clone()) {
-            changes.extend(make_changes(connector, schema, &origin_subgraph_map)?);
+            changes.extend(make_changes(
+                connector,
+                supergraph_schema,
+                &origin_subgraph_map,
+            )?);
         }
 
         for change in changes {
-            change.apply_to(schema, &mut new_schema)?;
+            change.apply_to(supergraph_schema, &mut inner_supergraph_schema)?;
         }
 
         let connector_graph_names = connectors
@@ -331,14 +335,14 @@ impl Source {
             .sorted_by_key(|c| c.name.clone())
             .map(|c| c.name.as_str())
             .collect::<Vec<_>>();
-        new_schema.types.insert(
+        inner_supergraph_schema.types.insert(
             name!("join__Graph"),
             join_graph_enum(&connector_graph_names),
         );
 
-        println!("{}", new_schema.serialize());
-
-        new_schema
+        // TODO: shouldn't need to reparse Oo
+        Schema::parse(inner_supergraph_schema.to_string(), "")
+            .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)?
             .validate()
             .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)
     }
