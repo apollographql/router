@@ -1475,7 +1475,6 @@ async fn test_comma_upper_bound() {
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
-
 #[test(tokio::test)]
 async fn test_underscore() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
@@ -1493,8 +1492,7 @@ async fn test_underscore() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("UnderscoreQuery".into()), &schema);
+    let generated = generate_usage_reporting(&doc, &doc, &Some("UnderscoreQuery".into()), &schema);
 
     let expected_sig = "# UnderscoreQuery\nquery UnderscoreQuery($_arg3_:String,$arg2_:String){underscoreQuery(_arg2:$arg2_,_arg3_:$_arg3_,arg_:\"\"){_ _name _name_ name_}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([

@@ -417,7 +417,7 @@ fn format_field(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
         // The graphql-js implementation will use newlines and indentation instead of commas if the length of the "arg line" is
         // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never
         // the case for any signatures that the JS implementation formatted), followed by the field name, followed by all argument
-        // names and values separated by ": ", surrounded with brackets. Our usage reporting plugin replaces all newlines + 
+        // names and values separated by ": ", surrounded with brackets. Our usage reporting plugin replaces all newlines +
         // indentation with a single space, so we have to replace commas with spaces if the line length is too long.
         let arg_strings: Vec<String> = sorted_args
             .iter()
@@ -428,10 +428,13 @@ fn format_field(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
         // * 2 extra characters for the surrounding brackets
         // * the length of all formatted arguments
         // * one extra character per argument since the JS implementation inserts a space between the argument name and value
-        // * two extra character per argument except the last one since the JS implementation inserts a separating comma and space 
+        // * two extra character per argument except the last one since the JS implementation inserts a separating comma and space
         //   between arguments (but not the last one)
-        let original_line_length =
-            field.name.len() + 2 + arg_strings.iter().map(|s| s.len()).sum::<usize>() + arg_strings.len() + ((arg_strings.len() - 1) * 2);
+        let original_line_length = field.name.len()
+            + 2
+            + arg_strings.iter().map(|s| s.len()).sum::<usize>()
+            + arg_strings.len()
+            + ((arg_strings.len() - 1) * 2);
         let separator = if original_line_length > 80 { " " } else { "," };
 
         for (index, arg_string) in arg_strings.iter().enumerate() {
