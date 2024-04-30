@@ -1112,7 +1112,7 @@ async fn cache_key_metadata() {
                         CacheKeyMetadata {
                             is_authenticated: true,
                             scopes: vec!["id".to_string()],
-                            policies: vec!["profile".to_string()]
+                            policies: vec!["name".to_string()]
                         }
                     );
 
@@ -1132,8 +1132,7 @@ async fn cache_key_metadata() {
             );
             mock_subgraph_service.boxed()
         })
-        // .extra_plugin(AuthzCheckPlugin)
-        .build_supergraph()
+        .build_router()
         .await
         .unwrap();
 
@@ -1150,8 +1149,12 @@ async fn cache_key_metadata() {
         .context(context)
         .build()
         .unwrap();
-    let mut response = service.oneshot(request).await.unwrap();
-    let response = response.next_response().await.unwrap();
+    let mut response = service
+        .oneshot(router::Request::try_from(request).unwrap())
+        .await
+        .unwrap();
+    let response = response.next_response().await.unwrap().unwrap();
+    let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
     insta::assert_json_snapshot!(response);
 }

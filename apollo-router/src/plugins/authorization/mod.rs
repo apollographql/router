@@ -199,8 +199,10 @@ impl AuthorizationPlugin {
         }
 
         if !policies.is_empty() {
-            let policies: HashMap<String, Option<bool>> =
-                policies.into_iter().map(|policy| (policy, None)).collect();
+            let policies: HashMap<String, Option<bool>> = policies
+                .into_iter()
+                .map(|policy| (policy, Some(true)))
+                .collect();
             context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
         }
     }
