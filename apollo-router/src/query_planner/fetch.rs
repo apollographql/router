@@ -126,6 +126,9 @@ pub(crate) struct FetchNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+    
+    // Optionally describes a number of "rewrites" to apply to the data that has already been received further up the tree
+    pub(crate) context_rewrites: Option<Vec<rewrites::DataRewrite>>,
 
     // hash for the query and relevant parts of the schema. if two different schemas provide the exact same types, fields and directives
     // affecting the query, then they will have the same hash
@@ -248,6 +251,27 @@ pub(crate) struct Variables {
     pub(crate) inverted_paths: Vec<Vec<Path>>,
 }
 
+fn path_to_data(
+    data: &Value,
+    path: &Vec<PathElement>
+) -> Option<Value> {
+    // TODO: We will have fragments with type conditions that need to be dealt with, but it's not working just yet
+    let v = match &path[0] {
+        PathElement::Fragment(s) => data.get(s),
+        PathElement::Key(v, t) => data.get(v),
+        PathElement::Flatten(_) => None,
+        PathElement::Index(_) => None,
+    };
+
+    if path.len() > 1 {
+        if let Some(val) = v {
+            let remaining_path = path.iter().skip(1).cloned().collect();
+            return path_to_data(val, &remaining_path);
+        }
+    }
+    v.cloned()
+}
+
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
@@ -259,31 +283,40 @@ impl Variables {
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
+        context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        let input_rewrites = if let Some(ir) = input_rewrites {
-            Some(
-                ir.into_iter()
-                    .map(|item| {
-                        if let DataRewrite::KeyRenamer(dr) = item {
-                            if dr.path == Path(vec![PathElement::Key("prop".to_string(), None)]) {
-                                return DataRewrite::KeyRenamer({
-                                    DataKeyRenamer {
-                                        path: Path(vec![
-                                            PathElement::Key("t".to_string(), None),
-                                            PathElement::Key("prop".to_string(), None),
-                                        ]),
-                                        rename_key_to: dr.rename_key_to.clone()
-                                    }
-                                });
+        match context_rewrites {
+            Some(crw) => {
+                crw.iter().for_each(|rewrite| {
+                    if let DataRewrite::KeyRenamer(item) = rewrite {
+                        let up_count = item.path.iter().enumerate().find_map(|(index, p)|  match p {
+                            PathElement::Key(key, _) => if key != ".." { Some(index) } else { None },
+                            _ => Some(index),
+                        });
+                        
+                        dbg!(&current_dir);
+                        if let Some(count) = up_count {
+                            let mut data_path: Vec<PathElement> = current_dir.iter().take(current_dir.len() - count).map(|e| e.clone()).collect();
+                            item.path.iter().skip(count).for_each(|elem| data_path.push(elem.clone()));                            
+                            dbg!(&data_path);
+                            dbg!(&data);
+                            let value = path_to_data(data, &data_path);
+                            let dp: Path = Path(data_path.into_iter().collect());
+                            let rewrite_with_updated_path = DataRewrite::KeyRenamer({
+                                DataKeyRenamer {
+                                    path: dp,
+                                    rename_key_to: item.rename_key_to.clone(),
+                                }
+                            });
+                            if let Some(mut v) = value {
+                                rewrites::apply_single_rewrite(schema, &mut v, &rewrite_with_updated_path);
                             }
                         }
-                        item.clone()
-                    })
-                    .collect(),
-            )
-        } else {
-            input_rewrites.clone()
-        };
+                    }
+                });
+            }
+            None => {}
+        }
 
         dbg!(&input_rewrites);
         let body = request.body();
@@ -300,7 +333,9 @@ impl Variables {
             let mut values: IndexSet<Value> = IndexSet::new();
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
+                dbg!(&requires);
                 let mut value = execute_selection_set(value, requires, schema, None);
+                dbg!(&value);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, &input_rewrites);
                     match values.get_index_of(&value) {
@@ -393,6 +428,7 @@ impl FetchNode {
             parameters.supergraph_request,
             parameters.schema,
             &self.input_rewrites,
+            &self.context_rewrites,
         ) {
             Some(variables) => variables,
             None => {

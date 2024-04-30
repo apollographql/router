@@ -250,6 +250,8 @@ impl PlanNode {
                             ))
                             .await;
                         value = v;
+                        dbg!("fetch node response", &current_dir);
+                        dbg!(&value);
                         errors = e;
                     }
                 }
