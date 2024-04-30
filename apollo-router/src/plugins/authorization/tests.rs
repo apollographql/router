@@ -1103,7 +1103,6 @@ async fn cache_key_metadata() {
         .unwrap()
         .schema(CACHE_KEY_SCHEMA)
         .subgraph_hook(|_name, _service| {
-            println!("calling service named: {_name:?}");
             let mut mock_subgraph_service = MockSubgraphService::new();
             mock_subgraph_service.expect_call().times(1).returning(
                 move |req: subgraph::Request| {
@@ -1112,7 +1111,7 @@ async fn cache_key_metadata() {
                         CacheKeyMetadata {
                             is_authenticated: true,
                             scopes: vec!["id".to_string()],
-                            policies: vec!["name".to_string()]
+                            policies: vec![]
                         }
                     );
 
@@ -1122,7 +1121,7 @@ async fn cache_key_metadata() {
 
                                 "currentUser": {
                                     "id": 1,
-                                    "name": "A",
+                                    "name": "A", // This will be filtered because we don't have the policy
                                     "phone": "1234"
                                 }
 

@@ -6,8 +6,20 @@ expression: response
   "data": {
     "currentUser": {
       "id": 1,
-      "name": "A",
+      "name": null,
       "phone": "1234"
     }
-  }
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "currentUser",
+        "name"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
 }
