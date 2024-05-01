@@ -75,7 +75,7 @@ pub(crate) struct GraphqlFederatedTypeConditionQueryGraphEdge {
 }
 
 #[derive(Debug)]
-pub(crate) enum GraphqlFederatedSourceEnterQueryGraphEdge {
+pub(crate) enum GraphqlFederatedSourceEnteringQueryGraphEdge {
     OperationRoot {
         subgraph_type: ObjectTypeDefinitionPosition,
         root_kind: SchemaRootDefinitionKind,
@@ -110,7 +110,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
-        _source_enter_edge: EdgeIndex,
+        _source_entering_edge: EdgeIndex,
         _source_data: &SourceFetchDependencyGraphNode,
         _path_tree_edges: Vec<FederatedPathTreeChildKey>,
     ) -> Result<Vec<FederatedPathTreeChildKey>, FederationError> {
@@ -121,7 +121,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
-        _source_enter_edge: EdgeIndex,
+        _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourceFetchDependencyGraphNode, FederationError> {
         todo!()
@@ -131,7 +131,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
-        _source_enter_edge: EdgeIndex,
+        _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError> {
         todo!()
@@ -177,7 +177,13 @@ pub(crate) enum GraphqlFetchDependencyGraphNode {
 }
 
 #[derive(Debug)]
-pub(crate) struct GraphqlPath;
+pub(crate) struct GraphqlPath {
+    query_graph: Arc<FederatedQueryGraph>,
+    merge_at: Vec<FetchDataPathElement>,
+    source_entering_edge: EdgeIndex,
+    source_id: SourceId,
+    operation_path: Vec<OperationPathElement>,
+}
 
 impl SourcePathApi for GraphqlPath {
     fn source_id(&self) -> &SourceId {

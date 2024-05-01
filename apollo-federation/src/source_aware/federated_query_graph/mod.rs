@@ -9,10 +9,9 @@ use crate::sources::{
     SourceFederatedAbstractFieldQueryGraphEdge, SourceFederatedAbstractQueryGraphNode,
     SourceFederatedConcreteFieldQueryGraphEdge, SourceFederatedConcreteQueryGraphNode,
     SourceFederatedEnumQueryGraphNode, SourceFederatedQueryGraphs,
-    SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnterQueryGraphEdge,
+    SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnteringQueryGraphEdge,
     SourceFederatedTypeConditionQueryGraphEdge, SourceId,
 };
-use apollo_compiler::schema::NamedType;
 use indexmap::{IndexMap, IndexSet};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 
@@ -23,8 +22,9 @@ pub(crate) mod path_tree;
 #[derive(Debug)]
 pub struct FederatedQueryGraph {
     graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
-    supergraph_types_to_root_nodes: IndexMap<NamedType, NodeIndex>,
-    supergraph_root_kinds_to_types: IndexMap<SchemaRootDefinitionKind, NamedType>,
+    supergraph_types_to_root_nodes: IndexMap<ObjectTypeDefinitionPosition, NodeIndex>,
+    supergraph_root_kinds_to_types:
+        IndexMap<SchemaRootDefinitionKind, ObjectTypeDefinitionPosition>,
     self_conditions: Vec<NormalizedSelectionSet>,
     non_trivial_followup_edges: IndexMap<EdgeIndex, IndexSet<EdgeIndex>>,
     source_data: SourceFederatedQueryGraphs,
@@ -34,20 +34,20 @@ pub struct FederatedQueryGraph {
 pub(crate) enum FederatedQueryGraphNode {
     Root {
         supergraph_type: ObjectTypeDefinitionPosition,
-        source_enters: IndexMap<NodeIndex, IndexSet<EdgeIndex>>,
+        source_entering_edges: IndexMap<NodeIndex, IndexSet<EdgeIndex>>,
     },
     Abstract {
         supergraph_type: AbstractTypeDefinitionPosition,
-        fields: IndexMap<AbstractFieldDefinitionPosition, EdgeIndex>,
-        type_conditions:
-            IndexMap<CompositeTypeDefinitionPosition, (Option<EdgeIndex>, IndexSet<EdgeIndex>)>,
+        field_edges: IndexMap<AbstractFieldDefinitionPosition, EdgeIndex>,
+        concrete_type_condition_edges: IndexMap<ObjectTypeDefinitionPosition, EdgeIndex>,
+        abstract_type_condition_edges: IndexMap<AbstractTypeDefinitionPosition, EdgeIndex>,
         source_id: SourceId,
         source_data: SourceFederatedAbstractQueryGraphNode,
     },
     Concrete {
         supergraph_type: ObjectTypeDefinitionPosition,
-        fields: IndexMap<ObjectFieldDefinitionPosition, EdgeIndex>,
-        source_exit: Option<EdgeIndex>,
+        field_edges: IndexMap<ObjectFieldDefinitionPosition, EdgeIndex>,
+        source_exiting_edge: Option<EdgeIndex>,
         source_id: SourceId,
         source_data: SourceFederatedConcreteQueryGraphNode,
     },
@@ -114,13 +114,13 @@ pub(crate) enum FederatedQueryGraphEdge {
         source_id: SourceId,
         source_data: Option<SourceFederatedTypeConditionQueryGraphEdge>,
     },
-    SourceEnter {
+    SourceEntering {
         supergraph_type: ObjectTypeDefinitionPosition,
         self_conditions: Option<SelfConditionIndex>,
         tail_source_id: SourceId,
-        source_data: Option<SourceFederatedSourceEnterQueryGraphEdge>,
+        source_data: Option<SourceFederatedSourceEnteringQueryGraphEdge>,
     },
-    SourceExit {
+    SourceExiting {
         supergraph_type: ObjectTypeDefinitionPosition,
         head_source_id: SourceId,
     },

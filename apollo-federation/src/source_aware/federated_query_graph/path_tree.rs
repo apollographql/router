@@ -17,7 +17,7 @@ pub(crate) struct FederatedPathTree {
 pub(crate) struct FederatedPathTreeChild {
     key: FederatedPathTreeChildKey,
     self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
-    source_enter_condition_resolutions_at_edge:
+    source_entering_condition_resolutions_at_edge:
         IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
     condition_resolutions_at_edge: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
     tree: Arc<FederatedPathTree>,

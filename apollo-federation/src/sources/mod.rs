@@ -11,7 +11,7 @@ use crate::sources::connect::{
     ConnectFederatedConcreteFieldQueryGraphEdge, ConnectFederatedConcreteQueryGraphNode,
     ConnectFederatedEnumQueryGraphNode, ConnectFederatedQueryGraph,
     ConnectFederatedQueryGraphBuilder, ConnectFederatedScalarQueryGraphNode,
-    ConnectFederatedSourceEnterQueryGraphEdge, ConnectFederatedTypeConditionQueryGraphEdge,
+    ConnectFederatedSourceEnteringQueryGraphEdge, ConnectFederatedTypeConditionQueryGraphEdge,
     ConnectFetchDependencyGraph, ConnectFetchDependencyGraphNode, ConnectFetchNode, ConnectId,
     ConnectPath,
 };
@@ -20,7 +20,7 @@ use crate::sources::graphql::{
     GraphqlFederatedConcreteFieldQueryGraphEdge, GraphqlFederatedConcreteQueryGraphNode,
     GraphqlFederatedEnumQueryGraphNode, GraphqlFederatedQueryGraph,
     GraphqlFederatedQueryGraphBuilder, GraphqlFederatedScalarQueryGraphNode,
-    GraphqlFederatedSourceEnterQueryGraphEdge, GraphqlFederatedTypeConditionQueryGraphEdge,
+    GraphqlFederatedSourceEnteringQueryGraphEdge, GraphqlFederatedTypeConditionQueryGraphEdge,
     GraphqlFetchDependencyGraph, GraphqlFetchDependencyGraphNode, GraphqlFetchNode, GraphqlId,
     GraphqlPath,
 };
@@ -105,9 +105,9 @@ pub(crate) enum SourceFederatedTypeConditionQueryGraphEdge {
 }
 
 #[derive(Debug)]
-pub(crate) enum SourceFederatedSourceEnterQueryGraphEdge {
-    Graphql(GraphqlFederatedSourceEnterQueryGraphEdge),
-    Connect(ConnectFederatedSourceEnterQueryGraphEdge),
+pub(crate) enum SourceFederatedSourceEnteringQueryGraphEdge {
+    Graphql(GraphqlFederatedSourceEnteringQueryGraphEdge),
+    Connect(ConnectFederatedSourceEnteringQueryGraphEdge),
 }
 
 #[enum_dispatch(SourceFederatedQueryGraphBuilderApi)]
@@ -156,7 +156,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
         &self,
         query_graph: Arc<FederatedQueryGraph>,
         merge_at: &[FetchDataPathElement],
-        source_enter_edge: EdgeIndex,
+        source_entering_edge: EdgeIndex,
         source_data: &SourceFetchDependencyGraphNode,
         path_tree_edges: Vec<FederatedPathTreeChildKey>,
     ) -> Result<Vec<FederatedPathTreeChildKey>, FederationError>;
@@ -165,7 +165,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
         &self,
         query_graph: Arc<FederatedQueryGraph>,
         merge_at: &[FetchDataPathElement],
-        source_enter_edge: EdgeIndex,
+        source_entering_edge: EdgeIndex,
         self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourceFetchDependencyGraphNode, FederationError>;
 
@@ -173,7 +173,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
         &self,
         query_graph: Arc<FederatedQueryGraph>,
         merge_at: &[FetchDataPathElement],
-        source_enter_edge: EdgeIndex,
+        source_entering_edge: EdgeIndex,
         self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError>;
 

@@ -1,6 +1,5 @@
 use crate::query_plan::operation::normalized_field_selection::NormalizedField;
 use crate::query_plan::operation::normalized_inline_fragment_selection::NormalizedInlineFragment;
-use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::source_aware::federated_query_graph::path_tree::FederatedPathTree;
 use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
 use crate::source_aware::query_plan::QueryPlanCost;
@@ -14,10 +13,9 @@ pub(crate) struct FederatedGraphPath {
     head: NodeIndex,
     tail: NodeIndex,
     edges: Vec<Arc<FederatedGraphPathEdge>>,
-    last_source_enter_edge_info: Option<SourceEnterEdgeInfo>,
-    runtime_types_at_tail: Arc<IndexSet<ObjectTypeDefinitionPosition>>,
-    runtime_types_before_last_edge_if_type_condition:
-        Option<Arc<IndexSet<ObjectTypeDefinitionPosition>>>,
+    last_source_entering_edge_info: Option<SourceEnteringEdgeInfo>,
+    possible_concrete_nodes_at_tail: Arc<IndexSet<NodeIndex>>,
+    possible_concrete_nodes_before_last_edge_if_type_condition: Option<Arc<IndexSet<NodeIndex>>>,
 }
 
 #[derive(Debug)]
@@ -25,7 +23,7 @@ pub(crate) struct FederatedGraphPathEdge {
     operation_element: Option<Arc<OperationPathElement>>,
     edge: Option<EdgeIndex>,
     self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
-    source_enter_condition_resolutions_at_edge:
+    source_entering_condition_resolutions_at_edge:
         IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
     condition_resolutions_at_edge: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
 }
@@ -47,7 +45,7 @@ pub(crate) struct ConditionResolutionInfo {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SourceEnterEdgeInfo {
+pub(crate) struct SourceEnteringEdgeInfo {
     index: usize,
     conditions_cost: QueryPlanCost,
 }

@@ -118,7 +118,7 @@ pub(crate) enum ConnectFederatedConcreteFieldQueryGraphEdge {
 pub(crate) struct ConnectFederatedTypeConditionQueryGraphEdge;
 
 #[derive(Debug)]
-pub(crate) enum ConnectFederatedSourceEnterQueryGraphEdge {
+pub(crate) enum ConnectFederatedSourceEnteringQueryGraphEdge {
     ConnectParent {
         subgraph_type: ObjectTypeDefinitionPosition,
     },
@@ -144,7 +144,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
-        _source_enter_edge: EdgeIndex,
+        _source_entering_edge: EdgeIndex,
         _source_data: &SourceFetchDependencyGraphNode,
         _path_tree_edges: Vec<FederatedPathTreeChildKey>,
     ) -> Result<Vec<FederatedPathTreeChildKey>, FederationError> {
@@ -155,7 +155,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
-        _source_enter_edge: EdgeIndex,
+        _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourceFetchDependencyGraphNode, FederationError> {
         todo!()
@@ -165,7 +165,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
-        _source_enter_edge: EdgeIndex,
+        _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError> {
         todo!()
@@ -206,7 +206,46 @@ pub(crate) struct ConnectFetchDependencyGraphNode {
 }
 
 #[derive(Debug)]
-pub(crate) struct ConnectPath;
+pub(crate) struct ConnectPath {
+    query_graph: Arc<FederatedQueryGraph>,
+    merge_at: Vec<FetchDataPathElement>,
+    source_entering_edge: EdgeIndex,
+    source_id: SourceId,
+    field: Option<ConnectPathField>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ConnectPathField {
+    response_name: Name,
+    arguments: IndexMap<Name, Value>,
+    selections: ConnectPathSelections,
+}
+
+#[derive(Debug)]
+pub(crate) enum ConnectPathSelections {
+    Selections {
+        head_property_path: Vec<Property>,
+        named_selections: Vec<(Name, Vec<Property>)>,
+        tail_selection: Option<(Name, ConnectPathTailSelection)>,
+    },
+    CustomScalarRoot {
+        selection: Selection,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum ConnectPathTailSelection {
+    Selection {
+        property_path: Vec<Property>,
+    },
+    CustomScalarPathSelection {
+        path_selection: PathSelection,
+    },
+    CustomScalarStarSelection {
+        star_subselection: Option<SubSelection>,
+        excluded_properties: IndexSet<Property>,
+    },
+}
 
 impl SourcePathApi for ConnectPath {
     fn source_id(&self) -> &SourceId {
@@ -227,6 +266,7 @@ impl SourcePathApi for ConnectPath {
 #[derive(Debug)]
 pub struct ConnectFetchNode {
     source_id: ConnectId,
-    arguments: IndexMap<Name, Value>,
+    field_response_name: Name,
+    field_arguments: IndexMap<Name, Value>,
     selection: Selection,
 }

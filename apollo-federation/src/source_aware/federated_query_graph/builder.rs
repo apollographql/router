@@ -1,11 +1,12 @@
 use crate::error::FederationError;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
 use crate::sources::{
     SourceFederatedAbstractFieldQueryGraphEdge, SourceFederatedConcreteFieldQueryGraphEdge,
     SourceFederatedConcreteQueryGraphNode, SourceFederatedEnumQueryGraphNode,
     SourceFederatedQueryGraph, SourceFederatedQueryGraphBuilders,
-    SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnterQueryGraphEdge,
+    SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnteringQueryGraphEdge,
     SourceFederatedTypeConditionQueryGraphEdge, SourceId, SourceKind,
 };
 use crate::ValidFederationSubgraph;
@@ -41,7 +42,8 @@ struct IntraSourceQueryGraphBuilder {
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
     is_for_query_planning: bool,
-    non_entity_supergraph_types_to_nodes: IndexMap<NamedType, IndexSet<NodeIndex>>,
+    non_entity_supergraph_types_to_nodes:
+        IndexMap<ObjectTypeDefinitionPosition, IndexSet<NodeIndex>>,
     current_source_kind: Option<SourceKind>,
     current_source_id: Option<SourceId>,
 }
@@ -110,10 +112,10 @@ pub(crate) trait IntraSourceQueryGraphBuilderApi {
         source_data: SourceFederatedTypeConditionQueryGraphEdge,
     ) -> Result<EdgeIndex, FederationError>;
 
-    fn add_source_enter_edge(
+    fn add_source_entering_edge(
         &mut self,
         tail: NodeIndex,
         self_conditions: Option<SelfConditionIndex>,
-        source_data: SourceFederatedSourceEnterQueryGraphEdge,
+        source_data: SourceFederatedSourceEnteringQueryGraphEdge,
     ) -> Result<EdgeIndex, FederationError>;
 }

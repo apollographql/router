@@ -49,7 +49,7 @@ pub enum PlanNode {
 #[derive(Debug)]
 pub struct FetchNode {
     pub operation_variables: IndexSet<Name>,
-    pub key_conditions: SelectionSet,
+    pub input_conditions: SelectionSet,
     pub source_data: SourceFetchNode,
 }
 

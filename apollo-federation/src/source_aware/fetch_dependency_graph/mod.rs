@@ -28,7 +28,7 @@ type FetchDependencyGraphPetgraph =
 #[derive(Debug)]
 pub(crate) struct FetchDependencyGraphNode {
     merge_at: Vec<FetchDataPathElement>,
-    source_enter_edge: EdgeIndex,
+    source_entering_edge: EdgeIndex,
     operation_variables: IndexSet<Name>,
     depends_on_condition_resolutions: IndexSet<ConditionResolutionId>,
     contains_condition_resolutions: IndexSet<ConditionResolutionId>,
