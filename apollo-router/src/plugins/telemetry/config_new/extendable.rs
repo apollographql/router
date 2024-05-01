@@ -6,10 +6,7 @@ use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
-use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
 use serde::de::Error;
 use serde::de::MapAccess;
@@ -156,63 +153,17 @@ where
                 }
             }
         }
-
-        Schema::Object(SchemaObject {
-            metadata: None,
-            instance_type: None,
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: Some(Box::new(SubschemaValidation {
-                one_of: None,
-                all_of: None,
-                any_of: Some(vec![
-                    attributes.clone(),
-                    Schema::Object(SchemaObject {
-                        metadata: None,
-                        instance_type: None,
-                        format: None,
-                        enum_values: None,
-                        const_value: None,
-                        subschemas: None,
-                        number: None,
-                        string: None,
-                        array: None,
-                        // This is required to prevent subschemas which specify additional_properties false from failing
-                        object: Some(Box::new(ObjectValidation {
-                            max_properties: None,
-                            min_properties: None,
-                            required: Default::default(),
-                            properties: Default::default(),
-                            pattern_properties: Default::default(),
-                            additional_properties: Some(Box::new(Schema::Bool(true))),
-                            property_names: None,
-                        })),
-                        reference: None,
-                        extensions: Default::default(),
-                    }),
-                ]),
-                not: None,
-                if_schema: None,
-                then_schema: None,
-                else_schema: None,
-            })),
-            number: None,
-            string: None,
-            array: None,
-            object: Some(Box::new(ObjectValidation {
-                max_properties: None,
-                min_properties: None,
-                required: Default::default(),
-                // This prevents the current subschema from bailing on the original attributes
-                properties,
-                pattern_properties: Default::default(),
-                additional_properties: custom.into_object().object().additional_properties.clone(),
-                property_names: None,
-            })),
-            reference: None,
-            extensions: Default::default(),
-        })
+        let mut schema = attribute_schema.clone();
+        if let Schema::Object(schema_object) = &mut schema {
+            if let Some(object_validation) = &mut schema_object.object {
+                object_validation.additional_properties = custom
+                    .into_object()
+                    .object
+                    .expect("could not get obejct validation")
+                    .additional_properties;
+            }
+        }
+        schema
     }
 }
 

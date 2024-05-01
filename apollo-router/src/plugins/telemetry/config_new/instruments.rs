@@ -515,6 +515,7 @@ impl DefaultForLevel for SubgraphInstrumentsConfig {
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Instrument<A, E>
 where
     A: Default + Debug,
