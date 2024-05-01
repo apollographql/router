@@ -1,6 +1,6 @@
-### Add gt operation for telemetry conditions ([PR #5048](https://github.com/apollographql/router/pull/5048))
+### Add gt and lt operators for telemetry conditions ([PR #5048](https://github.com/apollographql/router/pull/5048))
 
-Adds a greater than operator for telemetry conditions called `gt`. The configuration for `gt` takes two arguments as a list, similar to `eq`. The operator checks that the first argument is greater than the second. Other conditions such as `gte`, `lt`, `lte`, and `range` can all be made from combinations of `gt`, `eq`, and `all`.
+Adds greater than and less than operators for telemetry conditions called `gt` and `lt`, respectively. The configuration for both takes two arguments as a list, similar to `eq`. The `gt` operator checks that the first argument is greater than the second, and, similarly, the `lt` operator checks that the first argument is less than the second.. Other conditions such as `gte`, `lte`, and `range` can all be made from combinations of `gt`, `lt`, `eq`, and `all`.
 
 <!-- ROUTER-237 -->
 ---

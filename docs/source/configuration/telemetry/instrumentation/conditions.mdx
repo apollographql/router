@@ -82,6 +82,20 @@ gt:
 
 Values may be of types `string`, `number` or `boolean`.
 
+#### `lt`
+
+The `lt` condition checks that one value is less than another.
+
+For example, the following condition checks the response status code is less than 500:
+
+```yaml
+lt:
+  - response_status: code
+  - 500
+```
+
+Values may be of types `string`, `number` or `boolean`.
+
 #### `not`
 
 The `not` condition is a negation of the nested condition.
@@ -135,6 +149,7 @@ The available basic conditions:
 |----------|----------------------------------------------------------|
 | `eq`     | An equality test between selectors or values             |
 | `gt`     | An inequality test between selectors or values           |
+| `lt`     | An inequality test between selectors or values           |
 | `exist`  | A check to see if the selectors value exists             |
 | `not`    | A negated equality test between selectors or values      |
 | `all`    | A list of conditions that must all be true               |
