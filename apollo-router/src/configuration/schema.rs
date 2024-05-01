@@ -30,10 +30,13 @@ pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
-#[derive(Debug, Clone)]
-struct MyVisitor;
 
-impl Visitor for MyVisitor {
+/// This needs to exist because Schemars incorrectly generates references with spaces in them.
+/// We just rename them.
+#[derive(Debug, Clone)]
+struct RefRenameVisitor;
+
+impl Visitor for RefRenameVisitor {
     fn visit_root_schema(&mut self, root: &mut RootSchema) {
         visit_root_schema(self, root);
         root.definitions = mem::take(&mut root.definitions)
@@ -56,7 +59,7 @@ pub(crate) fn generate_config_schema() -> RootSchema {
         s.option_nullable = true;
         s.option_add_null_type = false;
         s.inline_subschemas = false;
-        s.visitors = vec![Box::new(MyVisitor)]
+        s.visitors = vec![Box::new(RefRenameVisitor)]
     });
 
     // Manually patch up the schema
