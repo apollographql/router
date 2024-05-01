@@ -1,6 +1,6 @@
-### Add gt, gte, lt, lte, and range operations for telemetry conditions ([PR #5048](https://github.com/apollographql/router/pull/5048))
+### Add gt operation for telemetry conditions ([PR #5048](https://github.com/apollographql/router/pull/5048))
 
-Add gt, gte, lt, lte, and range operations for telemetry conditions.
+Adds a greater than operator for telemetry conditions called `gt`. The configuration for `gt` takes two arguments as a list, similar to `eq`. The operator checks that the first argument is greater than the second. Other conditions such as `gte`, `lt`, `lte`, and `range` can all be made from combinations of `gt`, `eq`, and `all`.
 
 <!-- ROUTER-237 -->
 ---
