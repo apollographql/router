@@ -59,12 +59,12 @@ executors:
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:2022.08.1"
+      image: "windows-server-2019-vs2019:2024.02.21"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:2022.08.1"
+      image: "windows-server-2019-vs2019:2024.02.21"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
@@ -366,6 +366,10 @@ commands:
               cargo install --locked --version 0.12.0 cargo-fuzz
             fi
 
+            if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked --version 0.9.70 cargo-nextest
+            fi
+
   fetch_dependencies:
     steps:
       - run:
@@ -488,6 +492,9 @@ commands:
             - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
       - run:
           name: Run tests
+          environment:
+            # Use the settings from the "ci" profile in nextest configuration.
+            NEXTEST_PROFILE: ci
           command: xtask test --workspace --locked
       - run:
           name: Delete large files from cache
@@ -502,6 +509,9 @@ commands:
               key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
               paths:
                 - target
+      - store_test_results:
+          # The results from nextest that power the CircleCI Insights.
+          path: ./target/nextest/ci/junit.xml
   fuzz_build:
     steps:
       - run: cargo +nightly fuzz build
