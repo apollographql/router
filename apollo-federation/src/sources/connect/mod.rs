@@ -201,7 +201,8 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
 
 #[derive(Debug)]
 pub(crate) struct ConnectFetchDependencyGraphNode {
-    arguments: IndexMap<Name, Value>,
+    field_response_name: Name,
+    field_arguments: IndexMap<Name, Value>,
     selection: Selection,
 }
 
