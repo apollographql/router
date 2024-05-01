@@ -21,13 +21,7 @@ use crate::error::SchemaError;
 #[cfg(unix)]
 #[test]
 fn schema_generation() {
-    let settings = SchemaSettings::draft2019_09().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
-        s.inline_subschemas = true;
-    });
-    let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<Configuration>();
+    let schema = generate_config_schema();
     assert_json_snapshot!(&schema)
 }
 
