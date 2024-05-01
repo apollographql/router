@@ -26,8 +26,8 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceError;
 use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use opentelemetry::Value;
-use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use prost::Message;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -104,6 +104,42 @@ const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
+const OPERATION_SUBTYPE: Key = Key::from_static_str("graphql.operation.subtype");
+const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
+
+/// The set of attributes to include when sending to the Apollo Reports protocol.
+const REPORTS_INCLUDE_ATTRS: [Key; 17] = [
+    APOLLO_PRIVATE_REQUEST,
+    APOLLO_PRIVATE_DURATION_NS_KEY,
+    APOLLO_PRIVATE_SENT_TIME_OFFSET,
+    APOLLO_PRIVATE_GRAPHQL_VARIABLES,
+    APOLLO_PRIVATE_HTTP_REQUEST_HEADERS,
+    APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS,
+    APOLLO_PRIVATE_OPERATION_SIGNATURE,
+    APOLLO_PRIVATE_FTV1,
+    PATH,
+    SUBGRAPH_NAME,
+    CLIENT_NAME_KEY,
+    CLIENT_VERSION_KEY,
+    DEPENDS,
+    LABEL,
+    CONDITION,
+    OPERATION_NAME,
+    OPERATION_TYPE,
+];
+
+/// Additional attributes to include when sending to the OTLP protocol.
+const OTLP_EXT_INCLUDE_ATTRS: [Key; 6] = [
+    // TBD(tim): operation subtype is not yet implemented but we'll need it for parity with the reports protocol
+    OPERATION_SUBTYPE,
+    // TBD(tim): attributes below will take us beyond parity but these seem useful:
+    EXT_TRACE_ID,
+    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD,
+    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
+    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
+    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
+];
+
 const INCLUDE_SPANS: [&str; 15] = [
     PARALLEL_SPAN_NAME,
     SEQUENCE_SPAN_NAME,
@@ -140,8 +176,8 @@ pub(crate) enum Error {
     SystemTime(#[from] SystemTimeError),
 }
 
-// TBD(tim): maybe we should move this?
-// Also, maybe we can just use the actual SpanData instead of the light one?
+// TBD(tim): explore ways to have different types of LightSpanData,
+// since we only need some of these extra fields if we are going to send to OTel.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LightSpanData {
     pub(crate) trace_id: TraceId,
@@ -154,8 +190,27 @@ pub(crate) struct LightSpanData {
     pub(crate) attributes: EvictedHashMap,
 }
 
-impl From<SpanData> for LightSpanData {
-    fn from(value: SpanData) -> Self {
+impl LightSpanData {
+    /// Convert from a full Span into a lighter more memory-efficient span for caching purposes.
+    /// - If `include_attr_names` is passed, filter out any attributes that are not in the list.
+    fn from_span_data(value: SpanData, include_attr_names: &Option<HashSet<Key>>) -> Self {
+        let filtered_attributes = match include_attr_names {
+            None => value.attributes,
+            Some(attr_names) => {
+                // Looks like this transformation will be easier after upgrading opentelemetry_sdk >= 0.21
+                // when attributes are stored as Vec<KeyValue>.
+                // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
+                let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
+                let mut new_attrs = EvictedHashMap::new(max_attr_len.try_into().unwrap(), max_attr_len);
+                value.attributes.iter().for_each(|(key, value)| {
+                    if attr_names.contains(key) {
+                        // TBD(tim): any way to avoid copies here since it looks like we already own the SpanData at this point?
+                        new_attrs.insert(KeyValue::new(key.to_owned(), value.to_owned()))
+                    }
+                });
+                new_attrs
+            }
+        };
         Self {
             trace_id: value.span_context.trace_id(),
             span_id: value.span_context.span_id(),
@@ -164,7 +219,7 @@ impl From<SpanData> for LightSpanData {
             name: value.name,
             start_time: value.start_time,
             end_time: value.end_time,
-            attributes: value.attributes,
+            attributes: filtered_attributes
         }
     }
 }
@@ -186,6 +241,7 @@ pub(crate) struct Exporter {
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
     include_span_names: HashSet<&'static str>,
+    include_attr_names: Option<HashSet<Key>>,
 }
 
 #[derive(Debug)]
@@ -265,6 +321,13 @@ impl Exporter {
             errors_configuration: errors_configuration.clone(),
             use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
             include_span_names: INCLUDE_SPANS.into(),
+            include_attr_names: match apollo_tracing_protocol {
+                // TBD(tim): consider filtering the current implementation for memory purposes to HashSet::from(REPORTS_INCLUDE_ATTRS)
+                ApolloTracingProtocol::Apollo => None,
+                ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => Some(
+                    HashSet::from_iter([&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat())
+                )
+            },
         })
     }
 
@@ -814,7 +877,7 @@ pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
 fn extract_http_data(span: &LightSpanData) -> Http {
     let method = match span
         .attributes
-        .get(&HTTP_REQUEST_METHOD)
+        .get(&opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
         .map(|data| data.as_str())
         .unwrap_or_default()
         .as_ref()
@@ -869,11 +932,12 @@ impl SpanExporter for Exporter {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
-                let root_span: LightSpanData = span.into();
+                let root_span: LightSpanData = LightSpanData::from_span_data(span, &self.include_attr_names);
                 if self.otlp_exporter.is_some() {
                     // Only pop from the cache if running in Otlp-only mode.
                     let pop_cache = self.apollo_tracing_protocol == ApolloTracingProtocol::Otlp;
                     let grouped_trace_spans = self.group_by_trace(&root_span, pop_cache);
+                    // TBD(tim): do we need to filter out traces w/o signatures?  What scenario(s) would cause that to happen?
                     otlp_trace_spans.push(grouped_trace_spans);
                 }
 
@@ -913,7 +977,7 @@ impl SpanExporter for Exporter {
                 self.spans_by_parent_id
                     .get_mut(&span.parent_span_id)
                     .expect("capacity of cache was zero")
-                    .push(len, span.into());
+                    .push(len, LightSpanData::from_span_data(span, &self.include_attr_names));
             }
         }
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
