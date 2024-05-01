@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::{ObjectValidation, Schema, SchemaObject, SubschemaValidation};
+use schemars::schema::ObjectValidation;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
 use serde::de::Error;
 use serde::de::MapAccess;
@@ -86,7 +89,7 @@ where
             enum_values: None,
             const_value: None,
             subschemas: Some(Box::new(SubschemaValidation {
-                all_of: Some(vec![
+                any_of: Some(vec![
                     selector,
                     Schema::Object(SchemaObject {
                         metadata: None,
@@ -115,7 +118,7 @@ where
                         extensions: Default::default(),
                     }),
                 ]),
-                any_of: None,
+                all_of: None,
                 one_of: None,
                 not: None,
                 if_schema: None,

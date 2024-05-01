@@ -1,8 +1,5 @@
 //! Configuration schema generation and validation
 
-use apollo_compiler::ast::FragmentDefinition;
-use apollo_compiler::Schema;
-use std::any::Any;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
@@ -13,10 +10,12 @@ use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
-use schemars::gen::{GenVisitor, SchemaSettings};
-use schemars::schema::{RootSchema, SchemaObject};
-use schemars::visit::{visit_root_schema, visit_schema_object, Visitor};
-use tower::BoxError;
+use schemars::gen::SchemaSettings;
+use schemars::schema::RootSchema;
+use schemars::schema::SchemaObject;
+use schemars::visit::visit_root_schema;
+use schemars::visit::visit_schema_object;
+use schemars::visit::Visitor;
 use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
@@ -39,12 +38,12 @@ impl Visitor for MyVisitor {
         visit_root_schema(self, root);
         root.definitions = mem::take(&mut root.definitions)
             .into_iter()
-            .map(|(k, v)| (k.replace(" ", "_"), v))
+            .map(|(k, v)| (k.replace(' ', "_"), v))
             .collect();
     }
     fn visit_schema_object(&mut self, schema: &mut SchemaObject) {
         if let Some(reference) = &mut schema.reference {
-            *reference = reference.replace(" ", "_");
+            *reference = reference.replace(' ', "_");
         }
 
         visit_schema_object(self, schema);

@@ -1,11 +1,15 @@
 use std::any::type_name;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::{ObjectValidation, Schema, SchemaObject, SubschemaValidation};
+use schemars::schema::ObjectValidation;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
 use serde::de::Error;
 use serde::de::MapAccess;
@@ -132,8 +136,27 @@ where
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        // Extendable json schema is composed of and anyOf of A and additional properties of E
+        // To allow this to happen we need to generate a schema that contains all the properties of A
+        // and a schema ref to A.
+        // We can then add additional properties to the schema of type E.
+
         let attributes = gen.subschema_for::<A>();
         let custom = gen.subschema_for::<HashMap<String, E>>();
+
+        // Get a list of properties from the attributes schema
+        let attribute_schema = gen
+            .dereference(&attributes)
+            .expect("failed to dereference attributes");
+        let mut properties = BTreeMap::new();
+        if let Schema::Object(schema_object) = attribute_schema {
+            if let Some(object_validation) = &schema_object.object {
+                for key in object_validation.properties.keys() {
+                    properties.insert(key.clone(), Schema::Bool(true));
+                }
+            }
+        }
+
         Schema::Object(SchemaObject {
             metadata: None,
             instance_type: None,
@@ -141,9 +164,34 @@ where
             enum_values: None,
             const_value: None,
             subschemas: Some(Box::new(SubschemaValidation {
-                all_of: Some(vec![attributes]),
-                any_of: None,
                 one_of: None,
+                all_of: None,
+                any_of: Some(vec![
+                    attributes.clone(),
+                    Schema::Object(SchemaObject {
+                        metadata: None,
+                        instance_type: None,
+                        format: None,
+                        enum_values: None,
+                        const_value: None,
+                        subschemas: None,
+                        number: None,
+                        string: None,
+                        array: None,
+                        // This is required to prevent subschemas which specify additional_properties false from failing
+                        object: Some(Box::new(ObjectValidation {
+                            max_properties: None,
+                            min_properties: None,
+                            required: Default::default(),
+                            properties: Default::default(),
+                            pattern_properties: Default::default(),
+                            additional_properties: Some(Box::new(Schema::Bool(true))),
+                            property_names: None,
+                        })),
+                        reference: None,
+                        extensions: Default::default(),
+                    }),
+                ]),
                 not: None,
                 if_schema: None,
                 then_schema: None,
@@ -153,15 +201,15 @@ where
             string: None,
             array: None,
             object: Some(Box::new(ObjectValidation {
-                additional_properties: Some(Box::new(custom)),
-                property_names: None,
+                max_properties: None,
                 min_properties: None,
                 required: Default::default(),
-                properties: Default::default(),
-                max_properties: None,
+                // This prevents the current subschema from bailing on the original attributes
+                properties,
                 pattern_properties: Default::default(),
+                additional_properties: custom.into_object().object().additional_properties.clone(),
+                property_names: None,
             })),
-
             reference: None,
             extensions: Default::default(),
         })
