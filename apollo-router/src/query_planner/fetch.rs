@@ -214,6 +214,11 @@ impl SubgraphOperation {
                 .serialized
                 .get()
                 .expect("SubgraphOperation has neither representation initialized");
+
+            println!(
+                "\n -----------------\n {} \n -----------------",
+                subgraph_schema
+            );
             Arc::new(
                 ExecutableDocument::parse_and_validate(
                     subgraph_schema,
