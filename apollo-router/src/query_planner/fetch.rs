@@ -251,13 +251,14 @@ pub(crate) struct Variables {
     pub(crate) inverted_paths: Vec<Vec<Path>>,
 }
 
-fn data_at_path<'v>(data: &'v Value, path: &Vec<PathElement>) -> Option<&'v Value> {
+// TODO: There is probably a function somewhere else that already does this
+fn data_at_path<'v>(data: &'v Value, path: &Path) -> Option<&'v Value> {
     // TODO: We will have fragments with type conditions that need to be dealt with, but it's not working just yet
-    let v = match &path[0] {
+    let v = match &path.0[0] {
         PathElement::Fragment(s) => data.get(s),
-        PathElement::Key(v, t) => data.get(v),
+        PathElement::Key(v, _) => data.get(v),
+        PathElement::Index(idx) => Some(&data[idx]),
         PathElement::Flatten(_) => None,
-        PathElement::Index(_) => None,
     };
 
     if path.len() > 1 {
@@ -269,7 +270,7 @@ fn data_at_path<'v>(data: &'v Value, path: &Vec<PathElement>) -> Option<&'v Valu
     v
 }
 
-fn merge_context_path(current_dir: &Path, context_path: &Path) -> Vec<PathElement> {
+fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
     let mut i = 0;
     let mut j = current_dir.len();
     // iterate over the context_path(i), every time we encounter a '..', we want 
@@ -309,7 +310,7 @@ fn merge_context_path(current_dir: &Path, context_path: &Path) -> Vec<PathElemen
         .for_each(|e| {
             return_path.push(e.clone());
         });
-    return_path
+    Path(return_path.into_iter().collect())
 }
 
 impl Variables {
@@ -325,75 +326,89 @@ impl Variables {
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        let mut context_variables: HashMap<NodeStr, Value> = Default::default();
-        // apply context_rewrites
-        if let Some(crw) = context_rewrites {
-            crw.iter().for_each(|rewrite| {
-                if let DataRewrite::KeyRenamer(item) = rewrite {
-                    dbg!(&current_dir, &item.path);
-                    let data_path = merge_context_path(&current_dir, &item.path);
-
-                    let value = data_at_path(data, &data_path);
-                    let dp: Path = Path(data_path.into_iter().collect());
-                    let rewrite_with_updated_path = DataRewrite::KeyRenamer({
-                        DataKeyRenamer {
-                            path: dp,
-                            rename_key_to: item.rename_key_to.clone(),
-                        }
-                    });
-                    dbg!(&rewrite_with_updated_path, &value);
-                    if let Some(v) = value {
-                        // TODO: not great
-                        let mut new_value = v.clone();
-                        rewrites::apply_single_rewrite(
-                            schema,
-                            &mut new_value,
-                            &rewrite_with_updated_path,
-                        );
-                        context_variables.insert(item.rename_key_to.clone(), new_value);
-                    }
-                }
-            });
-        }
-
-        let body = request.body();
         let mut variables: serde_json_bytes::Map<serde_json_bytes::ByteString, Value> =
             Object::with_capacity(1 + variable_usages.len());
-        variables.extend(context_variables.iter().map(|(key, value)| {
-            (key.as_str().into(), value.clone())
-        }));
-        variables.extend(variable_usages.iter().filter_map(|key| {
-            body.variables
-                .get_key_value(key.as_str())
-                .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-        }));
 
         if !requires.is_empty() {
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::new();
-
+            let mut named_args: Vec<HashMap<String, Value>> = Vec::new();
+            dbg!(&data);
             data.select_values_and_paths(schema, current_dir, |path, value| {
+                // first get contextual values that are required
+                let hash_map: HashMap<String, Value> = context_rewrites
+                    .iter()
+                    .flatten()
+                    .filter_map(|rewrite| {
+                        match rewrite {
+                            DataRewrite::KeyRenamer(item) => {
+                                let data_path = merge_context_path(&path, &item.path);
+                                let val = data_at_path(data, &data_path);
+                                dbg!(&current_dir, &path, &item.path, &data_path);
+                                if let Some(v) = val {
+                                    // TODO: not great
+                                    let mut new_value = v.clone();
+                                    
+                                    rewrites::apply_single_rewrite(
+                                        schema,
+                                        &mut new_value,
+                                        &DataRewrite::KeyRenamer({
+                                            DataKeyRenamer {
+                                                path: data_path,
+                                                rename_key_to: item.rename_key_to.clone(),
+                                            }
+                                        })
+                                    );
+                                    return Some((item.rename_key_to.to_string(), new_value));
+                                }
+                                return None;
+                            },
+                            DataRewrite::ValueSetter(_) => {
+                                // TODO: Log error? panic? not sure
+                                return None;
+                            },
+                        }
+                    })
+                    .collect();
+                
                 let mut value = execute_selection_set(value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
                         Some(index) => {
                             inverted_paths[index].push(path.clone());
+                            named_args.push(hash_map);
                         }
                         None => {
                             inverted_paths.push(vec![path.clone()]);
                             values.insert(value);
                             debug_assert!(inverted_paths.len() == values.len());
+                            named_args.push(hash_map);
                         }
                     }
                 }
             });
-
+            
             if values.is_empty() {
                 return None;
             }
 
             let representations = Value::Array(Vec::from_iter(values));
+            dbg!(&named_args);
+            // TODO: Eventually we need exhibit different behavior depending on whether the named_args are all the same or have differences
+            if named_args.len() > 0 {
+                let hash_map = &named_args[0];
+                
+                let body = request.body();
+                variables.extend(hash_map.iter().map(|(key, value)| {
+                    (key.as_str().into(), value.clone())
+                }));
+                variables.extend(variable_usages.iter().filter_map(|key| {
+                    body.variables
+                        .get_key_value(key.as_str())
+                        .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+                }));    
+            }
 
             variables.insert("representations", representations);
             Some(Variables {
@@ -560,9 +575,9 @@ impl FetchNode {
                 .to_graphql_error(Some(current_dir.to_owned()))],
             );
         }
-
         let (value, errors) =
             self.response_at_path(parameters.schema, current_dir, paths, response);
+        dbg!(&value, &errors);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);

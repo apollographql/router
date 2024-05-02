@@ -67,6 +67,44 @@
     },
     {
       "request": {
+        "query": "query QueryLL__Subgraph1__0{tList{prop id uList{__typename id}}}",
+        "operationName": "QueryLL__Subgraph1__0"
+      },
+      "response": {
+        "data": [{
+          "tList": [{
+            "prop": "prop value 1",
+            "id": "1",
+            "uList": [
+              {
+                "__typename": "U",
+                "id": "1"
+              },
+              {
+                "__typename": "U",
+                "id": "2"
+              }
+            ]
+          },
+          {
+            "prop": "prop value 2",
+            "id": "2",
+            "uList": [
+              {
+                "__typename": "U",
+                "id": "3"
+              },
+              {
+                "__typename": "U",
+                "id": "4"
+              }
+            ]
+          }]
+      }]
+    }
+    }, 
+    {
+      "request": {
         "query": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{__typename id field(a:$Subgraph1_U_field_a)}}}",
         "operationName": "Query__Subgraph1__1",
         "variables": {
@@ -109,30 +147,31 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
-        "operationName": "Query__Subgraph1__1",
+        "query": "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
+        "operationName": "QueryLL__Subgraph1__1",
         "variables": {
-          "Subgraph1_U_field_a": "prop value",
-          "representations": [{ "__typename": "U", "id": "1" }, { "__typename": "U", "id": "2" }, { "__typename": "U", "id": "3" }]
+          "Subgraph1_U_field_a": "prop value 1",
+          "representations": [{ "__typename": "U", "id": "1" }, { "__typename": "U", "id": "2" }, { "__typename": "U", "id": "3" }, { "__typename": "U", "id": "4" }]
         }
       },
       "response": {
         "data": {
           "_entities": [
             {
-              "__typename": "U",
               "id": "1",
               "field": 1234
             },
             {
-              "__typename": "U",
               "id": "2",
               "field": 2345
             },
             {
-              "__typename": "U",
               "id": "3",
               "field": 3456
+            },
+            {
+              "id": "4",
+              "field": 4567
             }
           ]
         }

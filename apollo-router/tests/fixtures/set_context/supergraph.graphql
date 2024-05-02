@@ -109,7 +109,7 @@ type U
   @join__type(graph: SUBGRAPH1, key: "id")
   @join__type(graph: SUBGRAPH2, key: "id") {
   id: ID!
-  b: String! @join__field(graph: SUBGRAPH1)
+  b: String! @join__field(graph: SUBGRAPH2)
   field: Int!
     @join__field(
       graph: SUBGRAPH1

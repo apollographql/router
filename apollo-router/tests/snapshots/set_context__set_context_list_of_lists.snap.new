@@ -1,0 +1,93 @@
+---
+source: apollo-router/tests/set_context.rs
+assertion_line: 172
+expression: response
+---
+{
+  "data": null,
+  "extensions": {
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Fetch",
+              "serviceName": "Subgraph1",
+              "variableUsages": [],
+              "operation": "query QueryLL__Subgraph1__0{tList{prop id uList{__typename id}}}",
+              "operationName": "QueryLL__Subgraph1__0",
+              "operationKind": "query",
+              "id": null,
+              "inputRewrites": null,
+              "outputRewrites": null,
+              "contextRewrites": null,
+              "schemaAwareHash": "28135bcdab02ad1954997c68b030f269b89d580a697091e3397dcd058248bae0",
+              "authorization": {
+                "is_authenticated": false,
+                "scopes": [],
+                "policies": []
+              }
+            },
+            {
+              "kind": "Flatten",
+              "path": [
+                "tList",
+                "@",
+                "uList",
+                "@"
+              ],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "Subgraph1",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "U",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      }
+                    ]
+                  }
+                ],
+                "variableUsages": [
+                  "Subgraph1_U_field_a"
+                ],
+                "operation": "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
+                "operationName": "QueryLL__Subgraph1__1",
+                "operationKind": "query",
+                "id": null,
+                "inputRewrites": null,
+                "outputRewrites": null,
+                "contextRewrites": [
+                  {
+                    "kind": "KeyRenamer",
+                    "path": [
+                      "..",
+                      "prop"
+                    ],
+                    "renameKeyTo": "Subgraph1_U_field_a"
+                  }
+                ],
+                "schemaAwareHash": "82ac499d9905065a835b1ad324b824367a513c6eb3e3b9c0364dd6bd31edb384",
+                "authorization": {
+                  "is_authenticated": false,
+                  "scopes": [],
+                  "policies": []
+                }
+              }
+            }
+          ]
+        }
+      },
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        tList {\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"tList.@.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
+    }
+  }
+}
