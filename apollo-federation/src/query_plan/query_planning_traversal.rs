@@ -22,8 +22,8 @@ use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::{AbstractTypeDefinitionPosition, OutputTypeDefinitionPosition};
+use crate::schema::position::{CompositeTypeDefinitionPosition, SchemaRootDefinitionKind};
 use crate::schema::ValidFederationSchema;
 use indexmap::IndexSet;
 use petgraph::graph::{EdgeIndex, NodeIndex};
@@ -435,10 +435,52 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     fn selection_set_is_fully_local_from_all_nodes(
         &self,
-        _selection: &NormalizedSelectionSet,
-        _nodes: &IndexSet<NodeIndex>,
+        selection: &NormalizedSelectionSet,
+        nodes: &IndexSet<NodeIndex>,
     ) -> Result<bool, FederationError> {
-        todo!()
+        // To guarantee that the selection is fully local from the provided vertex/type, we must have:
+        // - no edge crossing subgraphs from that vertex.
+        // - the type must be compositeType (mostly just ensuring the selection make sense).
+        // - everything in the selection must be avaiable in the type (which `rebaseOn` essentially validates).
+        // - the selection must not "type-cast" into any abstract type that has inconsistent runtimes acrosse subgraphs. The reason for the
+        //   later condition is that `selection` is originally a supergraph selection, but that we're looking to apply "as-is" to a subgraph.
+        //   But suppose it has a `... on I` where `I` is an interface. Then it's possible that `I` includes "more" types in the supergraph
+        //   than in the subgraph, and so we might have to type-explode it. If so, we cannot use the selection "as-is".
+        // PORT_NOTE: The JS code performs the last check lazily. Instead of that, this check is
+        // skipped if `nodes` is empty.
+        if !nodes.is_empty()
+            && selection.selections.values().any(|val| match val {
+                NormalizedSelection::InlineFragment(fragment) => {
+                    match &fragment.inline_fragment.data().type_condition_position {
+                        Some(type_condition) => self
+                            .parameters
+                            .abstract_types_with_inconsistent_runtime_types
+                            .iter()
+                            .any(|ty| ty.type_name() == type_condition.type_name()),
+                        None => false,
+                    }
+                }
+                _ => false,
+            })
+        {
+            return Ok(false);
+        }
+        for node in nodes {
+            let n = self.parameters.federated_query_graph.node_weight(*node)?;
+            let parent_ty = match &n.type_ {
+                QueryGraphNodeType::SchemaType(ty) => {
+                    match CompositeTypeDefinitionPosition::try_from(ty.clone()) {
+                        Ok(ty) => ty,
+                        _ => return Ok(false),
+                    }
+                }
+                QueryGraphNodeType::FederatedRootType(_) => return Ok(false),
+            };
+            if n.has_reachable_cross_subgraph_edges || !selection.can_rebase_on(&parent_ty) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn cost(
