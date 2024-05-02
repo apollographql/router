@@ -322,7 +322,7 @@ impl Source {
 
         let mut changes = Vec::new();
 
-        let mut entity_changes = Vec::new();
+        // let mut entity_changes = Vec::new();
         // sorted for stable SDL generation
         for connector in connectors.values().sorted_by_key(|c| c.name.clone()) {
             changes.extend(make_changes(
@@ -392,7 +392,8 @@ fn entity_union_members(schema: &Schema) -> Vec<(Name, ExtendedType)> {
                 && !ty.is_built_in()
                 && ty.directives().iter().any(|arg| arg.name == name!("key"))
         })
-        // .map(|(key, value)| {
+        .map(|(key, value)| 
+            (key.clone(), value.clone()))
         //     key.clone(),
         // (
         //     key.into(),
