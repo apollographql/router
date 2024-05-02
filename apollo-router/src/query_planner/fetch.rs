@@ -348,17 +348,31 @@ impl Variables {
                                 if let Some(v) = val {
                                     // TODO: not great
                                     let mut new_value = v.clone();
-                                    
-                                    rewrites::apply_single_rewrite(
-                                        schema,
-                                        &mut new_value,
-                                        &DataRewrite::KeyRenamer({
-                                            DataKeyRenamer {
-                                                path: data_path,
-                                                rename_key_to: item.rename_key_to.clone(),
-                                            }
-                                        })
-                                    );
+                                    if let Some(values) = new_value.as_array_mut() {
+                                        for mut v in values {
+                                            rewrites::apply_single_rewrite(
+                                                schema,
+                                                &mut v,
+                                                &DataRewrite::KeyRenamer({
+                                                    DataKeyRenamer {
+                                                        path: data_path.clone(),
+                                                        rename_key_to: item.rename_key_to.clone(),
+                                                    }
+                                                })
+                                            );
+                                        }
+                                    } else {
+                                        rewrites::apply_single_rewrite(
+                                            schema,
+                                            &mut new_value,
+                                            &DataRewrite::KeyRenamer({
+                                                DataKeyRenamer {
+                                                    path: data_path,
+                                                    rename_key_to: item.rename_key_to.clone(),
+                                                }
+                                            })
+                                        );
+                                    }
                                     return Some((item.rename_key_to.to_string(), new_value));
                                 }
                                 return None;
