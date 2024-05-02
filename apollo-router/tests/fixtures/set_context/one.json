@@ -67,7 +67,7 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__0{tList{prop id uList{__typename id}}}",
+        "query": "query QueryLL__Subgraph1__0{tList{prop id uList{id}}}",
         "operationName": "QueryLL__Subgraph1__0"
       },
       "response": {
@@ -77,11 +77,9 @@
             "id": "1",
             "uList": [
               {
-                "__typename": "U",
                 "id": "1"
               },
               {
-                "__typename": "U",
                 "id": "2"
               }
             ]
@@ -91,11 +89,9 @@
             "id": "2",
             "uList": [
               {
-                "__typename": "U",
                 "id": "3"
               },
               {
-                "__typename": "U",
                 "id": "4"
               }
             ]
