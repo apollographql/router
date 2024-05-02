@@ -271,7 +271,9 @@ impl Change {
                 implements,
             } => {
                 let ty = upsert_type(original_schema, schema, name)?;
-                add_join_type_directive(ty, graph, key.clone(), Some(*is_interface_object));
+                if !ty.is_built_in() {
+                    add_join_type_directive(ty, graph, key.clone(), Some(*is_interface_object));
+                }
                 if let Some(implements) = implements {
                     add_join_implements(ty, graph, implements);
                 }

@@ -8,6 +8,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::Name;
+use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
@@ -340,12 +341,29 @@ impl Source {
             join_graph_enum(&connector_graph_names),
         );
 
-        // TODO: shouldn't need to reparse Oo
-        Schema::parse(inner_supergraph_schema.to_string(), "")
-            .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)?
+        // Add fake union _Entity and resolver since fetchNodes now validate operations against subgraphs
+        inner_supergraph_schema
+            .types
+            .insert(name!("_Entity"), entity_union(&inner_supergraph_schema));
+
+        inner_supergraph_schema
             .validate()
             .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)
     }
+}
+
+fn entity_union(schema: &Schema) -> ExtendedType {
+    ExtendedType::Union(Node::new(UnionType {
+        description: None,
+        name: name!("_Entity"),
+        directives: Default::default(),
+        members: schema
+            .types
+            .iter()
+            .filter(|(_, ty)| ty.is_object())
+            .map(|(key, _)| key.into())
+            .collect(),
+    }))
 }
 
 // --- @sourceAPI --------------------------------------------------------------

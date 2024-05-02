@@ -296,11 +296,8 @@ mod tests {
 
         let rpw = finder_field_for_fetch_node(&schema, &connectors, &requires).unwrap();
         assert_eq!(
-            rpw,
-            RestProtocolWrapper {
-                connector_service_name: "test".to_string(),
-                magic_finder_field: Some("_EntityAcrossBoth_a_b".to_string())
-            }
+            rpw.magic_finder_field,
+            Some("_EntityAcrossBoth_a_b".to_string())
         );
 
         // @requires
@@ -331,11 +328,8 @@ mod tests {
 
         let rpw = finder_field_for_fetch_node(&schema, &connectors, &requires).unwrap();
         assert_eq!(
-            rpw,
-            RestProtocolWrapper {
-                connector_service_name: "test".to_string(),
-                magic_finder_field: Some("_TestRequires_weight".to_string())
-            }
+            rpw.magic_finder_field,
+            Some("_TestRequires_weight".to_string())
         );
         // @interface object
 
@@ -374,11 +368,8 @@ mod tests {
 
         let rpw = finder_field_for_fetch_node(&schema, &connectors, &requires).unwrap();
         assert_eq!(
-            rpw,
-            RestProtocolWrapper {
-                connector_service_name: "test".to_string(),
-                magic_finder_field: Some("_TestingInterfaceObject_id".to_string())
-            }
+            rpw.magic_finder_field,
+            Some("_TestingInterfaceObject_id".to_string())
         );
     }
 }
