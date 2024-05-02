@@ -146,7 +146,7 @@
         "query": "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
         "operationName": "QueryLL__Subgraph1__1",
         "variables": {
-          "Subgraph1_U_field_a": "prop value 1",
+          "Subgraph1_U_field_a": "prop value 2",
           "representations": [{ "__typename": "U", "id": "1" }, { "__typename": "U", "id": "2" }, { "__typename": "U", "id": "3" }, { "__typename": "U", "id": "4" }]
         }
       },

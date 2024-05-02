@@ -409,20 +409,40 @@ impl Variables {
 
             let representations = Value::Array(Vec::from_iter(values));
             dbg!(&named_args);
-            // TODO: Eventually we need exhibit different behavior depending on whether the named_args are all the same or have differences
-            if named_args.len() > 0 {
-                let hash_map = &named_args[0];
-                
-                let body = request.body();
-                variables.extend(hash_map.iter().map(|(key, value)| {
-                    (key.as_str().into(), value.clone())
-                }));
-                variables.extend(variable_usages.iter().filter_map(|key| {
-                    body.variables
-                        .get_key_value(key.as_str())
-                        .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-                }));    
-            }
+            
+            // Here we create a new map with all the key value pairs to push into variables.
+            // Note that if all variables are the same, we just use the named parameter as a variable, but if they are different then each
+            // entity will have it's own set of parameters all appended by _<index>
+            let extended_vars = if let Some(first_map) = named_args.get(0) {
+                if named_args.iter().all(|map| map == first_map) {
+                    first_map
+                        .iter()
+                        .map(|(k, v)| {
+                            (k.as_str().into(), v.clone())
+                        }).collect()
+                } else {
+                    let mut hash_map: HashMap<String, Value> = HashMap::new();
+                    for (index, item) in named_args.iter().enumerate() {
+                        // append _<index> to each of the arguments and push all the values into hash_map
+                        hash_map.extend(item.iter().map(|(k, v)| {
+                            let mut new_named_param = k.clone();
+                            // new_named_param.push_str(&format!("_{}", index));
+                            (new_named_param, v.clone())
+                        }));
+                    }
+                    hash_map
+                }
+            } else { HashMap::new() };
+            
+            let body = request.body();
+            variables.extend(extended_vars.iter().map(|(key, value)| {
+                (key.as_str().into(), value.clone())
+            }));
+            variables.extend(variable_usages.iter().filter_map(|key| {
+                body.variables
+                    .get_key_value(key.as_str())
+                    .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+            }));    
 
             variables.insert("representations", representations);
             Some(Variables {
