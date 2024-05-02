@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
@@ -98,6 +99,7 @@ pub(crate) fn generate_usage_reporting(
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
+    configuration: Arc<crate::configuration::Configuration>,
 ) -> ComparableUsageReporting {
     let mut generator = UsageReportingGenerator {
         signature_doc,

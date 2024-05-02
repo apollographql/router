@@ -692,6 +692,7 @@ impl BridgeQueryPlanner {
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
+                        self.configuration.clone(),
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where
