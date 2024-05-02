@@ -635,7 +635,7 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .extract_authorization_metadata(&self.subgraph_schemas, &key);
+            .extract_authorization_metadata(self.schema.supergraph_schema(), &key);
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if matches!(
@@ -1071,11 +1071,11 @@ impl QueryPlan {
 
     fn extract_authorization_metadata(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        schema: &Valid<apollo_compiler::Schema>,
         key: &CacheKeyMetadata,
     ) {
         if let Some(node) = self.node.as_mut() {
-            node.extract_authorization_metadata(subgraph_schemas, key);
+            node.extract_authorization_metadata(schema, key);
         }
     }
 }
