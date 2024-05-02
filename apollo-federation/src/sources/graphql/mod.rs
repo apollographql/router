@@ -106,24 +106,31 @@ pub(crate) struct GraphqlFetchDependencyGraph {
 }
 
 impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
-    fn can_reuse_node(
+    fn can_reuse_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
         _source_entering_edge: EdgeIndex,
+        _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
         _source_data: &SourceFetchDependencyGraphNode,
-        _path_tree_edges: Vec<FederatedPathTreeChildKey>,
-    ) -> Result<Vec<FederatedPathTreeChildKey>, FederationError> {
+    ) -> Result<Vec<&'path_tree FederatedPathTreeChildKey>, FederationError> {
         todo!()
     }
 
-    fn add_node(
+    fn add_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
-    ) -> Result<SourceFetchDependencyGraphNode, FederationError> {
+        _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
+    ) -> Result<
+        (
+            SourceFetchDependencyGraphNode,
+            Vec<&'path_tree FederatedPathTreeChildKey>,
+        ),
+        FederationError,
+    > {
         todo!()
     }
 

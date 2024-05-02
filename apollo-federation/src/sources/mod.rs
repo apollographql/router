@@ -152,22 +152,29 @@ pub(crate) enum SourceFetchDependencyGraph {
 
 #[enum_dispatch]
 pub(crate) trait SourceFetchDependencyGraphApi {
-    fn can_reuse_node(
+    fn can_reuse_node<'path_tree>(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
         merge_at: &[FetchDataPathElement],
         source_entering_edge: EdgeIndex,
+        path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
         source_data: &SourceFetchDependencyGraphNode,
-        path_tree_edges: Vec<FederatedPathTreeChildKey>,
-    ) -> Result<Vec<FederatedPathTreeChildKey>, FederationError>;
+    ) -> Result<Vec<&'path_tree FederatedPathTreeChildKey>, FederationError>;
 
-    fn add_node(
+    fn add_node<'path_tree>(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
         merge_at: &[FetchDataPathElement],
         source_entering_edge: EdgeIndex,
         self_condition_resolution: Option<ConditionResolutionId>,
-    ) -> Result<SourceFetchDependencyGraphNode, FederationError>;
+        path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
+    ) -> Result<
+        (
+            SourceFetchDependencyGraphNode,
+            Vec<&'path_tree FederatedPathTreeChildKey>,
+        ),
+        FederationError,
+    >;
 
     fn new_path(
         &self,
