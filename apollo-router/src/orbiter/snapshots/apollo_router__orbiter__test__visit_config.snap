@@ -2,20 +2,18 @@
 source: apollo-router/src/orbiter/mod.rs
 expression: usage
 ---
-configuration.headers.all.request.insert.len: 1
 configuration.headers.all.request.insert.name.<redacted>: 1
 configuration.headers.all.request.insert.value.<redacted>: 1
-configuration.headers.all.request.propagate.len: 2
+configuration.headers.all.request.len: 3
 configuration.headers.all.request.propagate.named.<redacted>: 2
-configuration.headers.subgraphs.<redacted>.request.insert.len: 1
 configuration.headers.subgraphs.<redacted>.request.insert.name.<redacted>: 1
 configuration.headers.subgraphs.<redacted>.request.insert.value.<redacted>: 1
-configuration.headers.subgraphs.<redacted>.request.remove.len: 1
+configuration.headers.subgraphs.<redacted>.request.len: 2
 configuration.headers.subgraphs.<redacted>.request.remove.named.<redacted>: 1
-configuration.override_subgraph_url.len: 1
-configuration.telemetry.apollo.send_headers.len: 1
+configuration.override_subgraph_url.<redacted>.<redacted>: 1
+configuration.telemetry.apollo.send_headers.except.<redacted>: 2
+configuration.telemetry.apollo.send_headers.except.len: 2
 configuration.telemetry.exporters.tracing.otlp.enabled.true: 1
 configuration.telemetry.exporters.tracing.otlp.endpoint.<redacted>: 1
-configuration.telemetry.exporters.tracing.otlp.grpc.metadata.len: 2
+configuration.telemetry.exporters.tracing.otlp.grpc.metadata.<redacted>.<redacted>: 2
 configuration.telemetry.exporters.tracing.otlp.protocol.<redacted>: 1
-
