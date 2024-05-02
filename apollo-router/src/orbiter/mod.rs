@@ -343,57 +343,63 @@ mod test {
         });
     }
 
-    // #[test]
-    // fn test_visit_config() {
-    //     let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
-    //         .expect("yaml must be valid");
-    //     let mut usage = HashMap::new();
-    //     visit_config(
-    //         &mut usage,
-    //         config
-    //             .validated_yaml
-    //             .as_ref()
-    //             .expect("config should have had validated_yaml"),
-    //     );
-    //     insta::with_settings!({sort_maps => true}, {
-    //         assert_yaml_snapshot!(usage);
-    //     });
-    // }
-    //
-    // #[test]
-    // fn test_visit_config_that_needed_upgrade() {
-    //     let config: Configuration =
-    //         Configuration::from_str("supergraph:\n  preview_defer_support: true")
-    //             .expect("config must be valid");
-    //     let mut usage = HashMap::new();
-    //     visit_config(
-    //         &mut usage,
-    //         config
-    //             .validated_yaml
-    //             .as_ref()
-    //             .expect("config should have had validated_yaml"),
-    //     );
-    //     insta::with_settings!({sort_maps => true}, {
-    //         assert_yaml_snapshot!(usage);
-    //     });
-    // }
-    //
-    // #[test]
-    // fn test_create_report() {
-    //     let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
-    //         .expect("config must be valid");
-    //     let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-    //     let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
-    //     let report = create_report(Arc::new(config), Arc::new(schema));
-    //     insta::with_settings!({sort_maps => true}, {
-    //                 assert_yaml_snapshot!(report, {
-    //             ".version" => "[version]",
-    //             ".session_id" => "[session_id]",
-    //             ".platform.os" => "[os]",
-    //             ".platform.continuous_integration" => "[ci]",
-    //         });
-    //     });
-    // }
+    // The following two tests are ignored because since allowing refs in schema we can no longer
+    // examine the annotations for redaction.
+    // https://github.com/Stranger6667/jsonschema-rs/issues/403
+    // We should remove the orbiter code and move to otel for both anonymous and non-anonymous telemetry.
+    #[test]
+    #[ignore]
+    fn test_visit_config() {
+        let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
+            .expect("yaml must be valid");
+        let mut usage = HashMap::new();
+        visit_config(
+            &mut usage,
+            config
+                .validated_yaml
+                .as_ref()
+                .expect("config should have had validated_yaml"),
+        );
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(usage);
+        });
+    }
+
+    #[test]
+    #[ignore]
+    fn test_visit_config_that_needed_upgrade() {
+        let config: Configuration =
+            Configuration::from_str("supergraph:\n  preview_defer_support: true")
+                .expect("config must be valid");
+        let mut usage = HashMap::new();
+        visit_config(
+            &mut usage,
+            config
+                .validated_yaml
+                .as_ref()
+                .expect("config should have had validated_yaml"),
+        );
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(usage);
+        });
+    }
+
+    #[test]
+    fn test_create_report() {
+        let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
+            .expect("config must be valid");
+        let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
+        let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
+        let report = create_report(Arc::new(config), Arc::new(schema));
+        insta::with_settings!({sort_maps => true}, {
+                    assert_yaml_snapshot!(report, {
+                ".version" => "[version]",
+                ".session_id" => "[session_id]",
+                ".platform.os" => "[os]",
+                ".platform.continuous_integration" => "[ci]",
+            });
+        });
+    }
 
     #[test]
     fn test_create_report_incorrect_type_validated_yaml() {
