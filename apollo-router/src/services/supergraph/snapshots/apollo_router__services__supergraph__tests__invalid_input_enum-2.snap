@@ -1,13 +1,13 @@
 ---
 source: apollo-router/src/services/supergraph/tests.rs
-expression: stream.next_response().await.unwrap()
+expression: response
 ---
 {
   "errors": [
     {
-      "message": "invalid type for variable: 'userId'",
+      "message": "invalid type for variable: 'input'",
       "extensions": {
-        "name": "userId",
+        "name": "input",
         "code": "VALIDATION_INVALID_TYPE_VARIABLE"
       }
     }
