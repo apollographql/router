@@ -11,8 +11,8 @@ use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use schemars::gen::SchemaSettings;
-use schemars::schema::RootSchema;
 use schemars::schema::SchemaObject;
+use schemars::schema::{Metadata, RootSchema};
 use schemars::visit::visit_root_schema;
 use schemars::visit::visit_schema_object;
 use schemars::visit::Visitor;
@@ -30,7 +30,6 @@ pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
-
 /// This needs to exist because Schemars incorrectly generates references with spaces in them.
 /// We just rename them.
 #[derive(Debug, Clone)]
@@ -46,6 +45,10 @@ impl Visitor for RefRenameVisitor {
     }
     fn visit_schema_object(&mut self, schema: &mut SchemaObject) {
         if let Some(reference) = &mut schema.reference {
+            schema.metadata = Some(Box::new(Metadata {
+                description: Some(reference.clone()),
+                ..Default::default()
+            }));
             *reference = reference.replace(' ', "_");
         }
 

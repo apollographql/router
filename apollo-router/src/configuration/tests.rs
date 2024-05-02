@@ -22,7 +22,9 @@ use crate::error::SchemaError;
 #[test]
 fn schema_generation() {
     let schema = generate_config_schema();
-    assert_json_snapshot!(&schema)
+    insta::with_settings!({sort_maps => true}, {
+        assert_json_snapshot!(&schema)
+    });
 }
 
 #[test]
@@ -685,12 +687,16 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
                     for (k, v) in properties {
                         let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
-                            errors.push(format!("{path} was missing a description"));
+                            // Enum type does not get a description
+                            if k != "type" {
+                                errors.push(format!("{path} was missing a description"));
+                            }
                         }
                         visit_schema(&path, v, errors)
                     }
                 } else {
-                    visit_schema(path, v, errors)
+                    let path = format!("{path}.{k}");
+                    visit_schema(&path, v, errors)
                 }
             }
         }
