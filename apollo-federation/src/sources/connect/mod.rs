@@ -180,6 +180,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
 
     fn add_path(
         &self,
+        _query_graph: Arc<FederatedQueryGraph>,
         _source_path: SourcePath,
         _source_data: &mut SourceFetchDependencyGraphNode,
     ) -> Result<(), FederationError> {
@@ -208,6 +209,8 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
 
 #[derive(Debug)]
 pub(crate) struct ConnectFetchDependencyGraphNode {
+    merge_at: Vec<FetchDataPathElement>,
+    source_entering_edge: EdgeIndex,
     field_response_name: Name,
     field_arguments: IndexMap<Name, Value>,
     selection: Selection,
@@ -215,7 +218,6 @@ pub(crate) struct ConnectFetchDependencyGraphNode {
 
 #[derive(Debug)]
 pub(crate) struct ConnectPath {
-    query_graph: Arc<FederatedQueryGraph>,
     merge_at: Vec<FetchDataPathElement>,
     source_entering_edge: EdgeIndex,
     source_id: SourceId,

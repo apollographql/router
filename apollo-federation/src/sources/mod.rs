@@ -186,6 +186,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
 
     fn add_path(
         &self,
+        query_graph: Arc<FederatedQueryGraph>,
         source_path: SourcePath,
         source_data: &mut SourceFetchDependencyGraphNode,
     ) -> Result<(), FederationError>;
