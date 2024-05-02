@@ -11,7 +11,7 @@ use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::Name;
-// use apollo_compiler::schema::ScalarType;
+use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::validation::Valid;
@@ -369,9 +369,7 @@ impl Source {
             join_graph_enum(&connector_graph_names),
         );
 
-        // add_fake_entity(&mut inner_supergraph_schema);
-
-        println!("{}", inner_supergraph_schema);
+        add_fake_entity(&mut inner_supergraph_schema);
 
         inner_supergraph_schema
             .validate()
@@ -379,67 +377,75 @@ impl Source {
     }
 }
 
-// fn add_fake_entity(schema: &mut Schema) {
-//     schema.types.insert(name!("_Entity"), entity_union(schema));
-// }
+fn add_fake_entity(schema: &mut Schema) {
+    schema.types.insert(name!("_Entity"), entity_union(schema));
+}
 
 fn entity_union_members(schema: &Schema) -> Vec<(Name, ExtendedType)> {
     schema
         .types
         .iter()
         .filter(|(_, ty)| {
-            (ty.is_object() || ty.is_union() || ty.is_enum())
+            ty.is_object()
                 && !ty.is_built_in()
                 && ty.directives().iter().any(|arg| arg.name == name!("key"))
         })
-        .map(|(key, value)| 
-            (key.clone(), value.clone()))
-        //     key.clone(),
-        // (
-        //     key.into(),
-        //     value
-        //         .directives()
-        //         .clone()
-        //         .into_iter()
-        //         // Only add resolvable types to the entity union
-        //         .filter(|d| {
-        //             d.name == name!("join__type")
-        //                 && d.arguments.iter().any(|arg| arg.name == name!("key"))
-        //         })
-        //         .map(|d| {
-        //             let Component { origin, mut node } = d;
-        //             let directive = node.make_mut();
-        //             let Directive { name, arguments } = directive.clone();
-        //             Component {
-        //                 origin,
-        //                 node: Directive {
-        //                     name,
-        //                     arguments: arguments
-        //                         .into_iter()
-        //                         .filter(|a| a.name == name!("graph"))
-        //                         .collect(),
-        //                 }
-        //                 .into(),
-        //             }
-        //         })
-        //         .collect::<Vec<_>>(),
-        // )
-        // })
+        .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
-    // .unzip();
-    // names
+}
 
-    // let mut directives = join_directives.into_iter().flatten().collect::<Vec<_>>();
-    // directives.dedup();
+fn entity_union(schema: &Schema) -> ExtendedType {
+    let (names, join_directives): (Vec<_>, Vec<_>) = schema
+        .types
+        .iter()
+        .filter(|(_, ty)| {
+            ty.is_object()
+                && !ty.is_built_in()
+        })
+        .map(|(key, value)| {
+            (
+                key.into(),
+                value
+                    .directives()
+                    .clone()
+                    .into_iter()
+                    // Only add resolvable types to the entity union
+                    .filter(|d| {
+                        d.name == name!("join__type")
+                            && d.arguments.iter().any(|arg| arg.name == name!("key"))
+                    })
+                    .map(|d| {
+                        let Component { origin, mut node } = d;
+                        let directive = node.make_mut();
+                        let Directive { name, arguments } = directive.clone();
+                        Component {
+                            origin,
+                            node: Directive {
+                                name,
+                                arguments: arguments
+                                    .into_iter()
+                                    .filter(|a| a.name == name!("graph"))
+                                    .collect(),
+                            }
+                            .into(),
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .unzip();
 
-    // let directives = DirectiveList(directives);
+    let mut directives = join_directives.into_iter().flatten().collect::<Vec<_>>();
+    directives.dedup();
 
-    // ExtendedType::Union(Node::new(UnionType {
-    //     description: None,
-    //     name: name!("_Entity"),
-    //     directives,
-    //     members: names.into_iter().collect(),
-    // }))
+    let directives = DirectiveList(directives);
+
+    ExtendedType::Union(Node::new(UnionType {
+        description: None,
+        name: name!("_Entity"),
+        directives,
+        members: names.into_iter().collect(),
+    }))
 }
 
 // --- @sourceAPI --------------------------------------------------------------

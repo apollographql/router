@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
-use apollo_compiler::name;
+// use apollo_compiler::name;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
@@ -254,8 +254,8 @@ pub(super) enum Change {
         member_name: Name,
         graph: Arc<String>,
     },
-    /// _entities for validation only
-    FakeEntities { graph: Arc<String> },
+    // _entities for validation only
+    // FakeEntities { graph: Arc<String> },
 }
 
 impl Change {
@@ -317,11 +317,10 @@ impl Change {
                 add_entities_field(ty, graph, field_name, type_name);
             }
 
-            Change::FakeEntities { graph } => {
-                let ty = upsert_type(original_schema, schema, "Query")?;
-                add_entities_field(ty, graph, "_entities", "_Entity");
-            }
-
+            // Change::FakeEntities { graph } => {
+            //     let ty = upsert_type(original_schema, schema, "Query")?;
+            //     add_entities_field(ty, graph, "_entities", "_Entity");
+            // }
             Change::EnumValue {
                 enum_name,
                 value_name,
