@@ -66,13 +66,10 @@ impl BridgeQueryPlannerPool {
             let sdl = schema.clone();
             let configuration = configuration.clone();
 
-            if let Some(old_planner) = old_planners_iterator.next() {
-                join_set.spawn(async move {
-                    BridgeQueryPlanner::new_from_planner(old_planner, sdl, configuration).await
-                });
-            } else {
-                join_set.spawn(async move { BridgeQueryPlanner::new(sdl, configuration).await });
-            }
+            let old_planner = old_planners_iterator.next();
+            join_set.spawn(async move {
+                BridgeQueryPlanner::new(sdl, configuration, old_planner).await
+            });
         });
 
         let mut bridge_query_planners = Vec::new();
