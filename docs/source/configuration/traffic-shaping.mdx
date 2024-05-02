@@ -9,7 +9,7 @@ the traffic between the client and router and between the router and subgraphs.
 
 ## Configuration
 
-To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config file](./overview/#yaml-config-file), like so:
+By default, the `traffic_shaping` plugin is enabled with [preset values](#preset-values). To override presets, add `traffic_shaping` to your [YAML config file](./overview/#yaml-config-file) like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -36,6 +36,13 @@ traffic_shaping:
         retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
       experimental_http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
 ```
+
+### Preset values
+
+The preset values of `traffic_shaping` that's enabled by default:
+
+- `timeout: 30s` for all timeouts
+- `experimental_http2: enable`
 
 ## Client side traffic shaping
 
@@ -66,7 +73,7 @@ You can change the default timeout for client requests to the router like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  router: 
+  router:
     timeout: 50s # If client requests to the router take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
@@ -74,7 +81,7 @@ You can change the default timeout for all requests between the router and subgr
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  all: 
+  all:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
@@ -93,7 +100,7 @@ Compression is automatically supported on the client side, depending on the `Acc
 The Apollo Router has _experimental_ support for receiving client query batches:
 
 ```yaml title="router.yaml"
-experimental_batching:
+batching:
   enabled: true
   mode: batch_http_link
 ```
@@ -121,10 +128,16 @@ It currently supports these algorithms: `gzip`, `br`, and `deflate`.
 ```yaml title="router.yaml"
 traffic_shaping:
   all:
-    compression: br # Enable brotli compression for all subgraphs.
+    compression: gzip # Enable gzip compression for all subgraphs.
 ```
 
 Subgraph response decompression is always supported for these algorithms: `gzip`, `br`, and `deflate`.
+
+<Note>
+
+Brotli (`br`) compression is not supported by Apollo Server, due to its underlying Express.js not supporting it out of the box. Therefore, don't configure `br` compression for traffic shaping when using Apollo Server as a subgraph server with the router. 
+
+</Note>
 
 ### Rate limiting
 

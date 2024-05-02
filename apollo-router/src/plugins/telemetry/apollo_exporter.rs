@@ -240,17 +240,10 @@ impl ApolloExporter {
         let mut has_traces = false;
 
         for (_, traces_and_stats) in proto_report.traces_per_query.iter_mut() {
-            if !traces_and_stats.trace.is_empty()
-                || !traces_and_stats
-                    .internal_traces_contributing_to_stats
-                    .is_empty()
-            {
+            if !traces_and_stats.trace.is_empty() {
                 has_traces = true;
                 if self.strip_traces.load(Ordering::SeqCst) {
                     traces_and_stats.trace.clear();
-                    traces_and_stats
-                        .internal_traces_contributing_to_stats
-                        .clear();
                 }
             }
         }
@@ -448,18 +441,4 @@ where
         }
         None => serializer.serialize_none(),
     }
-}
-
-#[cfg(not(windows))] // git checkout converts \n to \r\n, making == below fail
-#[test]
-fn check_reports_proto_is_up_to_date() {
-    let proto_url = "https://usage-reporting.api.apollographql.com/proto/reports.proto";
-    let response = reqwest::blocking::get(proto_url).unwrap();
-    let content = response.text().unwrap();
-    // Not using assert_eq! as printing the entire file would be too verbose
-    assert!(
-        content == include_str!("proto/reports.proto"),
-        "Protobuf file is out of date. Run this command to update it:\n\n    \
-            curl -f {proto_url} > apollo-router/src/plugins/telemetry/proto/reports.proto\n\n"
-    );
 }

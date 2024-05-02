@@ -27,7 +27,6 @@ use http::StatusCode;
 use http::Uri;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
-use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use tower::BoxError;
@@ -36,71 +35,6 @@ use walkdir::DirEntry;
 use walkdir::WalkDir;
 
 mod integration;
-
-macro_rules! assert_federated_response {
-    ($query:expr, $service_requests:expr $(,)?) => {
-        let request = supergraph::Request::fake_builder()
-            .query($query)
-            .variable("topProductsFirst", 2_i32)
-            .variable("reviewsForAuthorAuthorId", 1_i32)
-            .method(Method::POST)
-            .build()
-            .unwrap();
-
-        let expected = match query_node(&request).await {
-            Ok(e) => e,
-            Err(err) => {
-                panic!("query_node failed: {err}. Probably caused by missing gateway during testing");
-            }
-        };
-        assert_eq!(expected.errors, []);
-
-        let (actual, registry) = query_rust(request).await;
-        assert_eq!(actual.errors, []);
-
-        tracing::debug!("query:\n{}\n", $query);
-
-        assert!(
-            expected.data.as_ref().unwrap().is_object(),
-            "nodejs: no response's data: please check that the gateway and the subgraphs are running",
-        );
-
-        tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
-        tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
-
-        let expected = expected.data.as_ref().expect("expected data should not be none");
-        let actual = actual.data.as_ref().expect("received data should not be none");
-        assert!(
-            expected.eq_and_ordered(actual),
-            "the gateway and the router didn't return the same data:\ngateway:\n{}\nrouter\n{}",
-            expected,
-            actual
-        );
-        assert_eq!(registry.totals(), $service_requests);
-    };
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn basic_request() {
-    assert_federated_response!(
-        r#"{ topProducts { name name2:name } }"#,
-        hashmap! {
-            "products".to_string()=>1,
-        },
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn basic_composition() {
-    assert_federated_response!(
-        r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
-        hashmap! {
-            "products".to_string()=>2,
-            "reviews".to_string()=>1,
-            "accounts".to_string()=>1,
-        },
-    );
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {
@@ -115,7 +49,7 @@ async fn api_schema_hides_field() {
 
     let message = &actual.errors[0].message;
     assert!(
-        message.contains("type `Product` does not have a field `inStock`"),
+        message.contains(r#"Cannot query field "inStock" on type "Product"."#),
         "{message}"
     );
     assert_eq!(
@@ -144,29 +78,6 @@ async fn validation_errors_from_rust() {
     .await;
 
     insta::assert_json_snapshot!(response.errors);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn basic_mutation() {
-    assert_federated_response!(
-        r#"mutation {
-              createProduct(upc:"8", name:"Bob") {
-                upc
-                name
-                reviews {
-                  body
-                }
-              }
-              createReview(upc: "8", id:"100", body: "Bif"){
-                id
-                body
-              }
-            }"#,
-        hashmap! {
-            "products".to_string()=>1,
-            "reviews".to_string()=>2,
-        },
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1220,18 +1131,6 @@ async fn query_operation_id() {
         .get::<_, String>("apollo_operation_id".to_string())
         .unwrap()
         .is_none());
-}
-
-async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
-    reqwest::Client::new()
-        .post("https://federation-demo-gateway.fly.dev/")
-        .json(request.supergraph_request.body())
-        .send()
-        .await
-        .map_err(|err| format!("HTTP fetch failed from 'test node': {err}"))?
-        .json()
-        .await
-        .map_err(|err| format!("service 'test node' response was malformed: {err}"))
 }
 
 async fn http_query_rust(

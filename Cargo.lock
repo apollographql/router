@@ -87,9 +87,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.6"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91429305e9f0a25f6205c5b8e0d2db09e0708a7a6df0f42212bb56c32c8ac97a"
+checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
  "const-random",
@@ -192,9 +192,9 @@ checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.15"
+version = "1.0.0-beta.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79df4ab329753d36476653850519fe92d1b34854dd4337f6abf42a64963ac0ce"
+checksum = "175659cea0232b38bfacd1505aed00221cc4028d848699ce9e3422c6bf87d90a"
 dependencies = [
  "apollo-parser",
  "ariadne",
@@ -220,9 +220,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "0.0.10"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94e3b0774618a4febe307d2ace6714583e13cd7948cdadb2b4a937ccdc166333"
+checksum = "e9fc457f3e836a60ea3d4e1a25a8b42c5c62ddf13a2131c194d94f752c7a1475"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.43.2"
+version = "1.45.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -337,6 +337,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry-zipkin",
  "opentelemetry_api",
+ "opentelemetry_sdk 0.20.0",
  "p256 0.13.2",
  "parking_lot",
  "paste",
@@ -411,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.43.2"
+version = "1.45.1"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -427,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.43.2"
+version = "1.45.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -1633,23 +1634,21 @@ checksum = "28c122c3980598d243d63d9a704629a2d748d101f278052ff068be5a4423ab6f"
 
 [[package]]
 name = "const-random"
-version = "0.1.15"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "368a7a772ead6ce7e1de82bfb04c485f3db8ec744f72925af5735e29a22cc18e"
+checksum = "87e00182fe74b066627d63b85fd550ac2998d4b0bd86bfed477a0ae4c7c71359"
 dependencies = [
  "const-random-macro",
- "proc-macro-hack",
 ]
 
 [[package]]
 name = "const-random-macro"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d7d6ab3c3a2282db210df5f02c4dab6e0a7057af0fb7ebd4070f30fe05c0ddb"
+checksum = "f9d839f2a20b0aee515dc581a6172f2321f96cab76c1a38a4c584a194955390e"
 dependencies = [
  "getrandom 0.2.10",
  "once_cell",
- "proc-macro-hack",
  "tiny-keccak",
 ]
 
@@ -3961,6 +3960,7 @@ checksum = "c1cc9717a20b1bb222f333e6a92fd32f7d8a18ddc5a3191a11af45dcbf4dcd16"
 dependencies = [
  "autocfg",
  "scopeguard",
+ "serde",
 ]
 
 [[package]]
@@ -5127,12 +5127,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-hack"
-version = "0.5.20+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc375e1527247fe1a97d8b7156678dfe7c1af2fc075c9a4db3690ecd2a148068"
-
-[[package]]
 name = "proc-macro2"
 version = "0.4.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5710,9 +5704,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.17+v2.7.2"
+version = "0.5.20+v2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f183e217179b38a4283e76ca62e3149ebe96512e9b1bd6b3933abab863f9a2c"
+checksum = "5179aaf2c3c9ca2d76e2c5f6fbfe30a4e1d4c64cae0d269d0395b351f4993fbb"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -5737,13 +5731,24 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "apollo-compiler",
  "apollo-parser",
+ "apollo-router",
  "apollo-smith",
+ "async-trait",
  "env_logger",
+ "http 0.2.11",
  "libfuzzer-sys",
  "log",
  "reqwest",
+ "router-bridge",
+ "schemars",
+ "serde",
  "serde_json",
+ "serde_json_bytes",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
@@ -5886,9 +5891,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.10"
+version = "0.21.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d5a6813c0759e4609cd494e8e725babae6a2ca7b62a5536a13daaec6fcb7ba"
+checksum = "7fecbfb7b1444f477b345853b1fce097a2c6fb637b2bfb87e6bc5db0f043fae4"
 dependencies = [
  "log",
  "ring 0.17.5",

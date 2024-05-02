@@ -141,6 +141,7 @@ where
                             hash,
                             metadata,
                             plan_options,
+                            ..
                         },
                         _,
                     )| WarmUpCachingQueryKey {
@@ -206,6 +207,7 @@ where
                 query: query.clone(),
                 operation: operation.clone(),
                 hash: doc.hash.clone(),
+                sdl: Arc::clone(&self.schema.raw_sdl),
                 metadata,
                 plan_options,
             };
@@ -238,7 +240,7 @@ where
                     }
                 };
 
-                let schema = &self.schema.api_schema().definitions;
+                let schema = self.schema.api_schema();
                 if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
                     query = modified_query.to_string();
                 }
@@ -367,10 +369,11 @@ where
         let doc = match request.context.extensions().lock().get::<ParsedDocument>() {
             None => {
                 return Err(CacheResolverError::RetrievalError(Arc::new(
-                    QueryPlannerError::SpecError(SpecError::ParsingError(
+                    // TODO: dedicated error variant?
+                    QueryPlannerError::SpecError(SpecError::TransformError(
                         "missing parsed document".to_string(),
                     )),
-                )))
+                )));
             }
             Some(d) => d.clone(),
         };
@@ -385,6 +388,7 @@ where
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
             hash: doc.hash.clone(),
+            sdl: Arc::clone(&self.schema.raw_sdl),
             metadata,
             plan_options,
         };
@@ -398,7 +402,7 @@ where
                 context,
             } = request;
 
-            let schema = &self.schema.api_schema().definitions;
+            let schema = self.schema.api_schema();
             if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
                 query = modified_query.to_string();
             }
@@ -429,6 +433,7 @@ where
                                 });
                             }
 
+                            // This will be overridden when running in ApolloMetricsGenerationMode::New mode
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                                 context
                                     .extensions()
@@ -520,6 +525,7 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
+    pub(crate) sdl: Arc<String>,
     pub(crate) operation: Option<String>,
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
@@ -531,19 +537,29 @@ const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut hasher = Sha256::new();
+        hasher.update(self.operation.as_deref().unwrap_or("-"));
+        let operation = hex::encode(hasher.finalize());
+
+        let mut hasher = Sha256::new();
         hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
+        hasher.update(&serde_json::to_vec(&self.sdl).expect("serialization should not fail"));
         let metadata = hex::encode(hasher.finalize());
 
-        write!(f, "plan:{}:{}:{}", FEDERATION_VERSION, self.hash, metadata,)
+        write!(
+            f,
+            "plan:{}:{}:{}:{}",
+            FEDERATION_VERSION, self.hash, operation, metadata,
+        )
     }
 }
 
 impl Hash for CachingQueryKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash.0.hash(state);
+        self.operation.hash(state);
         self.metadata.hash(state);
         self.plan_options.hash(state);
     }
@@ -625,16 +641,15 @@ mod tests {
         });
 
         let configuration = Arc::new(crate::Configuration::default());
-        let schema = Arc::new(Schema::parse(include_str!("testdata/schema.graphql")).unwrap());
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse_test(schema, &configuration).unwrap());
 
         let mut planner =
-            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new())
+            CachingQueryPlanner::new(delegate, schema.clone(), &configuration, IndexMap::new())
                 .await
                 .unwrap();
 
         let configuration = Configuration::default();
-
-        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
 
         let doc1 = Query::parse_document(
             "query Me { me { username } }",
@@ -714,7 +729,8 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema = Schema::parse(include_str!("testdata/schema.graphql")).unwrap();
+        let schema =
+            Schema::parse_test(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let doc = Query::parse_document(
             "query Me { me { username } }",

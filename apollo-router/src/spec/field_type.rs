@@ -126,7 +126,7 @@ fn validate_input_value(
         _ => {}
     }
     let type_def = schema
-        .definitions
+        .supergraph_schema()
         .types
         .get(type_name)
         .ok_or(InvalidValue)?;

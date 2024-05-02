@@ -1,0 +1,7 @@
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        cost.delta:
+          attributes:
+            cost.result: true

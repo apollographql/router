@@ -1,0 +1,4 @@
+description: experimental_graphql_validation_mode is no longer supported
+actions:
+  - type: delete
+    path: experimental_graphql_validation_mode

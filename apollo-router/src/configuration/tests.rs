@@ -55,7 +55,7 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::spec::Schema::parse(schema).unwrap();
+    let schema = crate::spec::Schema::parse_test(schema, &Default::default()).unwrap();
 
     let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -107,7 +107,7 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::spec::Schema::parse(schema_error)
+    let schema_error = crate::spec::Schema::parse_test(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -966,6 +966,132 @@ fn it_adds_slash_to_custom_health_check_path_if_missing() {
         .unwrap();
 
     assert_eq!(&conf.health_check.path, "/healthz");
+}
+
+#[test]
+fn it_processes_batching_subgraph_all_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": true
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(config.batch_include("anything"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_all_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": true
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": false
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": true
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": false
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(config.batch_include("anything"));
+    assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": true
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(config.batch_include("accounts"));
 }
 
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {

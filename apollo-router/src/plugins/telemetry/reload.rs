@@ -16,8 +16,6 @@ use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
 use tracing_core::Subscriber;
-use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_opentelemetry::PreSampledTracer;
 use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Filter;
@@ -33,7 +31,7 @@ use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
 use super::config_new::logging::RateLimit;
-use super::dynamic_attribute::DynAttributeLayer;
+use super::dynamic_attribute::DynSpanAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
@@ -44,10 +42,14 @@ use crate::metrics::meter_provider;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::otel;
+use crate::plugins::telemetry::otel::OpenTelemetryLayer;
+use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::router_factory::STARTING_SPAN_NAME;
 
-pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
+pub(crate) type LayeredRegistry =
+    Layered<SpanMetricsLayer, Layered<DynSpanAttributeLayer, Registry>>;
 
 pub(super) type LayeredTracer = Layered<
     Filtered<
@@ -84,7 +86,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             None,
         ),
     );
-    let opentelemetry_layer = tracing_opentelemetry::layer()
+    let opentelemetry_layer = otel::layer()
         .with_tracer(hot_tracer.clone())
         .with_filter(SamplingFilter::new());
 
@@ -116,7 +118,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
-                .with(DynAttributeLayer::new())
+                .with(DynSpanAttributeLayer::new())
                 .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
