@@ -1,0 +1,78 @@
+# rover supergraph compose --config src/sources/connect/tests/schemas/cyclical.yaml > src/sources/connect/tests/schemas/cyclical.graphql
+federation_version: =2.7.3-testing.0
+subgraphs:
+  connectors:
+    routing_url: http://unused
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+              headers: [
+                { name: "X-Auth-Token", as: "AuthToken" }
+                { name: "user-agent", value: "Firefox" }
+                { name: "X-From-Env" }
+              ]
+            }
+          )
+
+        type Query {
+          me: User
+            @connect(
+              source: "json"
+              http: { GET: "/users/1" }
+              selection: "id name friends: { id }"
+            )
+
+          user(id: ID): User
+            @connect(
+              source: "json"
+              http: { GET: "/users/1" }
+              selection: "id name friends: { id }"
+              # entity: true
+            )
+        }
+
+        type User @key(fields: "id", resolvable: false) {
+          id: ID!
+          name: String
+          friends: [User]
+        }
+
+# operation
+# { me { friends { name } } }
+
+# query paths
+# Query -> Query.me -> User -> User.friends -> User -> User.name -> String
+
+# option tree
+# Query -> Query.me -> User -> User.friends -> User -> User (conditions: id) -> User.name -> String
+
+# parent node: Query
+# node: User
+# node: ID
+# edge: User.id -> ID
+# node: String
+# edge: User.name -> String
+# node: User^ (cached) !!! should be a clone
+# node: ID (cached)
+# edge: User^.id -> ID
+# edge: User.friends -> User^
+# edge: Query.me -> User
+
+# parent: User
+# node: User
+# node: ID
+# edge: User.id -> ID
+# node: String
+# edge: User.name -> String
+# node: User (cached)
+# node: ID (cached)
+# edge: User.id -> ID
+# edge: User.friends -> User
+# edge: Query.user -> User
+# enter edge: User, conditions: id (creates edges from User->User everywhere, include a self-to-self edge)

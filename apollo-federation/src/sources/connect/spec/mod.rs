@@ -1,5 +1,5 @@
 mod directives;
-mod schema;
+pub(crate) mod schema;
 mod type_and_directive_specifications;
 
 pub(crate) use directives::extract_connect_directive_arguments;

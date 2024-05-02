@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
 
@@ -122,7 +123,7 @@ impl NamedSelection {
     }
 
     #[allow(dead_code)]
-    fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             Self::Field(alias, name, _) => {
                 if let Some(alias) = alias {
@@ -134,6 +135,35 @@ impl NamedSelection {
             Self::Quoted(alias, _, _) => alias.name.as_str(),
             Self::Path(alias, _) => alias.name.as_str(),
             Self::Group(alias, _) => alias.name.as_str(),
+        }
+    }
+
+    /// Extracts the property path for a given named selection
+    ///
+    // TODO: Expand on what this means once I have a better understanding
+    pub(crate) fn property_path(&self) -> Vec<Property> {
+        match self {
+            NamedSelection::Field(_, name, _) => vec![Property::Field(name.to_string())],
+            NamedSelection::Quoted(_, _, Some(_)) => todo!(),
+            NamedSelection::Quoted(_, name, None) => vec![Property::Quoted(name.to_string())],
+            NamedSelection::Path(_, path) => path.collect_paths(),
+            NamedSelection::Group(alias, _) => vec![Property::Field(alias.name.to_string())],
+        }
+    }
+
+    /// Find the next subselection, if present
+    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
+        match self {
+            // Paths are complicated because they can have a subselection deeply nested
+            NamedSelection::Path(_, path) => path.next_subselection(),
+
+            // The other options have it at the root
+            NamedSelection::Field(_, _, Some(sub))
+            | NamedSelection::Quoted(_, _, Some(sub))
+            | NamedSelection::Group(_, sub) => Some(sub),
+
+            // Every other option does not have a subselection
+            _ => None,
         }
     }
 }
@@ -168,14 +198,41 @@ impl PathSelection {
             }
         }
     }
+
+    /// Collect all nested paths
+    ///
+    /// This method attempts to collect as many paths as possible, shorting out once
+    /// a non path selection is encountered.
+    pub(crate) fn collect_paths(&self) -> Vec<Property> {
+        let mut results = Vec::new();
+
+        // Collect as many as possible
+        let mut current = self;
+        while let Self::Path(prop, rest) = current {
+            results.push(prop.clone());
+
+            current = rest;
+        }
+
+        results
+    }
+
+    /// Find the next subselection, traversing nested chains if needed
+    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
+        match self {
+            PathSelection::Path(_, path) => path.next_subselection(),
+            PathSelection::Selection(sub) => Some(sub),
+            PathSelection::Empty => None,
+        }
+    }
 }
 
 // SubSelection ::= "{" NamedSelection* StarSelection? "}"
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct SubSelection {
-    selections: Vec<NamedSelection>,
-    star: Option<StarSelection>,
+    pub(crate) selections: Vec<NamedSelection>,
+    pub(crate) star: Option<StarSelection>,
 }
 
 impl SubSelection {
@@ -249,6 +306,16 @@ impl Property {
             map(parse_identifier, Self::Field),
             map(parse_string_literal, Self::Quoted),
         ))(input)
+    }
+}
+
+impl Display for Property {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Property::Field(field) => write!(f, ".{field}"),
+            Property::Quoted(quote) => write!(f, r#"."{quote}""#),
+            Property::Index(index) => write!(f, "[{index}]"),
+        }
     }
 }
 
