@@ -5,7 +5,7 @@ expression: response
 {
   "errors": [
     {
-      "message": "value `C` does not exist on `InputEnum`",
+      "message": "Value \"C does not exist in \"InputEnum\" enum.",
       "locations": [
         {
           "line": 1,
