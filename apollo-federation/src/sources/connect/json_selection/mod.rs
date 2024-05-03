@@ -1,4 +1,5 @@
 mod apply_to;
+mod graphql;
 mod helpers;
 mod parser;
 
