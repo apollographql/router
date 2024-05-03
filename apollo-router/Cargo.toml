@@ -182,7 +182,7 @@ rhai = { version = "=1.17.1", features = ["sync", "serde", "internals"] }
 regex = "1.10.3"
 reqwest.workspace = true
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.18+v2.7.2"
+router-bridge.workspace = true
 rust-embed = "8.2.0"
 rustls = "0.21.11"
 rustls-native-certs = "0.6.3"

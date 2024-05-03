@@ -190,6 +190,7 @@ impl PlannerMode {
                         .query_planning
                         .experimental_paths_limit,
                 }),
+                type_conditioned_fetching: false,
             },
         )
         .await?;
@@ -495,6 +496,7 @@ impl BridgeQueryPlanner {
                                 .query_planning
                                 .experimental_paths_limit,
                         }),
+                        type_conditioned_fetching: false,
                     },
                 )
                 .await?,
