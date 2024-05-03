@@ -4,7 +4,7 @@ use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-use crate::sources::connect::selection_parser::Selection;
+use crate::sources::connect::json_selection::Selection;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
