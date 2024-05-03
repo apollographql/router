@@ -1,10 +1,28 @@
 ---
 source: apollo-router/tests/set_context.rs
-assertion_line: 172
 expression: response
 ---
 {
-  "data": null,
+  "data": {
+    "tList": [
+      {
+        "id": "1",
+        "uList": [
+          {
+            "field": 3456
+          }
+        ]
+      },
+      {
+        "id": "2",
+        "uList": [
+          {
+            "field": 4567
+          }
+        ]
+      }
+    ]
+  },
   "extensions": {
     "apolloQueryPlan": {
       "object": {

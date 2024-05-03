@@ -275,7 +275,7 @@ fn expand_contextual_args(args: &str, arg_set: &HashSet<String>, count: usize) -
 }
 
 fn query_batching_for_contextual_args(old_query: &str, contextual_args: &Option<(HashSet<String>, usize)>) -> Option<String> {
-    let re = Regex::new(r"(.*?)\((.*?)\).*?(\{.*?\})").unwrap();
+    let re = Regex::new(r"(.*?)\((.*?)\).*?(\{.*\})").unwrap();
     
     let result = match contextual_args {
         Some((args, count)) => {
