@@ -288,7 +288,7 @@ fn process_subselection(
             }
             TypeDefinitionPosition::Scalar(ref scalar) => {
                 // Custom scalars need to be handled differently
-                if !field_ty.is_built_in() {
+                if !scalar.get(subgraph_schema.schema())?.is_built_in() {
                     return Err(FederationError::internal(
                         "custom scalars are not yet handled",
                     ));
