@@ -2052,3 +2052,618 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
         ),
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::{name, Schema};
+
+    use crate::{schema::FederationSchema, ValidFederationSubgraphs};
+
+    // JS PORT NOTE: these tests were ported from
+    // https://github.com/apollographql/federation/blob/3e2c845c74407a136b9e0066e44c1ad1467d3013/internals-js/src/__tests__/extractSubgraphsFromSupergraph.test.ts
+
+    #[test]
+    fn handles_types_having_no_fields_referenced_by_other_interfaces_in_a_subgraph_correctly() {
+        /*
+         * JS PORT NOTE: the original test used a Federation 1 supergraph.
+         * The following supergraph has been generated from:
+
+        federation_version: =2.6.0
+        subgraphs:
+            a:
+                routing_url: http://a
+                schema:
+                    sdl: |
+                        type Query {
+                            q: A
+                        }
+
+                        interface A {
+                            a: B
+                        }
+
+                        type B {
+                            b: C @provides(fields: "c")
+                        }
+
+                        type C {
+                            c: String
+                        }
+            b:
+                routing_url: http://b
+                schema:
+                    sdl: |
+                        type C {
+                            c: String
+                        }
+            c:
+                routing_url: http://c
+                schema:
+                    sdl: |
+                        type D {
+                            d: String
+                        }
+
+         * This tests is almost identical to the 'handles types having no fields referenced by other objects in a subgraph correctly'
+         * one, except that the reference to the type being removed is in an interface, to make double-sure this case is
+         * handled as well.
+         */
+
+        let supergraph = r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+              query: Query
+            }
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            interface A
+              @join__type(graph: A)
+            {
+              a: B
+            }
+
+            type B
+              @join__type(graph: A)
+            {
+              b: C
+            }
+
+            type C
+              @join__type(graph: A)
+              @join__type(graph: B)
+            {
+              c: String
+            }
+
+            type D
+              @join__type(graph: C)
+            {
+              d: String
+            }
+
+            scalar join__FieldSet
+
+            enum join__Graph {
+              A @join__graph(name: "a", url: "http://a")
+              B @join__graph(name: "b", url: "http://b")
+              C @join__graph(name: "c", url: "http://c")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query
+              @join__type(graph: A)
+              @join__type(graph: B)
+              @join__type(graph: C)
+            {
+              q: A @join__field(graph: A)
+            }
+        "#;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        assert_eq!(subgraphs.len(), 3);
+
+        let a = subgraphs.get("a").unwrap();
+        // JS PORT NOTE: the original tests used the equivalent of `get_type`,
+        // so we have to be careful about using `get_interface` here.
+        assert!(a.schema.schema().get_interface("A").is_some());
+        assert!(a.schema.schema().get_object("B").is_some());
+
+        let b = subgraphs.get("b").unwrap();
+        assert!(b.schema.schema().get_interface("A").is_none());
+        assert!(b.schema.schema().get_object("B").is_none());
+
+        let c = subgraphs.get("c").unwrap();
+        assert!(c.schema.schema().get_interface("A").is_none());
+        assert!(c.schema.schema().get_object("B").is_none());
+    }
+
+    #[test]
+    fn handles_types_having_no_fields_referenced_by_other_unions_in_a_subgraph_correctly() {
+        /*
+         * JS PORT NOTE: the original test used a Federation 1 supergraph.
+         * The following supergraph has been generated from:
+
+        federation_version: =2.6.0
+        subgraphs:
+            a:
+                routing_url: http://a
+                schema:
+                    sdl: |
+                        type Query {
+                            q: A
+                        }
+
+                        union A = B | C
+
+                        type B {
+                            b: D @provides(fields: "d")
+                        }
+
+                        type C {
+                            c: D @provides(fields: "d")
+                        }
+
+                        type D {
+                            d: String
+                        }
+            b:
+                routing_url: http://b
+                schema:
+                    sdl: |
+                        type D {
+                            d: String
+                        }
+
+         * This tests is similar identical to 'handles types having no fields referenced by other objects in a subgraph correctly'
+         * but the reference to the type being removed is a union, one that should be fully removed.
+         */
+
+        let supergraph = r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+              query: Query
+            }
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            union A
+              @join__type(graph: A)
+              @join__unionMember(graph: A, member: "B")
+              @join__unionMember(graph: A, member: "C")
+             = B | C
+
+            type B
+              @join__type(graph: A)
+            {
+              b: D
+            }
+
+            type C
+              @join__type(graph: A)
+            {
+              c: D
+            }
+
+            type D
+              @join__type(graph: A)
+              @join__type(graph: B)
+            {
+              d: String
+            }
+
+            scalar join__FieldSet
+
+            enum join__Graph {
+              A @join__graph(name: "a", url: "http://a")
+              B @join__graph(name: "b", url: "http://b")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query
+              @join__type(graph: A)
+              @join__type(graph: B)
+            {
+              q: A @join__field(graph: A)
+            }
+        "#;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        assert_eq!(subgraphs.len(), 2);
+
+        let a = subgraphs.get("a").unwrap();
+        // JS PORT NOTE: the original tests used the equivalent of `get_type`,
+        // so we have to be careful about using `get_union` here.
+        assert!(a.schema.schema().get_union("A").is_some());
+        assert!(a.schema.schema().get_object("B").is_some());
+        assert!(a.schema.schema().get_object("C").is_some());
+        assert!(a.schema.schema().get_object("D").is_some());
+
+        let b = subgraphs.get("b").unwrap();
+        assert!(b.schema.schema().get_union("A").is_none());
+        assert!(b.schema.schema().get_object("B").is_none());
+        assert!(b.schema.schema().get_object("C").is_none());
+        assert!(b.schema.schema().get_object("D").is_some());
+    }
+
+    // JS PORT NOTE: the "handles types having only some of their fields removed in a subgraph correctly"
+    // test isn't relevant to Federation 2 supergraphs. Fed 1 supergraphs don't annotate all types with
+    // the associated subgraphs, so extraction sometimes required guessing about which types to bring
+    // into each subgraph.
+
+    #[test]
+    fn handles_unions_types_having_no_members_in_a_subgraph_correctly() {
+        /*
+         * JS PORT NOTE: the original test used a Federation 1 supergraph.
+         * The following supergraph has been generated from:
+
+        federation_version: =2.6.0
+        subgraphs:
+            a:
+                routing_url: http://a
+                schema:
+                    sdl: |
+                        type Query {
+                            q: A
+                        }
+
+                        union A = B | C
+
+                        type B @key(fields: "b { d }") {
+                            b: D
+                        }
+
+                        type C @key(fields: "c { d }") {
+                            c: D
+                        }
+
+                        type D {
+                            d: String
+                        }
+            b:
+                routing_url: http://b
+                schema:
+                    sdl: |
+                        type D {
+                            d: String
+                        }
+
+         * This tests is similar to the other test with unions, but because its members are enties, the
+         * members themself with have a join__owner, and that means the removal will hit a different
+         * code path (technically, the union A will be "removed" directly by `extractSubgraphsFromSupergraph`
+         * instead of being removed indirectly through the removal of its members).
+         */
+
+        let supergraph = r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+              query: Query
+            }
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            union A
+              @join__type(graph: A)
+              @join__unionMember(graph: A, member: "B")
+              @join__unionMember(graph: A, member: "C")
+             = B | C
+
+            type B
+              @join__type(graph: A, key: "b { d }")
+            {
+              b: D
+            }
+
+            type C
+              @join__type(graph: A, key: "c { d }")
+            {
+              c: D
+            }
+
+            type D
+              @join__type(graph: A)
+              @join__type(graph: B)
+            {
+              d: String
+            }
+
+            scalar join__FieldSet
+
+            enum join__Graph {
+              A @join__graph(name: "a", url: "http://a")
+              B @join__graph(name: "b", url: "http://b")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query
+              @join__type(graph: A)
+              @join__type(graph: B)
+            {
+              q: A @join__field(graph: A)
+            }
+        "#;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        assert_eq!(subgraphs.len(), 2);
+
+        let a = subgraphs.get("a").unwrap();
+        // JS PORT NOTE: the original tests used the equivalent of `get_type`,
+        // so we have to be careful about using `get_union` here.
+        assert!(a.schema.schema().get_union("A").is_some());
+        assert!(a.schema.schema().get_object("B").is_some());
+        assert!(a.schema.schema().get_object("C").is_some());
+        assert!(a.schema.schema().get_object("D").is_some());
+
+        let b = subgraphs.get("b").unwrap();
+        assert!(b.schema.schema().get_union("A").is_none());
+        assert!(b.schema.schema().get_object("B").is_none());
+        assert!(b.schema.schema().get_object("C").is_none());
+        assert!(b.schema.schema().get_object("D").is_some());
+    }
+
+    #[test]
+    fn preserves_default_values_of_input_object_fields() {
+        let supergraph = r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+            {
+              query: Query
+            }
+
+            directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input Input
+              @join__type(graph: SERVICE)
+            {
+              a: Int! = 1234
+            }
+
+            scalar join__FieldSet
+
+            enum join__Graph {
+              SERVICE @join__graph(name: "service", url: "")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query
+              @join__type(graph: SERVICE)
+            {
+              field(input: Input!): String
+            }
+        "#;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        assert_eq!(subgraphs.len(), 1);
+        let subgraph = subgraphs.get("service").unwrap();
+        let input_type = subgraph.schema.schema().get_input_object("Input").unwrap();
+        let input_field_a = input_type
+            .fields
+            .iter()
+            .find(|(name, _)| name == &&name!("a"))
+            .unwrap();
+        assert_eq!(
+            input_field_a.1.default_value.as_ref().unwrap().to_i32(),
+            Some(1234)
+        );
+    }
+
+    // JS PORT NOTE: the "throw meaningful error for invalid federation directive fieldSet"
+    // test checked an error condition that can appear only in a Federation 1 supergraph.
+
+    // JS PORT NOTE: the "throw meaningful error for type erased from supergraph due to extending an entity without a key"
+    // test checked an error condition that can appear only in a Federation 1 supergraph.
+
+    #[test]
+    fn types_that_are_empty_because_of_overridden_fields_are_erased() {
+        let supergraph = r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+              @link(url: "https://specs.apollo.dev/tag/v0.3")
+            {
+              query: Query
+            }
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+            input Input
+              @join__type(graph: B)
+            {
+              a: Int! = 1234
+            }
+
+            scalar join__FieldSet
+
+            enum join__Graph {
+              A @join__graph(name: "a", url: "")
+              B @join__graph(name: "b", url: "")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query
+              @join__type(graph: A)
+            {
+              field: String
+            }
+
+            type User
+              @join__type(graph: A)
+              @join__type(graph: B)
+            {
+              foo: String @join__field(graph: A, override: "b")
+
+              bar: String @join__field(graph: A)
+
+              baz: String @join__field(graph: A)
+            }
+      "#;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        let subgraph = subgraphs.get("a").unwrap();
+        let user_type = subgraph.schema.schema().get_object("User");
+        assert!(user_type.is_some());
+
+        let subgraph = subgraphs.get("b").unwrap();
+        let user_type = subgraph.schema.schema().get_object("User");
+        assert!(user_type.is_none());
+    }
+}
