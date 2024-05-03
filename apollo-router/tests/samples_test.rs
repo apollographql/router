@@ -11,17 +11,19 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use libtest_mimic::{Arguments, Failed, Trial};
+use libtest_mimic::Arguments;
+use libtest_mimic::Failed;
+use libtest_mimic::Trial;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
+use wiremock::matchers::body_partial_json;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
 
 #[path = "./common.rs"]
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
-use wiremock::matchers::body_partial_json;
-use wiremock::Mock;
-use wiremock::ResponseTemplate;
 
 fn main() -> Result<ExitCode, Box<dyn Error>> {
     let args = Arguments::from_args();
@@ -35,24 +37,8 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
         let path = entry.path();
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
         tests.push(Trial::test(name, move || test(&path)));
-        //tests.push(test_from_path(&path));
-        /*if file_type.is_file() {
-            if path.extension() == Some(OsStr::new("rs")) {
-                let name = path
-                    .strip_prefix(env::current_dir()?)?
-                    .display()
-                    .to_string();
-
-                let test = Trial::test(name, move || check_file(&path)).with_kind("tidy");
-                tests.push(test);
-            }
-        } else if file_type.is_dir() {
-            // Handle directories
-            visit_dir(&path, tests)?;
-        }*/
     }
 
-    //let tests = collect_tests()?;
     Ok(libtest_mimic::run(&args, tests).exit_code())
 }
 
