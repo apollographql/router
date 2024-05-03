@@ -344,12 +344,16 @@ impl DefaultForLevel for RouterInstrumentsConfig {
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ActiveRequestsAttributes {
+    /// The HTTP request method
     #[serde(rename = "http.request.method")]
     http_request_method: bool,
+    /// The server address
     #[serde(rename = "server.address")]
     server_address: bool,
+    /// The server port
     #[serde(rename = "server.port")]
     server_port: bool,
+    /// The URL scheme
     #[serde(rename = "url.scheme")]
     url_scheme: bool,
 }
@@ -515,6 +519,7 @@ impl DefaultForLevel for SubgraphInstrumentsConfig {
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Instrument<A, E>
 where
     A: Default + Debug,

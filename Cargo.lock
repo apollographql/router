@@ -221,13 +221,13 @@ dependencies = [
 [[package]]
 name = "apollo-federation"
 version = "0.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9fc457f3e836a60ea3d4e1a25a8b42c5c62ddf13a2131c194d94f752c7a1475"
 dependencies = [
  "apollo-compiler",
  "derive_more",
  "indexmap 2.2.3",
+ "insta",
  "lazy_static",
+ "multimap 0.10.0",
  "petgraph",
  "serde_json_bytes",
  "strum 0.26.2",
@@ -235,6 +235,15 @@ dependencies = [
  "thiserror",
  "time",
  "url",
+]
+
+[[package]]
+name = "apollo-federation-cli"
+version = "0.1.0"
+dependencies = [
+ "apollo-compiler",
+ "apollo-federation",
+ "clap",
 ]
 
 [[package]]
@@ -250,7 +259,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.45.0"
+version = "1.45.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -412,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.45.0"
+version = "1.45.1"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -428,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.45.0"
+version = "1.45.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -3559,9 +3568,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.35.1"
+version = "1.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c985c1bef99cf13c58fade470483d81a2bfe846ebde60ed28cc2dddec2df9e2"
+checksum = "3eab73f58e59ca6526037208f0e98851159ec1633cf17b6cd2e1f2c3fd5d53cc"
 dependencies = [
  "console",
  "lazy_static",
@@ -3570,7 +3579,6 @@ dependencies = [
  "pest_derive",
  "serde",
  "similar",
- "yaml-rust",
 ]
 
 [[package]]
@@ -4172,6 +4180,15 @@ name = "multimap"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1a5d38b9b352dbd913288736af36af41c48d61b1a8cd34bcecd727561b7d511"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "multimap"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
 dependencies = [
  "serde",
 ]
@@ -5704,9 +5721,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.20+v2.7.4"
+version = "0.5.21+v2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5179aaf2c3c9ca2d76e2c5f6fbfe30a4e1d4c64cae0d269d0395b351f4993fbb"
+checksum = "b2142445fe3fe2aae7a3c3c5083d1211a448a0dabb489a14dd90d427cf6c0b13"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
