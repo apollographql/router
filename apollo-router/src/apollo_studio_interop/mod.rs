@@ -25,6 +25,8 @@ use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 
+use crate::configuration;
+
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
 pub struct ComparableUsageReporting {
@@ -99,13 +101,14 @@ pub fn generate_usage_reporting(
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
-    configuration: Arc<crate::configuration::Configuration>,
+    configuration: Arc<configuration::Configuration>,
 ) -> ComparableUsageReporting {
     let mut generator = UsageReportingGenerator {
         signature_doc,
         references_doc,
         operation_name,
         schema,
+        configuration,
         fragments_map: HashMap::new(),
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
@@ -120,6 +123,7 @@ struct UsageReportingGenerator<'a> {
     references_doc: &'a ExecutableDocument,
     operation_name: &'a Option<String>,
     schema: &'a Valid<Schema>,
+    configuration: Arc<configuration::Configuration>,
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,
@@ -128,6 +132,13 @@ struct UsageReportingGenerator<'a> {
 
 impl UsageReportingGenerator<'_> {
     fn generate(&mut self) -> ComparableUsageReporting {
+        //temp
+        println!(
+            "config {:?}",
+            self.configuration
+                .experimental_apollo_signature_normalization_algorithm
+        );
+
         ComparableUsageReporting {
             result: UsageReporting {
                 stats_report_key: self.generate_stats_report_key(),

@@ -50,6 +50,15 @@ fn assert_expected_results(
     ));
 }
 
+// Generate usage reporting with the same signature and refs doc, and with default config
+fn generate(
+    doc: &ExecutableDocument,
+    operation_name: &Option<String>,
+    schema: &Valid<Schema>,
+) -> ComparableUsageReporting {
+    generate_usage_reporting(doc, doc, operation_name, schema, Default::default())
+}
+
 #[test(tokio::test)]
 async fn test_complex_query() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
@@ -106,7 +115,7 @@ async fn test_complex_query() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("TransformedQuery".into()), &schema);
+    let generated = generate(&doc, &Some("TransformedQuery".into()), &schema);
 
     let expected_sig = "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -269,7 +278,7 @@ async fn test_complex_references() {
     let schema: Valid<Schema> = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("Query".into()), &schema);
+    let generated = generate(&doc, &Some("Query".into()), &schema);
 
     let expected_sig = "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -362,7 +371,7 @@ async fn test_basic_whitespace() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("MyQuery".into()), &schema);
+    let generated = generate(&doc, &Some("MyQuery".into()), &schema);
 
     let expected_sig = "# MyQuery\nquery MyQuery{noInputQuery{id}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -399,7 +408,7 @@ async fn test_anonymous_query() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+    let generated = generate(&doc, &None, &schema);
 
     let expected_sig = "# -\n{noInputQuery{id}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -436,7 +445,7 @@ async fn test_anonymous_mutation() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+    let generated = generate(&doc, &None, &schema);
 
     let expected_sig = "# -\nmutation{noInputMutation{id}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -473,7 +482,7 @@ async fn test_anonymous_subscription() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+    let generated = generate(&doc, &None, &schema);
 
     let expected_sig = "# -\nsubscription{noInputSubscription{id}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -522,12 +531,7 @@ async fn test_ordered_fields_and_variables() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(
-        &doc,
-        &doc,
-        &Some("VariableScalarInputQuery".into()),
-        &schema,
-    );
+    let generated = generate(&doc, &Some("VariableScalarInputQuery".into()), &schema);
 
     let expected_sig = "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){sortQuery(INTInput:$intInput boolInput:$boolInput floatInput:$floatInput idInput:$idInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){CCC aaa id nullableId zzz}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -629,7 +633,7 @@ async fn test_fragments() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("FragmentQuery".into()), &schema);
+    let generated = generate(&doc, &Some("FragmentQuery".into()), &schema);
 
     let expected_sig = "# FragmentQuery\nfragment ZZZFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaInterfaceFragment on InterfaceImplementation1{sharedField}fragment bbbInterfaceFragment on InterfaceImplementation2{implementation2Field sharedField}fragment zzzFragment on EverythingResponse{listOfInterfaces{sharedField}}query FragmentQuery{noInputQuery{interfaceResponse{sharedField...aaaInterfaceFragment...bbbInterfaceFragment...on InterfaceImplementation2{implementation2Field}...{...on InterfaceImplementation1{implementation1Field}}...on InterfaceImplementation1{implementation1Field}}listOfBools unionResponse{...on UnionType2{unionType2Field}...on UnionType1{unionType1Field}}...ZZZFragment...aaaFragment...zzzFragment}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -799,7 +803,7 @@ async fn test_directives() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("DirectiveQuery".into()), &schema);
+    let generated = generate(&doc, &Some("DirectiveQuery".into()), &schema);
 
     let expected_sig = "# DirectiveQuery\nfragment Fragment1 on InterfaceImplementation1{implementation1Field sharedField}fragment Fragment2 on InterfaceImplementation2@noArgs@withArgs(arg1:\"\",arg2:\"\",arg3:true,arg4:0,arg5:[]){implementation2Field sharedField}query DirectiveQuery@withArgs(arg1:\"\",arg2:\"\")@noArgs{noInputQuery{enumResponse@withArgs(arg3:false,arg4:0,arg5:[])@noArgs interfaceResponse{...Fragment1@noArgs@withArgs(arg1:\"\")...Fragment2}unionResponse{...on UnionType1@noArgs@withArgs(arg1:\"\",arg2:\"\"){unionType1Field}}}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -874,7 +878,7 @@ async fn test_aliases() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("AliasQuery".into()), &schema);
+    let generated = generate(&doc, &Some("AliasQuery".into()), &schema);
 
     let expected_sig = "# AliasQuery\nquery AliasQuery{enumInputQuery(enumInput:SOME_VALUE_1){enumResponse}enumInputQuery(enumInput:SOME_VALUE_2){enumResponse}enumInputQuery(enumInput:SOME_VALUE_3){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -918,8 +922,7 @@ async fn test_inline_values() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("InlineInputTypeQuery".into()), &schema);
+    let generated = generate(&doc, &Some("InlineInputTypeQuery".into()), &schema);
 
     let expected_sig = "# InlineInputTypeQuery\nquery InlineInputTypeQuery{inputTypeQuery(input:{}){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -962,7 +965,7 @@ async fn test_root_type_fragment() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+    let generated = generate(&doc, &None, &schema);
 
     let expected_sig = "# SomeQuery\nquery SomeQuery{noInputQuery{enumResponse}...on Query{...{basicResponseQuery{id}}}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1006,7 +1009,7 @@ async fn test_directive_arg_spacing() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &None, &schema);
+    let generated = generate(&doc, &None, &schema);
 
     let expected_sig = "# -\n{basicResponseQuery{id@withArgs(arg1:\"\")id}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1043,7 +1046,7 @@ async fn test_operation_with_single_variable() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("QueryWithVar".into()), &schema);
+    let generated = generate(&doc, &Some("QueryWithVar".into()), &schema);
 
     let expected_sig = "# QueryWithVar\nquery QueryWithVar($input_enum:SomeEnum){enumInputQuery(enumInput:$input_enum){listOfBools}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1083,7 +1086,7 @@ async fn test_operation_with_multiple_variables() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("QueryWithVars".into()), &schema);
+    let generated = generate(&doc, &Some("QueryWithVars".into()), &schema);
 
     let expected_sig = "# QueryWithVars\nquery QueryWithVars($boolInput:Boolean!,$floatInput:Float!,$stringInput:String!){inputTypeQuery(input:{}){enumResponse}scalarInputQuery(boolInput:$boolInput floatInput:$floatInput idInput:\"\"intInput:0 listInput:[]stringInput:$stringInput){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1123,7 +1126,7 @@ async fn test_field_arg_comma_or_space() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("QueryArgLength".into()), &schema);
+    let generated = generate(&doc, &Some("QueryArgLength".into()), &schema);
 
     // enumInputQuery has a variable line length of 81, so it should be separated by spaces (which are converted from newlines
     // in the original implementation).
@@ -1170,7 +1173,7 @@ async fn test_operation_arg_always_commas() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("QueryArgLength".into()), &schema);
+    let generated = generate(&doc, &Some("QueryArgLength".into()), &schema);
 
     // operation variables shouldn't ever be converted to spaces, since the line length check is only on field variables
     // in the original implementation
@@ -1209,8 +1212,7 @@ async fn test_comma_separator_always() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("QueryCommaEdgeCase".into()), &schema);
+    let generated = generate(&doc, &Some("QueryCommaEdgeCase".into()), &schema);
 
     let expected_sig = "# QueryCommaEdgeCase\nquery QueryCommaEdgeCase{enumInputQuery(anotherStr:\"\",enumInput:SOME_VALUE_1,stringInput:\"\"){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1273,8 +1275,7 @@ async fn test_nested_fragments() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("NestedFragmentQuery".into()), &schema);
+    let generated = generate(&doc, &Some("NestedFragmentQuery".into()), &schema);
 
     let expected_sig = "# NestedFragmentQuery\nfragment EverythingResponseFragment on EverythingResponse{listOfObjects{...ObjectResponseFragment...on ObjectTypeResponse{stringField}}}fragment ObjectResponseFragment on ObjectTypeResponse{intField}fragment UnionType1Fragment on UnionType1{unionType1Field}query NestedFragmentQuery{noInputQuery{...EverythingResponseFragment...on EverythingResponse{listOfUnions{...UnionType1Fragment...on UnionType2{unionType2Field}}}}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1333,8 +1334,7 @@ async fn test_mutation_space() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("Test_Mutation_Space".into()), &schema);
+    let generated = generate(&doc, &Some("Test_Mutation_Space".into()), &schema);
 
     let expected_sig = "# Test_Mutation_Space\nmutation Test_Mutation_Space($arg1withalongnamegoeshere0123456789:Boolean){mutation2(id:\"\"){updateCheckConfiguration(arg1:$arg1withalongnamegoeshere0123456789 arg2:false)}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1372,8 +1372,7 @@ async fn test_mutation_comma() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("Test_Mutation_Comma".into()), &schema);
+    let generated = generate(&doc, &Some("Test_Mutation_Comma".into()), &schema);
 
     let expected_sig = "# Test_Mutation_Comma\nmutation Test_Mutation_Comma($arg1withalongnamegoeshere012345678:Boolean){mutation2(id:\"\"){updateCheckConfiguration(arg1:$arg1withalongnamegoeshere012345678,arg2:false)}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1411,8 +1410,7 @@ async fn test_comma_lower_bound() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("TestCommaLowerBound".into()), &schema);
+    let generated = generate(&doc, &Some("TestCommaLowerBound".into()), &schema);
 
     let expected_sig = "# TestCommaLowerBound\nquery TestCommaLowerBound($arg:String,$slightlyTooLongName1234:String){manyArgsQuery(arg1:$arg arg2:$arg arg3:$arg arg4:$slightlyTooLongName1234){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1450,8 +1448,7 @@ async fn test_comma_upper_bound() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated =
-        generate_usage_reporting(&doc, &doc, &Some("TestCommaUpperBound".into()), &schema);
+    let generated = generate(&doc, &Some("TestCommaUpperBound".into()), &schema);
 
     let expected_sig = "# TestCommaUpperBound\nquery TestCommaUpperBound($arg:String,$slightlyTooLongName12345:String){manyArgsQuery(arg1:$arg arg2:$arg arg3:$arg arg4:$slightlyTooLongName12345){enumResponse}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
@@ -1492,7 +1489,7 @@ async fn test_underscore() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_usage_reporting(&doc, &doc, &Some("UnderscoreQuery".into()), &schema);
+    let generated = generate(&doc, &Some("UnderscoreQuery".into()), &schema);
 
     let expected_sig = "# UnderscoreQuery\nquery UnderscoreQuery($_arg3_:String,$arg2_:String){underscoreQuery(_arg2:$arg2_,_arg3_:$_arg3_,arg_:\"\"){_ _name _name_ name_}}";
     let expected_refs: HashMap<String, ReferencedFieldsForType> = HashMap::from([
