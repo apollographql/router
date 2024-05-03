@@ -19,7 +19,7 @@ TODO
 
 ### CLI tool
 
-`cargo cli --help`
+`cargo fed --help`
 
 ## Contributing
 
