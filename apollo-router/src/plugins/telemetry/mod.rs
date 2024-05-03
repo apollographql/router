@@ -1844,9 +1844,10 @@ impl CustomTraceIdPropagator {
 
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
         let trace_id = extractor.get(&self.header_name)?;
+        let trace_id = trace_id.replace("-", "");
 
         // extract trace id
-        let trace_id = match opentelemetry::trace::TraceId::from_hex(trace_id) {
+        let trace_id = match opentelemetry::trace::TraceId::from_hex(&trace_id) {
             Ok(trace_id) => trace_id,
             Err(err) => {
                 ::tracing::error!("cannot generate custom trace_id: {err}");
@@ -1903,6 +1904,7 @@ struct EnableSubgraphFtv1;
 //
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
     use std::sync::Arc;
@@ -1952,6 +1954,7 @@ mod tests {
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
+    use super::CustomTraceIdPropagator;
 
     async fn create_plugin_with_config(config: &str) -> Box<dyn DynPlugin> {
         let prometheus_support = config.contains("prometheus");
@@ -2957,5 +2960,19 @@ mod tests {
         .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
         .await;
         test_layer.assert_log_entry_count("other error", 2);
+    }
+
+    #[tokio::test]
+    async fn test_custom_trace_id_propagator_strip_dashes_in_trace_id() {
+        let header = String::from("x-trace-id");
+        let trace_id = String::from("04f9e396-465c-4840-bc2b-f493b8b1a7fc");
+        let expected_trace_id = String::from("04f9e396465c4840bc2bf493b8b1a7fc");
+
+        let propagator = CustomTraceIdPropagator::new(header.clone());
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, trace_id);
+        let span = propagator.extract_span_context(&headers);
+        assert!(span.is_some());
+        assert_eq!(span.unwrap().trace_id().to_string(), expected_trace_id);
     }
 }
