@@ -1935,6 +1935,7 @@ mod tests {
     use tracing_subscriber::Layer;
 
     use super::apollo::ForwardHeaders;
+    use super::CustomTraceIdPropagator;
     use super::Telemetry;
     use crate::error::FetchError;
     use crate::graphql;
@@ -1954,7 +1955,6 @@ mod tests {
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
-    use super::CustomTraceIdPropagator;
 
     async fn create_plugin_with_config(config: &str) -> Box<dyn DynPlugin> {
         let prometheus_support = config.contains("prometheus");
