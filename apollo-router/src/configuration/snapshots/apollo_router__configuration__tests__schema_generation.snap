@@ -616,6 +616,44 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_RouterSelector",
+                "description": "#/definitions/SelectorOrValue_for_RouterSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_RouterSelector",
+                "description": "#/definitions/SelectorOrValue_for_RouterSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A condition to check a selection against a selector.",
           "properties": {
             "exists": {
@@ -715,6 +753,44 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_SubgraphSelector",
+                "description": "#/definitions/SelectorOrValue_for_SubgraphSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_SubgraphSelector",
+                "description": "#/definitions/SelectorOrValue_for_SubgraphSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A condition to check a selection against a selector.",
           "properties": {
             "exists": {
@@ -809,6 +885,44 @@ expression: "&schema"
           },
           "required": [
             "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_SupergraphSelector",
+                "description": "#/definitions/SelectorOrValue_for_SupergraphSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_SupergraphSelector",
+                "description": "#/definitions/SelectorOrValue_for_SupergraphSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
           ],
           "type": "object"
         },
