@@ -1,15 +1,17 @@
-use clap::Parser;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use apollo_compiler::ExecutableDocument;
-use apollo_federation::error::{FederationError, SingleFederationError};
+use apollo_federation::error::FederationError;
+use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::subgraph;
+use clap::Parser;
 
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
 #[derive(Parser)]

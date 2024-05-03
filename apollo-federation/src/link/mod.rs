@@ -1,14 +1,24 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::link::link_spec_definition::{LinkSpecDefinition, CORE_VERSIONS, LINK_VERSIONS};
-use crate::link::spec::Identity;
-use crate::link::spec::Url;
-use apollo_compiler::ast::{Directive, InvalidNameError, Value};
-use apollo_compiler::schema::Name;
-use apollo_compiler::{name, Node, NodeStr};
+use std::collections::HashMap;
 use std::fmt;
 use std::str;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
+
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::InvalidNameError;
+use apollo_compiler::ast::Value;
+use apollo_compiler::name;
+use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
 use thiserror::Error;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::link::link_spec_definition::LinkSpecDefinition;
+use crate::link::link_spec_definition::CORE_VERSIONS;
+use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
 
 pub(crate) mod argument;
 pub mod database;

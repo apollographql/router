@@ -1,3 +1,14 @@
+use std::num::NonZeroU32;
+use std::sync::Arc;
+
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -29,15 +40,6 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
-use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
-use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
-use std::num::NonZeroU32;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct QueryPlannerConfig {
@@ -576,9 +578,8 @@ fn compute_plan_for_defer_conditionals(
 
 #[cfg(test)]
 mod tests {
-    use crate::subgraph::Subgraph;
-
     use super::*;
+    use crate::subgraph::Subgraph;
 
     const TEST_SUPERGRAPH: &str = r#"
 schema

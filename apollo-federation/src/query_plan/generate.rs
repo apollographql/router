@@ -1,5 +1,7 @@
-use crate::{error::FederationError, query_plan::QueryPlanCost};
 use std::collections::VecDeque;
+
+use crate::error::FederationError;
+use crate::query_plan::QueryPlanCost;
 
 type Choices<T> = Vec<Option<T>>;
 

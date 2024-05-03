@@ -1,6 +1,7 @@
+use std::process::ExitCode;
+
 use apollo_compiler::Schema;
 use apollo_federation::Supergraph;
-use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let (source, name) = match std::env::args().nth(1) {

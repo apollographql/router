@@ -1,23 +1,39 @@
 use std::collections::HashSet;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::iter;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveList;
-use apollo_compiler::ast::{
-    Argument, Directive, DirectiveDefinition, DirectiveLocation, EnumValueDefinition,
-    FieldDefinition, NamedType, Value,
-};
-use apollo_compiler::schema::{
-    Component, EnumType, ExtendedType, InputObjectType, InputValueDefinition, InterfaceType, Name,
-    ObjectType, ScalarType, UnionType,
-};
+use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::ast::EnumValueDefinition;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::ast::Value;
+use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::InputObjectType;
+use apollo_compiler::schema::InputValueDefinition;
+use apollo_compiler::schema::InterfaceType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::ScalarType;
+use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::{name, Node, NodeStr, Schema};
-use indexmap::map::Entry::{Occupied, Vacant};
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use apollo_compiler::Schema;
+use indexmap::map::Entry::Occupied;
+use indexmap::map::Entry::Vacant;
 use indexmap::map::Iter;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 
 use crate::subgraph::ValidSubgraph;
 

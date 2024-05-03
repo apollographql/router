@@ -1,40 +1,60 @@
-use crate::error::FederationError;
-use crate::indented_display::{write_indented_lines, State as IndentedFormatter};
-use crate::is_leaf_type;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::graphql_definition::{
-    BooleanOrVariable, DeferDirectiveArguments, OperationConditional, OperationConditionalKind,
-};
-use crate::query_graph::condition_resolver::{
-    ConditionResolution, ConditionResolver, UnsatisfiedConditionReason,
-};
-use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition, QueryGraphNodeType};
-use crate::query_plan::operation::{
-    NormalizedField, NormalizedFieldData, NormalizedFieldSelection, NormalizedInlineFragment,
-    NormalizedInlineFragmentData, NormalizedInlineFragmentSelection, NormalizedSelection,
-    NormalizedSelectionSet, SelectionId,
-};
-use crate::query_plan::{FetchDataPathElement, QueryPathElement, QueryPlanCost};
-use crate::schema::position::{
-    AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition,
-    InterfaceFieldDefinitionPosition, ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition,
-    TypeDefinitionPosition,
-};
-use crate::schema::ValidFederationSchema;
-use apollo_compiler::ast::Value;
-use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::schema::{ExtendedType, Name};
-use apollo_compiler::NodeStr;
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::visit::EdgeRef;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashSet};
-use std::fmt::{Display, Formatter, Write};
+use std::collections::BinaryHeap;
+use std::collections::HashSet;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Write;
 use std::hash::Hash;
 use std::ops::Deref;
-use std::sync::{atomic, Arc};
+use std::sync::atomic;
+use std::sync::Arc;
+
+use apollo_compiler::ast::Value;
+use apollo_compiler::executable::DirectiveList;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
+
+use crate::error::FederationError;
+use crate::indented_display::write_indented_lines;
+use crate::indented_display::State as IndentedFormatter;
+use crate::is_leaf_type;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::graphql_definition::BooleanOrVariable;
+use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::link::graphql_definition::OperationConditional;
+use crate::link::graphql_definition::OperationConditionalKind;
+use crate::query_graph::condition_resolver::ConditionResolution;
+use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
+use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::operation::NormalizedField;
+use crate::query_plan::operation::NormalizedFieldData;
+use crate::query_plan::operation::NormalizedFieldSelection;
+use crate::query_plan::operation::NormalizedInlineFragment;
+use crate::query_plan::operation::NormalizedInlineFragmentData;
+use crate::query_plan::operation::NormalizedInlineFragmentSelection;
+use crate::query_plan::operation::NormalizedSelection;
+use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::SelectionId;
+use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::QueryPathElement;
+use crate::query_plan::QueryPlanCost;
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::ValidFederationSchema;
 
 /// An immutable path in a query graph.
 ///
@@ -3498,21 +3518,23 @@ impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::{executable::DirectiveList, schema::Name, NodeStr, Schema};
-    use petgraph::stable_graph::{EdgeIndex, NodeIndex};
+    use apollo_compiler::executable::DirectiveList;
+    use apollo_compiler::schema::Name;
+    use apollo_compiler::NodeStr;
+    use apollo_compiler::Schema;
+    use petgraph::stable_graph::EdgeIndex;
+    use petgraph::stable_graph::NodeIndex;
 
-    use crate::{
-        query_graph::{
-            build_query_graph::build_query_graph,
-            condition_resolver::ConditionResolution,
-            graph_path::{OpGraphPath, OpGraphPathTrigger, OpPathElement},
-        },
-        query_plan::operation::{NormalizedField, NormalizedFieldData},
-        schema::{
-            position::{FieldDefinitionPosition, ObjectFieldDefinitionPosition},
-            ValidFederationSchema,
-        },
-    };
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::condition_resolver::ConditionResolution;
+    use crate::query_graph::graph_path::OpGraphPath;
+    use crate::query_graph::graph_path::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::OpPathElement;
+    use crate::query_plan::operation::NormalizedField;
+    use crate::query_plan::operation::NormalizedFieldData;
+    use crate::schema::position::FieldDefinitionPosition;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
+    use crate::schema::ValidFederationSchema;
 
     #[test]
     fn path_display() {

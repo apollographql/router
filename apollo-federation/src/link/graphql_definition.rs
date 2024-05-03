@@ -1,12 +1,15 @@
 use std::fmt::Display;
 
-use crate::error::FederationError;
-use crate::link::argument::{
-    directive_optional_string_argument, directive_optional_variable_boolean_argument,
-};
 use apollo_compiler::ast::Value;
-use apollo_compiler::executable::{Directive, Name};
-use apollo_compiler::{name, Node, NodeStr};
+use apollo_compiler::executable::Directive;
+use apollo_compiler::executable::Name;
+use apollo_compiler::name;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+
+use crate::error::FederationError;
+use crate::link::argument::directive_optional_string_argument;
+use crate::link::argument::directive_optional_variable_boolean_argument;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DeferDirectiveArguments {

@@ -1,6 +1,10 @@
-use crate::link::spec::{Identity, Url, Version};
-use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
 use lazy_static::lazy_static;
+
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitions;
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,

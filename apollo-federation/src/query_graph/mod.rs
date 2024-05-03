@@ -1,22 +1,33 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::query_plan::operation::{
-    NormalizedField, NormalizedInlineFragment, NormalizedSelectionSet,
-};
-use crate::schema::field_set::parse_field_set;
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, InterfaceFieldDefinitionPosition,
-    ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition, SchemaRootDefinitionKind,
-};
-use crate::schema::ValidFederationSchema;
-use apollo_compiler::schema::{Name, NamedType};
-use apollo_compiler::NodeStr;
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex};
-use petgraph::visit::EdgeRef;
-use petgraph::Direction;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
+
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::NamedType;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::DiGraph;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::EdgeReference;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
+use petgraph::Direction;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::query_plan::operation::NormalizedField;
+use crate::query_plan::operation::NormalizedInlineFragment;
+use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::schema::field_set::parse_field_set;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::ValidFederationSchema;
 
 pub mod build_query_graph;
 pub(crate) mod condition_resolver;
@@ -25,12 +36,16 @@ pub(crate) mod graph_path;
 pub mod output;
 pub(crate) mod path_tree;
 
-use crate::query_graph::condition_resolver::{ConditionResolution, ConditionResolver};
-use crate::query_graph::graph_path::{
-    ExcludedConditions, ExcludedDestinations, OpGraphPathContext, OpGraphPathTrigger, OpPathElement,
-};
-use crate::query_plan::QueryPlanCost;
 pub use build_query_graph::build_federated_query_graph;
+
+use crate::query_graph::condition_resolver::ConditionResolution;
+use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::graph_path::ExcludedConditions;
+use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::OpGraphPathTrigger;
+use crate::query_graph::graph_path::OpPathElement;
+use crate::query_plan::QueryPlanCost;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {

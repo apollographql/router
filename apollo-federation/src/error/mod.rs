@@ -1,9 +1,14 @@
-use crate::subgraph::spec::FederationSpecError;
-use apollo_compiler::validation::DiagnosticList;
-use apollo_compiler::{ast::InvalidNameError, validation::WithErrors};
-use lazy_static::lazy_static;
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Write;
+
+use apollo_compiler::ast::InvalidNameError;
+use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::WithErrors;
+use lazy_static::lazy_static;
+
+use crate::subgraph::spec::FederationSpecError;
 
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.

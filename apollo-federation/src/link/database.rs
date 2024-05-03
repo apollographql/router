@@ -1,13 +1,19 @@
-use apollo_compiler::ast::{Directive, DirectiveLocation};
-use apollo_compiler::schema::DirectiveDefinition;
-use apollo_compiler::{ty, Schema};
 use std::borrow::Cow;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::link::{
-    spec::{Identity, Url},
-    {Link, LinkError, LinksMetadata, DEFAULT_LINK_NAME},
-};
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::ty;
+use apollo_compiler::Schema;
+
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::Link;
+use crate::link::LinkError;
+use crate::link::LinksMetadata;
+use crate::link::DEFAULT_LINK_NAME;
 
 /// Extract @link metadata from a schema.
 pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkError> {
@@ -215,12 +221,11 @@ fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
 mod tests {
     use apollo_compiler::name;
 
-    use crate::link::{
-        spec::{Version, APOLLO_SPEC_DOMAIN},
-        {Import, Purpose},
-    };
-
     use super::*;
+    use crate::link::spec::Version;
+    use crate::link::spec::APOLLO_SPEC_DOMAIN;
+    use crate::link::Import;
+    use crate::link::Purpose;
 
     #[test]
     fn explicit_root_directive_import() -> Result<(), LinkError> {

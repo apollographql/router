@@ -12,6 +12,40 @@
 //! For example, for fields, the data type is [`NormalizedFieldData`], the element type is
 //! [`NormalizedField`], and the selection type is [`NormalizedFieldSelection`].
 
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::sync::atomic;
+use std::sync::Arc;
+use std::sync::OnceLock;
+
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::ast::Name;
+use apollo_compiler::ast::OperationType;
+use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
+use apollo_compiler::executable;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::Fragment;
+use apollo_compiler::executable::FragmentSpread;
+use apollo_compiler::executable::InlineFragment;
+use apollo_compiler::executable::Operation;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::name;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
@@ -25,30 +59,11 @@ use crate::query_plan::FetchDataRewrite;
 use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, InterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
-    SchemaRootDefinitionKind,
-};
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-use apollo_compiler::ast::Type;
-use apollo_compiler::ast::{Argument, Directive, DirectiveList, Name, OperationType, Value};
-use apollo_compiler::executable;
-use apollo_compiler::executable::{
-    Field, Fragment, FragmentSpread, InlineFragment, Operation, Selection, SelectionSet,
-    VariableDefinition,
-};
-use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
-use apollo_compiler::{name, Node};
-use indexmap::{IndexMap, IndexSet};
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::fmt::{Display, Formatter};
-use std::hash::Hash;
-use std::ops::Deref;
-use std::sync::OnceLock;
-use std::sync::{atomic, Arc};
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
@@ -232,21 +247,23 @@ pub(crate) struct NormalizedSelectionSet {
 }
 
 pub(crate) mod normalized_selection_map {
+    use std::borrow::Cow;
+    use std::iter::Map;
+    use std::ops::Deref;
+    use std::sync::Arc;
+
+    use apollo_compiler::ast::Name;
+    use indexmap::IndexMap;
+
     use crate::error::FederationError;
     use crate::error::SingleFederationError::Internal;
     use crate::query_plan::operation::normalized_field_selection::NormalizedFieldSelection;
     use crate::query_plan::operation::normalized_fragment_spread_selection::NormalizedFragmentSpreadSelection;
     use crate::query_plan::operation::normalized_inline_fragment_selection::NormalizedInlineFragmentSelection;
-    use crate::query_plan::operation::{
-        HasNormalizedSelectionKey, NormalizedSelection, NormalizedSelectionKey,
-        NormalizedSelectionSet,
-    };
-    use apollo_compiler::ast::Name;
-    use indexmap::IndexMap;
-    use std::borrow::Cow;
-    use std::iter::Map;
-    use std::ops::Deref;
-    use std::sync::Arc;
+    use crate::query_plan::operation::HasNormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelection;
+    use crate::query_plan::operation::NormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelectionSet;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -1012,19 +1029,25 @@ impl NormalizedFragment {
 }
 
 mod normalized_field_selection {
-    use crate::error::FederationError;
-    use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_plan::operation::{
-        directives_with_sorted_arguments, HasNormalizedSelectionKey, NormalizedSelectionKey,
-        NormalizedSelectionSet,
-    };
-    use crate::query_plan::FetchDataPathElement;
-    use crate::schema::position::{FieldDefinitionPosition, TypeDefinitionPosition};
-    use crate::schema::ValidFederationSchema;
-    use apollo_compiler::ast::{Argument, Directive, DirectiveList, Name};
-    use apollo_compiler::Node;
     use std::collections::HashSet;
     use std::sync::Arc;
+
+    use apollo_compiler::ast::Argument;
+    use apollo_compiler::ast::Directive;
+    use apollo_compiler::ast::DirectiveList;
+    use apollo_compiler::ast::Name;
+    use apollo_compiler::Node;
+
+    use crate::error::FederationError;
+    use crate::query_graph::graph_path::OpPathElement;
+    use crate::query_plan::operation::directives_with_sorted_arguments;
+    use crate::query_plan::operation::HasNormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelectionSet;
+    use crate::query_plan::FetchDataPathElement;
+    use crate::schema::position::FieldDefinitionPosition;
+    use crate::schema::position::TypeDefinitionPosition;
+    use crate::schema::ValidFederationSchema;
 
     /// An analogue of the apollo-compiler type `Field` with these changes:
     /// - Makes the selection set optional. This is because `NormalizedSelectionSet` requires a type of
@@ -1201,14 +1224,19 @@ pub(crate) use normalized_field_selection::NormalizedFieldData;
 pub(crate) use normalized_field_selection::NormalizedFieldSelection;
 
 mod normalized_fragment_spread_selection {
-    use crate::query_plan::operation::{
-        directives_with_sorted_arguments, is_deferred_selection, HasNormalizedSelectionKey,
-        NormalizedSelectionKey, NormalizedSelectionSet, SelectionId,
-    };
+    use std::sync::Arc;
+
+    use apollo_compiler::ast::DirectiveList;
+    use apollo_compiler::ast::Name;
+
+    use crate::query_plan::operation::directives_with_sorted_arguments;
+    use crate::query_plan::operation::is_deferred_selection;
+    use crate::query_plan::operation::HasNormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelectionSet;
+    use crate::query_plan::operation::SelectionId;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
-    use apollo_compiler::ast::{DirectiveList, Name};
-    use std::sync::Arc;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub(crate) struct NormalizedFragmentSpreadSelection {
@@ -1505,20 +1533,26 @@ impl NormalizedFragmentSpreadData {
 }
 
 mod normalized_inline_fragment_selection {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use apollo_compiler::ast::DirectiveList;
+    use apollo_compiler::ast::Name;
+
+    use super::normalized_field_selection::collect_variables_from_directive;
     use crate::error::FederationError;
-    use crate::link::graphql_definition::{defer_directive_arguments, DeferDirectiveArguments};
-    use crate::query_plan::operation::{
-        directives_with_sorted_arguments, is_deferred_selection, runtime_types_intersect,
-        HasNormalizedSelectionKey, NormalizedSelectionKey, NormalizedSelectionSet, SelectionId,
-    };
+    use crate::link::graphql_definition::defer_directive_arguments;
+    use crate::link::graphql_definition::DeferDirectiveArguments;
+    use crate::query_plan::operation::directives_with_sorted_arguments;
+    use crate::query_plan::operation::is_deferred_selection;
+    use crate::query_plan::operation::runtime_types_intersect;
+    use crate::query_plan::operation::HasNormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelectionKey;
+    use crate::query_plan::operation::NormalizedSelectionSet;
+    use crate::query_plan::operation::SelectionId;
     use crate::query_plan::FetchDataPathElement;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
-    use apollo_compiler::ast::{DirectiveList, Name};
-    use std::sync::Arc;
-
-    use super::normalized_field_selection::collect_variables_from_directive;
-    use std::collections::HashSet;
 
     /// An analogue of the apollo-compiler type `InlineFragment` with these changes:
     /// - Stores the inline fragment data (other than the selection set) in `NormalizedInlineFragment`,
@@ -4619,6 +4653,10 @@ fn print_possible_runtimes(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
+    use apollo_compiler::ExecutableDocument;
+    use indexmap::IndexSet;
+
     use super::normalize_operation;
     use super::Containment;
     use super::ContainmentOptions;
@@ -4626,8 +4664,6 @@ mod tests {
     use crate::schema::position::InterfaceTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::subgraph::Subgraph;
-    use apollo_compiler::{name, ExecutableDocument};
-    use indexmap::IndexSet;
 
     fn parse_schema_and_operation(
         schema_and_operation: &str,
@@ -5636,11 +5672,13 @@ scalar FieldSet
     //
     #[cfg(test)]
     mod rebase_tests {
-        use crate::query_plan::operation::normalize_operation;
-        use crate::query_plan::operation::tests::{parse_schema_and_operation, parse_subgraph};
-        use crate::schema::position::InterfaceTypeDefinitionPosition;
         use apollo_compiler::name;
         use indexmap::IndexSet;
+
+        use crate::query_plan::operation::normalize_operation;
+        use crate::query_plan::operation::tests::parse_schema_and_operation;
+        use crate::query_plan::operation::tests::parse_subgraph;
+        use crate::schema::position::InterfaceTypeDefinitionPosition;
 
         #[test]
         fn skips_unknown_fragment_fields() {

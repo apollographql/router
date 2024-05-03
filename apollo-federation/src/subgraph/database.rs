@@ -13,12 +13,15 @@
 
 use std::sync::Arc;
 
-use apollo_compiler::executable::{Directive, SelectionSet};
+use apollo_compiler::executable::Directive;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::name;
 use apollo_compiler::schema::Name;
-use apollo_compiler::{name, Schema};
+use apollo_compiler::Schema;
 
 use crate::link::database::links_metadata;
-use crate::link::spec::{Identity, APOLLO_SPEC_DOMAIN};
+use crate::link::spec::Identity;
+use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::Link;
 
 // TODO: we should define this as part as some more generic "FederationSpec" definition, but need

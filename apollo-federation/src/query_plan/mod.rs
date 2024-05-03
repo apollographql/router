@@ -1,10 +1,16 @@
-use crate::query_plan::query_planner::QueryPlanningStatistics;
-use apollo_compiler::executable::{
-    Field, InlineFragment, Name, OperationType, Selection, SelectionSet,
-};
-use apollo_compiler::validation::Valid;
-use apollo_compiler::{ExecutableDocument, NodeStr};
 use std::sync::Arc;
+
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::InlineFragment;
+use apollo_compiler::executable::Name;
+use apollo_compiler::executable::OperationType;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::NodeStr;
+
+use crate::query_plan::query_planner::QueryPlanningStatistics;
 
 pub(crate) mod conditions;
 pub(crate) mod display;

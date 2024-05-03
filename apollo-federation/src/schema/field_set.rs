@@ -1,15 +1,25 @@
-use crate::error::{FederationError, MultipleFederationErrors, SingleFederationError};
-use crate::query_plan::operation::{NamedFragments, NormalizedSelectionSet};
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, InterfaceTypeDefinitionPosition,
-    ObjectTypeDefinitionPosition, UnionTypeDefinitionPosition,
-};
-use crate::schema::{FederationSchema, ValidFederationSchema};
-use apollo_compiler::executable::{FieldSet, Selection, SelectionSet};
-use apollo_compiler::schema::{ExtendedType, NamedType};
+use apollo_compiler::executable::FieldSet;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::{NodeStr, Schema};
+use apollo_compiler::NodeStr;
+use apollo_compiler::Schema;
 use indexmap::IndexMap;
+
+use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
+use crate::query_plan::operation::NamedFragments;
+use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 
 // Federation spec does not allow the alias syntax in field set strings.
 // However, since `parse_field_set` uses the standard GraphQL parser, which allows aliases,
@@ -177,11 +187,12 @@ pub(crate) fn add_interface_field_implementations(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        error::FederationError, query_graph::build_federated_query_graph, subgraph::Subgraph,
-        Supergraph,
-    };
     use apollo_compiler::schema::Name;
+
+    use crate::error::FederationError;
+    use crate::query_graph::build_federated_query_graph;
+    use crate::subgraph::Subgraph;
+    use crate::Supergraph;
 
     #[test]
     fn test_aliases_in_field_set() -> Result<(), FederationError> {

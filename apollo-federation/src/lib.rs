@@ -11,6 +11,12 @@ pub mod query_plan;
 pub mod schema;
 pub mod subgraph;
 
+use apollo_compiler::validation::Valid;
+use apollo_compiler::NodeStr;
+use apollo_compiler::Schema;
+use link::join_spec_definition::JOIN_VERSIONS;
+use schema::FederationSchema;
+
 pub use crate::api_schema::ApiSchemaOptions;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -24,11 +30,6 @@ pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSu
 pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSubgraphs;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
-use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
-use apollo_compiler::Schema;
-use link::join_spec_definition::JOIN_VERSIONS;
-use schema::FederationSchema;
 
 pub(crate) type SupergraphSpecs = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
 

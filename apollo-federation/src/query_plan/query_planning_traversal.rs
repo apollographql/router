@@ -1,33 +1,47 @@
+use std::sync::Arc;
+
+use indexmap::IndexSet;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+
 use crate::error::FederationError;
-use crate::query_graph::condition_resolver::{
-    ConditionResolution, ConditionResolutionCacheResult, ConditionResolver, ConditionResolverCache,
-};
-use crate::query_graph::graph_path::{
-    create_initial_options, ClosedBranch, ClosedPath, ExcludedConditions, ExcludedDestinations,
-    OpGraphPath, OpGraphPathContext, OpPathElement, OpenBranch, SimultaneousPaths,
-    SimultaneousPathsWithLazyIndirectPaths,
-};
+use crate::query_graph::condition_resolver::ConditionResolution;
+use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
+use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
+use crate::query_graph::graph_path::create_initial_options;
+use crate::query_graph::graph_path::ClosedBranch;
+use crate::query_graph::graph_path::ClosedPath;
+use crate::query_graph::graph_path::ExcludedConditions;
+use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::OpGraphPath;
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::OpenBranch;
+use crate::query_graph::graph_path::SimultaneousPaths;
+use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
 use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::{QueryGraph, QueryGraphNodeType};
-use crate::query_plan::fetch_dependency_graph::{compute_nodes_for_tree, FetchDependencyGraph};
-use crate::query_plan::fetch_dependency_graph_processor::{
-    FetchDependencyGraphProcessor, FetchDependencyGraphToCostProcessor,
-    FetchDependencyGraphToQueryPlanProcessor,
-};
-use crate::query_plan::generate::{generate_all_plans_and_find_best, PlanBuilder};
-use crate::query_plan::operation::{
-    NormalizedOperation, NormalizedSelection, NormalizedSelectionSet,
-};
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
+use crate::query_plan::generate::generate_all_plans_and_find_best;
+use crate::query_plan::generate::PlanBuilder;
+use crate::query_plan::operation::NormalizedOperation;
+use crate::query_plan::operation::NormalizedSelection;
+use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::{AbstractTypeDefinitionPosition, OutputTypeDefinitionPosition};
-use crate::schema::position::{CompositeTypeDefinitionPosition, SchemaRootDefinitionKind};
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-use indexmap::IndexSet;
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use std::sync::Arc;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we

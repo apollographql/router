@@ -1,17 +1,5 @@
-use crate::error::{FederationError, MultipleFederationErrors, SingleFederationError};
-use crate::link::spec::{Identity, Url, Version};
-use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
-use crate::schema::position;
-use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::EnumValueDefinitionPosition;
-use crate::schema::position::InputObjectFieldDefinitionPosition;
-use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
-use crate::schema::position::InterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
-use crate::schema::position::ObjectFieldDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::FederationSchema;
+use std::fmt;
+
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -27,7 +15,26 @@ use apollo_compiler::Node;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use lazy_static::lazy_static;
-use std::fmt;
+
+use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::position;
+use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::EnumValueDefinitionPosition;
+use crate::schema::position::InputObjectFieldDefinitionPosition;
+use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::FederationSchema;
 
 pub(crate) const INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("inaccessible");
 

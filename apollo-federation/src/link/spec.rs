@@ -1,10 +1,13 @@
 //! Representation of Apollo `@link` specifications.
-use crate::error::{FederationError, SingleFederationError};
-use apollo_compiler::ast::Name;
-use apollo_compiler::name;
 use std::fmt;
 use std::str;
+
+use apollo_compiler::ast::Name;
+use apollo_compiler::name;
 use thiserror::Error;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
 
 pub const APOLLO_SPEC_DOMAIN: &str = "https://specs.apollo.dev";
 

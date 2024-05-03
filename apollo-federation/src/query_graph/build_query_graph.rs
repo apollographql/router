@@ -1,32 +1,47 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::link::federation_spec_definition::{
-    get_federation_spec_definition_from_subgraph, FederationSpecDefinition, KeyDirectiveArguments,
-};
-use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
-use crate::query_graph::{
-    QueryGraph, QueryGraphEdge, QueryGraphEdgeTransition, QueryGraphNode, QueryGraphNodeType,
-};
-use crate::query_plan::operation::{
-    merge_selection_sets, NormalizedSelection, NormalizedSelectionSet,
-};
-use crate::schema::field_set::parse_field_set;
-use crate::schema::position::{
-    AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition, FieldDefinitionPosition,
-    InterfaceTypeDefinitionPosition, ObjectFieldDefinitionPosition,
-    ObjectOrInterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
-    OutputTypeDefinitionPosition, SchemaRootDefinitionKind, SchemaRootDefinitionPosition,
-    TypeDefinitionPosition, UnionTypeDefinitionPosition,
-};
-use crate::schema::ValidFederationSchema;
-use apollo_compiler::schema::{DirectiveList as ComponentDirectiveList, ExtendedType, Name};
+use std::sync::Arc;
+
+use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::{NodeStr, Schema};
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{EdgeIndex, NodeIndex};
+use apollo_compiler::NodeStr;
+use apollo_compiler::Schema;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
-use std::sync::Arc;
 use strum::IntoEnumIterator;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::federation_spec_definition::KeyDirectiveArguments;
+use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdge;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNode;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::operation::merge_selection_sets;
+use crate::query_plan::operation::NormalizedSelection;
+use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::schema::field_set::parse_field_set;
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::SchemaRootDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::ValidFederationSchema;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -2026,22 +2041,28 @@ fn resolvable_key_applications(
 
 #[cfg(test)]
 mod tests {
-    use crate::error::FederationError;
-    use crate::query_graph::build_query_graph::build_query_graph;
-    use crate::query_graph::{
-        QueryGraph, QueryGraphEdgeTransition, QueryGraphNode, QueryGraphNodeType,
-    };
-    use crate::schema::position::{
-        ObjectOrInterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
-        OutputTypeDefinitionPosition, ScalarTypeDefinitionPosition, SchemaRootDefinitionKind,
-    };
-    use crate::schema::ValidFederationSchema;
+    use apollo_compiler::name;
     use apollo_compiler::schema::Name;
-    use apollo_compiler::{name, NodeStr, Schema};
-    use indexmap::{IndexMap, IndexSet};
+    use apollo_compiler::NodeStr;
+    use apollo_compiler::Schema;
+    use indexmap::IndexMap;
+    use indexmap::IndexSet;
     use petgraph::graph::NodeIndex;
     use petgraph::visit::EdgeRef;
     use petgraph::Direction;
+
+    use crate::error::FederationError;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::QueryGraph;
+    use crate::query_graph::QueryGraphEdgeTransition;
+    use crate::query_graph::QueryGraphNode;
+    use crate::query_graph::QueryGraphNodeType;
+    use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
+    use crate::schema::position::OutputTypeDefinitionPosition;
+    use crate::schema::position::ScalarTypeDefinitionPosition;
+    use crate::schema::position::SchemaRootDefinitionKind;
+    use crate::schema::ValidFederationSchema;
 
     const SCHEMA_NAME: NodeStr = NodeStr::from_static(&"test");
 
