@@ -1,6 +1,5 @@
 <img src="https://raw.githubusercontent.com/apollographql/space-kit/main/src/illustrations/svgs/rocket1.svg" width="100%" height="144">
 
-[![CircleCI](https://circleci.com/gh/apollographql/federation-next/tree/main.svg?style=shield)](https://app.circleci.com/pipelines/github/apollographql/federation-next?branch=main)
 [![Crates.io](https://img.shields.io/crates/v/apollo-federation.svg?style=flat-square)](https://crates.io/crates/apollo-federation)
 [![docs](https://img.shields.io/static/v1?label=docs&message=apollo-federation&color=blue&style=flat-square)](https://docs.rs/apollo-federation/)
 [![Join the community forum](https://img.shields.io/badge/join%20the%20community-forum-blueviolet)](https://community.apollographql.com)
