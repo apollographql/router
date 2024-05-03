@@ -887,9 +887,9 @@ mod tests {
 
         assert_eq!(
             template.generate_path(&json!({
-                "user_id": "123",
                 "b": "456",
                 "f.g": "abc",
+                "user_id": "123",
             })),
             Err(
                 r#"Missing required variable d in {"b":"456","f.g":"abc","user_id":"123"}"#
@@ -925,8 +925,8 @@ mod tests {
 
         assert_eq!(
             template_with_nested_required_var.generate_path(&json!({
-                "user.login": "user",
                 "repo.name": "repo",
+                "user.login": "user",
             })),
             Err(
                 r#"Missing required variable a.b.c in {"repo.name":"repo","user.login":"user"}"#
@@ -1382,11 +1382,11 @@ mod tests {
 
         assert_eq!(
             template.generate_path(&json!({
+                "b": 4,
+                "c": 5,
                 "x": 1,
                 "y": 2,
                 "z": 3,
-                "b": 4,
-                "c": 5,
                 // "d": 6,
             })),
             Err(r#"Missing required variable d in {"b":4,"c":5,"x":1,"y":2,"z":3}"#.to_string()),
