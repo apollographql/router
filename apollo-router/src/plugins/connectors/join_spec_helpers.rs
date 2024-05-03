@@ -438,12 +438,12 @@ fn join_union_member_directive(graph: &str, member: &str) -> Directive {
     }
 }
 
-pub(super) fn add_join_union_member_directive(ty: &mut ExtendedType, graph: &str, member: &str) {
+pub(super) fn add_join_union_member_directive(ty: &mut ExtendedType, graph_name: &str, member: &str) {
     if ty.directives().iter().any(|d| {
         d.name == "join__unionMember"
             && d.argument_by_name("graph")
                 .and_then(|val| val.as_enum())
-                .map(|val| val.as_str() == graph)
+                .map(|val| val.as_str() == graph_name)
                 .unwrap_or(false)
             && d.argument_by_name("member")
                 .and_then(|val| val.as_str())
@@ -457,7 +457,7 @@ pub(super) fn add_join_union_member_directive(ty: &mut ExtendedType, graph: &str
         ExtendedType::Union(ref mut ty) => {
             let ty = ty.make_mut();
             ty.directives
-                .push(join_union_member_directive(graph, member).into());
+                .push(join_union_member_directive(graph_name, member).into());
         }
         _ => debug_assert!(false, "Cannot add join__unionMember to non-union type"),
     }
@@ -467,7 +467,7 @@ pub(super) fn add_join_union_member_directive(ty: &mut ExtendedType, graph: &str
 
 pub(super) fn add_entities_field(
     ty: &mut ExtendedType,
-    graph: &str,
+    graph_name: &str,
     name: &str,
     entity_name: &str,
 ) {
@@ -479,7 +479,7 @@ pub(super) fn add_entities_field(
                 .and_modify(|f| {
                     f.make_mut()
                         .directives
-                        .push(join_field_directive(graph).into());
+                        .push(join_field_directive(graph_name).into());
                 })
                 .or_insert_with(|| {
                     FieldDefinition {
@@ -492,7 +492,7 @@ pub(super) fn add_entities_field(
                             ty: ty!([_Any!]!).into(),
                         }
                         .into()],
-                        directives: DirectiveList(vec![join_field_directive(graph).into()]),
+                        directives: DirectiveList(vec![join_field_directive(graph_name).into()]),
                         description: None,
                         ty: Type::Named(ast::Name::new_unchecked(entity_name.into()))
                             .non_null()
