@@ -1,19 +1,29 @@
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::DiGraph;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+
 use crate::query_plan::operation::NormalizedSelectionSet;
-use crate::schema::position::{
-    AbstractFieldDefinitionPosition, AbstractTypeDefinitionPosition,
-    CompositeTypeDefinitionPosition, EnumTypeDefinitionPosition, ObjectFieldDefinitionPosition,
-    ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition, ScalarTypeDefinitionPosition,
-    SchemaRootDefinitionKind,
-};
-use crate::sources::{
-    SourceFederatedAbstractFieldQueryGraphEdge, SourceFederatedAbstractQueryGraphNode,
-    SourceFederatedConcreteFieldQueryGraphEdge, SourceFederatedConcreteQueryGraphNode,
-    SourceFederatedEnumQueryGraphNode, SourceFederatedQueryGraphs,
-    SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnteringQueryGraphEdge,
-    SourceFederatedTypeConditionQueryGraphEdge, SourceId,
-};
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
+use crate::schema::position::AbstractFieldDefinitionPosition;
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::sources::SourceFederatedAbstractFieldQueryGraphEdge;
+use crate::sources::SourceFederatedAbstractQueryGraphNode;
+use crate::sources::SourceFederatedConcreteFieldQueryGraphEdge;
+use crate::sources::SourceFederatedConcreteQueryGraphNode;
+use crate::sources::SourceFederatedEnumQueryGraphNode;
+use crate::sources::SourceFederatedQueryGraphs;
+use crate::sources::SourceFederatedScalarQueryGraphNode;
+use crate::sources::SourceFederatedSourceEnteringQueryGraphEdge;
+use crate::sources::SourceFederatedTypeConditionQueryGraphEdge;
+use crate::sources::SourceId;
 
 pub(crate) mod builder;
 pub(crate) mod graph_path;

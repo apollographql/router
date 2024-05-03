@@ -1,8 +1,13 @@
-use crate::sources::SourceFetchNode;
-use apollo_compiler::executable::{Field, InlineFragment, Name, SelectionSet};
+use std::sync::Arc;
+
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::InlineFragment;
+use apollo_compiler::executable::Name;
+use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
-use std::sync::Arc;
+
+use crate::sources::SourceFetchNode;
 
 pub type QueryPlanCost = i64;
 

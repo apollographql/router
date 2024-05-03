@@ -3,19 +3,17 @@ mod validation;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
-use crate::{
-    error::FederationError,
-    schema::ValidFederationSchema,
-    sources::connect::{
-        spec::{extract_connect_directive_arguments, extract_source_directive_arguments},
-        ConnectSpecDefinition,
-    },
-};
-
-use super::{
-    spec::{ConnectHTTPArguments, HTTPHeaderOption, SourceHTTPArguments},
-    ConnectId, Selection, URLPathTemplate,
-};
+use super::spec::ConnectHTTPArguments;
+use super::spec::HTTPHeaderOption;
+use super::spec::SourceHTTPArguments;
+use super::ConnectId;
+use super::Selection;
+use super::URLPathTemplate;
+use crate::error::FederationError;
+use crate::schema::ValidFederationSchema;
+use crate::sources::connect::spec::extract_connect_directive_arguments;
+use crate::sources::connect::spec::extract_source_directive_arguments;
+use crate::sources::connect::ConnectSpecDefinition;
 
 // --- Connector ---------------------------------------------------------------
 
@@ -154,12 +152,10 @@ pub(crate) enum HTTPMethod {
 mod tests {
     use apollo_compiler::Schema;
 
-    use crate::{
-        query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph,
-        schema::FederationSchema, ValidFederationSubgraphs,
-    };
-
     use super::*;
+    use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
+    use crate::schema::FederationSchema;
+    use crate::ValidFederationSubgraphs;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
 

@@ -4,36 +4,43 @@ mod selection_parser;
 pub(crate) mod spec;
 mod url_path_template;
 
-use crate::error::FederationError;
-use crate::schema::position::{
-    EnumTypeDefinitionPosition, ObjectFieldDefinitionPosition,
-    ObjectOrInterfaceFieldDirectivePosition, ObjectTypeDefinitionPosition,
-    ScalarTypeDefinitionPosition,
-};
+use std::sync::Arc;
 
-use crate::source_aware::federated_query_graph::graph_path::{
-    ConditionResolutionId, OperationPathElement,
-};
-use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
-use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
-use crate::source_aware::query_plan::{FetchDataPathElement, QueryPlanCost};
-use crate::sources::connect::selection_parser::{PathSelection, Property, SubSelection};
-use crate::sources::{
-    SourceFetchDependencyGraphApi, SourceFetchDependencyGraphNode, SourceFetchNode, SourceId,
-    SourcePath, SourcePathApi,
-};
-use crate::ValidFederationSubgraph;
-use apollo_compiler::executable::{Name, Value};
+use apollo_compiler::executable::Name;
+use apollo_compiler::executable::Value;
 use apollo_compiler::NodeStr;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
 pub use selection_parser::ApplyTo;
 pub use selection_parser::ApplyToError;
 pub use selection_parser::Selection;
-use std::sync::Arc;
+pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 
-pub(crate) use spec::ConnectSpecDefinition;
+use crate::error::FederationError;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
+use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
+use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
+use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+use crate::source_aware::federated_query_graph::SelfConditionIndex;
+use crate::source_aware::query_plan::FetchDataPathElement;
+use crate::source_aware::query_plan::QueryPlanCost;
+use crate::sources::connect::selection_parser::PathSelection;
+use crate::sources::connect::selection_parser::Property;
+use crate::sources::connect::selection_parser::SubSelection;
+use crate::sources::SourceFetchDependencyGraphApi;
+use crate::sources::SourceFetchDependencyGraphNode;
+use crate::sources::SourceFetchNode;
+use crate::sources::SourceId;
+use crate::sources::SourcePath;
+use crate::sources::SourcePathApi;
+use crate::ValidFederationSubgraph;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct ConnectId {

@@ -1,35 +1,50 @@
-use crate::error::FederationError;
-use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
-use crate::source_aware::federated_query_graph::graph_path::{
-    ConditionResolutionId, OperationPathElement,
-};
-use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
-use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
-use crate::source_aware::query_plan::{FetchDataPathElement, QueryPlanCost};
-use crate::sources::connect::{
-    ConnectFederatedAbstractFieldQueryGraphEdge, ConnectFederatedAbstractQueryGraphNode,
-    ConnectFederatedConcreteFieldQueryGraphEdge, ConnectFederatedConcreteQueryGraphNode,
-    ConnectFederatedEnumQueryGraphNode, ConnectFederatedQueryGraph,
-    ConnectFederatedQueryGraphBuilder, ConnectFederatedScalarQueryGraphNode,
-    ConnectFederatedSourceEnteringQueryGraphEdge, ConnectFederatedTypeConditionQueryGraphEdge,
-    ConnectFetchDependencyGraph, ConnectFetchDependencyGraphNode, ConnectFetchNode, ConnectId,
-    ConnectPath,
-};
-use crate::sources::graphql::{
-    GraphqlFederatedAbstractFieldQueryGraphEdge, GraphqlFederatedAbstractQueryGraphNode,
-    GraphqlFederatedConcreteFieldQueryGraphEdge, GraphqlFederatedConcreteQueryGraphNode,
-    GraphqlFederatedEnumQueryGraphNode, GraphqlFederatedQueryGraph,
-    GraphqlFederatedQueryGraphBuilder, GraphqlFederatedScalarQueryGraphNode,
-    GraphqlFederatedSourceEnteringQueryGraphEdge, GraphqlFederatedTypeConditionQueryGraphEdge,
-    GraphqlFetchDependencyGraph, GraphqlFetchDependencyGraphNode, GraphqlFetchNode, GraphqlId,
-    GraphqlPath,
-};
-use crate::ValidFederationSubgraph;
+use std::sync::Arc;
+
 use apollo_compiler::NodeStr;
 use enum_dispatch::enum_dispatch;
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
-use std::sync::Arc;
+
+use crate::error::FederationError;
+use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
+use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
+use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
+use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+use crate::source_aware::federated_query_graph::SelfConditionIndex;
+use crate::source_aware::query_plan::FetchDataPathElement;
+use crate::source_aware::query_plan::QueryPlanCost;
+use crate::sources::connect::ConnectFederatedAbstractFieldQueryGraphEdge;
+use crate::sources::connect::ConnectFederatedAbstractQueryGraphNode;
+use crate::sources::connect::ConnectFederatedConcreteFieldQueryGraphEdge;
+use crate::sources::connect::ConnectFederatedConcreteQueryGraphNode;
+use crate::sources::connect::ConnectFederatedEnumQueryGraphNode;
+use crate::sources::connect::ConnectFederatedQueryGraph;
+use crate::sources::connect::ConnectFederatedQueryGraphBuilder;
+use crate::sources::connect::ConnectFederatedScalarQueryGraphNode;
+use crate::sources::connect::ConnectFederatedSourceEnteringQueryGraphEdge;
+use crate::sources::connect::ConnectFederatedTypeConditionQueryGraphEdge;
+use crate::sources::connect::ConnectFetchDependencyGraph;
+use crate::sources::connect::ConnectFetchDependencyGraphNode;
+use crate::sources::connect::ConnectFetchNode;
+use crate::sources::connect::ConnectId;
+use crate::sources::connect::ConnectPath;
+use crate::sources::graphql::GraphqlFederatedAbstractFieldQueryGraphEdge;
+use crate::sources::graphql::GraphqlFederatedAbstractQueryGraphNode;
+use crate::sources::graphql::GraphqlFederatedConcreteFieldQueryGraphEdge;
+use crate::sources::graphql::GraphqlFederatedConcreteQueryGraphNode;
+use crate::sources::graphql::GraphqlFederatedEnumQueryGraphNode;
+use crate::sources::graphql::GraphqlFederatedQueryGraph;
+use crate::sources::graphql::GraphqlFederatedQueryGraphBuilder;
+use crate::sources::graphql::GraphqlFederatedScalarQueryGraphNode;
+use crate::sources::graphql::GraphqlFederatedSourceEnteringQueryGraphEdge;
+use crate::sources::graphql::GraphqlFederatedTypeConditionQueryGraphEdge;
+use crate::sources::graphql::GraphqlFetchDependencyGraph;
+use crate::sources::graphql::GraphqlFetchDependencyGraphNode;
+use crate::sources::graphql::GraphqlFetchNode;
+use crate::sources::graphql::GraphqlId;
+use crate::sources::graphql::GraphqlPath;
+use crate::ValidFederationSubgraph;
 
 pub mod connect;
 pub mod graphql;

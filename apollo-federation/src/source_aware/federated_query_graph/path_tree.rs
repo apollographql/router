@@ -1,10 +1,14 @@
-use crate::source_aware::federated_query_graph::graph_path::{
-    ConditionResolutionId, ConditionResolutionInfo, OperationPathElement,
-};
-use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
-use indexmap::IndexMap;
-use petgraph::graph::{EdgeIndex, NodeIndex};
 use std::sync::Arc;
+
+use indexmap::IndexMap;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+
+use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
+use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionInfo;
+use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
+use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+use crate::source_aware::federated_query_graph::SelfConditionIndex;
 
 #[derive(Debug)]
 pub(crate) struct FederatedPathTree {

@@ -1,19 +1,28 @@
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::NamedType;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+
 use crate::error::FederationError;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
-use crate::sources::{
-    SourceFederatedAbstractFieldQueryGraphEdge, SourceFederatedConcreteFieldQueryGraphEdge,
-    SourceFederatedConcreteQueryGraphNode, SourceFederatedEnumQueryGraphNode,
-    SourceFederatedQueryGraph, SourceFederatedQueryGraphBuilders,
-    SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnteringQueryGraphEdge,
-    SourceFederatedTypeConditionQueryGraphEdge, SourceId, SourceKind,
-};
+use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+use crate::source_aware::federated_query_graph::SelfConditionIndex;
+use crate::sources::SourceFederatedAbstractFieldQueryGraphEdge;
+use crate::sources::SourceFederatedConcreteFieldQueryGraphEdge;
+use crate::sources::SourceFederatedConcreteQueryGraphNode;
+use crate::sources::SourceFederatedEnumQueryGraphNode;
+use crate::sources::SourceFederatedQueryGraph;
+use crate::sources::SourceFederatedQueryGraphBuilders;
+use crate::sources::SourceFederatedScalarQueryGraphNode;
+use crate::sources::SourceFederatedSourceEnteringQueryGraphEdge;
+use crate::sources::SourceFederatedTypeConditionQueryGraphEdge;
+use crate::sources::SourceId;
+use crate::sources::SourceKind;
 use crate::ValidFederationSubgraph;
-use apollo_compiler::schema::{Name, NamedType};
-use apollo_compiler::NodeStr;
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{EdgeIndex, NodeIndex};
 
 struct FederatedQueryGraphBuilder {
     supergraph_schema: ValidFederationSchema,

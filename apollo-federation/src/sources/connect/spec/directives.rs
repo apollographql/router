@@ -1,35 +1,36 @@
-use apollo_compiler::{
-    ast::{Directive, Name, Value},
-    schema::Component,
-    Node,
-};
-use indexmap::{
-    map::Entry::{Occupied, Vacant},
-    IndexMap,
-};
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Name;
+use apollo_compiler::ast::Value;
+use apollo_compiler::schema::Component;
+use apollo_compiler::Node;
+use indexmap::map::Entry::Occupied;
+use indexmap::map::Entry::Vacant;
+use indexmap::IndexMap;
 
-use crate::{
-    error::FederationError,
-    schema::{
-        position::{
-            ObjectOrInterfaceFieldDefinitionPosition, ObjectOrInterfaceFieldDirectivePosition,
-        },
-        FederationSchema,
-    },
-    sources::connect::{
-        selection_parser::Selection,
-        spec::schema::{CONNECT_HTTP_ARGUMENT_NAME, CONNECT_SOURCE_ARGUMENT_NAME},
-    },
-};
-
-use super::schema::{
-    ConnectDirectiveArguments, ConnectHTTPArguments, HTTPHeaderMappings, HTTPHeaderOption,
-    SourceDirectiveArguments, SourceHTTPArguments, CONNECT_BODY_ARGUMENT_NAME,
-    CONNECT_ENTITY_ARGUMENT_NAME, CONNECT_HEADERS_ARGUMENT_NAME, CONNECT_SELECTION_ARGUMENT_NAME,
-    HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME, HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME,
-    HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME, SOURCE_BASE_URL_ARGUMENT_NAME,
-    SOURCE_HEADERS_ARGUMENT_NAME, SOURCE_HTTP_ARGUMENT_NAME, SOURCE_NAME_ARGUMENT_NAME,
-};
+use super::schema::ConnectDirectiveArguments;
+use super::schema::ConnectHTTPArguments;
+use super::schema::HTTPHeaderMappings;
+use super::schema::HTTPHeaderOption;
+use super::schema::SourceDirectiveArguments;
+use super::schema::SourceHTTPArguments;
+use super::schema::CONNECT_BODY_ARGUMENT_NAME;
+use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
+use super::schema::CONNECT_HEADERS_ARGUMENT_NAME;
+use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use super::schema::HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME;
+use super::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
+use super::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
+use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
+use super::schema::SOURCE_HEADERS_ARGUMENT_NAME;
+use super::schema::SOURCE_HTTP_ARGUMENT_NAME;
+use super::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::error::FederationError;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::schema::FederationSchema;
+use crate::sources::connect::selection_parser::Selection;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 
 pub(crate) fn extract_source_directive_arguments(
     schema: &FederationSchema,
@@ -363,16 +364,15 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::{name, Schema};
+    use apollo_compiler::name;
+    use apollo_compiler::Schema;
 
-    use crate::{
-        query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph,
-        schema::FederationSchema,
-        sources::connect::spec::schema::{
-            SourceDirectiveArguments, CONNECT_DIRECTIVE_NAME_IN_SPEC, SOURCE_DIRECTIVE_NAME_IN_SPEC,
-        },
-        ValidFederationSubgraphs,
-    };
+    use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
+    use crate::schema::FederationSchema;
+    use crate::sources::connect::spec::schema::SourceDirectiveArguments;
+    use crate::sources::connect::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
+    use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+    use crate::ValidFederationSubgraphs;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
 
