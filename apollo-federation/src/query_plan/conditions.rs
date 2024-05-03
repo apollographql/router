@@ -1,6 +1,8 @@
 use crate::error::FederationError;
 use crate::query_graph::graph_path::selection_of_element;
 use crate::query_graph::graph_path::OpPathElement;
+use crate::query_plan::operation::NormalizedSelectionMap;
+use crate::query_plan::operation::NormalizedSelectionSet;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::Name;
@@ -8,9 +10,6 @@ use apollo_compiler::executable::Value;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use std::sync::Arc;
-
-use super::operation::normalized_selection_map::NormalizedSelectionMap;
-use super::operation::NormalizedSelectionSet;
 
 /// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
 /// to be queried, based on the `@skip`/`@include` applications on the selections within.

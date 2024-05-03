@@ -899,6 +899,16 @@ impl From<SchemaRootDefinitionKind> for ast::OperationType {
     }
 }
 
+impl From<ast::OperationType> for SchemaRootDefinitionKind {
+    fn from(value: ast::OperationType) -> Self {
+        match value {
+            ast::OperationType::Query => SchemaRootDefinitionKind::Query,
+            ast::OperationType::Mutation => SchemaRootDefinitionKind::Mutation,
+            ast::OperationType::Subscription => SchemaRootDefinitionKind::Subscription,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct SchemaRootDefinitionPosition {
     pub(crate) root_kind: SchemaRootDefinitionKind,

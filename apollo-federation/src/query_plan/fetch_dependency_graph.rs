@@ -8,15 +8,10 @@ use crate::query_graph::path_tree::{OpPathTree, PathTreeChild};
 use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition};
 use crate::query_plan::conditions::{remove_conditions_from_selection_set, Conditions};
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
-use crate::query_plan::operation::normalized_field_selection::{
-    NormalizedField, NormalizedFieldData,
-};
-use crate::query_plan::operation::normalized_inline_fragment_selection::{
-    NormalizedInlineFragment, NormalizedInlineFragmentData,
-};
 use crate::query_plan::operation::{
-    NormalizedOperation, NormalizedSelection, NormalizedSelectionSet, RebasedFragments,
-    SelectionId, TYPENAME_FIELD,
+    NormalizedField, NormalizedFieldData, NormalizedInlineFragment, NormalizedInlineFragmentData,
+    NormalizedOperation, NormalizedSelection, NormalizedSelectionMap, NormalizedSelectionSet,
+    RebasedFragments, SelectionId, TYPENAME_FIELD,
 };
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::{FetchDataRewrite, FetchDataValueSetter, QueryPlanCost};
@@ -43,7 +38,6 @@ type DeferRef = NodeStr;
 /// Map of defer labels to nodes of the fetch dependency graph.
 type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
 
-use super::operation::normalized_selection_map::NormalizedSelectionMap;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 

@@ -10,13 +10,11 @@ use crate::query_graph::condition_resolver::{
 };
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition, QueryGraphNodeType};
-use crate::query_plan::operation::normalized_field_selection::{
-    NormalizedField, NormalizedFieldData, NormalizedFieldSelection,
+use crate::query_plan::operation::{
+    NormalizedField, NormalizedFieldData, NormalizedFieldSelection, NormalizedInlineFragment,
+    NormalizedInlineFragmentData, NormalizedInlineFragmentSelection, NormalizedSelection,
+    NormalizedSelectionSet, SelectionId,
 };
-use crate::query_plan::operation::normalized_inline_fragment_selection::{
-    NormalizedInlineFragment, NormalizedInlineFragmentData, NormalizedInlineFragmentSelection,
-};
-use crate::query_plan::operation::{NormalizedSelection, NormalizedSelectionSet, SelectionId};
 use crate::query_plan::{FetchDataPathElement, QueryPathElement, QueryPlanCost};
 use crate::schema::position::{
     AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition,
@@ -3509,7 +3507,7 @@ mod tests {
             condition_resolver::ConditionResolution,
             graph_path::{OpGraphPath, OpGraphPathTrigger, OpPathElement},
         },
-        query_plan::operation::normalized_field_selection::{NormalizedField, NormalizedFieldData},
+        query_plan::operation::{NormalizedField, NormalizedFieldData},
         schema::{
             position::{FieldDefinitionPosition, ObjectFieldDefinitionPosition},
             ValidFederationSchema,

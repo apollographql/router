@@ -1,3 +1,17 @@
+//! Normalized operation types for apollo-federation.
+//!
+//! ## Selection types
+//! Each "conceptual" type consists of up to three actual types: a data type, an "element"
+//! type, and a selection type.
+//! - The data type records the data about the type. Things like a field name or fragment type
+//! condition are in the data type. These types can be constructed and modified with plain rust.
+//! - The element type contains the data type and maintains a key for the data. These types provide
+//! APIs for modifications that keep the key up-to-date.
+//! - The selection type contains the element type and, for composite fields, a subselection.
+//!
+//! For example, for fields, the data type is [`NormalizedFieldData`], the element type is
+//! [`NormalizedField`], and the selection type is [`NormalizedFieldSelection`].
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
@@ -5,19 +19,6 @@ use crate::link::federation_spec_definition::get_federation_spec_definition_from
 use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
-use crate::query_plan::operation::normalized_field_selection::{
-    NormalizedField, NormalizedFieldData, NormalizedFieldSelection,
-};
-use crate::query_plan::operation::normalized_fragment_spread_selection::{
-    NormalizedFragmentSpread, NormalizedFragmentSpreadData, NormalizedFragmentSpreadSelection,
-};
-use crate::query_plan::operation::normalized_inline_fragment_selection::{
-    NormalizedInlineFragment, NormalizedInlineFragmentData, NormalizedInlineFragmentSelection,
-};
-use crate::query_plan::operation::normalized_selection_map::{
-    Entry, NormalizedFieldSelectionValue, NormalizedFragmentSpreadSelectionValue,
-    NormalizedInlineFragmentSelectionValue, NormalizedSelectionMap, NormalizedSelectionValue,
-};
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
@@ -46,6 +47,7 @@ use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::ops::Deref;
+use std::sync::OnceLock;
 use std::sync::{atomic, Arc};
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
@@ -65,6 +67,70 @@ impl SelectionId {
         // atomically increment global counter
         Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
     }
+}
+
+/// Compare two input values, with two special cases for objects: assuming no duplicate keys,
+/// and order-independence.
+///
+/// This comes from apollo-rs: https://github.com/apollographql/apollo-rs/blob/6825be88fe13cd0d67b83b0e4eb6e03c8ab2555e/crates/apollo-compiler/src/validation/selection.rs#L160-L188
+/// Hopefully we can do this more easily in the future!
+fn same_value(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Null, Value::Null) => true,
+        (Value::Enum(left), Value::Enum(right)) => left == right,
+        (Value::Variable(left), Value::Variable(right)) => left == right,
+        (Value::String(left), Value::String(right)) => left == right,
+        (Value::Float(left), Value::Float(right)) => left == right,
+        (Value::Int(left), Value::Int(right)) => left == right,
+        (Value::Boolean(left), Value::Boolean(right)) => left == right,
+        (Value::List(left), Value::List(right)) => left
+            .iter()
+            .zip(right.iter())
+            .all(|(left, right)| same_value(left, right)),
+        (Value::Object(left), Value::Object(right)) if left.len() == right.len() => {
+            left.iter().all(|(key, value)| {
+                right
+                    .iter()
+                    .find(|(other_key, _)| key == other_key)
+                    .is_some_and(|(_, other_value)| same_value(value, other_value))
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Returns true if two argument lists are equivalent.
+///
+/// The arguments and values must be the same, independent of order.
+fn same_arguments(left: &[Node<Argument>], right: &[Node<Argument>]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let right = right
+        .iter()
+        .map(|arg| (&arg.name, arg))
+        .collect::<HashMap<_, _>>();
+
+    left.iter().all(|arg| {
+        right
+            .get(&arg.name)
+            .is_some_and(|right_arg| same_value(&arg.value, &right_arg.value))
+    })
+}
+
+/// Returns true if two directive lists are equivalent.
+fn same_directives(left: &DirectiveList, right: &DirectiveList) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    left.iter().all(|left_directive| {
+        right.iter().any(|right_directive| {
+            left_directive.name == right_directive.name
+                && same_arguments(&left_directive.arguments, &right_directive.arguments)
+        })
+    })
 }
 
 /// An analogue of the apollo-compiler type `Operation` with these changes:
@@ -92,6 +158,47 @@ pub(crate) struct NormalizedDefer {
 }
 
 impl NormalizedOperation {
+    /// Parse an operation from a source string.
+    #[cfg(any(test, doc))]
+    pub fn parse(
+        schema: ValidFederationSchema,
+        source_text: &str,
+        source_name: &str,
+        operation_name: Option<&str>,
+    ) -> Result<Self, FederationError> {
+        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            schema.schema(),
+            source_text,
+            source_name,
+        )?;
+        NormalizedOperation::from_operation_document(schema, &document, operation_name)
+    }
+
+    pub fn from_operation_document(
+        schema: ValidFederationSchema,
+        document: &Valid<apollo_compiler::ExecutableDocument>,
+        operation_name: Option<&str>,
+    ) -> Result<Self, FederationError> {
+        let operation = document.get_operation(operation_name).map_err(|_| {
+            FederationError::internal(format!("No operation named {operation_name:?}"))
+        })?;
+        let named_fragments = NamedFragments::new(&document.fragments, &schema);
+        let selection_set = NormalizedSelectionSet::from_selection_set(
+            &operation.selection_set,
+            &named_fragments,
+            &schema,
+        )?;
+        Ok(NormalizedOperation {
+            schema,
+            root_kind: operation.operation_type.into(),
+            name: operation.name.clone(),
+            variables: Arc::new(operation.variables.clone()),
+            directives: Arc::new(operation.directives.clone()),
+            selection_set,
+            named_fragments,
+        })
+    }
+
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
     pub(crate) fn with_normalized_defer(self) -> NormalizedDefer {
@@ -136,8 +243,7 @@ pub(crate) mod normalized_selection_map {
     };
     use apollo_compiler::ast::Name;
     use indexmap::IndexMap;
-    use std::borrow::{Borrow, Cow};
-    use std::hash::Hash;
+    use std::borrow::Cow;
     use std::iter::Map;
     use std::ops::Deref;
     use std::sync::Arc;
@@ -176,11 +282,10 @@ pub(crate) mod normalized_selection_map {
             self.0.insert(value.key(), value)
         }
 
-        pub(crate) fn remove<Q>(&mut self, key: &Q) -> Option<NormalizedSelection>
-        where
-            NormalizedSelectionKey: Borrow<Q>,
-            Q: Eq + Hash + ?Sized,
-        {
+        pub(crate) fn remove(
+            &mut self,
+            key: &NormalizedSelectionKey,
+        ) -> Option<NormalizedSelection> {
             // We specifically use shift_remove() instead of swap_remove() to maintain order.
             self.0.shift_remove(key)
         }
@@ -192,11 +297,10 @@ pub(crate) mod normalized_selection_map {
             self.0.retain(|k, v| predicate(k, v))
         }
 
-        pub(crate) fn get_mut<Q>(&mut self, key: &Q) -> Option<NormalizedSelectionValue>
-        where
-            NormalizedSelectionKey: Borrow<Q>,
-            Q: Eq + Hash + ?Sized,
-        {
+        pub(crate) fn get_mut(
+            &mut self,
+            key: &NormalizedSelectionKey,
+        ) -> Option<NormalizedSelectionValue> {
             self.0.get_mut(key).map(NormalizedSelectionValue::new)
         }
 
@@ -473,6 +577,12 @@ pub(crate) mod normalized_selection_map {
     }
 }
 
+pub(crate) use normalized_selection_map::NormalizedFieldSelectionValue;
+pub(crate) use normalized_selection_map::NormalizedFragmentSpreadSelectionValue;
+pub(crate) use normalized_selection_map::NormalizedInlineFragmentSelectionValue;
+pub(crate) use normalized_selection_map::NormalizedSelectionMap;
+pub(crate) use normalized_selection_map::NormalizedSelectionValue;
+
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
 /// (field, inline fragment, or fragment spread) that is used to determine whether two selections
 /// can be merged.
@@ -492,29 +602,66 @@ pub(crate) enum NormalizedSelectionKey {
         directives: Arc<DirectiveList>,
     },
     FragmentSpread {
-        /// The fragment name referenced in the spread.
-        name: Name,
+        /// The name of the fragment.
+        fragment_name: Name,
         /// Directives applied on the fragment spread (does not contain @defer).
         directives: Arc<DirectiveList>,
     },
-    DeferredFragmentSpread {
-        /// Unique selection ID used to distinguish deferred fragment spreads that cannot be merged.
-        deferred_id: SelectionId,
-    },
     InlineFragment {
-        /// The optional type condition of the inline fragment.
+        /// The optional type condition of the fragment.
         type_condition: Option<Name>,
-        /// Directives applied on the inline fragment (does not contain @defer).
+        /// Directives applied on the fragment spread (does not contain @defer).
         directives: Arc<DirectiveList>,
     },
-    DeferredInlineFragment {
-        /// Unique selection ID used to distinguish deferred inline fragments that cannot be merged.
+    Defer {
+        /// Unique selection ID used to distinguish deferred fragment spreads that cannot be merged.
         deferred_id: SelectionId,
     },
 }
 
+impl NormalizedSelectionKey {
+    fn is_typename_field(&self) -> bool {
+        matches!(self, NormalizedSelectionKey::Field { response_name, .. } if *response_name == TYPENAME_FIELD)
+    }
+}
+
 pub(crate) trait HasNormalizedSelectionKey {
     fn key(&self) -> NormalizedSelectionKey;
+}
+
+/// Options for the `.containment()` family of selection functions.
+#[derive(Debug, Clone, Copy)]
+pub struct ContainmentOptions {
+    /// If the right-hand side has a __typename selection but the left-hand side does not,
+    /// still consider the left-hand side to contain the right-hand side.
+    pub ignore_missing_typename: bool,
+}
+
+// Currently Default *can* be derived, but if we add a new option
+// here, that might no longer be true.
+#[allow(clippy::derivable_impls)]
+impl Default for ContainmentOptions {
+    fn default() -> Self {
+        Self {
+            ignore_missing_typename: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Containment {
+    /// The left-hand selection does not fully contain right-hand selection.
+    NotContained,
+    /// The left-hand selection fully contains the right-hand selection, and more.
+    StrictlyContained,
+    /// Two selections are equal.
+    Equal,
+}
+impl Containment {
+    /// Returns true if the right-hand selection set is strictly contained or equal.
+    pub fn is_contained(self) -> bool {
+        matches!(self, Containment::StrictlyContained | Containment::Equal)
+    }
 }
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
@@ -765,6 +912,32 @@ impl NormalizedSelection {
             }
         }
     }
+
+    pub(crate) fn containment(
+        &self,
+        other: &NormalizedSelection,
+        options: ContainmentOptions,
+    ) -> Containment {
+        match (self, other) {
+            (NormalizedSelection::Field(self_field), NormalizedSelection::Field(other_field)) => {
+                self_field.containment(other_field, options)
+            }
+            (
+                NormalizedSelection::InlineFragment(self_fragment),
+                NormalizedSelection::InlineFragment(_) | NormalizedSelection::FragmentSpread(_),
+            ) => self_fragment.containment(other, options),
+            (
+                NormalizedSelection::FragmentSpread(self_fragment),
+                NormalizedSelection::InlineFragment(_) | NormalizedSelection::FragmentSpread(_),
+            ) => self_fragment.containment(other, options),
+            _ => Containment::NotContained,
+        }
+    }
+
+    /// Returns true if this selection is a superset of the other selection.
+    pub(crate) fn contains(&self, other: &NormalizedSelection) -> bool {
+        self.containment(other, Default::default()).is_contained()
+    }
 }
 
 impl HasNormalizedSelectionKey for NormalizedSelection {
@@ -838,7 +1011,7 @@ impl NormalizedFragment {
     }
 }
 
-pub(crate) mod normalized_field_selection {
+mod normalized_field_selection {
     use crate::error::FederationError;
     use crate::query_graph::graph_path::OpPathElement;
     use crate::query_plan::operation::{
@@ -1023,7 +1196,11 @@ pub(crate) mod normalized_field_selection {
     }
 }
 
-pub(crate) mod normalized_fragment_spread_selection {
+pub(crate) use normalized_field_selection::NormalizedField;
+pub(crate) use normalized_field_selection::NormalizedFieldData;
+pub(crate) use normalized_field_selection::NormalizedFieldSelection;
+
+mod normalized_fragment_spread_selection {
     use crate::query_plan::operation::{
         directives_with_sorted_arguments, is_deferred_selection, HasNormalizedSelectionKey,
         NormalizedSelectionKey, NormalizedSelectionSet, SelectionId,
@@ -1050,8 +1227,8 @@ pub(crate) mod normalized_fragment_spread_selection {
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub(crate) struct NormalizedFragmentSpread {
-        pub(crate) data: NormalizedFragmentSpreadData,
-        pub(crate) key: NormalizedSelectionKey,
+        data: NormalizedFragmentSpreadData,
+        key: NormalizedSelectionKey,
     }
 
     impl NormalizedFragmentSpread {
@@ -1092,18 +1269,22 @@ pub(crate) mod normalized_fragment_spread_selection {
     impl HasNormalizedSelectionKey for NormalizedFragmentSpreadData {
         fn key(&self) -> NormalizedSelectionKey {
             if is_deferred_selection(&self.directives) {
-                NormalizedSelectionKey::DeferredFragmentSpread {
+                NormalizedSelectionKey::Defer {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
                 NormalizedSelectionKey::FragmentSpread {
-                    name: self.fragment_name.clone(),
+                    fragment_name: self.fragment_name.clone(),
                     directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
                 }
             }
         }
     }
 }
+
+pub(crate) use normalized_fragment_spread_selection::NormalizedFragmentSpread;
+pub(crate) use normalized_fragment_spread_selection::NormalizedFragmentSpreadData;
+pub(crate) use normalized_fragment_spread_selection::NormalizedFragmentSpreadSelection;
 
 impl NormalizedFragmentSpreadSelection {
     pub(crate) fn rebase_on(
@@ -1122,7 +1303,7 @@ impl NormalizedFragmentSpreadSelection {
         // QP code works on selections with fully expanded fragments, so this code (and that of `can_add_to`
         // on come into play in the code for reusing fragments, and that code calls those methods
         // appropriately.
-        if self.spread.data.schema == *schema
+        if self.spread.data().schema == *schema
             && self.spread.data().type_condition_position == *parent_type
         {
             return Ok(Some(NormalizedSelection::FragmentSpread(Arc::new(
@@ -1133,8 +1314,8 @@ impl NormalizedFragmentSpreadSelection {
         // If we're rebasing on a _different_ schema, then we *must* have fragments, since reusing
         // `self.fragments` would be incorrect. If we're on the same schema though, we're happy to default
         // to `self.fragments`.
-        let rebase_on_same_schema = self.spread.data.schema == *schema;
-        let Some(named_fragment) = named_fragments.get(&self.spread.data.fragment_name) else {
+        let rebase_on_same_schema = self.spread.data().schema == *schema;
+        let Some(named_fragment) = named_fragments.get(&self.spread.data().fragment_name) else {
             // If we're rebasing on another schema (think a subgraph), then named fragments will have been rebased on that, and some
             // of them may not contain anything that is on that subgraph, in which case they will not have been included at all.
             // If so, then as long as we're not asked to error if we cannot rebase, then we're happy to skip that spread (since again,
@@ -1142,7 +1323,7 @@ impl NormalizedFragmentSpreadSelection {
             return if let RebaseErrorHandlingOption::ThrowError = error_handling {
                 Err(FederationError::internal(format!(
                     "Cannot rebase {} fragment if it isn't part of the provided fragments",
-                    self.spread.data.fragment_name
+                    self.spread.data().fragment_name
                 )))
             } else {
                 Ok(None)
@@ -1202,7 +1383,7 @@ impl NormalizedFragmentSpreadSelection {
 
         let spread = NormalizedFragmentSpread::new(NormalizedFragmentSpreadData::from_fragment(
             &named_fragment,
-            &self.spread.data.directives,
+            &self.spread.data().directives,
         ));
         Ok(Some(NormalizedSelection::FragmentSpread(Arc::new(
             NormalizedFragmentSpreadSelection {
@@ -1213,7 +1394,7 @@ impl NormalizedFragmentSpreadSelection {
     }
 
     pub(crate) fn has_defer(&self) -> bool {
-        self.spread.data.directives.has("defer") || self.selection_set.has_defer()
+        self.spread.data().directives.has("defer") || self.selection_set.has_defer()
     }
 
     /// Copies fragment spread selection and assigns it a new unique selection ID.
@@ -1262,7 +1443,7 @@ impl NormalizedFragmentSpreadSelection {
 
         // We must update the spread parent type if necessary since we're not going deeper,
         // or we'll be fundamentally losing context.
-        if self.spread.data.schema != *schema {
+        if self.spread.data().schema != *schema {
             return Err(FederationError::internal(
                 "Should not try to normalize using a type from another schema",
             ));
@@ -1280,6 +1461,30 @@ impl NormalizedFragmentSpreadSelection {
         } else {
             unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
         }
+    }
+
+    pub(crate) fn containment(
+        &self,
+        other: &NormalizedSelection,
+        options: ContainmentOptions,
+    ) -> Containment {
+        match other {
+            // Using keys here means that @defer fragments never compare equal.
+            // This is a bit odd but it is consistent: the selection set data structure would not
+            // even try to compare two @defer fragments, because their keys are different.
+            NormalizedSelection::FragmentSpread(other)
+                if self.spread.key() == other.spread.key() =>
+            {
+                self.selection_set
+                    .containment(&other.selection_set, options)
+            }
+            _ => Containment::NotContained,
+        }
+    }
+
+    /// Returns true if this selection is a superset of the other selection.
+    pub(crate) fn contains(&self, other: &NormalizedSelection) -> bool {
+        self.containment(other, Default::default()).is_contained()
     }
 }
 
@@ -1299,7 +1504,7 @@ impl NormalizedFragmentSpreadData {
     }
 }
 
-pub(crate) mod normalized_inline_fragment_selection {
+mod normalized_inline_fragment_selection {
     use crate::error::FederationError;
     use crate::link::graphql_definition::{defer_directive_arguments, DeferDirectiveArguments};
     use crate::query_plan::operation::{
@@ -1481,7 +1686,7 @@ pub(crate) mod normalized_inline_fragment_selection {
     impl HasNormalizedSelectionKey for NormalizedInlineFragmentData {
         fn key(&self) -> NormalizedSelectionKey {
             if is_deferred_selection(&self.directives) {
-                NormalizedSelectionKey::DeferredInlineFragment {
+                NormalizedSelectionKey::Defer {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
@@ -1497,6 +1702,11 @@ pub(crate) mod normalized_inline_fragment_selection {
     }
 }
 
+pub(crate) use normalized_inline_fragment_selection::NormalizedInlineFragment;
+pub(crate) use normalized_inline_fragment_selection::NormalizedInlineFragmentData;
+pub(crate) use normalized_inline_fragment_selection::NormalizedInlineFragmentSelection;
+
+// TODO(@goto-bus-stop): merge this with the other NormalizedOperation impl block.
 impl NormalizedOperation {
     pub(crate) fn optimize(
         &mut self,
@@ -1533,11 +1743,11 @@ impl NormalizedSelectionSet {
         type_position: CompositeTypeDefinitionPosition,
         selection: NormalizedSelection,
     ) -> Self {
-        let schema = selection.schema();
+        let schema = selection.schema().clone();
         let mut selection_map = NormalizedSelectionMap::new();
-        selection_map.insert(selection.clone());
+        selection_map.insert(selection);
         Self {
-            schema: schema.clone(),
+            schema,
             type_position,
             selections: Arc::new(selection_map),
         }
@@ -1728,7 +1938,7 @@ impl NormalizedSelectionSet {
         for other_selection in others {
             let other_key = other_selection.key();
             match target.entry(other_key.clone()) {
-                Entry::Occupied(existing) => match existing.get() {
+                normalized_selection_map::Entry::Occupied(existing) => match existing.get() {
                     NormalizedSelection::Field(self_field_selection) => {
                         let NormalizedSelection::Field(other_field_selection) = other_selection
                         else {
@@ -1782,7 +1992,7 @@ impl NormalizedSelectionSet {
                             .push(other_inline_fragment_selection);
                     }
                 },
-                Entry::Vacant(vacant) => {
+                normalized_selection_map::Entry::Vacant(vacant) => {
                     vacant.insert(other_selection.clone())?;
                 }
             }
@@ -2097,7 +2307,16 @@ impl NormalizedSelectionSet {
     }
 
     fn has_top_level_typename_field(&self) -> bool {
-        todo!()
+        // Needs to be behind a OnceLock because `Arc::new` is non-const.
+        // XXX(@goto-bus-stop): Note this does *not* count `__typename @include(if: true)`.
+        // This seems wrong? But it's what JS does, too.
+        static TYPENAME_KEY: OnceLock<NormalizedSelectionKey> = OnceLock::new();
+        let key = TYPENAME_KEY.get_or_init(|| NormalizedSelectionKey::Field {
+            response_name: TYPENAME_FIELD,
+            directives: Arc::new(Default::default()),
+        });
+
+        self.selections.contains_key(key)
     }
 
     pub(crate) fn add_at_path(
@@ -2122,14 +2341,14 @@ impl NormalizedSelectionSet {
         error_handling: RebaseErrorHandlingOption,
     ) -> Result<NormalizedSelectionSet, FederationError> {
         let mut rebased_selections = NormalizedSelectionMap::new();
-        let rebased_results: Result<Vec<Option<NormalizedSelection>>, FederationError> = self
+        let rebased_results = self
             .selections
             .iter()
             .map(|(_, selection)| {
                 selection.rebase_on(parent_type, named_fragments, schema, error_handling)
             })
-            .collect();
-        for rebased in rebased_results?.iter().flatten() {
+            .collect::<Result<Vec<_>, _>>()?;
+        for rebased in rebased_results.iter().flatten() {
             rebased_selections.insert(rebased.clone());
         }
         Ok(NormalizedSelectionSet {
@@ -2443,6 +2662,60 @@ impl NormalizedSelectionSet {
 
             Ok(())
         }
+    }
+
+    pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
+        if other.selections.len() > self.selections.len() {
+            // If `other` has more selections but we're ignoring missing __typename, then in the case where
+            // `other` has a __typename but `self` does not, then we need the length of `other` to be at
+            // least 2 more than other of `self` to be able to conclude there is no contains.
+            if !options.ignore_missing_typename
+                || other.selections.len() > self.selections.len() + 1
+                || self.has_top_level_typename_field()
+                || !other.has_top_level_typename_field()
+            {
+                return Containment::NotContained;
+            }
+        }
+
+        let mut is_equal = true;
+        let mut did_ignore_typename = false;
+
+        for (key, other_selection) in other.selections.iter() {
+            if key.is_typename_field() && options.ignore_missing_typename {
+                if !self.has_top_level_typename_field() {
+                    did_ignore_typename = true;
+                }
+                continue;
+            }
+
+            let Some(self_selection) = self.selections.get(key) else {
+                return Containment::NotContained;
+            };
+
+            match self_selection.containment(other_selection, options) {
+                Containment::NotContained => return Containment::NotContained,
+                Containment::StrictlyContained if is_equal => is_equal = false,
+                Containment::StrictlyContained | Containment::Equal => {}
+            }
+        }
+
+        let expected_len = if did_ignore_typename {
+            self.selections.len() + 1
+        } else {
+            self.selections.len()
+        };
+
+        if is_equal && other.selections.len() == expected_len {
+            Containment::Equal
+        } else {
+            Containment::StrictlyContained
+        }
+    }
+
+    /// Returns true if this selection is a superset of the other selection.
+    pub(crate) fn contains(&self, other: &Self) -> bool {
+        self.containment(other, Default::default()).is_contained()
     }
 }
 
@@ -2894,10 +3167,6 @@ impl NormalizedFieldSelection {
         }
     }
 
-    pub(crate) fn has_defer(&self) -> bool {
-        self.field.has_defer() || self.selection_set.as_ref().is_some_and(|s| s.has_defer())
-    }
-
     fn can_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -2922,6 +3191,42 @@ impl NormalizedFieldSelection {
             }
         }
         true
+    }
+
+    pub(crate) fn has_defer(&self) -> bool {
+        self.field.has_defer() || self.selection_set.as_ref().is_some_and(|s| s.has_defer())
+    }
+
+    pub(crate) fn containment(
+        &self,
+        other: &NormalizedFieldSelection,
+        options: ContainmentOptions,
+    ) -> Containment {
+        let self_field = self.field.data();
+        let other_field = other.field.data();
+        if self_field.name() != other_field.name()
+            || self_field.alias != other_field.alias
+            || !same_arguments(&self_field.arguments, &other_field.arguments)
+            || !same_directives(&self_field.directives, &other_field.directives)
+        {
+            return Containment::NotContained;
+        }
+
+        match (&self.selection_set, &other.selection_set) {
+            (None, None) => Containment::Equal,
+            (Some(self_selection), Some(other_selection)) => {
+                self_selection.containment(other_selection, options)
+            }
+            (None, Some(_)) | (Some(_), None) => {
+                debug_assert!(false, "field selections have the same element, so if one does not have a subselection, neither should the other one");
+                Containment::NotContained
+            }
+        }
+    }
+
+    /// Returns true if this selection is a superset of the other selection.
+    pub(crate) fn contains(&self, other: &NormalizedFieldSelection) -> bool {
+        self.containment(other, Default::default()).is_contained()
     }
 }
 
@@ -3323,8 +3628,11 @@ impl NormalizedInlineFragmentSelection {
             for (_, selection) in normalized_selection_set.selections.iter() {
                 match selection {
                     NormalizedSelection::FragmentSpread(spread_selection) => {
-                        let type_condition =
-                            spread_selection.spread.data.type_condition_position.clone();
+                        let type_condition = spread_selection
+                            .spread
+                            .data()
+                            .type_condition_position
+                            .clone();
                         if type_condition.is_object_type()
                             && runtime_types_intersect(parent_type, &type_condition, schema)
                         {
@@ -3526,6 +3834,30 @@ impl NormalizedInlineFragmentSelection {
                 .selections
                 .values()
                 .any(|s| s.has_defer())
+    }
+
+    pub(crate) fn containment(
+        &self,
+        other: &NormalizedSelection,
+        options: ContainmentOptions,
+    ) -> Containment {
+        match other {
+            // Using keys here means that @defer fragments never compare equal.
+            // This is a bit odd but it is consistent: the selection set data structure would not
+            // even try to compare two @defer fragments, because their keys are different.
+            NormalizedSelection::InlineFragment(other)
+                if self.inline_fragment.key() == other.inline_fragment.key() =>
+            {
+                self.selection_set
+                    .containment(&other.selection_set, options)
+            }
+            _ => Containment::NotContained,
+        }
+    }
+
+    /// Returns true if this selection is a superset of the other selection.
+    pub(crate) fn contains(&self, other: &NormalizedSelection) -> bool {
+        self.containment(other, Default::default()).is_contained()
     }
 }
 
@@ -4224,14 +4556,9 @@ pub(crate) fn normalize_operation(
     normalized_selection_set = normalized_selection_set.expand_all_fragments()?;
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
 
-    let schema_definition_root_kind = match operation.operation_type {
-        OperationType::Query => SchemaRootDefinitionKind::Query,
-        OperationType::Mutation => SchemaRootDefinitionKind::Mutation,
-        OperationType::Subscription => SchemaRootDefinitionKind::Subscription,
-    };
     let normalized_operation = NormalizedOperation {
         schema: schema.clone(),
-        root_kind: schema_definition_root_kind,
+        root_kind: operation.operation_type.into(),
         name: operation.name.clone(),
         variables: Arc::new(operation.variables.clone()),
         directives: Arc::new(operation.directives.clone()),
@@ -4292,9 +4619,13 @@ fn print_possible_runtimes(
 
 #[cfg(test)]
 mod tests {
+    use super::normalize_operation;
+    use super::Containment;
+    use super::ContainmentOptions;
+    use super::NormalizedOperation;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
-    use crate::{query_plan::operation::normalize_operation, subgraph::Subgraph};
+    use crate::subgraph::Subgraph;
     use apollo_compiler::{name, ExecutableDocument};
     use indexmap::IndexSet;
 
@@ -5894,5 +6225,249 @@ type T {
                 assert_eq!(actual, expected);
             }
         }
+    }
+
+    fn containment_custom(left: &str, right: &str, ignore_missing_typename: bool) -> Containment {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+        directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+        interface Intf {
+            intfField: Int
+        }
+        type HasA implements Intf {
+            a: Boolean
+            intfField: Int
+        }
+        type Nested {
+            a: Int
+            b: Int
+            c: Int
+        }
+        input Input {
+            recur: Input
+            f: Boolean
+            g: Boolean
+            h: Boolean
+        }
+        type Query {
+            a: Int
+            b: Int
+            c: Int
+            object: Nested
+            intf: Intf
+            arg(a: Int, b: Int, c: Int, d: Input): Int
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+        let left = NormalizedOperation::parse(schema.clone(), left, "left.graphql", None).unwrap();
+        let right =
+            NormalizedOperation::parse(schema.clone(), right, "right.graphql", None).unwrap();
+
+        left.selection_set.containment(
+            &right.selection_set,
+            ContainmentOptions {
+                ignore_missing_typename,
+            },
+        )
+    }
+
+    fn containment(left: &str, right: &str) -> Containment {
+        containment_custom(left, right, false)
+    }
+
+    #[test]
+    fn selection_set_contains() {
+        assert_eq!(containment("{ a }", "{ a }"), Containment::Equal);
+        assert_eq!(containment("{ a b }", "{ b a }"), Containment::Equal);
+        assert_eq!(
+            containment("{ arg(a: 1) }", "{ arg(a: 2) }"),
+            Containment::NotContained
+        );
+        assert_eq!(
+            containment("{ arg(a: 1) }", "{ arg(b: 1) }"),
+            Containment::NotContained
+        );
+        assert_eq!(
+            containment("{ arg(a: 1) }", "{ arg(a: 1) }"),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment("{ arg(a: 1, b: 1) }", "{ arg(b: 1 a: 1) }"),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment("{ arg(a: 1) }", "{ arg(a: 1) }"),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment(
+                "{ arg(d: { f: true, g: true }) }",
+                "{ arg(d: { f: true }) }"
+            ),
+            Containment::NotContained
+        );
+        assert_eq!(
+            containment(
+                "{ arg(d: { recur: { f: true } g: true h: false }) }",
+                "{ arg(d: { h: false recur: {f: true} g: true }) }"
+            ),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment("{ arg @skip(if: true) }", "{ arg @skip(if: true) }"),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment("{ arg @skip(if: true) }", "{ arg @skip(if: false) }"),
+            Containment::NotContained
+        );
+        assert_eq!(
+            containment("{ ... @defer { arg } }", "{ ... @defer { arg } }"),
+            Containment::NotContained,
+            "@defer selections never contain each other"
+        );
+        assert_eq!(
+            containment("{ a b c }", "{ b a }"),
+            Containment::StrictlyContained
+        );
+        assert_eq!(
+            containment("{ a b }", "{ b c a }"),
+            Containment::NotContained
+        );
+        assert_eq!(containment("{ a }", "{ b }"), Containment::NotContained);
+        assert_eq!(
+            containment("{ object { a } }", "{ object { b a } }"),
+            Containment::NotContained
+        );
+
+        assert_eq!(
+            containment("{ ... { a } }", "{ ... { a } }"),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment(
+                "{ intf { ... on HasA { a } } }",
+                "{ intf { ... on HasA { a } } }",
+            ),
+            Containment::Equal
+        );
+        // These select the same things, but containment also counts fragment namedness
+        assert_eq!(
+            containment(
+                "{ intf { ... on HasA { a } } }",
+                "{ intf { ...named } } fragment named on HasA { a }",
+            ),
+            Containment::NotContained
+        );
+        assert_eq!(
+            containment(
+                "{ intf { ...named } } fragment named on HasA { a intfField }",
+                "{ intf { ...named } } fragment named on HasA { a }",
+            ),
+            Containment::StrictlyContained
+        );
+        assert_eq!(
+            containment(
+                "{ intf { ...named } } fragment named on HasA { a }",
+                "{ intf { ...named } } fragment named on HasA { a intfField }",
+            ),
+            Containment::NotContained
+        );
+    }
+
+    #[test]
+    fn selection_set_contains_missing_typename() {
+        assert_eq!(
+            containment_custom("{ a }", "{ a __typename }", true),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment_custom("{ a b }", "{ b a __typename }", true),
+            Containment::Equal
+        );
+        assert_eq!(
+            containment_custom("{ a b }", "{ b __typename }", true),
+            Containment::StrictlyContained
+        );
+        assert_eq!(
+            containment_custom("{ object { a b } }", "{ object { b __typename } }", true),
+            Containment::StrictlyContained
+        );
+        assert_eq!(
+            containment_custom(
+                "{ intf { intfField __typename } }",
+                "{ intf { intfField } }",
+                true
+            ),
+            Containment::StrictlyContained,
+        );
+        assert_eq!(
+            containment_custom(
+                "{ intf { intfField __typename } }",
+                "{ intf { intfField __typename } }",
+                true
+            ),
+            Containment::Equal,
+        );
+    }
+
+    /// This regression-tests an assumption from
+    /// https://github.com/apollographql/federation-next/pull/290#discussion_r1587200664
+    #[test]
+    fn converting_operation_types() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+        interface Intf {
+            intfField: Int
+        }
+        type HasA implements Intf {
+            a: Boolean
+            intfField: Int
+        }
+        type Nested {
+            a: Int
+            b: Int
+            c: Int
+        }
+        type Query {
+            a: Int
+            b: Int
+            c: Int
+            object: Nested
+            intf: Intf
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+        insta::assert_snapshot!(NormalizedOperation::parse(
+            schema.clone(),
+            r#"
+        {
+            intf {
+                ... on HasA { a }
+                ... frag
+            }
+        }
+        fragment frag on HasA { intfField }
+        "#,
+            "operation.graphql",
+            None,
+        )
+        .unwrap(), @r###"
+        {
+          intf {
+            ... on HasA {
+              a
+            }
+            ...frag
+          }
+        }
+        "###);
     }
 }

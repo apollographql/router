@@ -1,7 +1,7 @@
 use crate::error::{FederationError, SingleFederationError};
-use crate::query_plan::operation::normalized_field_selection::NormalizedField;
-use crate::query_plan::operation::normalized_inline_fragment_selection::NormalizedInlineFragment;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::{
+    NormalizedField, NormalizedInlineFragment, NormalizedSelectionSet,
+};
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::{
     CompositeTypeDefinitionPosition, FieldDefinitionPosition, InterfaceFieldDefinitionPosition,
