@@ -1812,7 +1812,7 @@ fn broken_plan_does_not_panic() {
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::new();
     subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
-    let result = plan.root.hash_subqueries(&subgraph_schemas, "");
+    let result = plan.root.hash_subqueries(&subgraph_schemas);
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#
