@@ -1,2 +1,2 @@
-mod selection_parser;
+mod json_selection;
 mod url_path_template;
