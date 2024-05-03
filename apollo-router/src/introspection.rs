@@ -8,6 +8,7 @@ use router_bridge::planner::Planner;
 use tower::BoxError;
 
 use crate::cache::storage::CacheStorage;
+use crate::cache::DEFAULT_TRANSIENT_CACHE_CAPACITY;
 use crate::graphql::Response;
 use crate::query_planner::QueryPlanResult;
 
@@ -24,15 +25,21 @@ impl Introspection {
     pub(crate) async fn with_capacity(
         planner: Arc<Planner<QueryPlanResult>>,
         capacity: NonZeroUsize,
+        transient_capacity: NonZeroUsize,
     ) -> Result<Self, BoxError> {
         Ok(Self {
-            cache: CacheStorage::new(capacity, None, "introspection").await?,
+            cache: CacheStorage::new(capacity, transient_capacity, None, "introspection").await?,
             planner,
         })
     }
 
     pub(crate) async fn new(planner: Arc<Planner<QueryPlanResult>>) -> Result<Self, BoxError> {
-        Self::with_capacity(planner, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
+        Self::with_capacity(
+            planner,
+            DEFAULT_INTROSPECTION_CACHE_CAPACITY,
+            DEFAULT_TRANSIENT_CACHE_CAPACITY,
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -40,10 +47,15 @@ impl Introspection {
         planner: Arc<Planner<QueryPlanResult>>,
         cache: HashMap<String, Response>,
     ) -> Result<Self, BoxError> {
-        let this = Self::with_capacity(planner, cache.len().try_into().unwrap()).await?;
+        let this = Self::with_capacity(
+            planner,
+            cache.len().try_into().unwrap(),
+            DEFAULT_TRANSIENT_CACHE_CAPACITY,
+        )
+        .await?;
 
         for (query, response) in cache.into_iter() {
-            this.cache.insert(query, response).await;
+            this.cache.insert_in_memory(query, response).await;
         }
         Ok(this)
     }

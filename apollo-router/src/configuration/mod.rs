@@ -43,6 +43,7 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
+use crate::cache::DEFAULT_TRANSIENT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
@@ -1109,15 +1110,28 @@ impl From<QueryPlanCache> for Cache {
 /// In memory cache configuration
 pub(crate) struct InMemoryCache {
     /// Number of entries in the Least Recently Used cache
+    #[serde(default = "in_memory_limit_default")]
     pub(crate) limit: NonZeroUsize,
+    /// Number of entries in the Least Recently Used transient cache
+    #[serde(default = "transient_in_memory_limit_default")]
+    pub(crate) transient_limit: NonZeroUsize,
 }
 
-impl Default for InMemoryCache {
+impl std::default::Default for InMemoryCache {
     fn default() -> Self {
         Self {
             limit: DEFAULT_CACHE_CAPACITY,
+            transient_limit: DEFAULT_TRANSIENT_CACHE_CAPACITY,
         }
     }
+}
+
+fn in_memory_limit_default() -> NonZeroUsize {
+    DEFAULT_CACHE_CAPACITY
+}
+
+fn transient_in_memory_limit_default() -> NonZeroUsize {
+    DEFAULT_TRANSIENT_CACHE_CAPACITY
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
