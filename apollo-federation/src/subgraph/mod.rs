@@ -2,21 +2,32 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use apollo_compiler::schema::{ComponentName, ExtendedType, ObjectType};
-use apollo_compiler::{name, Node, Schema};
+use apollo_compiler::name;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use indexmap::map::Entry;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::link::spec::Identity;
+use crate::link::Link;
 use crate::link::LinkError;
-use crate::link::{Link, DEFAULT_LINK_NAME};
-use crate::subgraph::spec::{
-    AppliedFederationLink, FederationSpecDefinitions, LinkSpecDefinitions, ANY_SCALAR_NAME,
-    ENTITIES_QUERY, ENTITY_UNION_NAME, FEDERATION_V2_DIRECTIVE_NAMES, KEY_DIRECTIVE_NAME,
-    SERVICE_SDL_QUERY, SERVICE_TYPE,
-};
-use apollo_compiler::validation::Valid;
+use crate::link::DEFAULT_LINK_NAME;
+use crate::subgraph::spec::AppliedFederationLink;
+use crate::subgraph::spec::FederationSpecDefinitions;
+use crate::subgraph::spec::LinkSpecDefinitions;
+use crate::subgraph::spec::ANY_SCALAR_NAME;
+use crate::subgraph::spec::ENTITIES_QUERY;
+use crate::subgraph::spec::ENTITY_UNION_NAME;
+use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
+use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
+use crate::subgraph::spec::SERVICE_SDL_QUERY;
+use crate::subgraph::spec::SERVICE_TYPE;
 
 mod database;
 pub mod spec;
@@ -318,9 +329,8 @@ impl std::fmt::Debug for ValidSubgraph {
 
 #[cfg(test)]
 mod tests {
-    use crate::subgraph::database::keys;
-
     use super::*;
+    use crate::subgraph::database::keys;
 
     #[test]
     fn can_inspect_a_type_key() {

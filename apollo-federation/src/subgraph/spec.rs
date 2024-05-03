@@ -1,24 +1,42 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::{
-    Argument, Directive, DirectiveDefinition, DirectiveLocation, EnumValueDefinition,
-    FieldDefinition, InputValueDefinition, InvalidNameError, Name, Type, Value,
-};
-use apollo_compiler::schema::{
-    Component, ComponentName, EnumType, ExtendedType, ObjectType, ScalarType, UnionType,
-};
-use apollo_compiler::{name, ty, Node, NodeStr};
-use indexmap::{IndexMap, IndexSet};
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::ast::EnumValueDefinition;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::InputValueDefinition;
+use apollo_compiler::ast::InvalidNameError;
+use apollo_compiler::ast::Name;
+use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
+use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::ScalarType;
+use apollo_compiler::schema::UnionType;
+use apollo_compiler::ty;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use lazy_static::lazy_static;
 use thiserror::Error;
 
-use crate::link::spec::{Identity, Url, Version};
-use crate::link::{
-    Import, Link, DEFAULT_IMPORT_SCALAR_NAME, DEFAULT_LINK_NAME, DEFAULT_PURPOSE_ENUM_NAME,
-};
-use crate::subgraph::spec::FederationSpecError::{
-    UnsupportedFederationDirective, UnsupportedVersionError,
-};
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::Import;
+use crate::link::Link;
+use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
+use crate::link::DEFAULT_LINK_NAME;
+use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
+use crate::subgraph::spec::FederationSpecError::UnsupportedFederationDirective;
+use crate::subgraph::spec::FederationSpecError::UnsupportedVersionError;
 
 pub const COMPOSE_DIRECTIVE_NAME: Name = name!("composeDirective");
 pub const KEY_DIRECTIVE_NAME: Name = name!("key");
@@ -148,7 +166,9 @@ pub trait AppliedFederationLink {
 macro_rules! applied_specification {
     ($($t:ty),+) => {
         $(impl AppliedFederationLink for $t {
+            /// ```
             /// @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+            /// ```
             fn applied_link_directive(&self) -> Directive {
                 let imports = self
                     .link
@@ -700,9 +720,8 @@ impl Default for LinkSpecDefinitions {
 
 #[cfg(test)]
 mod tests {
-    use crate::subgraph::database::federation_link_identity;
-
     use super::*;
+    use crate::subgraph::database::federation_link_identity;
 
     #[test]
     fn handle_unsupported_federation_version() {

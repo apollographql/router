@@ -1,9 +1,14 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::link::graphql_definition::BooleanOrVariable;
-use apollo_compiler::ast::Value;
-use apollo_compiler::schema::{Directive, Name};
-use apollo_compiler::{Node, NodeStr};
 use std::ops::Deref;
+
+use apollo_compiler::ast::Value;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::link::graphql_definition::BooleanOrVariable;
 
 pub(crate) fn directive_optional_enum_argument(
     application: &Node<Directive>,

@@ -1,25 +1,47 @@
-use crate::error::{FederationError, SingleFederationError};
+use std::fmt::Debug;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::ops::Deref;
+
+use apollo_compiler::ast;
+use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::schema::InputObjectType;
+use apollo_compiler::schema::InputValueDefinition;
+use apollo_compiler::schema::InterfaceType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::ScalarType;
+use apollo_compiler::schema::SchemaDefinition;
+use apollo_compiler::schema::UnionType;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
+use indexmap::IndexSet;
+use lazy_static::lazy_static;
+use strum::IntoEnumIterator;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec_definition::SpecDefinition;
 use crate::query_graph::QueryGraphNodeType;
-use crate::schema::referencer::{
-    DirectiveReferencers, EnumTypeReferencers, InputObjectTypeReferencers,
-    InterfaceTypeReferencers, ObjectTypeReferencers, Referencers, ScalarTypeReferencers,
-    UnionTypeReferencers,
-};
+use crate::schema::referencer::DirectiveReferencers;
+use crate::schema::referencer::EnumTypeReferencers;
+use crate::schema::referencer::InputObjectTypeReferencers;
+use crate::schema::referencer::InterfaceTypeReferencers;
+use crate::schema::referencer::ObjectTypeReferencers;
+use crate::schema::referencer::Referencers;
+use crate::schema::referencer::ScalarTypeReferencers;
+use crate::schema::referencer::UnionTypeReferencers;
 use crate::schema::FederationSchema;
-use apollo_compiler::schema::{
-    Component, ComponentName, Directive, DirectiveDefinition, EnumType, EnumValueDefinition,
-    ExtendedType, FieldDefinition, InputObjectType, InputValueDefinition, InterfaceType, Name,
-    ObjectType, ScalarType, SchemaDefinition, UnionType,
-};
-use apollo_compiler::{ast, name, Node, Schema};
-use indexmap::IndexSet;
-use lazy_static::lazy_static;
-use std::fmt::{Debug, Display, Formatter};
-use std::ops::Deref;
-use strum::IntoEnumIterator;
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {

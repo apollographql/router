@@ -1,16 +1,21 @@
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::hash::Hash;
+use std::sync::Arc;
+
+use apollo_compiler::NodeStr;
+use indexmap::map::Entry;
+use indexmap::IndexMap;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+
 use crate::error::FederationError;
 use crate::query_graph::graph_path::GraphPathItem;
 use crate::query_graph::graph_path::OpGraphPath;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
-use crate::query_graph::{QueryGraph, QueryGraphNode};
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNode;
 use crate::query_plan::operation::NormalizedSelectionSet;
-use apollo_compiler::NodeStr;
-use indexmap::map::Entry;
-use indexmap::IndexMap;
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use std::fmt::{Display, Formatter};
-use std::hash::Hash;
-use std::sync::Arc;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
 /// node, in which each node of the tree corresponds to a node in the query graph, and a tree's node
@@ -361,21 +366,25 @@ fn merge_conditions(
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::{executable::DirectiveList, ExecutableDocument};
-    use petgraph::{stable_graph::NodeIndex, visit::EdgeRef};
+    use apollo_compiler::executable::DirectiveList;
+    use apollo_compiler::ExecutableDocument;
+    use petgraph::stable_graph::NodeIndex;
+    use petgraph::visit::EdgeRef;
 
-    use crate::{
-        error::FederationError,
-        query_graph::{
-            build_query_graph::build_query_graph,
-            condition_resolver::ConditionResolution,
-            graph_path::{OpGraphPath, OpGraphPathTrigger, OpPathElement},
-            path_tree::OpPathTree,
-            QueryGraph, QueryGraphEdgeTransition,
-        },
-        query_plan::operation::{normalize_operation, NormalizedField, NormalizedFieldData},
-        schema::{position::SchemaRootDefinitionKind, ValidFederationSchema},
-    };
+    use crate::error::FederationError;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::condition_resolver::ConditionResolution;
+    use crate::query_graph::graph_path::OpGraphPath;
+    use crate::query_graph::graph_path::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::OpPathElement;
+    use crate::query_graph::path_tree::OpPathTree;
+    use crate::query_graph::QueryGraph;
+    use crate::query_graph::QueryGraphEdgeTransition;
+    use crate::query_plan::operation::normalize_operation;
+    use crate::query_plan::operation::NormalizedField;
+    use crate::query_plan::operation::NormalizedFieldData;
+    use crate::schema::position::SchemaRootDefinitionKind;
+    use crate::schema::ValidFederationSchema;
 
     // NB: stole from operation.rs
     fn parse_schema_and_operation(

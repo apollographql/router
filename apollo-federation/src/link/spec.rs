@@ -1,10 +1,13 @@
 //! Representation of Apollo `@link` specifications.
-use crate::error::{FederationError, SingleFederationError};
-use apollo_compiler::ast::Name;
-use apollo_compiler::name;
 use std::fmt;
 use std::str;
+
+use apollo_compiler::ast::Name;
+use apollo_compiler::name;
 use thiserror::Error;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
 
 pub const APOLLO_SPEC_DOMAIN: &str = "https://specs.apollo.dev";
 
@@ -28,7 +31,7 @@ impl From<SpecError> for FederationError {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Identity {
     /// The "domain" of which the specification this identifies is part of.
-    /// For instance, "https://specs.apollo.dev".
+    /// For instance, `"https://specs.apollo.dev"`.
     pub domain: String,
 
     /// The name of the specification this identifies.

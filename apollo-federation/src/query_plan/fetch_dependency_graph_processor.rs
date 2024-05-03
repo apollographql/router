@@ -1,9 +1,17 @@
+use std::collections::HashSet;
+
+use apollo_compiler::ast::Name;
+use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+
 use crate::error::FederationError;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
-use crate::query_plan::operation::{NormalizedSelectionSet, RebasedFragments};
+use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::RebasedFragments;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -13,11 +21,6 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::PrimaryDeferBlock;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::SequenceNode;
-use apollo_compiler::ast::Name;
-use apollo_compiler::executable::VariableDefinition;
-use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
-use std::collections::HashSet;
 
 /// Constant used during query plan cost computation to account for the base cost of doing a fetch,
 /// that is the fact any fetch imply some networking cost, request serialization/deserialization,

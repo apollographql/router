@@ -1,36 +1,64 @@
+use std::collections::HashSet;
+use std::fmt::Write as _;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::sync::OnceLock;
+
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::OperationType;
+use apollo_compiler::ast::Type;
+use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::executable::{self};
+use apollo_compiler::name;
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::{self};
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::stable_graph::EdgeIndex;
+use petgraph::stable_graph::NodeIndex;
+use petgraph::stable_graph::StableDiGraph;
+use petgraph::visit::EdgeRef;
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
-use crate::query_graph::graph_path::{
-    selection_of_element, OpGraphPathContext, OpGraphPathTrigger, OpPath, OpPathElement,
-};
-use crate::query_graph::path_tree::{OpPathTree, PathTreeChild};
-use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition};
-use crate::query_plan::conditions::{remove_conditions_from_selection_set, Conditions};
+use crate::query_graph::graph_path::selection_of_element;
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::OpGraphPathTrigger;
+use crate::query_graph::graph_path::OpPath;
+use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::path_tree::PathTreeChild;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_plan::conditions::remove_conditions_from_selection_set;
+use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
-use crate::query_plan::operation::{
-    NormalizedField, NormalizedFieldData, NormalizedInlineFragment, NormalizedInlineFragmentData,
-    NormalizedOperation, NormalizedSelection, NormalizedSelectionMap, NormalizedSelectionSet,
-    RebasedFragments, SelectionId, TYPENAME_FIELD,
-};
+use crate::query_plan::operation::NormalizedField;
+use crate::query_plan::operation::NormalizedFieldData;
+use crate::query_plan::operation::NormalizedInlineFragment;
+use crate::query_plan::operation::NormalizedInlineFragmentData;
+use crate::query_plan::operation::NormalizedOperation;
+use crate::query_plan::operation::NormalizedSelection;
+use crate::query_plan::operation::NormalizedSelectionMap;
+use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::SelectionId;
+use crate::query_plan::operation::TYPENAME_FIELD;
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::{FetchDataRewrite, FetchDataValueSetter, QueryPlanCost};
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, ObjectTypeDefinitionPosition,
-    SchemaRootDefinitionKind,
-};
+use crate::query_plan::FetchDataRewrite;
+use crate::query_plan::FetchDataValueSetter;
+use crate::query_plan::QueryPlanCost;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-use crate::subgraph::spec::{ANY_SCALAR_NAME, ENTITIES_QUERY};
-use apollo_compiler::ast::{Argument, Directive, OperationType, Type};
-use apollo_compiler::executable::{self, VariableDefinition};
-use apollo_compiler::schema::{self, Name};
-use apollo_compiler::{name, Node, NodeStr};
-use indexmap::{IndexMap, IndexSet};
-use petgraph::stable_graph::{EdgeIndex, NodeIndex, StableDiGraph};
-use petgraph::visit::EdgeRef;
-use std::collections::HashSet;
-use std::fmt::Write as _;
-use std::sync::{atomic::AtomicU64, Arc, OnceLock};
+use crate::subgraph::spec::ANY_SCALAR_NAME;
+use crate::subgraph::spec::ENTITIES_QUERY;
 
 /// Represents the value of a `@defer(label:)` argument.
 type DeferRef = NodeStr;

@@ -1,12 +1,14 @@
-use crate::error::FederationError;
-use crate::query_graph::graph_path::{
-    ExcludedConditions, ExcludedDestinations, OpGraphPathContext,
-};
-use crate::query_graph::path_tree::OpPathTree;
-use crate::query_plan::QueryPlanCost;
+use std::sync::Arc;
+
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
-use std::sync::Arc;
+
+use crate::error::FederationError;
+use crate::query_graph::graph_path::ExcludedConditions;
+use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::path_tree::OpPathTree;
+use crate::query_plan::QueryPlanCost;
 
 /// Note that `ConditionResolver`s are guaranteed to be only called for edge with conditions.
 pub(crate) trait ConditionResolver {

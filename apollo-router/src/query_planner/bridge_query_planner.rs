@@ -6,8 +6,10 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
@@ -224,8 +226,11 @@ impl PlannerMode {
                 )
                 .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
 
-                let plan = rust
-                    .build_query_plan(&document, operation.as_deref())
+                let plan = operation
+                    .as_deref()
+                    .map(|n| Name::new(n).map_err(FederationError::from))
+                    .transpose()
+                    .and_then(|operation| rust.build_query_plan(&document, operation))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()))?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
@@ -257,7 +262,8 @@ impl PlannerMode {
                 // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
                 let rust_result = std::panic::catch_unwind(|| {
                     USING_CATCH_UNWIND.set(true);
-                    let result = rust.build_query_plan(&document, operation.as_deref());
+                    let operation = operation.as_deref().map(Name::new).transpose()?;
+                    let result = rust.build_query_plan(&document, operation);
                     USING_CATCH_UNWIND.set(false);
                     result
                 })

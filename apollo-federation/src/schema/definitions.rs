@@ -1,11 +1,13 @@
-use apollo_compiler::ast::{NamedType, Type};
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::ast::Type;
 use apollo_compiler::Schema;
 
-use crate::error::{FederationError, SingleFederationError};
-use crate::schema::position::{
-    FieldDefinitionPosition, InterfaceTypeDefinitionPosition, TypeDefinitionPosition,
-    UnionTypeDefinitionPosition,
-};
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
 
 pub(crate) enum AbstractType {
     Interface(InterfaceTypeDefinitionPosition),

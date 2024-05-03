@@ -1,12 +1,19 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::link::spec::{Identity, Url, Version};
-use crate::link::Link;
-use crate::schema::FederationSchema;
-use apollo_compiler::schema::{DirectiveDefinition, ExtendedType, Name};
-use apollo_compiler::Node;
 use std::collections::btree_map::Keys;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::Link;
+use crate::schema::FederationSchema;
 
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;

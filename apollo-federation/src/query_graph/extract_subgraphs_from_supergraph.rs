@@ -1,44 +1,77 @@
-use crate::error::{FederationError, MultipleFederationErrors, SingleFederationError};
-use crate::link::federation_spec_definition::{
-    get_federation_spec_definition_from_subgraph, FederationSpecDefinition, FEDERATION_VERSIONS,
-};
-use crate::link::join_spec_definition::{
-    FieldDirectiveArguments, JoinSpecDefinition, TypeDirectiveArguments,
-};
-use crate::link::spec::{Identity, Version};
-use crate::link::spec_definition::SpecDefinition;
-use crate::schema::field_set::parse_field_set_without_normalization;
-use crate::schema::position::{
-    is_graphql_reserved_name, CompositeTypeDefinitionPosition, DirectiveDefinitionPosition,
-    EnumTypeDefinitionPosition, FieldDefinitionPosition, InputObjectFieldDefinitionPosition,
-    InputObjectTypeDefinitionPosition, InterfaceTypeDefinitionPosition,
-    ObjectFieldDefinitionPosition, ObjectOrInterfaceFieldDefinitionPosition,
-    ObjectOrInterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
-    SchemaRootDefinitionKind, SchemaRootDefinitionPosition, TypeDefinitionPosition,
-    UnionTypeDefinitionPosition,
-};
-use crate::schema::type_and_directive_specification::{
-    FieldSpecification, ObjectTypeSpecification, ScalarTypeSpecification,
-    TypeAndDirectiveSpecification, UnionTypeSpecification,
-};
-use crate::schema::{FederationSchema, ValidFederationSchema};
-use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::executable::{Field, Selection, SelectionSet};
-use apollo_compiler::schema::{
-    Component, ComponentName, ComponentOrigin, DirectiveDefinition, DirectiveList,
-    DirectiveLocation, EnumType, EnumValueDefinition, ExtendedType, ExtensionId, InputObjectType,
-    InputValueDefinition, InterfaceType, Name, NamedType, ObjectType, ScalarType, SchemaBuilder,
-    Type, UnionType,
-};
-use apollo_compiler::validation::Valid;
-use apollo_compiler::{name, Node, NodeStr};
-use indexmap::{IndexMap, IndexSet};
-use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::Deref;
+
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::ComponentOrigin;
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::schema::DirectiveList;
+use apollo_compiler::schema::DirectiveLocation;
+use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ExtensionId;
+use apollo_compiler::schema::InputObjectType;
+use apollo_compiler::schema::InputValueDefinition;
+use apollo_compiler::schema::InterfaceType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::NamedType;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::ScalarType;
+use apollo_compiler::schema::SchemaBuilder;
+use apollo_compiler::schema::Type;
+use apollo_compiler::schema::UnionType;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use lazy_static::lazy_static;
 use time::OffsetDateTime;
+
+use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::join_spec_definition::FieldDirectiveArguments;
+use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::link::join_spec_definition::TypeDirectiveArguments;
+use crate::link::spec::Identity;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::schema::field_set::parse_field_set_without_normalization;
+use crate::schema::position::is_graphql_reserved_name;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InputObjectFieldDefinitionPosition;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::SchemaRootDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::type_and_directive_specification::FieldSpecification;
+use crate::schema::type_and_directive_specification::ObjectTypeSpecification;
+use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+use crate::schema::type_and_directive_specification::UnionTypeSpecification;
+use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 
 /// Assumes the given schema has been validated.
 ///
@@ -2055,9 +2088,11 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::{name, Schema};
+    use apollo_compiler::name;
+    use apollo_compiler::Schema;
 
-    use crate::{schema::FederationSchema, ValidFederationSubgraphs};
+    use crate::schema::FederationSchema;
+    use crate::ValidFederationSubgraphs;
 
     // JS PORT NOTE: these tests were ported from
     // https://github.com/apollographql/federation/blob/3e2c845c74407a136b9e0066e44c1ad1467d3013/internals-js/src/__tests__/extractSubgraphsFromSupergraph.test.ts

@@ -1,12 +1,18 @@
 // Output module for query graphs
 // - Corresponds to the `graphviz` and `mermaid` modules from the JS federation.
 
-use crate::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode};
-use apollo_compiler::NodeStr;
-use petgraph::dot::{Config, Dot};
-use petgraph::graph::{DiGraph, EdgeIndex};
-use petgraph::stable_graph::StableGraph;
 use std::fmt::Write;
+
+use apollo_compiler::NodeStr;
+use petgraph::dot::Config;
+use petgraph::dot::Dot;
+use petgraph::graph::DiGraph;
+use petgraph::graph::EdgeIndex;
+use petgraph::stable_graph::StableGraph;
+
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdge;
+use crate::query_graph::QueryGraphNode;
 
 type InnerGraph = DiGraph<QueryGraphNode, QueryGraphEdge>;
 type StableInnerGraph = StableGraph<QueryGraphNode, QueryGraphEdge>;
