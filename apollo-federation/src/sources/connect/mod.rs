@@ -4,6 +4,7 @@ mod selection_parser;
 pub(crate) mod spec;
 mod url_path_template;
 
+use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::executable::Name;
@@ -44,8 +45,15 @@ use crate::ValidFederationSubgraph;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct ConnectId {
+    label: String,
     subgraph_name: NodeStr,
     directive: ObjectOrInterfaceFieldDirectivePosition,
+}
+
+impl Display for ConnectId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
+    }
 }
 
 #[derive(Debug)]

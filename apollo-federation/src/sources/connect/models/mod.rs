@@ -29,6 +29,14 @@ enum Transport {
     HttpJson(HttpJsonTransport),
 }
 
+impl Transport {
+    fn label(&self) -> String {
+        match self {
+            Transport::HttpJson(http) => http.label(),
+        }
+    }
+}
+
 impl Connector {
     pub(crate) fn from_valid_schema(
         schema: &ValidFederationSchema,
@@ -51,11 +59,6 @@ impl Connector {
         connect_arguments
             .into_iter()
             .map(move |args| {
-                let id = ConnectId {
-                    subgraph_name: subgraph_name.clone(),
-                    directive: args.position,
-                };
-
                 let source = if let Some(source_name) = args.source {
                     source_arguments
                         .iter()
@@ -64,6 +67,7 @@ impl Connector {
                     None
                 };
 
+                let source_name = source.map(|s| s.name.clone());
                 let connect_http = args.http.expect("@connect http missing");
                 let source_http = source.map(|s| &s.http);
 
@@ -72,17 +76,27 @@ impl Connector {
                     source_http,
                 )?);
 
-                Ok((
-                    id.clone(),
-                    Connector {
-                        id,
-                        transport,
-                        selection: args.selection,
-                    },
-                ))
+                let id = ConnectId {
+                    label: make_label(&subgraph_name, source_name, &transport),
+                    subgraph_name: subgraph_name.clone(),
+                    directive: args.position,
+                };
+
+                let connector = Connector {
+                    id: id.clone(),
+                    transport,
+                    selection: args.selection,
+                };
+
+                Ok((id, connector))
             })
             .collect()
     }
+}
+
+fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Transport) -> String {
+    let source = format!(".{}", source.as_deref().unwrap_or(""));
+    format!("{}{} {}", subgraph_name, source, transport.label())
 }
 
 // --- HTTP JSON ---------------------------------------------------------------
@@ -136,10 +150,15 @@ impl HttpJsonTransport {
             body: http.body.clone(),
         })
     }
+
+    fn label(&self) -> String {
+        format!("http: {} {}", self.method, self.path_template)
+    }
 }
 
 /// The HTTP arguments needed for a connect request
 #[cfg_attr(test, derive(Debug))]
+#[derive(strum_macros::Display)]
 pub(crate) enum HTTPMethod {
     Get,
     Post,
@@ -151,6 +170,7 @@ pub(crate) enum HTTPMethod {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
+    use insta::assert_debug_snapshot;
 
     use super::*;
     use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
@@ -171,6 +191,154 @@ mod tests {
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors =
             Connector::from_valid_schema(&subgraph.schema, "connectors".into()).unwrap();
-        dbg!(&connectors);
+        assert_debug_snapshot!(&connectors, @r###"
+        {
+            ConnectId {
+                label: "connectors.json http: Get /users",
+                subgraph_name: "connectors",
+                directive: ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.users),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            }: Connector {
+                id: ConnectId {
+                    label: "connectors.json http: Get /users",
+                    subgraph_name: "connectors",
+                    directive: ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.users),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                },
+                transport: HttpJson(
+                    HttpJsonTransport {
+                        base_url: "https://jsonplaceholder.typicode.com/",
+                        path_template: URLPathTemplate {
+                            path: [
+                                ParameterValue {
+                                    parts: [
+                                        Text(
+                                            "users",
+                                        ),
+                                    ],
+                                },
+                            ],
+                            query: {},
+                        },
+                        method: Get,
+                        headers: {
+                            "X-Auth-Token": Some(
+                                As(
+                                    "AuthToken",
+                                ),
+                            ),
+                            "user-agent": Some(
+                                Value(
+                                    [
+                                        "Firefox",
+                                    ],
+                                ),
+                            ),
+                            "X-From-Env": None,
+                        },
+                        body: None,
+                    },
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "id",
+                                None,
+                            ),
+                            Field(
+                                None,
+                                "name",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
+            },
+            ConnectId {
+                label: "connectors.json http: Get /posts",
+                subgraph_name: "connectors",
+                directive: ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.posts),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            }: Connector {
+                id: ConnectId {
+                    label: "connectors.json http: Get /posts",
+                    subgraph_name: "connectors",
+                    directive: ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.posts),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                },
+                transport: HttpJson(
+                    HttpJsonTransport {
+                        base_url: "https://jsonplaceholder.typicode.com/",
+                        path_template: URLPathTemplate {
+                            path: [
+                                ParameterValue {
+                                    parts: [
+                                        Text(
+                                            "posts",
+                                        ),
+                                    ],
+                                },
+                            ],
+                            query: {},
+                        },
+                        method: Get,
+                        headers: {
+                            "X-Auth-Token": Some(
+                                As(
+                                    "AuthToken",
+                                ),
+                            ),
+                            "user-agent": Some(
+                                Value(
+                                    [
+                                        "Firefox",
+                                    ],
+                                ),
+                            ),
+                            "X-From-Env": None,
+                        },
+                        body: None,
+                    },
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "id",
+                                None,
+                            ),
+                            Field(
+                                None,
+                                "title",
+                                None,
+                            ),
+                            Field(
+                                None,
+                                "body",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
+            },
+        }
+        "###);
     }
 }
