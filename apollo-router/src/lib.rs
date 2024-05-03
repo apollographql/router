@@ -114,4 +114,8 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
+
+    // For fuzz tests
+    pub use crate::apollo_studio_interop::generate_usage_reporting;
+    pub use crate::apollo_studio_interop::UsageReportingComparisonResult;
 }

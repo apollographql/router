@@ -27,14 +27,14 @@ use router_bridge::planner::UsageReporting;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
-pub(crate) struct ComparableUsageReporting {
+pub struct ComparableUsageReporting {
     /// The UsageReporting fields
-    pub(crate) result: UsageReporting,
+    pub result: UsageReporting,
 }
 
 /// Enum specifying the result of a comparison.
 #[derive(Debug)]
-pub(crate) enum UsageReportingComparisonResult {
+pub enum UsageReportingComparisonResult {
     /// The UsageReporting instances are the same
     Equal,
     /// The stats_report_key in the UsageReporting instances are different
@@ -94,7 +94,7 @@ impl ComparableUsageReporting {
 /// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
 /// and referenced fields of an operation. The document used to generate the signature and for the references can be
 /// different to handle cases where the operation has been filtered, but we want to keep the same signature.
-pub(crate) fn generate_usage_reporting(
+pub fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
