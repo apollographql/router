@@ -5,8 +5,6 @@ use indexmap::IndexSet;
 use petgraph::prelude::NodeIndex;
 
 use super::models::Connector;
-use super::selection_parser::NamedSelection;
-use super::selection_parser::PathSelection;
 use super::selection_parser::Property;
 use super::selection_parser::SubSelection;
 use super::ConnectFederatedConcreteFieldQueryGraphEdge;
@@ -157,7 +155,7 @@ fn process_selection(
                 // If we don't have either of the above, then we must have a subselection
                 let Some(sub) = path.next_subselection() else {
                     return Err(FederationError::internal(
-                        "expected subselection for non-unit type",
+                        "expected subselection for leaf type",
                     ));
                 };
 
@@ -175,7 +173,7 @@ fn process_selection(
             // Make sure that we aren't selecting sub fields from simple types
             if field_ty.is_scalar() || field_ty.is_enum() {
                 return Err(FederationError::internal(
-                    "unit types cannot have subselections",
+                    "leaf types cannot have subselections",
                 ));
             }
 
@@ -235,7 +233,7 @@ fn process_subselection(
         let alias = selection.name();
         let Some(selection_field) = object_type.fields.get(alias) else {
             return Err(FederationError::internal(format!(
-                "expected alias `{alias}` to exist in GraphQL object `{}`",
+                "expected field `{alias}` to exist on GraphQL type `{}`",
                 object_type.name
             )));
         };
