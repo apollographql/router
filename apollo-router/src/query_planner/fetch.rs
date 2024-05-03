@@ -174,15 +174,20 @@ impl SubgraphOperation {
                 .serialized
                 .get()
                 .expect("SubgraphOperation has neither representation initialized");
-            Arc::new(
-                ExecutableDocument::parse_and_validate(
+            // TODO: This is not the "correct" solution. This is a placeholder until we have a
+            // better approach for handling parsing/validation.
+            // This code will at least not panic if parse_and_validate() fails
+            let parsed = match ExecutableDocument::parse_and_validate(
                     subgraph_schema,
                     serialized,
                     "operation.graphql",
-                )
-                .map_err(|e| e.errors)
-                .expect("Subgraph operation should be valid"),
-            )
+                ) {
+                Ok(valid) => valid,
+                Err(invalid) => {
+                    tracing::error!(errors=%invalid.errors, "Subgraph operation parse and validate failed");
+                    Valid::assume_valid(invalid.partial)
+                }};
+            Arc::new(parsed)
         })
     }
 }
