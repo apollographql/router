@@ -20,7 +20,7 @@ pub type QueryPlanCost = i64;
 #[derive(Debug, Default)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
-    statistics: QueryPlanningStatistics,
+    pub statistics: QueryPlanningStatistics,
 }
 
 #[derive(Debug, derive_more::From)]

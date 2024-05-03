@@ -150,8 +150,8 @@ impl Default for QueryPlannerDebugConfig {
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct QueryPlanningStatistics {
-    pub(crate) evaluated_plan_count: usize,
+pub struct QueryPlanningStatistics {
+    pub evaluated_plan_count: usize,
 }
 
 impl QueryPlannerConfig {

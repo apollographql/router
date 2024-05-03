@@ -65,7 +65,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.80"
 apollo-compiler.workspace = true
-apollo-federation = "=0.0.11"
+apollo-federation = { path = "../apollo-federation", version = "=0.0.11" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
@@ -285,7 +285,7 @@ axum = { version = "0.6.20", features = [
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "7.1.2", features = ["enable-rustls", "mocks"] }
 futures-test = "0.3.30"
-insta = { version = "1.38.0", features = ["json", "redactions", "yaml"] }
+insta.workspace = true
 maplit = "1.0.2"
 memchr = { version = "2.7.1", default-features = false }
 mockall = "0.11.4"
