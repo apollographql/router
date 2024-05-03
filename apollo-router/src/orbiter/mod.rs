@@ -274,31 +274,21 @@ fn visit_value(
                 .or_default() += 1;
         }
         Value::Object(o) => {
-            let mut redacted_found = false;
             for (key, value) in o {
                 let key = if schema_properties.contains(key) {
                     key
                 } else {
-                    redacted_found = true;
                     "<redacted>"
                 };
 
                 if path.is_empty() {
                     visit_value(schema_properties, usage, value, key);
                 } else {
-                    visit_value(
-                        schema_properties,
-                        usage,
-                        value,
-                        &format!("{}.{}", path, key),
-                    );
+                    visit_value(schema_properties, usage, value, &format!("{path}.{key}"));
+                    *usage
+                        .entry(format!("configuration.{path}.{key}.len"))
+                        .or_default() += 1;
                 }
-            }
-            // If we found a redacted key then this is probably an additional properties. so we can count the length.
-            if !path.is_empty() && redacted_found {
-                *usage
-                    .entry(format!("configuration.{path}.len"))
-                    .or_default() += o.len() as u64;
             }
         }
         Value::Array(a) => {
@@ -306,7 +296,7 @@ fn visit_value(
                 visit_value(schema_properties, usage, value, path);
             }
             *usage
-                .entry(format!("configuration.{path}.len"))
+                .entry(format!("configuration.{path}.array.len"))
                 .or_default() += a.len() as u64;
         }
         Value::Null => {}
