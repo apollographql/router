@@ -336,6 +336,10 @@ lazy_static! {
             Version { major: 0, minor: 3 },
             Some(Version { major: 2, minor: 0 }),
         ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 4 },
+            Some(Version { major: 2, minor: 0 }),
+        ));
         definitions
     };
 

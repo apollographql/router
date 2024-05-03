@@ -403,6 +403,14 @@ lazy_static! {
             major: 2,
             minor: 5,
         }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 6,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 7,
+        }));
         definitions
     };
 }
