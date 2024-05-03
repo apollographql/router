@@ -663,25 +663,38 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas) {
+    pub(crate) fn hash_subquery(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+        supergraph_schema_hash: &str,
+    ) {
         let doc = self.parsed_operation(subgraph_schemas);
         let schema = &subgraph_schemas[self.service_name().as_str()];
 
-        if let Ok(hash) = QueryHashVisitor::hash_query(schema, doc, self.operation_name.as_deref())
-        {
+        if let Ok(hash) = QueryHashVisitor::hash_query(
+            schema,
+            supergraph_schema_hash,
+            doc,
+            self.operation_name.as_deref(),
+        ) {
             self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
     }
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        schema: &Valid<apollo_compiler::Schema>,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
-        let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[self.service_name().as_str()];
+        let doc = ExecutableDocument::parse(
+            schema,
+            self.operation.as_serialized().to_string(),
+            "query.graphql",
+        )
+        // Assume query planing creates a valid document: ignore parse errors
+        .unwrap_or_else(|invalid| invalid.partial);
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
-            doc,
+            &doc,
             self.operation_name.as_deref(),
             schema,
             !self.requires.is_empty(),

@@ -275,7 +275,12 @@ impl Change {
             } => {
                 let ty = upsert_type(original_schema, schema, name)?;
                 if !ty.is_built_in() {
-                    add_join_type_directive(ty, graph_name, key.clone(), Some(*is_interface_object));
+                    add_join_type_directive(
+                        ty,
+                        graph_name,
+                        key.clone(),
+                        Some(*is_interface_object),
+                    );
                 }
                 if let Some(implements) = implements {
                     add_join_implements(ty, graph_name, implements);
@@ -848,7 +853,11 @@ fn recurse_inputs(
                     field_name: field.name.clone(),
                     graph_name: Arc::clone(&graph_name),
                 });
-                changes.extend(recurse_inputs(Arc::clone(&graph_name), schema, &field.node)?);
+                changes.extend(recurse_inputs(
+                    Arc::clone(&graph_name),
+                    schema,
+                    &field.node,
+                )?);
             }
         }
         ExtendedType::Enum(enm) => {
@@ -919,7 +928,11 @@ impl PartialEq for ConnectorSupergraphError {
 
 /// Given an enum definition, find all the values that are associated with the origin
 /// subgraph. Return a list of enum value inclusions for the connector subgraph.
-fn enum_values_for_graph(ty: &ExtendedType, origin_graph: &str, graph_name: Arc<String>) -> Vec<Change> {
+fn enum_values_for_graph(
+    ty: &ExtendedType,
+    origin_graph: &str,
+    graph_name: Arc<String>,
+) -> Vec<Change> {
     let mut results = Vec::new();
 
     if let ExtendedType::Enum(enm) = ty {

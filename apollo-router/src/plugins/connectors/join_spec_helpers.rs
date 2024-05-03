@@ -438,7 +438,11 @@ fn join_union_member_directive(graph: &str, member: &str) -> Directive {
     }
 }
 
-pub(super) fn add_join_union_member_directive(ty: &mut ExtendedType, graph_name: &str, member: &str) {
+pub(super) fn add_join_union_member_directive(
+    ty: &mut ExtendedType,
+    graph_name: &str,
+    member: &str,
+) {
     if ty.directives().iter().any(|d| {
         d.name == "join__unionMember"
             && d.argument_by_name("graph")

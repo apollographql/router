@@ -254,9 +254,10 @@ async fn service_call(
                     return Ok(response);
                 }
                 // Now perform query batch analysis
-                let batching = context.extensions().lock().get::<BatchQuery>().cloned();
-                if let Some(batch_query) = batching {
-                    let query_hashes = plan.query_hashes(operation_name.as_deref(), &variables)?;
+                let batch_query_opt = context.extensions().lock().get::<BatchQuery>().cloned();
+                if let Some(batch_query) = batch_query_opt {
+                    let query_hashes =
+                        plan.query_hashes(batching, operation_name.as_deref(), &variables)?;
                     batch_query
                         .set_query_hashes(query_hashes)
                         .await

@@ -1,0 +1,63 @@
+# rover supergraph compose --config src/sources/connect/tests/schemas/nested.yaml > src/sources/connect/tests/schemas/nested.graphql
+federation_version: =2.7.3-testing.0
+subgraphs:
+  connectors:
+    routing_url: http://unused
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+              headers: [
+                { name: "X-Auth-Token", as: "AuthToken" }
+                { name: "user-agent", value: "Firefox" }
+                { name: "X-From-Env" }
+              ]
+            }
+          )
+
+        type Query {
+          user: User
+            @connect(
+              source: "json"
+              http: { GET: "/users" }
+              selection: """
+                id
+                info: user_info {
+                  name: 'user full name'
+                  address: .addresses.main.address {
+                    street: street_line
+                    state
+                    zip
+                  }
+                  avatar: { large thumbnail }
+                }
+              """
+            )
+        }
+
+        type User {
+          id: ID!
+          info: UserInfo
+        }
+
+        type UserInfo {
+          name: String
+          address: UserAddress
+          avatar: UserAvatar
+        }
+
+        type UserAddress {
+          street: String
+          state: String
+          zip: Int
+        }
+
+        type UserAvatar {
+          large: String
+          thumbnail: String
+        }

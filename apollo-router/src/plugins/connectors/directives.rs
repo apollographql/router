@@ -336,7 +336,6 @@ impl Source {
             change.apply_to(supergraph_schema, &mut inner_supergraph_schema)?;
         }
 
-
         let entity_union_members = entity_union_members(&inner_supergraph_schema);
 
         for (eum, ty) in entity_union_members {
@@ -344,12 +343,12 @@ impl Source {
                 .directives()
                 .iter()
                 .find(|d| d.name == name!("join__Graph"))
-            .and_then(|d| {
-                d.arguments
-                    .iter()
-                    .find(|a| a.name == name!("name"))
-                    .map(|a| Arc::new(a.value.to_string()))
-            });
+                .and_then(|d| {
+                    d.arguments
+                        .iter()
+                        .find(|a| a.name == name!("name"))
+                        .map(|a| Arc::new(a.value.to_string()))
+                });
             Change::UnionMember {
                 union_name: name!("_Entity"),
                 member_name: eum,
@@ -361,8 +360,6 @@ impl Source {
             }
             .apply_to(supergraph_schema, &mut inner_supergraph_schema)?;
         }
-
-       
 
         let connector_graph_names = connectors
             .values()
@@ -384,15 +381,15 @@ impl Source {
     }
 }
 
-fn add_fake_entity(supergraph_schema: &Schema, inner_supergraph_schema: &mut Schema) -> Result<(), ConnectorSupergraphError> {
+fn add_fake_entity(
+    supergraph_schema: &Schema,
+    inner_supergraph_schema: &mut Schema,
+) -> Result<(), ConnectorSupergraphError> {
     let graph_name = Arc::new(inner_supergraph_schema.to_string());
-    inner_supergraph_schema.types.insert(
-        name!("_Entity"), entity_union(inner_supergraph_schema)
-    );
-    Change::FakeEntities {
-        graph_name,
-    }
-    .apply_to(supergraph_schema, inner_supergraph_schema)
+    inner_supergraph_schema
+        .types
+        .insert(name!("_Entity"), entity_union(inner_supergraph_schema));
+    Change::FakeEntities { graph_name }.apply_to(supergraph_schema, inner_supergraph_schema)
 }
 
 fn entity_union_members(schema: &Schema) -> Vec<(Name, ExtendedType)> {

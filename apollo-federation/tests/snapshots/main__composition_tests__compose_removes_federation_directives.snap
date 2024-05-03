@@ -1,0 +1,49 @@
+---
+source: tests/composition_tests.rs
+expression: print_sdl(&supergraph.schema)
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type Product @join__type(graph: SUBGRAPHA, key: "sku") @join__type(graph: SUBGRAPHB, key: "sku") {
+  sku: String!
+  name: String! @join__field(graph: SUBGRAPHA, external: true) @join__field(graph: SUBGRAPHB)
+}
+
+type Query @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB) {
+  products: [Product!] @join__field(graph: SUBGRAPHA, provides: "name")
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPHA @join__graph(name: "SubgraphA", url: "https://subgraphA")
+  SUBGRAPHB @join__graph(name: "SubgraphB", url: "https://subgraphB")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+

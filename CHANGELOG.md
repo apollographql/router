@@ -4,7 +4,36 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.45.1] - 2024-04-26
+
+## 🐛 Fixes
+
+### Correct v1.44.0 regression in query plan cache ([PR #5028](https://github.com/apollographql/router/pull/5028))
+
+Correct a critical regression that was introduced in [v1.44.0](https://github.com/apollographql/router/pull/4883) which could lead to execution of an incorrect query plan. This issue only affects Routers that use [distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), enabled via the `supergraph.query_planning.cache.redis.urls` configuration property.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/5028
+
+### Use entire schema when hashing an introspection query ([Issue #5006](https://github.com/apollographql/router/issues/5006))
+
+Correct a _different_ hashing bug which impacted introspection queries which was also introduced in [v1.44.0](https://github.com/apollographql/router/pull/4883).  This other hashing bug failed to account for introspection queries, resulting in introspection results being misaligned to the current schema. This issue only affects Routers that use [distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), enabled via the `supergraph.query_planning.cache.redis.urls` configuration property. 
+
+This release fixes the hashing mechanism by adding the schema string to hashed data if an introspection field is encountered. As a result, the entire schema is taken into account and the correct introspection result is returned.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5007
+
+### Fix subgraph name mapping of Datadog exporter ([PR #5012](https://github.com/apollographql/router/pull/5012))
+
+Previously in the router v1.45.0, subgraph name mapping didn't work correctly in the router's Datadog exporter. The exporter used the incorrect value `apollo.subgraph.name` for mapping attributes when it should have used the value `subgraph.name`. This issue has been fixed in this release.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5012
+
+
 # [1.45.0] - 2024-04-22
+
+> **Warning**
+>
+> **This version has a critical bug impacting users of [distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching).  See the _Fixes_ in [v1.45.1](https://github.com/apollographql/router/releases/tag/v1.45.1) for details.  We highly recommend using v1.45.1 or v1.43.2 over v1.45.0.**
 
 ## 🚀 Features
 
@@ -153,6 +182,11 @@ The feature is configured with the `experimental_apollo_metrics_generation_mode`
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/4796
 
 # [1.44.0] - 2024-04-12
+
+> **Warning**
+>
+> **This version has a critical bug impacting users of [distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching).  See the _Fixes_ in [v1.45.1](https://github.com/apollographql/router/releases/tag/v1.45.1) for details.  We highly recommend using v1.45.1 or v1.43.2 over v1.44.0.**
+
 
 ## 🚀 Features
 
