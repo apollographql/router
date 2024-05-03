@@ -11,7 +11,7 @@ use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::query_plan::operation::NamedFragments;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::SelectionSet;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -46,7 +46,7 @@ pub(crate) fn parse_field_set(
     schema: &ValidFederationSchema,
     parent_type_name: NamedType,
     value: NodeStr,
-) -> Result<NormalizedSelectionSet, FederationError> {
+) -> Result<SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set = FieldSet::parse_and_validate(
@@ -61,7 +61,7 @@ pub(crate) fn parse_field_set(
 
     // field set should not contain any named fragments
     let named_fragments = NamedFragments::new(&IndexMap::new(), schema);
-    NormalizedSelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)
+    SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)
 }
 
 /// This exists because there's a single callsite in extract_subgraphs_from_supergraph() that needs
