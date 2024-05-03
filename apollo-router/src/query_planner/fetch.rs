@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -8,6 +9,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use json_ext::PathElement;
+use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -249,6 +251,63 @@ impl Display for QueryHash {
 pub(crate) struct Variables {
     pub(crate) variables: Object,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
+    pub(crate) contextual_args: Option<(HashSet<String>, usize)>,
+}
+
+// If contextual_args is set, then all contextual arguments need to be expanded. Non-contextual arguments
+// must be preserved
+fn expand_contextual_args(args: &str, arg_set: &HashSet<String>, count: usize) -> String {
+    // it's easiest to just add the $ back in later.
+    let mut expanded_str = String::new();
+    for pair in args.split('$') {
+        let mut parts = pair.split(':');
+        if let (Some(named_param), Some(param_type)) = (parts.next(), parts.next()) {
+            if arg_set.contains(named_param) {
+                for i in 0..count {
+                    expanded_str.push_str(&format!("${}_{}:{}", &named_param, i, param_type));
+                }
+            } else {
+                expanded_str.push_str(&format!("{}:{}", &named_param, param_type));
+            }
+        }
+    }
+    expanded_str
+}
+
+fn query_batching_for_contextual_args(old_query: &str, contextual_args: &Option<(HashSet<String>, usize)>) -> Option<String> {
+    let re = Regex::new(r"(.*?)\((.*?)\).*?(\{.*?\})").unwrap();
+    
+    let result = match contextual_args {
+        Some((args, count)) => {
+            match re.captures(old_query) {
+                Some(caps) => {
+                    match (caps.get(1), caps.get(2), caps.get(3)) {
+                        (Some(query_cruft), Some(params), Some(content)) => {
+                            let params = expand_contextual_args(params.as_str(), args, *count);
+                            let mut new_query: String = query_cruft.as_str().into();
+                            new_query.push_str(&format!("({})", params.as_str()));
+                            new_query.push_str(" {");
+                            for i in 0..*count {
+                                let mut cloned_content: String = content.as_str().into();
+                                for arg in args {
+                                    let mut modified_arg = arg.clone();
+                                    modified_arg.push_str(&format!("_{}", i));
+                                    cloned_content = cloned_content.replace(arg, &modified_arg);
+                                }
+                                new_query.push_str(&format!(" _{}:{}", i, &cloned_content));
+                            }
+                            new_query.push_str("}");
+                            Some(new_query)
+                        },
+                        (_, _, _) => None,
+                    }
+                },
+                None => None,
+            }
+        },
+        None => None,
+    };
+    result
 }
 
 // TODO: There is probably a function somewhere else that already does this
@@ -333,7 +392,6 @@ impl Variables {
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::new();
             let mut named_args: Vec<HashMap<String, Value>> = Vec::new();
-            dbg!(&data);
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
                 let hash_map: HashMap<String, Value> = context_rewrites
@@ -344,7 +402,6 @@ impl Variables {
                             DataRewrite::KeyRenamer(item) => {
                                 let data_path = merge_context_path(&path, &item.path);
                                 let val = data_at_path(data, &data_path);
-                                dbg!(&current_dir, &path, &item.path, &data_path);
                                 if let Some(v) = val {
                                     // TODO: not great
                                     let mut new_value = v.clone();
@@ -408,31 +465,31 @@ impl Variables {
             }
 
             let representations = Value::Array(Vec::from_iter(values));
-            dbg!(&named_args);
             
             // Here we create a new map with all the key value pairs to push into variables.
             // Note that if all variables are the same, we just use the named parameter as a variable, but if they are different then each
             // entity will have it's own set of parameters all appended by _<index>
-            let extended_vars = if let Some(first_map) = named_args.get(0) {
+            let (extended_vars, contextual_args) = if let Some(first_map) = named_args.get(0) {
                 if named_args.iter().all(|map| map == first_map) {
-                    first_map
+                    (first_map
                         .iter()
                         .map(|(k, v)| {
                             (k.as_str().into(), v.clone())
-                        }).collect()
+                        }).collect(), None)
                 } else {
                     let mut hash_map: HashMap<String, Value> = HashMap::new();
+                    let arg_names: HashSet<_> = first_map.keys().cloned().collect();
                     for (index, item) in named_args.iter().enumerate() {
                         // append _<index> to each of the arguments and push all the values into hash_map
                         hash_map.extend(item.iter().map(|(k, v)| {
                             let mut new_named_param = k.clone();
-                            // new_named_param.push_str(&format!("_{}", index));
+                            new_named_param.push_str(&format!("_{}", index));
                             (new_named_param, v.clone())
                         }));
                     }
-                    hash_map
+                    (hash_map, Some((arg_names, named_args.len())))
                 }
-            } else { HashMap::new() };
+            } else { (HashMap::new(), None) };
             
             let body = request.body();
             variables.extend(extended_vars.iter().map(|(key, value)| {
@@ -448,6 +505,7 @@ impl Variables {
             Some(Variables {
                 variables,
                 inverted_paths,
+                contextual_args,
             })
         } else {
             // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
@@ -474,6 +532,7 @@ impl Variables {
                     })
                     .collect::<Object>(),
                 inverted_paths: Vec::new(),
+                contextual_args: None,
             })
         }
     }
@@ -506,6 +565,7 @@ impl FetchNode {
         let Variables {
             variables,
             inverted_paths: paths,
+            contextual_args,
         } = match Variables::new(
             &self.requires,
             &self.variable_usages,
@@ -522,6 +582,11 @@ impl FetchNode {
                 return (Value::Object(Object::default()), Vec::new());
             }
         };
+        
+        let query_batched_query = query_batching_for_contextual_args(
+            operation.as_serialized(), 
+            &contextual_args
+        );
 
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
@@ -541,7 +606,7 @@ impl FetchNode {
                     )
                     .body(
                         Request::builder()
-                            .query(operation.as_serialized())
+                            .query(query_batched_query.as_deref().unwrap_or(operation.as_serialized()))
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
@@ -611,7 +676,6 @@ impl FetchNode {
         }
         let (value, errors) =
             self.response_at_path(parameters.schema, current_dir, paths, response);
-        dbg!(&value, &errors);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);

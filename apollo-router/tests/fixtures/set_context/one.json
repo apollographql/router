@@ -67,7 +67,7 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__0{tList{prop id uList{id}}}",
+        "query": "query QueryLL__Subgraph1__0{tList{prop id uList{__typename id}}}",
         "operationName": "QueryLL__Subgraph1__0"
       },
       "response": {
@@ -77,9 +77,11 @@
             "id": "1",
             "uList": [
               {
+                "__typename": "U",
                 "id": "1"
               },
               {
+                "__typename": "U",
                 "id": "2"
               }
             ]
@@ -89,9 +91,11 @@
             "id": "2",
             "uList": [
               {
+                "__typename": "U",
                 "id": "3"
               },
               {
+                "__typename": "U",
                 "id": "4"
               }
             ]
@@ -143,10 +147,13 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
+        "query": "query QueryLL__Subgraph1__1(representations:[_Any!]!$Subgraph1_U_field_a_0:String!$Subgraph1_U_field_a_1:String!$Subgraph1_U_field_a_2:String!$Subgraph1_U_field_a_3:String!) { _0:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_0)} _1:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_1)} _2:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_2)} _3:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_3)}}",
         "operationName": "QueryLL__Subgraph1__1",
         "variables": {
-          "Subgraph1_U_field_a": "prop value 2",
+          "Subgraph1_U_field_a_0": "prop value 1",
+          "Subgraph1_U_field_a_1": "prop value 1",
+          "Subgraph1_U_field_a_2": "prop value 2",
+          "Subgraph1_U_field_a_3": "prop value 2",
           "representations": [{ "__typename": "U", "id": "1" }, { "__typename": "U", "id": "2" }, { "__typename": "U", "id": "3" }, { "__typename": "U", "id": "4" }]
         }
       },
