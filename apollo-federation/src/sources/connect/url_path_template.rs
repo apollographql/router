@@ -1394,24 +1394,24 @@ mod tests {
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 "b": 4,
                 // "c": 5,
                 "d": 6,
+                "x": 1,
+                "y": 2,
+                "z": 3,
             })),
             Err(r#"Missing variable c for required parameter {b},{c};{d!} given variables {"b":4,"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 // "b": 4,
                 // "c": 5,
                 "d": 6,
+                "x": 1,
+                "y": 2,
+                "z": 3,
             })),
             Err(r#"Missing variable b for required parameter {b},{c};{d!} given variables {"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
