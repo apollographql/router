@@ -1,15 +1,17 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::{self, Display, Formatter},
-    sync::Arc,
-};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fmt::Display;
+use std::sync::Arc;
 
-use apollo_compiler::{execution::GraphQLError, NodeStr};
+use apollo_compiler::execution::GraphQLError;
+use apollo_compiler::NodeStr;
 use itertools::Itertools;
 
-use crate::{error::SchemaRootKind, query_graph::QueryGraph};
-
-use super::{diagnostics::CompositionHint, ValidationContext};
+use super::diagnostics::CompositionHint;
+use super::ValidationContext;
+use crate::error::FederationError;
+use crate::query_graph::QueryGraph;
+use crate::schema::position::SchemaRootDefinitionKind;
 
 type Todo = usize;
 static _TODO: Todo = 0;
@@ -31,11 +33,11 @@ pub(super) struct ValidationState {
 impl ValidationState {
     pub(super) fn initial(
         _supergraph_api: Arc<QueryGraph>,
-        kind: SchemaRootKind,
+        kind: SchemaRootDefinitionKind,
         federated_query_graph: Arc<QueryGraph>,
         _condition_resolver: Todo, // ConditionResolver
         _override_conditions: HashMap<NodeStr, bool>,
-    ) -> Result<Self, Todo> {
+    ) -> Result<Self, FederationError> {
         Ok(Self {
             supergraph_path: _TODO, // GraphPath::from_graph_root(_supergraph_api, _kind),
             subgraph_paths: initial_subgraph_paths(kind, federated_query_graph)?, // .map(p => TransitionPathWithLazyIndirectPaths.initial(p, _condition_resolver, _override_conditions)),
@@ -96,7 +98,7 @@ impl ValidationState {
 }
 
 impl Display for ValidationState {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let supergraph_path = self.supergraph_path;
         let subgraph_paths = self.subgraph_paths.iter().map(|p| p.to_string()).join(", ");
         write!(f, "{supergraph_path} <=> [{subgraph_paths}]")
@@ -104,9 +106,9 @@ impl Display for ValidationState {
 }
 
 fn initial_subgraph_paths(
-    _kind: SchemaRootKind,
+    _kind: SchemaRootDefinitionKind,
     _subgraphs: Arc<QueryGraph>,
-) -> Result<Vec<Todo>, Todo> /* RootPath<Transition>[], can error */ {
+) -> Result<Vec<Todo>, FederationError> /* RootPath<Transition>[], can error */ {
     todo!()
 }
 

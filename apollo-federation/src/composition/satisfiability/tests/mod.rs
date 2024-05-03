@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use apollo_compiler::{execution::GraphQLError, Schema};
+use apollo_compiler::execution::GraphQLError;
+use apollo_compiler::Schema;
 
-use crate::{
-    api_schema::to_api_schema,
-    query_graph::{build_federated_query_graph, build_query_graph::build_query_graph},
-    schema::ValidFederationSchema,
-    ApiSchemaOptions,
-};
-
-use super::{diagnostics::CompositionHint, validate_graph_composition};
+use super::diagnostics::CompositionHint;
+use super::validate_graph_composition;
+use crate::api_schema::to_api_schema;
+use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::build_query_graph::build_query_graph;
+use crate::schema::ValidFederationSchema;
+use crate::ApiSchemaOptions;
 
 fn run_validation(
     supergraph_sdl: &str,

@@ -1,25 +1,20 @@
-use std::{
-    fmt::{self, Display},
-    str::FromStr,
-};
+use std::fmt::Display;
+use std::fmt::{self};
+use std::str::FromStr;
 
-use apollo_compiler::{
-    ast::{FieldDefinition, Name},
-    execution::GraphQLError,
-    NodeStr,
-};
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Name;
+use apollo_compiler::execution::GraphQLError;
+use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 
-use crate::{
-    composition::satisfiability::dependencies::print_human_readable_list,
-    query_graph::graph_path::Unadvanceables,
-};
-
-use super::{
-    dependencies::print_subgraph_names, state::ValidationState, witness::build_witness_operation,
-};
+use super::dependencies::print_subgraph_names;
+use super::state::ValidationState;
+use super::witness::build_witness_operation;
+use crate::composition::satisfiability::dependencies::print_human_readable_list;
+use crate::query_graph::graph_path::Unadvanceables;
 
 // PORT_NOTE: this is assigned to the `originalError` field of the GraphQLError
 // which is not a concept in apollo-compiler. Can we just ignore it?

@@ -1,19 +1,17 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::{
-    error::SchemaRootKind,
-    query_graph::{
-        graph_path::{GraphPath, GraphPathTrigger, IndirectPaths},
-        QueryGraph,
-    },
-};
-
-use apollo_compiler::{
-    ast::{Document, NamedType},
-    NodeStr,
-};
+use apollo_compiler::ast::Document;
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::NodeStr;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
+
+use crate::query_graph::graph_path::GraphPath;
+use crate::query_graph::graph_path::GraphPathTrigger;
+use crate::query_graph::graph_path::IndirectPaths;
+use crate::query_graph::QueryGraph;
+use crate::schema::position::SchemaRootDefinitionKind;
 
 type Todo = usize;
 
@@ -24,7 +22,7 @@ where
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
-    pub fn from_graph_root(_graph: Arc<QueryGraph>, _root_kind: SchemaRootKind) -> Todo /* Option<Self> */
+    pub fn from_graph_root(_graph: Arc<QueryGraph>, _root_kind: SchemaRootDefinitionKind) -> Todo /* Option<Self> */
     {
         // graph
         //     .root_node_for_kind(root_kind)

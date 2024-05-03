@@ -73,25 +73,18 @@
 
 use std::sync::Arc;
 
-use apollo_compiler::{
-    ast::{DirectiveDefinition, FieldDefinition},
-    execution::GraphQLError,
-    Node,
-};
-
-use crate::{
-    composition::satisfiability::traversal::ValidationTraversal,
-    link::{
-        join_spec_definition::{
-            JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC, JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
-        },
-        spec::Identity,
-    },
-    query_graph::QueryGraph,
-    schema::ValidFederationSchema,
-};
+use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::execution::GraphQLError;
+use apollo_compiler::Node;
 
 use self::diagnostics::CompositionHint;
+use crate::composition::satisfiability::traversal::ValidationTraversal;
+use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec::Identity;
+use crate::query_graph::QueryGraph;
+use crate::schema::ValidFederationSchema;
 
 mod dependencies;
 mod diagnostics;
@@ -107,7 +100,18 @@ pub(crate) fn validate_graph_composition(
     supergraph_api: Arc<QueryGraph>,
     federated_query_graph: Arc<QueryGraph>,
 ) -> Result<Vec<CompositionHint>, (Vec<GraphQLError>, Vec<CompositionHint>)> {
-    ValidationTraversal::new(supergraph_schema, supergraph_api, federated_query_graph).validate()
+    ValidationTraversal::new(supergraph_schema, supergraph_api, federated_query_graph)
+        .map_err(|_| {
+            (
+                vec![GraphQLError::new(
+                    "TODO",
+                    None,
+                    &Arc::new(Default::default()),
+                )],
+                vec![],
+            )
+        })?
+        .validate()
 }
 
 struct ValidationContext {
