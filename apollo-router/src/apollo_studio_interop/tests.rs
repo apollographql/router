@@ -50,6 +50,13 @@ fn assert_expected_results(
     ));
 }
 
+fn assert_expected_signature(
+    actual: &ComparableUsageReporting,
+    expected_sig: &str,
+) {
+    assert_eq!(actual.result.stats_report_key, expected_sig);
+}
+
 // Generate usage reporting with the same signature and refs doc, and with legacy normalization algorithm
 fn generate_legacy(
     doc: &ExecutableDocument,
@@ -62,6 +69,21 @@ fn generate_legacy(
         operation_name,
         schema,
         &ApolloSignatureNormalizationAlgorithm::Legacy,
+    )
+}
+
+// Generate usage reporting with the same signature and refs doc, and with enhanced normalization algorithm
+fn generate_enhanced(
+    doc: &ExecutableDocument,
+    operation_name: &Option<String>,
+    schema: &Valid<Schema>,
+) -> ComparableUsageReporting {
+    generate_usage_reporting(
+        doc,
+        doc,
+        operation_name,
+        schema,
+        &ApolloSignatureNormalizationAlgorithm::Enhanced,
     )
 }
 
@@ -1517,6 +1539,58 @@ async fn test_underscore() {
 
     assert_expected_results(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
+}
+
+#[test(tokio::test)]
+async fn test_enhanced_uses_comma_always() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      query TestCommaEnhanced($arg1: String, $arg2: String, $veryMuchUsuallyTooLongName1234567890: String) {
+        manyArgsQuery(arg1: $arg1, arg2: $arg2, arg3: \"\", arg4: $veryMuchUsuallyTooLongName1234567890) {
+          enumResponse
+          basicTypes {
+            nullableId
+          }
+          id
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_enhanced(&doc, &Some("TestCommaEnhanced".into()), &schema);
+    let expected_sig = "# TestCommaEnhanced\nquery TestCommaEnhanced($arg1:String,$arg2:String,$veryMuchUsuallyTooLongName1234567890:String){manyArgsQuery(arg1:$arg1,arg2:$arg2,arg3:\"\",arg4:$veryMuchUsuallyTooLongName1234567890){basicTypes{nullableId} enumResponse id}}";
+    assert_expected_signature(&generated, expected_sig);
+}
+
+#[test(tokio::test)]
+async fn test_enhanced_always_sorts() {
+    /* todo
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = "
+      query TestCommaEnhanced($arg1: String, $arg2: String, $veryMuchUsuallyTooLongName1234567890: String) {
+        manyArgsQuery(arg1: $arg1, arg2: $arg2, arg3: \"\", arg4: $veryMuchUsuallyTooLongName1234567890) {
+          enumResponse
+          basicTypes {
+            nullableId
+          }
+          id
+        }
+      }";
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_enhanced(&doc, &Some("TestCommaEnhanced".into()), &schema);
+    let expected_sig = "# TestCommaEnhanced\nquery TestCommaEnhanced($arg1:String,$arg2:String,$veryMuchUsuallyTooLongName1234567890:String){manyArgsQuery(arg1:$arg1,arg2:$arg2,arg3:\"\",arg4:$veryMuchUsuallyTooLongName1234567890){basicTypes{nullableId} enumResponse id}}";
+    assert_expected_signature(&generated, expected_sig);
+
+    //temp
+    let generated_legacy = generate_legacy(&doc, &Some("TestCommaEnhanced".into()), &schema);
+    assert_expected_signature(&generated_legacy, expected_sig);
+    */
 }
 
 #[test(tokio::test)]
