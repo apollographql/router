@@ -372,7 +372,7 @@ fn format_operation(
             f.write_str(")")?;
         }
 
-        // In the JS implementation, only the fragment directives are sorted
+        // In the JS implementation, only the fragment directives are sorted (this is overridden in enhanced mode)
         format_directives(&operation.directives, false, normalization_algorithm, f)?;
     }
 
@@ -405,7 +405,14 @@ fn format_selection_set(
     if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
         fields.sort_by(|&a, &b| a.name.cmp(&b.name));
         named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
-        // Note that inline fragments are not sorted in the JS implementation
+        // Inline fragments are not sorted in the JS implementation
+        if is_enhanced(normalization_algorithm) {
+            inline_fragments.sort_by(|&a, &b| {
+                let a_name = a.type_condition.as_ref().map(|t| t.as_str()).unwrap_or("");
+                let b_name = b.type_condition.as_ref().map(|t| t.as_str()).unwrap_or("");
+                a_name.cmp(b_name)
+            });
+        }
 
         f.write_str("{")?;
 
@@ -418,9 +425,7 @@ fn format_selection_set(
             f.write_str(&field_str)?;
 
             // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
-            // In enhanced mode, we always insert a space unless it's the last field.
-            let use_separator = is_enhanced(normalization_algorithm)
-                || field_str
+            let use_separator = field_str
                     .chars()
                     .last()
                     .map_or(false, |c| c.is_alphanumeric() || c == '_');
@@ -453,6 +458,8 @@ fn format_variable(
         f.write_str("=")?;
         format_value(value, normalization_algorithm, f)?;
     }
+
+    // The JS implementation doesn't sort directives (this is overridden in enhanced mode)
     format_directives(&arg.directives, false, normalization_algorithm, f)
 }
 
@@ -509,7 +516,7 @@ fn format_field(
         f.write_str(")")?;
     }
 
-    // In the JS implementation, only the fragment directives are sorted
+    // In the JS implementation, only the fragment directives are sorted (this is overridden in enhanced mode)
     format_directives(&field.directives, false, normalization_algorithm, f)?;
     format_selection_set(&field.selection_set, normalization_algorithm, f)
 }
@@ -556,7 +563,9 @@ fn format_directives(
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     let mut sorted_directives = directives.clone();
-    if sorted {
+
+    // In enhanced mode, we always want to sort
+    if sorted || is_enhanced(normalization_algorithm) {
         sorted_directives.sort_by(|a, b| a.name.cmp(&b.name));
     }
 

@@ -1557,37 +1557,128 @@ async fn test_enhanced_uses_comma_always() {
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
     let generated = generate_enhanced(&doc, &Some("TestCommaEnhanced".into()), &schema);
-    let expected_sig = "# TestCommaEnhanced\nquery TestCommaEnhanced($arg1:String,$arg2:String,$veryMuchUsuallyTooLongName1234567890:String){manyArgsQuery(arg1:$arg1,arg2:$arg2,arg3:\"\",arg4:$veryMuchUsuallyTooLongName1234567890){basicTypes{nullableId} enumResponse id}}";
+    let expected_sig = "# TestCommaEnhanced\nquery TestCommaEnhanced($arg1:String,$arg2:String,$veryMuchUsuallyTooLongName1234567890:String){manyArgsQuery(arg1:$arg1,arg2:$arg2,arg3:\"\",arg4:$veryMuchUsuallyTooLongName1234567890){basicTypes{nullableId}enumResponse id}}";
     assert_expected_signature(&generated, expected_sig);
 }
 
 #[test(tokio::test)]
-async fn test_enhanced_always_sorts() {
-    /* todo
+async fn test_enhanced_sorts_fragments() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      query TestCommaEnhanced($arg1: String, $arg2: String, $veryMuchUsuallyTooLongName1234567890: String) {
-        manyArgsQuery(arg1: $arg1, arg2: $arg2, arg3: \"\", arg4: $veryMuchUsuallyTooLongName1234567890) {
-          enumResponse
-          basicTypes {
-            nullableId
+    let query_str = r#"
+      query EnhancedFragmentQuery {
+        noInputQuery {
+          listOfBools
+          interfaceResponse {
+            ... on InterfaceImplementation2 {
+              implementation2Field
+            }
+            ...bbbInterfaceFragment
+            ...aaaInterfaceFragment
+            ... {
+              ... on InterfaceImplementation1 {
+                implementation1Field
+              }
+            }
+            ... {
+              ... on InterfaceImplementation2 {
+                sharedField
+              }
+            }
+            ... on InterfaceImplementation1 {
+              implementation1Field
+            }
           }
-          id
+          unionResponse {
+            ... on UnionType2 {
+              unionType2Field
+            }
+            ... on UnionType1 {
+              unionType1Field
+            }
+          }
+          ...zzzFragment
+          ...aaaFragment
+          ...ZZZFragment
         }
-      }";
+      }
+      
+      fragment zzzFragment on EverythingResponse {
+        listOfInterfaces {
+          sharedField
+        }
+      }
+      
+      fragment ZZZFragment on EverythingResponse {
+        listOfInterfaces {
+          sharedField
+        }
+      }
+      
+      fragment aaaFragment on EverythingResponse {
+        listOfInterfaces {
+          sharedField
+        }
+      }
+      
+      fragment UnusedFragment on InterfaceImplementation2 {
+        sharedField
+        implementation2Field
+      }
+      
+      fragment bbbInterfaceFragment on InterfaceImplementation2 {
+        sharedField
+        implementation2Field
+      }
+      
+      fragment aaaInterfaceFragment on InterfaceImplementation1 {
+        sharedField
+      }"#;
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_enhanced(&doc, &Some("TestCommaEnhanced".into()), &schema);
-    let expected_sig = "# TestCommaEnhanced\nquery TestCommaEnhanced($arg1:String,$arg2:String,$veryMuchUsuallyTooLongName1234567890:String){manyArgsQuery(arg1:$arg1,arg2:$arg2,arg3:\"\",arg4:$veryMuchUsuallyTooLongName1234567890){basicTypes{nullableId} enumResponse id}}";
+    let generated = generate_enhanced(&doc, &Some("EnhancedFragmentQuery".into()), &schema);
+    let expected_sig = "# EnhancedFragmentQuery\nfragment ZZZFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaFragment on EverythingResponse{listOfInterfaces{sharedField}}fragment aaaInterfaceFragment on InterfaceImplementation1{sharedField}fragment bbbInterfaceFragment on InterfaceImplementation2{implementation2Field sharedField}fragment zzzFragment on EverythingResponse{listOfInterfaces{sharedField}}query EnhancedFragmentQuery{noInputQuery{interfaceResponse{...aaaInterfaceFragment...bbbInterfaceFragment...{...on InterfaceImplementation1{implementation1Field}}...{...on InterfaceImplementation2{sharedField}}...on InterfaceImplementation1{implementation1Field}...on InterfaceImplementation2{implementation2Field}}listOfBools unionResponse{...on UnionType1{unionType1Field}...on UnionType2{unionType2Field}}...ZZZFragment...aaaFragment...zzzFragment}}";
     assert_expected_signature(&generated, expected_sig);
+}
 
-    //temp
-    let generated_legacy = generate_legacy(&doc, &Some("TestCommaEnhanced".into()), &schema);
-    assert_expected_signature(&generated_legacy, expected_sig);
-    */
+#[test(tokio::test)]
+async fn test_enhanced_sorts_directives() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = r#"
+      fragment Fragment1 on InterfaceImplementation1 {
+        sharedField
+        implementation1Field
+      }
+      
+      fragment Fragment2 on InterfaceImplementation2 @withArgs(arg2: "" arg1: "test" arg3: true arg5: [1,2] arg4: 2) @noArgs {
+        sharedField
+        implementation2Field
+      }
+      
+      query DirectiveQuery @withArgs(arg2: "" arg1: "test") @noArgs {
+        noInputQuery {
+          enumResponse @withArgs(arg3: false arg5: [1,2] arg4: 2) @noArgs
+          unionResponse {
+            ... on UnionType1 @withArgs(arg2: "" arg1: "test") @noArgs {
+              unionType1Field
+            }
+          }
+          interfaceResponse {
+            ... Fragment1 @withArgs(arg1: "test") @noArgs
+            ... Fragment2
+          }
+        }
+      }"#;
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_enhanced(&doc, &Some("DirectiveQuery".into()), &schema);
+    let expected_sig = "# DirectiveQuery\nfragment Fragment1 on InterfaceImplementation1{implementation1Field sharedField}fragment Fragment2 on InterfaceImplementation2@noArgs@withArgs(arg1:\"\",arg2:\"\",arg3:true,arg4:0,arg5:[]){implementation2Field sharedField}query DirectiveQuery@noArgs@withArgs(arg1:\"\",arg2:\"\"){noInputQuery{enumResponse@noArgs@withArgs(arg3:false,arg4:0,arg5:[])interfaceResponse{...Fragment1@noArgs@withArgs(arg1:\"\")...Fragment2}unionResponse{...on UnionType1@noArgs@withArgs(arg1:\"\",arg2:\"\"){unionType1Field}}}}";
+    assert_expected_signature(&generated, expected_sig);
 }
 
 #[test(tokio::test)]
