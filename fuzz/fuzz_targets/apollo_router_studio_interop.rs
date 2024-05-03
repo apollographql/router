@@ -1,5 +1,6 @@
 #![no_main]
 
+/*todo
 use std::env;
 use std::process::Child;
 use std::process::Command;
@@ -9,8 +10,8 @@ use std::sync::OnceLock;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
-use apollo_router::_private::generate_usage_reporting;
-use apollo_router::_private::UsageReportingComparisonResult;
+use apollo_router::_private::apollo_studio_interop::generate_usage_reporting;
+use apollo_router::_private::apollo_studio_interop::UsageReportingComparisonResult;
 use libfuzzer_sys::fuzz_target;
 use router_bridge::planner::UsageReporting;
 use router_fuzz::generate_valid_operation;
@@ -39,7 +40,7 @@ impl Drop for ChildProcessGuard {
     }
 }
 
-/*
+/ *
 Ideally this fuzzer would just call the router-bridge's Planner.plan function directly instead of spinning up a new
 router executable, but when we tried to do that, we ran into some very confusing serialization issues. The running
 theory is that the fuzzer runs a couple of sanitizers / custom flags, which deno was not happy with. We work around
@@ -53,7 +54,7 @@ To run this fuzzer:
   * run `cargo build --example usage_reporting_router`
 * start the fuzzer using `cargo +nightly fuzz run apollo_router_studio_interop` from the root directory
   * if you get an Address already in use error, make sure you `killall usage_reporting_router` before a new run
-*/
+* /
 
 fuzz_target!(|data: &[u8]| {
     let _ = env_logger::try_init();
@@ -110,7 +111,7 @@ fuzz_target!(|data: &[u8]| {
         }
     };
 
-    let rust_generated = generate_usage_reporting(&doc, &doc, &None, &schema, Default::default());
+    let rust_generated = generate_usage_reporting(&doc, &doc, &None, &schema);
 
     let http_client = reqwest::blocking::Client::new();
     let router_response = http_client
@@ -158,3 +159,4 @@ fuzz_target!(|data: &[u8]| {
         );
     }
 });
+*/

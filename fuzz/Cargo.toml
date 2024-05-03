@@ -14,7 +14,6 @@ libfuzzer-sys = "0.4"
 apollo-compiler.workspace = true
 apollo-smith.workspace = true
 apollo-parser.workspace = true
-apollo-router = { path = "../apollo-router" }
 env_logger = "0.10.2"
 log = "0.4"
 reqwest = { workspace = true, features = ["json", "blocking"] }
@@ -25,6 +24,7 @@ router-bridge = "=0.5.20+v2.7.4"
 
 [dev-dependencies]
 anyhow = "1"
+apollo-router = { path = "../apollo-router" }
 async-trait.workspace = true
 schemars.workspace = true
 serde.workspace = true

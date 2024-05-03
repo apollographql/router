@@ -50,7 +50,7 @@ pub enum UsageReportingComparisonResult {
 
 impl ComparableUsageReporting {
     /// Compare this to another UsageReporting.
-    pub fn compare(&self, other: &UsageReporting) -> UsageReportingComparisonResult {
+    pub(crate) fn compare(&self, other: &UsageReporting) -> UsageReportingComparisonResult {
         let sig_equal = self.result.stats_report_key == other.stats_report_key;
         let refs_equal = self.compare_referenced_fields(&other.referenced_fields_by_type);
         match (sig_equal, refs_equal) {
