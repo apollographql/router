@@ -24,7 +24,7 @@ use serde_json_bytes::Value as JSON;
 /// values from concrete URL paths.
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub(super) struct URLPathTemplate {
+pub struct URLPathTemplate {
     path: Vec<ParameterValue>,
     query: IndexMap<String, ParameterValue>,
 }
