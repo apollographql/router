@@ -16,7 +16,6 @@ mod tests {
     use serde_json::json;
     use tower::BoxError;
     use tower::ServiceExt;
-    use url::Url;
 
     use super::super::*;
     use crate::plugin::test::MockHttpClientService;
@@ -98,7 +97,9 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                ..Default::default()
+                path: false,
+                method: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -132,7 +133,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -156,7 +157,9 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                ..Default::default()
+                path: false,
+                method: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -190,7 +193,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -214,7 +217,9 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                ..Default::default()
+                path: false,
+                method: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -247,7 +252,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -267,8 +272,13 @@ mod tests {
     async fn coprocessor_subgraph_with_invalid_response_body_should_fail() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                headers: false,
+                context: false,
                 body: true,
-                ..Default::default()
+                uri: false,
+                method: false,
+                service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -301,7 +311,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -325,8 +335,13 @@ mod tests {
     async fn external_plugin_subgraph_request() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                headers: false,
+                context: false,
                 body: true,
-                ..Default::default()
+                uri: false,
+                method: false,
+                service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -427,7 +442,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -450,8 +465,13 @@ mod tests {
     async fn external_plugin_subgraph_request_controlflow_break() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                headers: false,
+                context: false,
                 body: true,
-                ..Default::default()
+                uri: false,
+                method: false,
+                service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -489,7 +509,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -514,8 +534,13 @@ mod tests {
     async fn external_plugin_subgraph_request_controlflow_break_with_message_string() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                headers: false,
+                context: false,
                 body: true,
-                ..Default::default()
+                uri: false,
+                method: false,
+                service_name: false,
+                detached: false,
             },
             response: Default::default(),
         };
@@ -543,7 +568,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -600,7 +625,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -624,8 +649,12 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
             response: SubgraphResponseConf {
+                headers: false,
+                context: false,
                 body: true,
-                ..Default::default()
+                service_name: false,
+                status_code: false,
+                detached: false,
             },
         };
 
@@ -698,7 +727,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -760,7 +789,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -784,7 +813,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                ..Default::default()
+                detached: false,
             },
             response: Default::default(),
         };
@@ -884,7 +913,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -903,7 +932,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                ..Default::default()
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1010,7 +1039,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -1032,7 +1061,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                ..Default::default()
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1081,7 +1110,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -1121,7 +1150,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
-                ..Default::default()
+                detached: false,
             },
             response: Default::default(),
         };
@@ -1160,7 +1189,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -1192,127 +1221,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_router_request_url() {
-        let router_stage = RouterStage {
-            request: RouterRequestConf {
-                headers: true,
-                context: true,
-                body: true,
-                sdl: true,
-                path: true,
-                method: true,
-                url: Some(Url::parse("http://example.com").unwrap()),
-                ..Default::default()
-            },
-            response: Default::default(),
-        };
-
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            // Let's assert that the router request has been transformed as it should have.
-            assert_eq!(
-                req.supergraph_request.headers().get("cookie").unwrap(),
-                "tasty_cookie=strawberry"
-            );
-
-            assert_eq!(
-                req.context
-                    .get::<&str, u8>("this-is-a-test-context")
-                    .unwrap()
-                    .unwrap(),
-                42
-            );
-
-            // The query should have changed
-            assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
-            );
-
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
-
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
-            Box::pin(async {
-                let (parts, body) = req.into_parts();
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(body).await.unwrap()).unwrap();
-
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
-                assert_eq!(
-                    PipelineStep::RouterRequest.to_string(),
-                    deserialized_request.stage
-                );
-                assert_eq!(parts.uri, http::Uri::from_static("http://example.com/"));
-
-                let input = json!(
-                      {
-                  "version": 1,
-                  "stage": "RouterRequest",
-                  "control": "continue",
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "headers": {
-                    "cookie": [
-                      "tasty_cookie=strawberry"
-                    ],
-                    "content-type": [
-                      "application/json"
-                    ],
-                    "host": [
-                      "127.0.0.1:4000"
-                    ],
-                    "apollo-federation-include-trace": [
-                      "ftv1"
-                    ],
-                    "apollographql-client-name": [
-                      "manual"
-                    ],
-                    "accept": [
-                      "*/*"
-                    ],
-                    "user-agent": [
-                      "curl/7.79.1"
-                    ],
-                    "content-length": [
-                      "46"
-                    ]
-                  },
-                  "body": "{
-                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                    }",
-                  "context": {
-                    "entries": {
-                      "accepts-json": false,
-                      "accepts-wildcard": true,
-                      "accepts-multipart": false,
-                      "this-is-a-test-context": 42
-                    }
-                  },
-                  "sdl": "the sdl shouldnt change"
-                });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
-                    .unwrap())
-            })
-        });
-
-        let service = router_stage.as_service(
-            mock_http_client,
-            mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
-            Arc::new("".to_string()),
-        );
-
-        let request = supergraph::Request::canned_builder().build().unwrap();
-
-        service.oneshot(request.try_into().unwrap()).await.unwrap();
-    }
-
-    #[tokio::test]
     async fn external_plugin_router_response() {
         let router_stage = RouterStage {
             response: RouterResponseConf {
@@ -1320,7 +1228,8 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                ..Default::default()
+                status_code: false,
+                detached: false,
             },
             request: Default::default(),
         };
@@ -1407,7 +1316,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -1467,7 +1376,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
@@ -1503,7 +1412,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            Url::parse("http://test").unwrap(),
+            "http://test".to_string(),
             Arc::new("".to_string()),
         );
 
