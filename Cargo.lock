@@ -221,6 +221,7 @@ dependencies = [
 [[package]]
 name = "apollo-federation"
 version = "0.0.11"
+source = "git+https://github.com/apollographql/federation-next?rev=7d25ce0d4721e3c00b2300b9377777826e159474#7d25ce0d4721e3c00b2300b9377777826e159474"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -349,7 +350,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rhai",
- "router-bridge",
+ "router-bridge 0.5.20+v2.7.4 (git+https://github.com/apollographql/federation-rs?rev=499dc5d51839011093b66d89aeb8bc8ac0d9f908)",
  "rstack",
  "rust-embed",
  "rustls",
@@ -5724,6 +5725,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "router-bridge"
+version = "0.5.20+v2.7.4"
+source = "git+https://github.com/apollographql/federation-rs?rev=499dc5d51839011093b66d89aeb8bc8ac0d9f908#499dc5d51839011093b66d89aeb8bc8ac0d9f908"
+dependencies = [
+ "anyhow",
+ "async-channel 1.9.0",
+ "deno_console",
+ "deno_core",
+ "deno_crypto",
+ "deno_url",
+ "deno_web",
+ "deno_webidl",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tower-service",
+ "tracing",
+ "which",
+]
+
+[[package]]
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
@@ -5738,7 +5763,7 @@ dependencies = [
  "libfuzzer-sys",
  "log",
  "reqwest",
- "router-bridge",
+ "router-bridge 0.5.20+v2.7.4",
  "schemars",
  "serde",
  "serde_json",
