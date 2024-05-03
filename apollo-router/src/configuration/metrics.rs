@@ -355,6 +355,38 @@ impl InstrumentData {
             opt.limits.max_files,
             "$.limits.max_files"
         );
+
+        populate_config_instrument!(
+            apollo.router.config.experimental_demand_control,
+            "$.experimental_demand_control[?(@.enabled == true)]",
+            opt.mode,
+            "$.mode"
+        );
+
+        // We need to update the entry we just made because we set the strategy as an object in the configuration. Using the macro
+        // just maps a selected object to a boolean indicating whether it is present or not, and jsonpath_rust doesn't allow you
+        // to select the name of a key. So, we grab the object at the path for the strategy, then grab the strategy name, which is
+        // assumed to be the first (and only) key.
+        match JsonPathInst::from_str("$.experimental_demand_control[?(@.enabled == true)].strategy")
+            .expect("json path must be valid")
+            .find_slice(yaml)
+            .into_iter()
+            .next()
+            .as_deref()
+        {
+            Some(Value::Object(values)) => {
+                if let Some(strategy_name) = values.keys().next() {
+                    let (_, demand_control_attributes) = self
+                        .data
+                        .entry("apollo.router.config.experimental_demand_control".to_string())
+                        .or_insert_with(|| (0, HashMap::new()));
+
+                    demand_control_attributes
+                        .insert("opt.strategy".to_string(), strategy_name.clone().into());
+                }
+            }
+            _ => {}
+        };
     }
 
     fn populate_env_instrument(&mut self) {
