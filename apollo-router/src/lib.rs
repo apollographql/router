@@ -110,9 +110,6 @@ pub mod _private {
     pub use router_bridge;
     pub use serde_json;
 
-    // Export apollo_studio_interop functions for fuzz tests
-    // pub use crate::apollo_studio_interop::generate_usage_reporting;
-    // pub use crate::apollo_studio_interop::UsageReportingComparisonResult;
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
     // For tests

@@ -50,10 +50,7 @@ fn assert_expected_results(
     ));
 }
 
-fn assert_expected_signature(
-    actual: &ComparableUsageReporting,
-    expected_sig: &str,
-) {
+fn assert_expected_signature(actual: &ComparableUsageReporting, expected_sig: &str) {
     assert_eq!(actual.result.stats_report_key, expected_sig);
 }
 

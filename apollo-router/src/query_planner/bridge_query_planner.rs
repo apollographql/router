@@ -692,7 +692,9 @@ impl BridgeQueryPlanner {
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
-                        &self.configuration.experimental_apollo_signature_normalization_algorithm,
+                        &self
+                            .configuration
+                            .experimental_apollo_signature_normalization_algorithm,
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where

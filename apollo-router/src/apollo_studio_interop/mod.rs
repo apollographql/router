@@ -411,10 +411,11 @@ fn format_selection_set(
 
             // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
             // In enhanced mode, we always insert a space unless it's the last field.
-            let use_separator = is_enhanced(normalization_algorithm) || field_str
-                .chars()
-                .last()
-                .map_or(false, |c| c.is_alphanumeric() || c == '_');
+            let use_separator = is_enhanced(normalization_algorithm)
+                || field_str
+                    .chars()
+                    .last()
+                    .map_or(false, |c| c.is_alphanumeric() || c == '_');
             if i < fields.len() - 1 && use_separator {
                 f.write_str(" ")?;
             }
@@ -592,7 +593,6 @@ fn format_value(
     }
 }
 
-
 // Figure out which separator to use between arguments
 fn get_arg_separator(
     field_name: &Name,
@@ -621,7 +621,11 @@ fn get_arg_separator(
         + arg_strings.iter().map(|s| s.len()).sum::<usize>()
         + arg_strings.len()
         + ((arg_strings.len() - 1) * 2);
-    if original_line_length > 80 { ' ' } else { ',' }
+    if original_line_length > 80 {
+        ' '
+    } else {
+        ','
+    }
 }
 
 fn format_fragment_spread(
