@@ -261,7 +261,7 @@ mod test {
         assert!(res.errors.is_empty());
 
         let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
-        insta::assert_display_snapshot!(s.unwrap());
+        insta::assert_snapshot!(s.unwrap());
 
         // we start a new router with the same config
         // it should have the same connection to Redis, but the in memory cache has been reset
