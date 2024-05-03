@@ -34,6 +34,7 @@ use indexmap::{IndexMap, IndexSet};
 use petgraph::stable_graph::{EdgeIndex, NodeIndex, StableDiGraph};
 use petgraph::visit::EdgeRef;
 use std::collections::HashSet;
+use std::fmt::Write as _;
 use std::sync::{atomic::AtomicU64, Arc, OnceLock};
 
 /// Represents the value of a `@defer(label:)` argument.
@@ -1125,6 +1126,52 @@ impl FetchDependencyGraph {
         //   Root2 /
         // And so it is a sequence, even if the roots will be queried in parallel.
         Ok((processor.reduce_sequence(main_sequence), deferred))
+    }
+}
+
+impl std::fmt::Display for FetchDependencyGraph {
+    /// Displays the relationship between subgraph fetches.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn fmt_node(
+            g: &FetchDependencyGraph,
+            node_id: NodeIndex,
+            f: &mut std::fmt::Formatter<'_>,
+            indent: usize,
+        ) -> std::fmt::Result {
+            let Ok(node) = g.node_weight(node_id) else {
+                return Ok(());
+            };
+            for _ in 0..indent {
+                write!(f, "  ")?;
+            }
+            write!(f, "{} <- ", node.display(node_id))?;
+            for (i, child_id) in g.children_of(node_id).enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+
+                let Ok(child) = g.node_weight(child_id) else {
+                    continue;
+                };
+                write!(f, "{}", child.display(child_id))?;
+            }
+
+            for child_id in g.children_of(node_id) {
+                if g.children_of(child_id).next().is_some() {
+                    f.write_char('\n')?;
+                    fmt_node(g, child_id, f, indent + 1)?;
+                }
+            }
+            Ok(())
+        }
+
+        for (i, &node_id) in self.root_nodes_by_subgraph.values().enumerate() {
+            if i > 0 {
+                f.write_char('\n')?;
+            }
+            fmt_node(self, node_id, f, 0)?;
+        }
+        Ok(())
     }
 }
 

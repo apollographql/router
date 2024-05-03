@@ -242,6 +242,21 @@ impl Display for OpGraphPathTrigger {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
+impl std::fmt::Display for OpPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for (i, element) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            match element.deref() {
+                OpPathElement::Field(field) => write!(f, "{field}")?,
+                OpPathElement::InlineFragment(fragment) => write!(f, "{fragment}")?,
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
 pub(crate) enum OpPathElement {
     Field(NormalizedField),
