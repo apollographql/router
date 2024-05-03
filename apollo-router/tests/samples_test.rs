@@ -1,14 +1,16 @@
 use std::collections::HashMap;
-use std::fmt::write;
+use std::env;
+use std::error::Error;
 use std::fmt::Write;
+use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::net::TcpListener;
+use std::path::Path;
 use std::path::PathBuf;
-use std::{env, error::Error, ffi::OsStr, fs, path::Path, process::ExitCode};
+use std::process::ExitCode;
 
-use datatest_stable::Utf8Path;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use serde_json::Value;
@@ -28,7 +30,6 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
 
     for entry in fs::read_dir(path)? {
         let entry = entry?;
-        let file_type = entry.file_type()?;
 
         // Handle files
         let path = entry.path();
@@ -168,14 +169,14 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
 
 fn open_file(path: &Path, out: &mut String) -> Result<String, Failed> {
     let mut file = File::open(path).map_err(|e| {
-        writeln!(out, "could not open file at path: {path:?}").unwrap();
+        writeln!(out, "could not open file at path '{path:?}': {e}").unwrap();
         let f: Failed = out.into();
         f
     })?;
 
     let mut s = String::new();
     file.read_to_string(&mut s).map_err(|e| {
-        writeln!(out, "could not read file at path: {path:?}").unwrap();
+        writeln!(out, "could not read file at path: '{path:?}': {e} ").unwrap();
         let f: Failed = out.into();
         f
     })?;
