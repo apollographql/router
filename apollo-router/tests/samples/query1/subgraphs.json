@@ -1,1 +1,10 @@
-{}
+{
+    "accounts": {
+        "requests": [
+            {
+                "request": {"query":"{me{name}}"},
+                "response": {"data": { "me": { "name": "test" } } }
+            }
+        ]
+    }
+}

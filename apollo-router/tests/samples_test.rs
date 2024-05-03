@@ -90,6 +90,9 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
             .listener(listener)
             .start()
             .await;
+
+        writeln!(&mut out, "subgraphs listening on {url}").unwrap();
+
         let mut subgraph_overrides = HashMap::new();
 
         for (name, subgraph) in subgraphs {
@@ -132,6 +135,20 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
         })?;
 
         if expected_response != graphql_response {
+            if let Some(requests) = subgraphs_server.received_requests().await {
+                writeln!(&mut out, "subgraphs received requests:").unwrap();
+                for request in requests {
+                    writeln!(
+                        &mut out,
+                        "\t{}\n",
+                        std::str::from_utf8(&request.body).unwrap()
+                    )
+                    .unwrap();
+                }
+            } else {
+                writeln!(&mut out, "subgraphs received no requests").unwrap();
+            }
+
             writeln!(&mut out, "assertion `left == right` failed").unwrap();
             writeln!(
                 &mut out,
