@@ -425,9 +425,10 @@ async fn defer_if_condition() {
     let schema = include_str!("testdata/defer_clause.graphql");
     // we need to use the planner here instead of Schema::parse_test because that one uses the router bridge's api_schema function
     // does not keep the defer directive definition
-    let planner = BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()))
-        .await
-        .unwrap();
+    let planner =
+        BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()), None)
+            .await
+            .unwrap();
     let schema = planner.schema();
 
     let root: PlanNode =
