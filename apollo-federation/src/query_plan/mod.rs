@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
-use apollo_compiler::executable::Field;
-use apollo_compiler::executable::InlineFragment;
+use apollo_compiler::executable;
 use apollo_compiler::executable::Name;
-use apollo_compiler::executable::OperationType;
-use apollo_compiler::executable::Selection;
-use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
@@ -73,13 +69,13 @@ pub struct FetchNode {
     /// `FragmentSpread`.
     // PORT_NOTE: This was its own type in the JS codebase, but it's likely simpler to just have the
     // constraint be implicit for router instead of creating a new type.
-    pub requires: Option<Vec<Selection>>,
+    pub requires: Option<Vec<executable::Selection>>,
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.
     pub operation_document: Valid<ExecutableDocument>,
     pub operation_name: Option<NodeStr>,
-    pub operation_kind: OperationType,
+    pub operation_kind: executable::OperationType,
     /// Optionally describe a number of "rewrites" that query plan executors should apply to the
     /// data that is sent as the input of this fetch. Note that such rewrites should only impact the
     /// inputs of the fetch they are applied to (meaning that, as those inputs are collected from
@@ -143,7 +139,7 @@ pub struct PrimaryDeferBlock {
     /// sub-selection will start at that parent `DeferredNode.query_path`. Note that this can be
     /// `None` in the rare case that everything in the original query is deferred (which is not very
     /// useful  in practice, but not disallowed by the @defer spec at the moment).
-    pub sub_selection: Option<SelectionSet>,
+    pub sub_selection: Option<executable::SelectionSet>,
     /// The plan to get all the data for the primary block. Same notes as for subselection: usually
     /// defined, but can be undefined in some corner cases where nothing is to be done in the
     /// primary block.
@@ -163,7 +159,7 @@ pub struct DeferredDeferBlock {
     pub query_path: Vec<QueryPathElement>,
     /// The part of the original query that "selects" the data to send in the deferred response
     /// (once the plan in `node` completes). Will be set _unless_ `node` is a `DeferNode` itself.
-    pub sub_selection: Option<SelectionSet>,
+    pub sub_selection: Option<executable::SelectionSet>,
     /// The plan to get all the data for this deferred block. Usually set, but can be `None` for a
     /// `@defer` application where everything has been fetched in the "primary block" (i.e. when
     /// this deferred block only exists to expose what should be send to the upstream client in a
@@ -241,8 +237,8 @@ pub enum FetchDataPathElement {
 /// an inline fragment in a query.
 #[derive(Debug, Clone)]
 pub enum QueryPathElement {
-    Field(Field),
-    InlineFragment(InlineFragment),
+    Field(executable::Field),
+    InlineFragment(executable::InlineFragment),
 }
 
 impl QueryPlan {

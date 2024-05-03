@@ -1,6 +1,5 @@
+use apollo_compiler::executable;
 use apollo_compiler::executable::FieldSet;
-use apollo_compiler::executable::Selection;
-use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
@@ -74,7 +73,7 @@ pub(crate) fn parse_field_set_without_normalization(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
     value: NodeStr,
-) -> Result<SelectionSet, FederationError> {
+) -> Result<executable::SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set = FieldSet::parse_and_validate(
@@ -134,18 +133,18 @@ pub(crate) fn collect_target_fields_from_field_set(
         // selections in reverse order to fix it.
         for selection in selection_set.selections.iter().rev() {
             match selection {
-                Selection::Field(field) => {
+                executable::Selection::Field(field) => {
                     fields.push(parent_type_position.field(field.name.clone())?);
                     if !field.selection_set.selections.is_empty() {
                         stack.push(&field.selection_set);
                     }
                 }
-                Selection::FragmentSpread(_) => {
+                executable::Selection::FragmentSpread(_) => {
                     return Err(FederationError::internal(
                         "Unexpectedly encountered fragment spread in FieldSet.",
                     ));
                 }
-                Selection::InlineFragment(inline_fragment) => {
+                executable::Selection::InlineFragment(inline_fragment) => {
                     stack.push(&inline_fragment.selection_set);
                 }
             }
