@@ -45,11 +45,13 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use multimap::MultiMap;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::query_graph::graph_path::selection_of_element;
 use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
@@ -955,6 +957,24 @@ impl NormalizedSelection {
     pub(crate) fn contains(&self, other: &NormalizedSelection) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
+
+    /// Apply the `mapper` to self.selection_set, if it exists, and return a new `NormalizedSelection`.
+    /// - Note: The returned selection may have no subselection set or an empty one if the mapper
+    ///         returns so, which may make the returned selection invalid. It's caller's responsibility
+    ///         to appropriately handle invalid return values.
+    pub(crate) fn map_selection_set(
+        &self,
+        mapper: &mut dyn FnMut(
+            &NormalizedSelectionSet,
+        ) -> Result<Option<NormalizedSelectionSet>, FederationError>,
+    ) -> Result<Self, FederationError> {
+        if let Some(selection_set) = self.selection_set()? {
+            self.with_updated_selection_set(mapper(selection_set)?)
+        } else {
+            // selection has no (sub-)selection set.
+            Ok(self.clone())
+        }
+    }
 }
 
 impl HasNormalizedSelectionKey for NormalizedSelection {
@@ -975,6 +995,18 @@ impl HasNormalizedSelectionKey for NormalizedSelection {
 pub(crate) enum NormalizedSelectionOrSet {
     Selection(NormalizedSelection),
     SelectionSet(NormalizedSelectionSet),
+}
+
+impl From<NormalizedSelection> for NormalizedSelectionOrSet {
+    fn from(selection: NormalizedSelection) -> Self {
+        Self::Selection(selection)
+    }
+}
+
+impl From<NormalizedSelectionSet> for NormalizedSelectionOrSet {
+    fn from(selections: NormalizedSelectionSet) -> Self {
+        Self::SelectionSet(selections)
+    }
 }
 
 /// An analogue of the apollo-compiler type `Fragment` with these changes:
@@ -1197,11 +1229,14 @@ mod normalized_field_selection {
             self.alias.clone().unwrap_or_else(|| self.name().clone())
         }
 
-        pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
+        pub(crate) fn base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
             let definition = self.field_position.get(self.schema.schema())?;
-            let base_type_position = self
-                .schema
-                .get_type(definition.ty.inner_named_type().clone())?;
+            self.schema
+                .get_type(definition.ty.inner_named_type().clone())
+        }
+
+        pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
+            let base_type_position = self.base_type()?;
             Ok(matches!(
                 base_type_position,
                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
@@ -1691,7 +1726,7 @@ mod normalized_inline_fragment_selection {
             }
         }
 
-        fn casted_type(&self) -> CompositeTypeDefinitionPosition {
+        pub(super) fn casted_type(&self) -> CompositeTypeDefinitionPosition {
             self.type_condition_position
                 .clone()
                 .unwrap_or_else(|| self.parent_type_position.clone())
@@ -2287,10 +2322,194 @@ impl NormalizedSelectionSet {
         Ok(conditions)
     }
 
+    fn make_selection(
+        schema: &ValidFederationSchema,
+        parent_type: &CompositeTypeDefinitionPosition,
+        updates: Vec<NormalizedSelection>,
+    ) -> Result<Option<NormalizedSelection>, FederationError> {
+        let Some((first, rest)) = updates.split_first() else {
+            // PORT_NOTE: The TypeScript version asserts here.
+            return Err(FederationError::internal(
+                "Should not be called without any updates",
+            ));
+        };
+        if rest.is_empty() {
+            // Optimize for the simple case of a single selection, as we don't have to do anything
+            // complex to merge the sub-selections.
+            return first.rebase_on(
+                parent_type,
+                /*named_fragments*/ &Default::default(),
+                schema,
+                RebaseErrorHandlingOption::ThrowError,
+            );
+        }
+
+        let element = first.element()?.rebase_on(
+            parent_type,
+            schema,
+            RebaseErrorHandlingOption::ThrowError,
+        )?;
+        let Some(element) = element else {
+            return Err(FederationError::internal(
+                "Unable to rebase selection updates",
+            ));
+        };
+        let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> = match element {
+            OpPathElement::Field(ref field) => field.data().base_type()?.try_into().ok(),
+            OpPathElement::InlineFragment(ref inline) => Some(inline.data().casted_type()),
+        };
+
+        let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
+            // This is a leaf, so all updates should correspond ot the same field and we just use the first.
+            return Ok(Some(selection_of_element(
+                element, /*sub_selection*/ None,
+            )?));
+        };
+
+        // This case has a sub-selection. Merge all sub-selection updates.
+        let mut sub_selection_updates: MultiMap<NormalizedSelectionKey, NormalizedSelection> =
+            MultiMap::new();
+        for update in updates {
+            if let Some(sub_selection_set) = update.selection_set()? {
+                sub_selection_updates.extend(
+                    sub_selection_set
+                        .selections
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone())),
+                );
+            }
+        }
+        let updated_sub_selection = Some(Self::make_selection_set(
+            schema,
+            sub_selection_parent_type,
+            sub_selection_updates,
+        )?);
+        Ok(Some(selection_of_element(element, updated_sub_selection)?))
+    }
+
+    fn make_selection_set(
+        schema: &ValidFederationSchema,
+        parent_type: &CompositeTypeDefinitionPosition,
+        updated_selections: MultiMap<NormalizedSelectionKey, NormalizedSelection>,
+    ) -> Result<NormalizedSelectionSet, FederationError> {
+        let mut selections = NormalizedSelectionMap::new();
+        for (_key, updates) in updated_selections.into_iter() {
+            if let Some(selection) = Self::make_selection(schema, parent_type, updates)? {
+                selections.insert(selection);
+            }
+        }
+        Ok(NormalizedSelectionSet {
+            schema: schema.clone(),
+            type_position: parent_type.clone(),
+            selections: Arc::new(selections),
+        })
+    }
+
+    // PORT_NOTE: Some features of the TypeScript `lazyMap` were not ported:
+    // - `parentType` (optional) parameter: This is only used in `SelectionSet.normalize` method,
+    //   but its Rust version doesn't use `lazy_map`.
+    // - `mapper` may return `PathBasedUpdate`.
+    //   The `PathBasedUpdate` case is only used in `withFieldAliased` function in the TypeScript
+    //   version, but its Rust version doesn't use `lazy_map`.
+    // PORT_NOTE #2: Taking ownership of `self` in this method was considered. However, calling
+    // `Arc::make_mut` on the `Arc` fields of `self` didn't seem better than cloning Arc instances.
+    pub(crate) fn lazy_map(
+        &self,
+        mapper: &mut dyn FnMut(
+            &NormalizedSelection,
+        )
+            -> Result<Option<NormalizedSelectionOrSet>, FederationError>,
+    ) -> Result<NormalizedSelectionSet, FederationError> {
+        // Note: If `changed` is false, then `updated_selections` must be empty.
+        // However, `changed` can be true and `updated_selections` is empty when
+        // all of the selections up to that point are removed.
+        let mut changed = false;
+        let mut updated_selections: MultiMap<NormalizedSelectionKey, NormalizedSelection> =
+            MultiMap::new();
+
+        for (index, selection) in self.selections.values().enumerate() {
+            let updated = mapper(selection)?;
+            if let Some(NormalizedSelectionOrSet::Selection(ref updated)) = updated {
+                if !changed && *updated == *selection {
+                    continue; // No change so far => skip
+                }
+            }
+            // Otherwise, journal the change
+            if !changed {
+                // If this is the first change, we copy all the previously identical selections.
+                changed = true;
+                updated_selections.extend(
+                    self.selections
+                        .iter()
+                        .take(index)
+                        .map(|(k, v)| (k.clone(), v.clone())),
+                );
+            }
+            let Some(updated) = updated else {
+                // This selection is removed.
+                continue;
+            };
+            match updated {
+                NormalizedSelectionOrSet::Selection(new_selection) => {
+                    updated_selections.insert(new_selection.key(), new_selection);
+                }
+                NormalizedSelectionOrSet::SelectionSet(new_selections) => {
+                    updated_selections.extend(
+                        new_selections
+                            .selections
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone())),
+                    );
+                }
+            };
+        }
+
+        if !changed {
+            Ok(self.clone())
+        } else {
+            Self::make_selection_set(&self.schema, &self.type_position, updated_selections)
+        }
+    }
+
     pub(crate) fn add_back_typename_in_attachments(
         &self,
     ) -> Result<NormalizedSelectionSet, FederationError> {
-        todo!()
+        self.lazy_map(&mut |selection| {
+            let selection_element = selection.element()?;
+            let updated = selection
+                .map_selection_set(&mut |ss| ss.add_back_typename_in_attachments().map(Some))?;
+            let Some(sibling_typename) = selection_element.sibling_typename() else {
+                // No sibling typename to add back
+                return Ok(Some(updated.into()));
+            };
+            // We need to add the query __typename for the current type in the current group.
+            // Note that the value of the sibling_typename is the alias or "" if there is no alias
+            let alias = if sibling_typename == "" {
+                None
+            } else {
+                Some(sibling_typename.clone())
+            };
+            let field_position = selection
+                .element()?
+                .parent_type_position()
+                .introspection_typename_field();
+            let field_element = NormalizedField::new(NormalizedFieldData {
+                schema: self.schema.clone(),
+                field_position,
+                alias,
+                arguments: Default::default(),
+                directives: Default::default(),
+                sibling_typename: None,
+            });
+            let typename_selection =
+                selection_of_element(field_element.into(), /*subselection*/ None)?;
+            let mut result = NormalizedSelectionSet::from_selection(
+                self.type_position.clone(),
+                typename_selection,
+            );
+            result.merge_selections_into([updated].iter())?;
+            Ok(Some(result.into()))
+        })
     }
 
     pub(crate) fn add_typename_field_for_abstract_types(
@@ -6507,5 +6726,182 @@ type T {
           }
         }
         "###);
+    }
+
+    #[cfg(test)]
+    mod lazy_map_tests {
+        use super::super::*;
+        use super::*;
+
+        fn contains_field(ss: &NormalizedSelectionSet, field_name: &Name) -> bool {
+            ss.selections.contains_key(&NormalizedSelectionKey::Field {
+                response_name: field_name.clone(),
+                directives: Default::default(),
+            })
+        }
+
+        fn is_named_field(sk: &NormalizedSelectionKey, name: &Name) -> bool {
+            matches!(sk,
+                NormalizedSelectionKey::Field { response_name, directives: _ }
+                    if *response_name == *name)
+        }
+
+        // recursive filter implementation using `lazy_map`
+        fn filter_rec(
+            ss: &NormalizedSelectionSet,
+            pred: &impl Fn(&NormalizedSelection) -> bool,
+        ) -> Result<NormalizedSelectionSet, FederationError> {
+            ss.lazy_map(&mut |s| {
+                if !pred(s) {
+                    return Ok(None);
+                }
+                match s.selection_set()? {
+                    // Base case: leaf field
+                    None => Ok(Some(s.clone().into())),
+
+                    // Recursive case: non-leaf field
+                    Some(inner_ss) => {
+                        let updated_ss = filter_rec(inner_ss, pred).map(Some)?;
+                        // see if `updated_ss` is an non-empty selection set.
+                        if matches!(updated_ss, Some(ref sub_ss) if !sub_ss.is_empty()) {
+                            s.with_updated_selection_set(updated_ss)
+                                .map(|ss| Some(ss.into()))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                }
+            })
+        }
+
+        const SAMPLE_OPERATION_DOC: &str = r#"
+        type Query {
+            foo: Foo!
+            some_int: Int!
+            foo2: Foo!
+        }
+
+        type Foo {
+            id: ID!
+            bar: String!
+            baz: Int
+        }
+
+        query TestQuery {
+            foo {
+                id
+                bar
+            },
+            some_int
+            foo2 {
+                bar
+            }
+        }
+        "#;
+
+        // Tests `lazy_map` via `filter_rec` function.
+        #[test]
+        fn test_lazy_map() {
+            let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
+            let normalized_operation = normalize_operation(
+                executable_document.get_operation(None).unwrap(),
+                &Default::default(),
+                &schema,
+                &Default::default(),
+            )
+            .unwrap();
+
+            let selection_set = normalized_operation.selection_set;
+
+            // Select none
+            let select_none = filter_rec(&selection_set, &|_| false).unwrap();
+            assert!(select_none.is_empty());
+
+            // Select all
+            let select_all = filter_rec(&selection_set, &|_| true).unwrap();
+            assert!(select_all == selection_set);
+
+            // Remove `foo`
+            let remove_foo = filter_rec(&selection_set, &|s| {
+                !is_named_field(&s.key(), &name!("foo"))
+            })
+            .unwrap();
+            assert!(contains_field(&remove_foo, &name!("some_int")));
+            assert!(contains_field(&remove_foo, &name!("foo2")));
+            assert!(!contains_field(&remove_foo, &name!("foo")));
+
+            // Remove `bar`
+            let remove_bar = filter_rec(&selection_set, &|s| {
+                !is_named_field(&s.key(), &name!("bar"))
+            })
+            .unwrap();
+            // "foo2" should be removed, since it has no sub-selections left.
+            assert!(!contains_field(&remove_bar, &name!("foo2")));
+        }
+
+        fn add_typename_if(
+            ss: &NormalizedSelectionSet,
+            pred: &impl Fn(&NormalizedSelection) -> bool,
+        ) -> Result<NormalizedSelectionSet, FederationError> {
+            ss.lazy_map(&mut |s| {
+                let to_add_typename = pred(s);
+                let updated = s.map_selection_set(&mut |ss| add_typename_if(ss, pred).map(Some))?;
+                if !to_add_typename {
+                    return Ok(Some(updated.into()));
+                }
+
+                let parent_type_pos = s.element()?.parent_type_position();
+                // start with the `updated` selection.
+                let mut result =
+                    NormalizedSelectionSet::from_selection(parent_type_pos.clone(), updated);
+                // add "__typename" field
+                let field_position = parent_type_pos.introspection_typename_field();
+                let field_element = NormalizedField::new(NormalizedFieldData {
+                    schema: s.schema().clone(),
+                    field_position,
+                    alias: None,
+                    arguments: Default::default(),
+                    directives: Default::default(),
+                    sibling_typename: None,
+                });
+                let typename_selection =
+                    selection_of_element(field_element.into(), /*subselection*/ None)?;
+                result.merge_selections_into([typename_selection].iter())?;
+                // done
+                Ok(Some(result.into()))
+            })
+        }
+
+        // Tests `lazy_map` via `add_typename_if` function.
+        #[test]
+        fn test_lazy_map2() {
+            let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
+            let normalized_operation = normalize_operation(
+                executable_document.get_operation(None).unwrap(),
+                &Default::default(),
+                &schema,
+                &Default::default(),
+            )
+            .unwrap();
+
+            let selection_set = normalized_operation.selection_set;
+
+            // Add __typename next to any "id" field.
+            let result =
+                add_typename_if(&selection_set, &|s| is_named_field(&s.key(), &name!("id")))
+                    .unwrap();
+
+            // Check if "foo" has "__typename".
+            let (_, foo) = result
+                .selections
+                .iter()
+                .find(|(k, _v)| is_named_field(k, &name!("foo")))
+                .unwrap();
+            let foo_selection_set = foo.selection_set().unwrap().unwrap();
+            // The top level won't have __typename, since it doesn't have "id".
+            assert!(!contains_field(&result, &name!("__typename")));
+            // The "foo" should have __typename, since it has "id".
+            assert!(contains_field(foo_selection_set, &name!("__typename")));
+        }
     }
 }

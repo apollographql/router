@@ -44,6 +44,7 @@ use crate::query_plan::operation::NormalizedInlineFragmentData;
 use crate::query_plan::operation::NormalizedInlineFragmentSelection;
 use crate::query_plan::operation::NormalizedSelection;
 use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::RebaseErrorHandlingOption;
 use crate::query_plan::operation::SelectionId;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
@@ -405,6 +406,22 @@ impl OpPathElement {
                     Some(self.with_updated_directives(updated_directives))
                 }
             }
+        }
+    }
+
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        error_handling: RebaseErrorHandlingOption,
+    ) -> Result<Option<OpPathElement>, FederationError> {
+        match self {
+            OpPathElement::Field(field) => field
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
+            OpPathElement::InlineFragment(inline) => inline
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
         }
     }
 }
