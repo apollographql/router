@@ -65,7 +65,7 @@ fn generate_legacy(
         doc,
         operation_name,
         schema,
-        &ApolloSignatureNormalizationAlgorithm::Legacy,
+        &SignatureNormalizationAlgorithm::Legacy,
     )
 }
 
@@ -80,7 +80,7 @@ fn generate_enhanced(
         doc,
         operation_name,
         schema,
-        &ApolloSignatureNormalizationAlgorithm::Enhanced,
+        &SignatureNormalizationAlgorithm::Enhanced,
     )
 }
 
