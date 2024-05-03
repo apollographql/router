@@ -1,0 +1,109 @@
+# This is an invalid supergraph generated with a version of JS composition
+# that does not validate satisfiability.
+#
+# File: validation_errors.test.ts
+# Test name: when shared field has non-intersecting runtime types in different subgraphs errors for unions
+
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+  overrideLabel: String
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+type A @join__type(graph: A) {
+  a: Int
+}
+
+type B @join__type(graph: A) {
+  b: Int
+}
+
+type C @join__type(graph: B) {
+  c: Int
+}
+
+type D @join__type(graph: B) {
+  d: Int
+}
+
+type E @join__type(graph: A, key: "id") @join__type(graph: B, key: "id") {
+  id: ID!
+  s: U!
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "A", url: "")
+  B @join__graph(name: "B", url: "")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query @join__type(graph: A) @join__type(graph: B) {
+  e: E! @join__field(graph: A)
+}
+
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "A")
+  @join__unionMember(graph: A, member: "B")
+  @join__unionMember(graph: B, member: "C")
+  @join__unionMember(graph: B, member: "D") =
+    A
+  | B
+  | C
+  | D

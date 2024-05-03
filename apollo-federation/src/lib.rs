@@ -2,6 +2,7 @@
 
 mod api_schema;
 mod compat;
+mod composition;
 pub mod error;
 mod indented_display;
 pub mod link;

@@ -1,0 +1,109 @@
+# This is an invalid supergraph generated with a version of JS composition
+# that does not validate satisfiability.
+#
+# subgraphs:
+#  A:
+#    routing_url: http://a
+#    schema:
+#      sdl: |
+#        type Query {
+#          as: [A]
+#        }
+#
+#        type A @key(fields: "id", resolvable: false) {
+#          id: ID!
+#          x: Int @shareable
+#          y: Int
+#        }
+#  B:
+#    routing_url: http://b
+#    schema:
+#      sdl: |
+#        type Query {
+#          a: A
+#        }
+#
+#        type A @key(fields: "id") {
+#          id: ID!
+#          x: Int @shareable
+#        }
+
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+  overrideLabel: String
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+type A
+  @join__type(graph: A, key: "id", resolvable: false)
+  @join__type(graph: B, key: "id") {
+  id: ID!
+  x: Int
+  y: Int @join__field(graph: A)
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "A", url: "")
+  B @join__graph(name: "B", url: "")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query @join__type(graph: A) @join__type(graph: B) {
+  as: [A] @join__field(graph: A)
+  a: A @join__field(graph: B)
+}

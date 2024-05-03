@@ -24,6 +24,7 @@ strum = "0.26.0"
 strum_macros = "0.26.0"
 thiserror = "1.0"
 url = "2"
+itertools = "0.12.1"
 
 [dev-dependencies]
 insta.workspace = true

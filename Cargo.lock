@@ -226,6 +226,7 @@ dependencies = [
  "derive_more",
  "indexmap 2.2.3",
  "insta",
+ "itertools 0.12.1",
  "lazy_static",
  "multimap 0.10.0",
  "petgraph",

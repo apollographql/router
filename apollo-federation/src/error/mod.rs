@@ -13,7 +13,7 @@ use crate::subgraph::spec::FederationSpecError;
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.
 #[derive(Clone, Debug, strum_macros::Display)]
-enum SchemaRootKind {
+pub(crate) enum SchemaRootKind {
     #[strum(to_string = "query")]
     Query,
     #[strum(to_string = "mutation")]
