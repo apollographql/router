@@ -8,5 +8,5 @@ platform:
   os: "[os]"
   continuous_integration: "[ci]"
 usage:
+  configuration.<redacted>.<redacted>: 1
   configuration.plugins.len: 0
-
