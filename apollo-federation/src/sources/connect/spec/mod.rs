@@ -2,30 +2,29 @@ mod directives;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
 
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Name;
+use apollo_compiler::name;
+use apollo_compiler::Schema;
 pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;
+use lazy_static::lazy_static;
 pub(crate) use schema::ConnectHTTPArguments;
 pub(crate) use schema::HTTPHeaderOption;
 pub(crate) use schema::SourceHTTPArguments;
 
-use apollo_compiler::{
-    ast::{Directive, Name},
-    name, Schema,
-};
-use lazy_static::lazy_static;
-
-use crate::{
-    error::FederationError,
-    link::{
-        database::links_metadata,
-        spec::{Identity, Url, Version, APOLLO_SPEC_DOMAIN},
-        spec_definition::{SpecDefinition, SpecDefinitions},
-        Link,
-    },
-    schema::FederationSchema,
-};
-
-use self::schema::{CONNECT_DIRECTIVE_NAME_IN_SPEC, SOURCE_DIRECTIVE_NAME_IN_SPEC};
+use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
+use self::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use crate::error::FederationError;
+use crate::link::database::links_metadata;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec::APOLLO_SPEC_DOMAIN;
+use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitions;
+use crate::link::Link;
+use crate::schema::FederationSchema;
 
 pub(crate) struct ConnectSpecDefinition {
     url: Url,

@@ -1,13 +1,19 @@
+use std::sync::Arc;
+
+use apollo_compiler::executable::Name;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+use petgraph::stable_graph::StableDiGraph;
+
 use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::query_plan::FetchDataPathElement;
-use crate::sources::{SourceFetchDependencyGraphNode, SourceFetchDependencyGraphs, SourceId};
-use apollo_compiler::executable::Name;
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::stable_graph::StableDiGraph;
-use std::sync::Arc;
+use crate::sources::SourceFetchDependencyGraphNode;
+use crate::sources::SourceFetchDependencyGraphs;
+use crate::sources::SourceId;
 
 #[derive(Debug)]
 pub(crate) struct FetchDependencyGraph {

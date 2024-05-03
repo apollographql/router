@@ -1,30 +1,42 @@
+use std::sync::Arc;
+
+use apollo_compiler::executable::OperationType;
+use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use petgraph::graph::EdgeIndex;
+
 use crate::error::FederationError;
 use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::query_plan::query_planner::QueryPlannerConfig;
-use crate::schema::position::{
-    AbstractFieldDefinitionPosition, AbstractTypeDefinitionPosition,
-    CompositeTypeDefinitionPosition, EnumTypeDefinitionPosition, ObjectFieldDefinitionPosition,
-    ObjectOrInterfaceFieldDirectivePosition, ObjectTypeDefinitionPosition,
-    ScalarTypeDefinitionPosition, SchemaRootDefinitionKind,
-};
+use crate::schema::position::AbstractFieldDefinitionPosition;
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
-use crate::source_aware::federated_query_graph::graph_path::{
-    ConditionResolutionId, OperationPathElement,
-};
+use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
+use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
 use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
-use crate::source_aware::federated_query_graph::{FederatedQueryGraph, SelfConditionIndex};
-use crate::source_aware::query_plan::{FetchDataPathElement, QueryPlanCost};
-use crate::sources::{
-    SourceFederatedQueryGraphBuilderApi, SourceFetchDependencyGraphApi,
-    SourceFetchDependencyGraphNode, SourceFetchNode, SourceId, SourcePath, SourcePathApi,
-};
+use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+use crate::source_aware::federated_query_graph::SelfConditionIndex;
+use crate::source_aware::query_plan::FetchDataPathElement;
+use crate::source_aware::query_plan::QueryPlanCost;
+use crate::sources::SourceFederatedQueryGraphBuilderApi;
+use crate::sources::SourceFetchDependencyGraphApi;
+use crate::sources::SourceFetchDependencyGraphNode;
+use crate::sources::SourceFetchNode;
+use crate::sources::SourceId;
+use crate::sources::SourcePath;
+use crate::sources::SourcePathApi;
 use crate::ValidFederationSubgraph;
-use apollo_compiler::executable::{OperationType, VariableDefinition};
-use apollo_compiler::validation::Valid;
-use apollo_compiler::{ExecutableDocument, Node, NodeStr};
-use indexmap::IndexMap;
-use petgraph::graph::EdgeIndex;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct GraphqlId {

@@ -1,28 +1,32 @@
 use apollo_compiler::ast::Name;
-use indexmap::{map::Entry, IndexMap, IndexSet};
+use indexmap::map::Entry;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use petgraph::prelude::NodeIndex;
 
-use crate::{
-    error::FederationError,
-    schema::{
-        position::{ObjectOrInterfaceFieldDefinitionPosition, TypeDefinitionPosition},
-        ValidFederationSchema,
-    },
-    source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi,
-    sources::{
-        connect::ConnectFederatedScalarQueryGraphNode, SourceFederatedConcreteFieldQueryGraphEdge,
-        SourceFederatedConcreteQueryGraphNode, SourceFederatedEnumQueryGraphNode,
-        SourceFederatedQueryGraphBuilderApi, SourceFederatedScalarQueryGraphNode, SourceId,
-    },
-    ValidFederationSubgraph,
-};
-
-use super::{
-    models::Connector,
-    selection_parser::{NamedSelection, PathSelection, Property, SubSelection},
-    ConnectFederatedConcreteFieldQueryGraphEdge, ConnectFederatedConcreteQueryGraphNode,
-    ConnectFederatedEnumQueryGraphNode, ConnectFederatedQueryGraphBuilder, Selection,
-};
+use super::models::Connector;
+use super::selection_parser::NamedSelection;
+use super::selection_parser::PathSelection;
+use super::selection_parser::Property;
+use super::selection_parser::SubSelection;
+use super::ConnectFederatedConcreteFieldQueryGraphEdge;
+use super::ConnectFederatedConcreteQueryGraphNode;
+use super::ConnectFederatedEnumQueryGraphNode;
+use super::ConnectFederatedQueryGraphBuilder;
+use super::Selection;
+use crate::error::FederationError;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::ValidFederationSchema;
+use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+use crate::sources::connect::ConnectFederatedScalarQueryGraphNode;
+use crate::sources::SourceFederatedConcreteFieldQueryGraphEdge;
+use crate::sources::SourceFederatedConcreteQueryGraphNode;
+use crate::sources::SourceFederatedEnumQueryGraphNode;
+use crate::sources::SourceFederatedQueryGraphBuilderApi;
+use crate::sources::SourceFederatedScalarQueryGraphNode;
+use crate::sources::SourceId;
+use crate::ValidFederationSubgraph;
 
 impl SourceFederatedQueryGraphBuilderApi for ConnectFederatedQueryGraphBuilder {
     fn process_subgraph_schema(
@@ -383,13 +387,11 @@ mod tests {
     use apollo_compiler::Schema;
     use insta::assert_snapshot;
 
-    use crate::{
-        query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph,
-        schema::FederationSchema, sources::SourceFederatedQueryGraphBuilderApi,
-        ValidFederationSubgraphs,
-    };
-
     use super::ConnectFederatedQueryGraphBuilder;
+    use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
+    use crate::schema::FederationSchema;
+    use crate::sources::SourceFederatedQueryGraphBuilderApi;
+    use crate::ValidFederationSubgraphs;
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -608,31 +610,30 @@ mod tests {
     mod mock {
         use std::fmt::Display;
 
-        use apollo_compiler::ast::{Name, NamedType};
+        use apollo_compiler::ast::Name;
+        use apollo_compiler::ast::NamedType;
         use indexmap::IndexSet;
         use itertools::Itertools;
-        use petgraph::{
-            dot::{Config, Dot},
-            prelude::{EdgeIndex, NodeIndex},
-            Graph,
-        };
+        use petgraph::dot::Config;
+        use petgraph::dot::Dot;
+        use petgraph::prelude::EdgeIndex;
+        use petgraph::prelude::NodeIndex;
+        use petgraph::Graph;
 
-        use crate::{
-            error::FederationError,
-            source_aware::federated_query_graph::{
-                builder::IntraSourceQueryGraphBuilderApi, SelfConditionIndex,
-            },
-            sources::{
-                connect::{
-                    selection_parser::Property, ConnectFederatedConcreteFieldQueryGraphEdge,
-                },
-                SourceFederatedAbstractFieldQueryGraphEdge,
-                SourceFederatedConcreteFieldQueryGraphEdge, SourceFederatedConcreteQueryGraphNode,
-                SourceFederatedEnumQueryGraphNode, SourceFederatedQueryGraph,
-                SourceFederatedScalarQueryGraphNode, SourceFederatedSourceEnteringQueryGraphEdge,
-                SourceFederatedTypeConditionQueryGraphEdge, SourceId,
-            },
-        };
+        use crate::error::FederationError;
+        use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+        use crate::source_aware::federated_query_graph::SelfConditionIndex;
+        use crate::sources::connect::selection_parser::Property;
+        use crate::sources::connect::ConnectFederatedConcreteFieldQueryGraphEdge;
+        use crate::sources::SourceFederatedAbstractFieldQueryGraphEdge;
+        use crate::sources::SourceFederatedConcreteFieldQueryGraphEdge;
+        use crate::sources::SourceFederatedConcreteQueryGraphNode;
+        use crate::sources::SourceFederatedEnumQueryGraphNode;
+        use crate::sources::SourceFederatedQueryGraph;
+        use crate::sources::SourceFederatedScalarQueryGraphNode;
+        use crate::sources::SourceFederatedSourceEnteringQueryGraphEdge;
+        use crate::sources::SourceFederatedTypeConditionQueryGraphEdge;
+        use crate::sources::SourceId;
 
         /// A mock query Node
         #[derive(Clone)]

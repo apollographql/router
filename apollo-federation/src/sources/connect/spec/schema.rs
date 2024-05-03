@@ -1,5 +1,6 @@
+use apollo_compiler::name;
 use apollo_compiler::schema::Name;
-use apollo_compiler::{name, NodeStr};
+use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
