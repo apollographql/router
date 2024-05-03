@@ -9,8 +9,8 @@
 //! APIs for modifications that keep the key up-to-date.
 //! - The selection type contains the element type and, for composite fields, a subselection.
 //!
-//! For example, for fields, the data type is [`NormalizedFieldData`], the element type is
-//! [`NormalizedField`], and the selection type is [`NormalizedFieldSelection`].
+//! For example, for fields, the data type is `NormalizedFieldData`, the element type is
+//! `NormalizedField`, and the selection type is `NormalizedFieldSelection`.
 
 use std::borrow::Cow;
 use std::collections::HashMap;

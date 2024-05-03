@@ -166,7 +166,9 @@ pub trait AppliedFederationLink {
 macro_rules! applied_specification {
     ($($t:ty),+) => {
         $(impl AppliedFederationLink for $t {
+            /// ```
             /// @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+            /// ```
             fn applied_link_directive(&self) -> Directive {
                 let imports = self
                     .link

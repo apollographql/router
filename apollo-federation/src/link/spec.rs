@@ -31,7 +31,7 @@ impl From<SpecError> for FederationError {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Identity {
     /// The "domain" of which the specification this identifies is part of.
-    /// For instance, "https://specs.apollo.dev".
+    /// For instance, `"https://specs.apollo.dev"`.
     pub domain: String,
 
     /// The name of the specification this identifies.
