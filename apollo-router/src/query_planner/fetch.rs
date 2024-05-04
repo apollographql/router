@@ -4,12 +4,14 @@ use std::fmt::Display;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use apollo_compiler::ast;
+use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use json_ext::PathElement;
-use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -74,22 +76,22 @@ impl OperationKind {
     }
 }
 
-impl From<OperationKind> for apollo_compiler::ast::OperationType {
+impl From<OperationKind> for ast::OperationType {
     fn from(value: OperationKind) -> Self {
         match value {
-            OperationKind::Query => apollo_compiler::ast::OperationType::Query,
-            OperationKind::Mutation => apollo_compiler::ast::OperationType::Mutation,
-            OperationKind::Subscription => apollo_compiler::ast::OperationType::Subscription,
+            OperationKind::Query => ast::OperationType::Query,
+            OperationKind::Mutation => ast::OperationType::Mutation,
+            OperationKind::Subscription => ast::OperationType::Subscription,
         }
     }
 }
 
-impl From<apollo_compiler::ast::OperationType> for OperationKind {
-    fn from(value: apollo_compiler::ast::OperationType) -> Self {
+impl From<ast::OperationType> for OperationKind {
+    fn from(value: ast::OperationType) -> Self {
         match value {
-            apollo_compiler::ast::OperationType::Query => OperationKind::Query,
-            apollo_compiler::ast::OperationType::Mutation => OperationKind::Mutation,
-            apollo_compiler::ast::OperationType::Subscription => OperationKind::Subscription,
+            ast::OperationType::Query => OperationKind::Query,
+            ast::OperationType::Mutation => OperationKind::Mutation,
+            ast::OperationType::Subscription => OperationKind::Subscription,
         }
     }
 }
@@ -254,60 +256,117 @@ pub(crate) struct Variables {
     pub(crate) contextual_args: Option<(HashSet<String>, usize)>,
 }
 
-// If contextual_args is set, then all contextual arguments need to be expanded. Non-contextual arguments
-// must be preserved
-fn expand_contextual_args(args: &str, arg_set: &HashSet<String>, count: usize) -> String {
-    // it's easiest to just add the $ back in later.
-    let mut expanded_str = String::new();
-    for pair in args.split('$') {
-        let mut parts = pair.split(':');
-        if let (Some(named_param), Some(param_type)) = (parts.next(), parts.next()) {
-            if arg_set.contains(named_param) {
-                for i in 0..count {
-                    expanded_str.push_str(&format!("${}_{}:{}", &named_param, i, param_type));
-                }
-            } else {
-                expanded_str.push_str(&format!("{}:{}", &named_param, param_type));
+fn query_batching_for_contextual_args2(
+    operation: &str,
+    contextual_args: &Option<(HashSet<String>, usize)>,
+) -> Option<String> {
+    if let Some((ctx, times)) = contextual_args {
+        let parser = apollo_compiler::Parser::new()
+            .parse_ast(operation, "")
+            // TODO: remove unwrap
+            .unwrap();
+        if let Some(mut operation) = parser
+            .definitions
+            .into_iter()
+            .find_map(|definition| definition.as_operation_definition().cloned())
+        {
+            let mut new_variables: Vec<_> = Default::default();
+            if operation
+                .variables
+                .iter()
+                .any(|v| ctx.contains(v.name.as_str()))
+            {
+                let new_selection_set: Vec<_> = (0..*times)
+                    .into_iter()
+                    .map(|i| {
+                        // TODO: Unwrap
+                        let mut s = operation.selection_set.first().unwrap().clone();
+                        if let ast::Selection::Field(f) = &mut s {
+                            let f = f.make_mut();
+                            f.alias = Some(Name::new(format!("_{}", i)).unwrap());
+                        }
+
+                        for v in &operation.variables {
+                            if ctx.contains(v.name.as_str()) {
+                                let mut cloned = v.clone();
+                                let new_variable = cloned.make_mut();
+                                // TODO: remove unwrap
+                                new_variable.name = Name::new(format!("{}_{}", v.name, i)).unwrap();
+                                new_variables.push(Node::new(new_variable.clone()));
+
+                                s = rename_variables(s, v.name.clone(), new_variable.name.clone());
+                            } else {
+                                if !new_variables.iter().any(|var| var.name == v.name) {
+                                    new_variables.push(v.clone());
+                                }
+                            }
+                        }
+
+                        s
+                    })
+                    .collect();
+
+                let new_operation = operation.make_mut();
+                new_operation.selection_set = new_selection_set;
+                new_operation.variables = new_variables;
+
+                return Some(new_operation.serialize().no_indent().to_string());
             }
         }
     }
-    expanded_str
+
+    None
 }
 
-fn query_batching_for_contextual_args(old_query: &str, contextual_args: &Option<(HashSet<String>, usize)>) -> Option<String> {
-    let re = Regex::new(r"(.*?)\((.*?)\).*?(\{.*\})").unwrap();
-    
-    let result = match contextual_args {
-        Some((args, count)) => {
-            match re.captures(old_query) {
-                Some(caps) => {
-                    match (caps.get(1), caps.get(2), caps.get(3)) {
-                        (Some(query_cruft), Some(params), Some(content)) => {
-                            let params = expand_contextual_args(params.as_str(), args, *count);
-                            let mut new_query: String = query_cruft.as_str().into();
-                            new_query.push_str(&format!("({})", params.as_str()));
-                            new_query.push_str(" {");
-                            for i in 0..*count {
-                                let mut cloned_content: String = content.as_str().into();
-                                for arg in args {
-                                    let mut modified_arg = arg.clone();
-                                    modified_arg.push_str(&format!("_{}", i));
-                                    cloned_content = cloned_content.replace(arg, &modified_arg);
-                                }
-                                new_query.push_str(&format!(" _{}:{}", i, &cloned_content));
-                            }
-                            new_query.push_str("}");
-                            Some(new_query)
-                        },
-                        (_, _, _) => None,
-                    }
-                },
-                None => None,
-            }
-        },
-        None => None,
-    };
-    result
+fn rename_variables(selection_set: ast::Selection, from: Name, to: Name) -> ast::Selection {
+    match selection_set {
+        ast::Selection::Field(f) => {
+            let mut new = f.clone();
+
+            let as_mut = new.make_mut();
+
+            as_mut.arguments.iter_mut().for_each(|arg| {
+                if arg.value.as_variable() == Some(&from) {
+                    arg.make_mut().value = ast::Value::Variable(to.clone()).into();
+                }
+            });
+
+            as_mut.selection_set = as_mut
+                .selection_set
+                .clone()
+                .into_iter()
+                .map(|s| rename_variables(s, from.clone(), to.clone()))
+                .collect();
+
+            ast::Selection::Field(new)
+        }
+        ast::Selection::InlineFragment(f) => {
+            let mut new = f.clone();
+            new.make_mut().selection_set = f
+                .selection_set
+                .clone()
+                .into_iter()
+                .map(|s| rename_variables(s, from.clone(), to.clone()))
+                .collect();
+            ast::Selection::InlineFragment(new)
+        }
+        ast::Selection::FragmentSpread(f) => ast::Selection::FragmentSpread(f),
+    }
+}
+
+#[test]
+fn test_query_batching_for_contextual_args() {
+    let old_query = "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}";
+    let mut ctx_args = HashSet::new();
+    ctx_args.insert("Subgraph1_U_field_a".to_string());
+    let contextual_args = Some((ctx_args, 2));
+
+    let expected = "query QueryLL__Subgraph1__1($representations: [_Any!]!, $Subgraph1_U_field_a_0: String!, $Subgraph1_U_field_a_1: String!) { _0: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_0) } } _1: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_1) } } }";
+
+    assert_eq!(
+        expected,
+        query_batching_for_contextual_args2(old_query, &contextual_args).unwrap()
+    );
 }
 
 // TODO: There is probably a function somewhere else that already does this
@@ -332,20 +391,20 @@ fn data_at_path<'v>(data: &'v Value, path: &Path) -> Option<&'v Value> {
 fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
     let mut i = 0;
     let mut j = current_dir.len();
-    // iterate over the context_path(i), every time we encounter a '..', we want 
+    // iterate over the context_path(i), every time we encounter a '..', we want
     // to go up one level in the current_dir(j)
     while i < context_path.len() {
         match &context_path.0[i] {
-            PathElement::Key(e,_) => {
+            PathElement::Key(e, _) => {
                 let mut found = false;
                 if e == ".." {
                     while !found {
                         j -= 1;
                         match current_dir.0[j] {
-                            PathElement::Key(_,_) => {
+                            PathElement::Key(_, _) => {
                                 found = true;
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
                     }
                     i += 1;
@@ -356,19 +415,12 @@ fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
             _ => break,
         }
     }
-    
-    let mut return_path: Vec<PathElement> = current_dir
-        .iter()
-        .take(j)
-        .map(|e| e.clone())
-        .collect();
-    
-    context_path
-        .iter()
-        .skip(i)
-        .for_each(|e| {
-            return_path.push(e.clone());
-        });
+
+    let mut return_path: Vec<PathElement> = current_dir.iter().take(j).map(|e| e.clone()).collect();
+
+    context_path.iter().skip(i).for_each(|e| {
+        return_path.push(e.clone());
+    });
     Path(return_path.into_iter().collect())
 }
 
@@ -415,7 +467,7 @@ impl Variables {
                                                         path: data_path.clone(),
                                                         rename_key_to: item.rename_key_to.clone(),
                                                     }
-                                                })
+                                                }),
                                             );
                                         }
                                     } else {
@@ -427,21 +479,21 @@ impl Variables {
                                                     path: data_path,
                                                     rename_key_to: item.rename_key_to.clone(),
                                                 }
-                                            })
+                                            }),
                                         );
                                     }
                                     return Some((item.rename_key_to.to_string(), new_value));
                                 }
                                 return None;
-                            },
+                            }
                             DataRewrite::ValueSetter(_) => {
                                 // TODO: Log error? panic? not sure
                                 return None;
-                            },
+                            }
                         }
                     })
                     .collect();
-                
+
                 let mut value = execute_selection_set(value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
@@ -459,23 +511,25 @@ impl Variables {
                     }
                 }
             });
-            
+
             if values.is_empty() {
                 return None;
             }
 
             let representations = Value::Array(Vec::from_iter(values));
-            
+
             // Here we create a new map with all the key value pairs to push into variables.
             // Note that if all variables are the same, we just use the named parameter as a variable, but if they are different then each
             // entity will have it's own set of parameters all appended by _<index>
             let (extended_vars, contextual_args) = if let Some(first_map) = named_args.get(0) {
                 if named_args.iter().all(|map| map == first_map) {
-                    (first_map
-                        .iter()
-                        .map(|(k, v)| {
-                            (k.as_str().into(), v.clone())
-                        }).collect(), None)
+                    (
+                        first_map
+                            .iter()
+                            .map(|(k, v)| (k.as_str().into(), v.clone()))
+                            .collect(),
+                        None,
+                    )
                 } else {
                     let mut hash_map: HashMap<String, Value> = HashMap::new();
                     let arg_names: HashSet<_> = first_map.keys().cloned().collect();
@@ -489,17 +543,21 @@ impl Variables {
                     }
                     (hash_map, Some((arg_names, named_args.len())))
                 }
-            } else { (HashMap::new(), None) };
-            
+            } else {
+                (HashMap::new(), None)
+            };
+
             let body = request.body();
-            variables.extend(extended_vars.iter().map(|(key, value)| {
-                (key.as_str().into(), value.clone())
-            }));
+            variables.extend(
+                extended_vars
+                    .iter()
+                    .map(|(key, value)| (key.as_str().into(), value.clone())),
+            );
             variables.extend(variable_usages.iter().filter_map(|key| {
                 body.variables
                     .get_key_value(key.as_str())
                     .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-            }));    
+            }));
 
             variables.insert("representations", representations);
             Some(Variables {
@@ -582,11 +640,9 @@ impl FetchNode {
                 return (Value::Object(Object::default()), Vec::new());
             }
         };
-        
-        let query_batched_query = query_batching_for_contextual_args(
-            operation.as_serialized(), 
-            &contextual_args
-        );
+
+        let query_batched_query =
+            query_batching_for_contextual_args2(operation.as_serialized(), &contextual_args);
 
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())

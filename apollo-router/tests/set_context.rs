@@ -60,7 +60,6 @@ async fn test_set_context() {
     insta::assert_json_snapshot!(response);
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_no_typenames() {
     let harness = setup_from_mocks(
@@ -204,38 +203,38 @@ fn setup_from_mocks(
 
 // TODO[clenfest]: figure out why i need __typename here?
 static QUERY: &str = r#"query Query {
-    t {
-      __typename
-      id
-      u {
-        __typename
-        field
-      }
-    }
-  }"#;
+        t {
+          __typename
+          id
+          u {
+            __typename
+            field
+          }
+        }
+      }"#;
 static QUERY_NO_TYPENAMES: &str = r#"query Query {
-    t {
-      id
-      u {
-        field
-      }
-    }
-  }"#;
+        t {
+          id
+          u {
+            field
+          }
+        }
+      }"#;
 
 static QUERY_WITH_LIST: &str = r#"query Query {
-    t {
-      id
-      uList {
-        field
-      }
-    }
-  }"#;
+        t {
+          id
+          uList {
+            field
+          }
+        }
+      }"#;
 
 static QUERY_WITH_LIST_OF_LISTS: &str = r#"query QueryLL {
-    tList {
-      id
-      uList {
-        field
-      }
-    }
-  }"#;
+        tList {
+          id
+          uList {
+            field
+          }
+        }
+      }"#;

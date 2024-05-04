@@ -72,29 +72,31 @@
       },
       "response": {
         "data": {
-          "tList": [{
-            "prop": "prop value 1",
-            "id": "1",
-            "uList": [
-              {
-                "__typename": "U",
-                "id": "3"
-              }
-            ]
-          },
-          {
-            "prop": "prop value 2",
-            "id": "2",
-            "uList": [
-              {
-                "__typename": "U",
-                "id": "4"
-              }
-            ]
-          }]
+          "tList": [
+            {
+              "prop": "prop value 1",
+              "id": "1",
+              "uList": [
+                {
+                  "__typename": "U",
+                  "id": "3"
+                }
+              ]
+            },
+            {
+              "prop": "prop value 2",
+              "id": "2",
+              "uList": [
+                {
+                  "__typename": "U",
+                  "id": "4"
+                }
+              ]
+            }
+          ]
+        }
       }
-    }
-    }, 
+    },
     {
       "request": {
         "query": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{__typename id field(a:$Subgraph1_U_field_a)}}}",
@@ -139,12 +141,47 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__1(representations:[_Any!]!$Subgraph1_U_field_a_0:String!$Subgraph1_U_field_a_1:String!) { _0:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_0)}}} _1:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_1)}}}}",
+        "query": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
+        "operationName": "Query__Subgraph1__1",
+        "variables": {
+          "Subgraph1_U_field_a": "prop value",
+          "representations": [
+            { "__typename": "U", "id": "1" },
+            { "__typename": "U", "id": "2" },
+            { "__typename": "U", "id": "3" }
+          ]
+        }
+      },
+      "response": {
+        "data": {
+          "_entities": [
+            {
+              "id": "1",
+              "field": 1234
+            },
+            {
+              "id": "2",
+              "field": 2345
+            },
+            {
+              "id": "3",
+              "field": 3456
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "query": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $Subgraph1_U_field_a_0: String!, $Subgraph1_U_field_a_1: String!) { _0: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_0) } } _1: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_1) } } }",
         "operationName": "QueryLL__Subgraph1__1",
         "variables": {
           "Subgraph1_U_field_a_0": "prop value 1",
           "Subgraph1_U_field_a_1": "prop value 2",
-          "representations": [{ "__typename": "U", "id": "3" }, { "__typename": "U", "id": "4" }]
+          "representations": [
+            { "__typename": "U", "id": "3" },
+            { "__typename": "U", "id": "4" }
+          ]
         }
       },
       "response": {
@@ -164,12 +201,15 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__1(representations:[_Any!]!$Subgraph1_U_field_a_0:String!$Subgraph1_U_field_a_1:String!) { _0:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_0)}}} _1:{_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a_1)}}}}",
+        "query": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $Subgraph1_U_field_a_0: String!, $Subgraph1_U_field_a_1: String!) { _0: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_0) } } _1: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_1) } } }",
         "operationName": "QueryLL__Subgraph1__1",
         "variables": {
           "Subgraph1_U_field_a_1": "prop value 2",
           "Subgraph1_U_field_a_0": "prop value 1",
-          "representations": [{ "__typename": "U", "id": "3" }, { "__typename": "U", "id": "4" }]
+          "representations": [
+            { "__typename": "U", "id": "3" },
+            { "__typename": "U", "id": "4" }
+          ]
         }
       },
       "response": {
