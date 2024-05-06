@@ -75,6 +75,7 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
 struct TestExecution {
     router: Option<IntegrationTest>,
     subgraphs_server: Option<MockServer>,
+    subgraphs: HashMap<String, Subgraph>,
 }
 
 impl TestExecution {
@@ -82,6 +83,7 @@ impl TestExecution {
         TestExecution {
             router: None,
             subgraphs_server: None,
+            subgraphs: HashMap::new(),
         }
     }
 
@@ -98,6 +100,10 @@ impl TestExecution {
                 subgraphs,
             } => {
                 self.start(schema_path, configuration_path, subgraphs, path, out)
+                    .await
+            }
+            Action::ReloadConfiguration { configuration_path } => {
+                self.reload_configuration(configuration_path, path, out)
                     .await
             }
             Action::Request {
@@ -168,6 +174,59 @@ impl TestExecution {
 
         self.router = Some(router);
         self.subgraphs_server = Some(subgraphs_server);
+        self.subgraphs = subgraphs.clone();
+
+        Ok(())
+    }
+
+    async fn reload_configuration(
+        &mut self,
+        configuration_path: &str,
+        path: &PathBuf,
+        out: &mut String,
+    ) -> Result<(), Failed> {
+        let router = match self.router.as_mut() {
+            None => {
+                writeln!(
+                    out,
+                    "cannot reload router configuration: router was not started"
+                )
+                .unwrap();
+                return Err(out.into());
+            }
+            Some(router) => router,
+        };
+
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let url = format!("http://{address}/");
+
+        let subgraphs_server = wiremock::MockServer::builder()
+            .listener(listener)
+            .start()
+            .await;
+
+        writeln!(out, "subgraphs listening on {url}").unwrap();
+
+        let mut subgraph_overrides = HashMap::new();
+
+        for (name, subgraph) in &self.subgraphs {
+            for SubgraphRequest { request, response } in &subgraph.requests {
+                Mock::given(body_partial_json(&request))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(response))
+                    .mount(&subgraphs_server)
+                    .await;
+            }
+
+            // Add a default override for products, if not specified
+            subgraph_overrides
+                .entry(name.to_string())
+                .or_insert(url.clone());
+        }
+
+        let config = open_file(&path.join(configuration_path), out)?;
+
+        router.update_config(&config).await;
 
         Ok(())
     }
@@ -194,7 +253,7 @@ impl TestExecution {
             None => {
                 writeln!(
                     out,
-                    "cannot send request to the router router: router was not started"
+                    "cannot send request to the router: router was not started"
                 )
                 .unwrap();
                 return Err(out.into());
@@ -295,6 +354,9 @@ enum Action {
         configuration_path: String,
         subgraphs: HashMap<String, Subgraph>,
     },
+    ReloadConfiguration {
+        configuration_path: String,
+    },
     Request {
         request: Value,
         query_path: Option<String>,
@@ -303,12 +365,12 @@ enum Action {
     Stop,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Subgraph {
     requests: Vec<SubgraphRequest>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct SubgraphRequest {
     request: Value,
     response: Value,
