@@ -1,9 +1,9 @@
-### Use subgraph.name attribute not apollo.subgraph.name ([PR #5012](https://github.com/apollographql/router/pull/5012))
+### Use `subgraph.name` attribute instead of `apollo.subgraph.name` ([PR #5012](https://github.com/apollographql/router/pull/5012))
 
-The Datadog exporter does some explicit mapping of attributes and was using a value "apollo.subgraph.name" that the latest versions of the router don't use. The correct choice is "subgraph.name".
+In the router v1.45.0, subgraph name mapping didn't work correctly in the Datadog exporter.
 
-This meant that subgraph name mapping did not work correctly in 1.45.0.
+The Datadog exporter does some explicit mapping of attributes and was using a value `apollo.subgraph.name` that the latest versions of the router don't use. The correct choice is `subgraph.name`.
 
-Update the mapping to reflect the change and fix subgraph name mapping for Datadog.
+This release updates the mapping to reflect the change and fixes subgraph name mapping for Datadog.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5012

@@ -1,10 +1,11 @@
-### Type conditioned fetching ([PR #4748](https://github.com/apollographql/router/pull/4748))
+### Experimental type conditioned fetching ([PR #4748](https://github.com/apollographql/router/pull/4748))
 
-Type conditioned fetching
+This release introduces an experimental configuration to enable type-conditioned fetching.
 
-When querying a field that is in a path of 2 or more unions, the query planner was not able to handle different selections and would aggressively collapse selections in fetches yielding an incorrect plan.
+Previously, when querying a field that was in a path of two or more unions, the query planner wasn't able to handle different selections and would aggressively collapse selections in fetches. This resulted in incorrect plans.
 
-This change introduces an experimental configuration option to enable type conditioned fetching:
+Enabling the `experimental_type_conditioned_fetching` option can fix this issue by configuring the query planner to fetch with type conditions.
+
 
 ```yaml
 experimental_type_conditioned_fetching: true # false by default

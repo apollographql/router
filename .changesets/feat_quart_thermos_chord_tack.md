@@ -1,6 +1,8 @@
-### Add conditions on custom attributes for spans and a new selector for graphql errors ([Issue #4336](https://github.com/apollographql/router/issues/4336))
+### Support conditions on custom attributes for spans and a new selector for GraphQL errors ([Issue #4336](https://github.com/apollographql/router/issues/4336))
 
-Example of configuration if you want to conditionally add attributes on a span. It's also using the new `on_graphql_error` selector which is set to true if the response body contains graphql errors.
+The router now supports conditionally adding attributes on a span and the new `on_graphql_error` selector that is set to true if the response body contains GraphQL errors.
+
+An example configuration using `condition` in `attributes` and `on_graphql_error`:
 
 ```yaml
 telemetry:

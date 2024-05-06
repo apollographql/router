@@ -1,10 +1,8 @@
-### Ability to ignore other auth prefixes in the JWT plugin
+### Ability to ignore auth prefixes in the JWT plugin
 
-You can now choose whether to ignore other header prefixes with the JWT plugin. Many applications will use the format of `Authorization: <scheme> <token>` and this will enable the use of other schemes within the `Authorization` header. 
+The router now supports a configuration to ignore header prefixes with the JWT plugin. Given that many application headers use the format of `Authorization: <scheme> <token>`, this option enables the router to process requests for specific schemes within the `Authorization` header while ignoring others.
 
-If the header prefix is an empty string, this option will be ignored. 
-
-You can configure this, such as:
+For example, you can configure the router to process requests with `Authorization: Bearer <token>` defined while ignoring others such as `Authorization: Basic <token>`: 
 
 ```yaml title="router.yaml"
 authentication:
@@ -15,6 +13,6 @@ authentication:
       ignore_mismatched_prefix: true
 ```
 
-In the above, the router will ignore `Authorization: Basic <token>`, but process requests with `Authorization: Bearer <token>` defined.
+If the header prefix is an empty string, this option is ignored.
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4718
