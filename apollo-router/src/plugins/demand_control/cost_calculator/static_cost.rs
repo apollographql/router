@@ -258,7 +258,10 @@ impl StaticCostCalculator {
             ))
         })?;
 
-        self.estimated(operation.as_parsed(schema), schema)
+        let operation = operation
+            .as_parsed(schema)
+            .map_err(DemandControlError::InvalidSubgraphQuery)?;
+        self.estimated(operation, schema)
     }
 
     fn max_score_of_nodes(
