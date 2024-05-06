@@ -914,15 +914,13 @@ impl Selection {
         self.containment(other, Default::default()).is_contained()
     }
 
-    /// Apply the `mapper` to self.selection_set, if it exists, and return a new `NormalizedSelection`.
+    /// Apply the `mapper` to self.selection_set, if it exists, and return a new `Selection`.
     /// - Note: The returned selection may have no subselection set or an empty one if the mapper
     ///         returns so, which may make the returned selection invalid. It's caller's responsibility
     ///         to appropriately handle invalid return values.
     pub(crate) fn map_selection_set(
         &self,
-        mapper: &mut dyn FnMut(
-            &NormalizedSelectionSet,
-        ) -> Result<Option<NormalizedSelectionSet>, FederationError>,
+        mapper: &mut dyn FnMut(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
     ) -> Result<Self, FederationError> {
         if let Some(selection_set) = self.selection_set()? {
             self.with_updated_selection_set(mapper(selection_set)?)
@@ -949,14 +947,14 @@ pub(crate) enum SelectionOrSet {
     SelectionSet(SelectionSet),
 }
 
-impl From<NormalizedSelection> for NormalizedSelectionOrSet {
-    fn from(selection: NormalizedSelection) -> Self {
+impl From<Selection> for SelectionOrSet {
+    fn from(selection: Selection) -> Self {
         Self::Selection(selection)
     }
 }
 
-impl From<NormalizedSelectionSet> for NormalizedSelectionOrSet {
-    fn from(selections: NormalizedSelectionSet) -> Self {
+impl From<SelectionSet> for SelectionOrSet {
+    fn from(selections: SelectionSet) -> Self {
         Self::SelectionSet(selections)
     }
 }
@@ -2302,8 +2300,7 @@ impl SelectionSet {
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
-        let mut sub_selection_updates: MultiMap<SelectionKey, Selection> =
-            MultiMap::new();
+        let mut sub_selection_updates: MultiMap<SelectionKey, Selection> = MultiMap::new();
         for update in updates {
             if let Some(sub_selection_set) = update.selection_set()? {
                 sub_selection_updates.extend(
@@ -2356,8 +2353,7 @@ impl SelectionSet {
         // However, `changed` can be true and `updated_selections` is empty when
         // all of the selections up to that point are removed.
         let mut changed = false;
-        let mut updated_selections: MultiMap<SelectionKey, Selection> =
-            MultiMap::new();
+        let mut updated_selections: MultiMap<SelectionKey, Selection> = MultiMap::new();
 
         for (index, selection) in self.selections.values().enumerate() {
             let updated = mapper(selection)?;
@@ -2403,9 +2399,7 @@ impl SelectionSet {
         }
     }
 
-    pub(crate) fn add_back_typename_in_attachments(
-        &self,
-    ) -> Result<SelectionSet, FederationError> {
+    pub(crate) fn add_back_typename_in_attachments(&self) -> Result<SelectionSet, FederationError> {
         self.lazy_map(&mut |selection| {
             let selection_element = selection.element()?;
             let updated = selection
@@ -2435,10 +2429,8 @@ impl SelectionSet {
             });
             let typename_selection =
                 selection_of_element(field_element.into(), /*subselection*/ None)?;
-            let mut result = SelectionSet::from_selection(
-                self.type_position.clone(),
-                typename_selection,
-            );
+            let mut result =
+                SelectionSet::from_selection(self.type_position.clone(), typename_selection);
             result.merge_selections_into([updated].iter())?;
             Ok(Some(result.into()))
         })
@@ -6639,24 +6631,24 @@ type T {
         use super::super::*;
         use super::*;
 
-        fn contains_field(ss: &NormalizedSelectionSet, field_name: &Name) -> bool {
-            ss.selections.contains_key(&NormalizedSelectionKey::Field {
+        fn contains_field(ss: &SelectionSet, field_name: &Name) -> bool {
+            ss.selections.contains_key(&SelectionKey::Field {
                 response_name: field_name.clone(),
                 directives: Default::default(),
             })
         }
 
-        fn is_named_field(sk: &NormalizedSelectionKey, name: &Name) -> bool {
+        fn is_named_field(sk: &SelectionKey, name: &Name) -> bool {
             matches!(sk,
-                NormalizedSelectionKey::Field { response_name, directives: _ }
+                SelectionKey::Field { response_name, directives: _ }
                     if *response_name == *name)
         }
 
         // recursive filter implementation using `lazy_map`
         fn filter_rec(
-            ss: &NormalizedSelectionSet,
-            pred: &impl Fn(&NormalizedSelection) -> bool,
-        ) -> Result<NormalizedSelectionSet, FederationError> {
+            ss: &SelectionSet,
+            pred: &impl Fn(&Selection) -> bool,
+        ) -> Result<SelectionSet, FederationError> {
             ss.lazy_map(&mut |s| {
                 if !pred(s) {
                     return Ok(None);
@@ -6746,9 +6738,9 @@ type T {
         }
 
         fn add_typename_if(
-            ss: &NormalizedSelectionSet,
-            pred: &impl Fn(&NormalizedSelection) -> bool,
-        ) -> Result<NormalizedSelectionSet, FederationError> {
+            ss: &SelectionSet,
+            pred: &impl Fn(&Selection) -> bool,
+        ) -> Result<SelectionSet, FederationError> {
             ss.lazy_map(&mut |s| {
                 let to_add_typename = pred(s);
                 let updated = s.map_selection_set(&mut |ss| add_typename_if(ss, pred).map(Some))?;
@@ -6758,11 +6750,10 @@ type T {
 
                 let parent_type_pos = s.element()?.parent_type_position();
                 // start with the `updated` selection.
-                let mut result =
-                    NormalizedSelectionSet::from_selection(parent_type_pos.clone(), updated);
+                let mut result = SelectionSet::from_selection(parent_type_pos.clone(), updated);
                 // add "__typename" field
                 let field_position = parent_type_pos.introspection_typename_field();
-                let field_element = NormalizedField::new(NormalizedFieldData {
+                let field_element = Field::new(FieldData {
                     schema: s.schema().clone(),
                     field_position,
                     alias: None,
