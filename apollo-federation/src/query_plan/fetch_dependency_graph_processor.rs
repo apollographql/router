@@ -10,8 +10,8 @@ use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
-use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -105,7 +105,7 @@ pub(crate) trait FetchDependencyGraphProcessor<TProcessed, TDeferred> {
     fn reduce_defer(
         &mut self,
         main: TProcessed,
-        sub_selection: &NormalizedSelectionSet,
+        sub_selection: &SelectionSet,
         deferred_blocks: Vec<TDeferred>,
     ) -> Result<TProcessed, FederationError>;
 }
@@ -142,7 +142,7 @@ where
     fn reduce_defer(
         &mut self,
         main: TProcessed,
-        sub_selection: &NormalizedSelectionSet,
+        sub_selection: &SelectionSet,
         deferred_blocks: Vec<TDeferred>,
     ) -> Result<TProcessed, FederationError> {
         (*self).reduce_defer(main, sub_selection, deferred_blocks)
@@ -222,7 +222,7 @@ impl FetchDependencyGraphProcessor<QueryPlanCost, QueryPlanCost>
     fn reduce_defer(
         &mut self,
         main: QueryPlanCost,
-        _sub_selection: &NormalizedSelectionSet,
+        _sub_selection: &SelectionSet,
         deferred_blocks: Vec<QueryPlanCost>,
     ) -> Result<QueryPlanCost, FederationError> {
         Ok(sequence_cost([main, parallel_cost(deferred_blocks)]))
@@ -369,7 +369,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
     fn reduce_defer(
         &mut self,
         main: Option<PlanNode>,
-        sub_selection: &NormalizedSelectionSet,
+        sub_selection: &SelectionSet,
         deferred: Vec<DeferredDeferBlock>,
     ) -> Result<Option<PlanNode>, FederationError> {
         Ok(Some(PlanNode::Defer(DeferNode {

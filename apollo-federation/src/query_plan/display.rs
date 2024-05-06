@@ -310,7 +310,7 @@ fn write_operation(
     let operation = operation_document
         .get_operation(None)
         .expect("expected a single-operation document");
-    if operation.operation_type == OperationType::Query {
+    if operation.operation_type == executable::OperationType::Query {
         write_selections(state, &operation.selection_set.selections)?
     } else {
         state.write(
