@@ -6771,9 +6771,7 @@ type T {
                 }
 
                 let parent_type_pos = s.element()?.parent_type_position();
-                // start with the `updated` selection.
-                // let mut result = SelectionSet::from_selection(parent_type_pos.clone(), updated);
-                // add "__typename" field
+                // "__typename" field
                 let field_position = parent_type_pos.introspection_typename_field();
                 let field_element = Field::new(FieldData {
                     schema: s.schema().clone(),
@@ -6785,7 +6783,7 @@ type T {
                 });
                 let typename_selection =
                     selection_of_element(field_element.into(), /*subselection*/ None)?;
-                // done
+                // return `updated` and `typename_selection`
                 Ok([updated, typename_selection].into_iter().collect())
             })
         }
