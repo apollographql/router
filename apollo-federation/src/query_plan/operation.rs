@@ -6684,8 +6684,7 @@ type T {
                         let updated_ss = filter_rec(inner_ss, pred).map(Some)?;
                         // see if `updated_ss` is an non-empty selection set.
                         if matches!(updated_ss, Some(ref sub_ss) if !sub_ss.is_empty()) {
-                            s.with_updated_selection_set(updated_ss)
-                                .map(|ss| ss.into())
+                            s.with_updated_selection_set(updated_ss).map(|ss| ss.into())
                         } else {
                             Ok(SelectionMapperReturn::None)
                         }
