@@ -19,6 +19,7 @@ use serde_json::Value;
 use tokio::runtime::Runtime;
 use wiremock::matchers::body_partial_json;
 use wiremock::Mock;
+use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
 #[path = "./common.rs"]
@@ -49,39 +50,82 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
     if let Ok(file) = open_file(&path.join("README.md"), &mut out) {
         writeln!(&mut out, "{file}\n\n============\n\n").unwrap();
     }
-    let query: Value = match serde_json::from_str(&open_file(&path.join("query.json"), &mut out)?) {
+
+    let plan: Plan = match serde_json::from_str(&open_file(&path.join("plan.json"), &mut out)?) {
         Ok(data) => data,
         Err(e) => {
-            writeln!(&mut out, "could not deserialize subgraph responses: {e}").unwrap();
+            writeln!(&mut out, "could not deserialize test plan: {e}").unwrap();
             return Err(out.into());
         }
     };
-    let expected_response: Value =
-        match serde_json::from_str(&open_file(&path.join("response.json"), &mut out)?) {
-            Ok(data) => data,
-            Err(e) => {
-                writeln!(&mut out, "could not deserialize subgraph responses: {e}").unwrap();
-                return Err(out.into());
-            }
-        };
-    let subgraphs: HashMap<String, Subgraph> =
-        match serde_json::from_str(&open_file(&path.join("subgraphs.json"), &mut out)?) {
-            Ok(data) => data,
-            Err(e) => {
-                writeln!(&mut out, "could not deserialize subgraph responses: {e}").unwrap();
-                return Err(out.into());
-            }
-        };
-
-    let config = open_file(&path.join("configuration.yaml"), &mut out)?;
-
-    let schema_path = path.join("supergraph.graphql");
-    check_path(&schema_path, &mut out)?;
 
     let rt = Runtime::new()?;
 
     // Spawn the root task
     rt.block_on(async {
+        let mut execution = TestExecution::new();
+        for action in plan.actions {
+            execution.execute_action(&action, path, &mut out).await?;
+        }
+
+        Ok(())
+    })
+}
+
+struct TestExecution {
+    router: Option<IntegrationTest>,
+    subgraphs_server: Option<MockServer>,
+}
+
+impl TestExecution {
+    fn new() -> Self {
+        TestExecution {
+            router: None,
+            subgraphs_server: None,
+        }
+    }
+
+    async fn execute_action(
+        &mut self,
+        action: &Action,
+        path: &PathBuf,
+        out: &mut String,
+    ) -> Result<(), Failed> {
+        match action {
+            Action::Start {
+                schema_path,
+                configuration_path,
+                subgraphs,
+            } => {
+                self.start(schema_path, configuration_path, subgraphs, path, out)
+                    .await
+            }
+            Action::Request {
+                request,
+                query_path,
+                expected_response,
+            } => {
+                self.request(
+                    request.clone(),
+                    query_path.as_deref(),
+                    expected_response,
+                    path,
+                    out,
+                )
+                .await
+            }
+            Action::Stop => self.stop(out).await,
+        }
+    }
+
+    async fn start(
+        &mut self,
+        schema_path: &str,
+        configuration_path: &str,
+        subgraphs: &HashMap<String, Subgraph>,
+        path: &PathBuf,
+        out: &mut String,
+    ) -> Result<(), Failed> {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let address = listener.local_addr().unwrap();
         let url = format!("http://{address}/");
@@ -91,12 +135,12 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
             .start()
             .await;
 
-        writeln!(&mut out, "subgraphs listening on {url}").unwrap();
+        writeln!(out, "subgraphs listening on {url}").unwrap();
 
         let mut subgraph_overrides = HashMap::new();
 
         for (name, subgraph) in subgraphs {
-            for SubgraphRequest { request, response } in subgraph.requests {
+            for SubgraphRequest { request, response } in &subgraph.requests {
                 Mock::given(body_partial_json(&request))
                     .respond_with(ResponseTemplate::new(200).set_body_json(response))
                     .mount(&subgraphs_server)
@@ -104,8 +148,14 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
             }
 
             // Add a default override for products, if not specified
-            subgraph_overrides.entry(name).or_insert(url.clone());
+            subgraph_overrides
+                .entry(name.to_string())
+                .or_insert(url.clone());
         }
+
+        let config = open_file(&path.join(configuration_path), out)?;
+        let schema_path = path.join(schema_path);
+        check_path(&schema_path, out)?;
 
         let mut router = IntegrationTest::builder()
             .config(&config)
@@ -116,58 +166,96 @@ fn test(path: &PathBuf) -> Result<(), Failed> {
         router.start().await;
         router.assert_started().await;
 
-        writeln!(
-            &mut out,
-            "query: {}\n",
-            serde_json::to_string(&query).unwrap()
-        )
-        .unwrap();
-        let (_, response) = router.execute_query(&query).await;
+        self.router = Some(router);
+        self.subgraphs_server = Some(subgraphs_server);
+
+        Ok(())
+    }
+
+    async fn stop(&mut self, out: &mut String) -> Result<(), Failed> {
+        if let Some(mut router) = self.router.take() {
+            router.graceful_shutdown().await;
+            Ok(())
+        } else {
+            writeln!(out, "could not shutdown router: router was not started").unwrap();
+            Err(out.into())
+        }
+    }
+
+    async fn request(
+        &mut self,
+        mut request: Value,
+        query_path: Option<&str>,
+        expected_response: &Value,
+        path: &PathBuf,
+        out: &mut String,
+    ) -> Result<(), Failed> {
+        let router = match self.router.as_mut() {
+            None => {
+                writeln!(
+                    out,
+                    "cannot send request to the router router: router was not started"
+                )
+                .unwrap();
+                return Err(out.into());
+            }
+            Some(router) => router,
+        };
+
+        if let Some(query_path) = query_path {
+            let query: String = open_file(&path.join(query_path), out)?;
+            if let Some(req) = request.as_object_mut() {
+                req.insert("query".to_string(), query.into());
+            }
+        }
+
+        writeln!(out, "query: {}\n", serde_json::to_string(&request).unwrap()).unwrap();
+        let (_, response) = router.execute_query(&request).await;
         let body = response.bytes().await.map_err(|e| {
-            writeln!(&mut out, "could not get graphql response data: {e}").unwrap();
+            writeln!(out, "could not get graphql response data: {e}").unwrap();
             let f: Failed = out.clone().into();
             f
         })?;
         let graphql_response: Value = serde_json::from_slice(&body).map_err(|e| {
-            writeln!(&mut out, "could not deserialize graphql response data: {e}").unwrap();
+            writeln!(out, "could not deserialize graphql response data: {e}").unwrap();
             let f: Failed = out.clone().into();
             f
         })?;
 
-        if expected_response != graphql_response {
-            if let Some(requests) = subgraphs_server.received_requests().await {
-                writeln!(&mut out, "subgraphs received requests:").unwrap();
+        if expected_response != &graphql_response {
+            if let Some(requests) = self
+                .subgraphs_server
+                .as_ref()
+                .unwrap()
+                .received_requests()
+                .await
+            {
+                writeln!(out, "subgraphs received requests:").unwrap();
                 for request in requests {
-                    writeln!(
-                        &mut out,
-                        "\t{}\n",
-                        std::str::from_utf8(&request.body).unwrap()
-                    )
-                    .unwrap();
+                    writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
                 }
             } else {
-                writeln!(&mut out, "subgraphs received no requests").unwrap();
+                writeln!(out, "subgraphs received no requests").unwrap();
             }
 
-            writeln!(&mut out, "assertion `left == right` failed").unwrap();
+            writeln!(out, "assertion `left == right` failed").unwrap();
             writeln!(
-                &mut out,
+                out,
                 " left: {}",
                 serde_json::to_string(&expected_response).unwrap()
             )
             .unwrap();
             writeln!(
-                &mut out,
+                out,
                 "right: {}",
                 serde_json::to_string(&graphql_response).unwrap()
             )
             .unwrap();
             return Err(out.into());
         }
-        router.graceful_shutdown().await;
 
         Ok(())
-    })
+    }
 }
 
 fn open_file(path: &Path, out: &mut String) -> Result<String, Failed> {
@@ -192,6 +280,27 @@ fn check_path(path: &Path, out: &mut String) -> Result<(), Failed> {
         return Err(out.into());
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct Plan {
+    actions: Vec<Action>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum Action {
+    Start {
+        schema_path: String,
+        configuration_path: String,
+        subgraphs: HashMap<String, Subgraph>,
+    },
+    Request {
+        request: Value,
+        query_path: Option<String>,
+        expected_response: Value,
+    },
+    Stop,
 }
 
 #[derive(Deserialize)]
