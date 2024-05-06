@@ -426,9 +426,9 @@ fn format_selection_set(
 
             // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
             let use_separator = field_str
-                    .chars()
-                    .last()
-                    .map_or(false, |c| c.is_alphanumeric() || c == '_');
+                .chars()
+                .last()
+                .map_or(false, |c| c.is_alphanumeric() || c == '_');
             if i < fields.len() - 1 && use_separator {
                 f.write_str(" ")?;
             }
@@ -598,13 +598,27 @@ fn format_directives(
 
 fn format_value(
     value: &Value,
-    _normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &SignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     match value {
         Value::String(_) => f.write_str("\"\""),
         Value::Float(_) | Value::Int(_) => f.write_str("0"),
-        Value::Object(_) => f.write_str("{}"),
+        Value::Object(o) => {
+            if is_enhanced(normalization_algorithm) {
+                f.write_str("{")?;
+                for (index, (name, val)) in o.iter().enumerate() {
+                    if index != 0 {
+                        f.write_str(",")?;
+                    }
+                    write!(f, "{}:", name)?;
+                    format_value(val, normalization_algorithm, f)?;
+                }
+                f.write_str("}")
+            } else {
+                f.write_str("{}")
+            }
+        }
         Value::List(_) => f.write_str("[]"),
         rest => f.write_str(&rest.to_string()),
     }

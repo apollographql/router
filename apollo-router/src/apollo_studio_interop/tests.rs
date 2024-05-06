@@ -1682,6 +1682,33 @@ async fn test_enhanced_sorts_directives() {
 }
 
 #[test(tokio::test)]
+async fn test_enhanced_inline_input_object() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str: &str = r#"
+      query InputObjectTypeQuery {
+        inputTypeQuery(input: {
+            inputString: "foo",
+            inputInt: 42,
+            inputBoolean: null,
+            nestedType: { someFloat: 4.2 },
+            enumInput: SOME_VALUE_1,
+            nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ],
+            listInput: [1, 2, 3]
+        }) {
+          enumResponse
+        }
+      }"#;
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_enhanced(&doc, &Some("InputObjectTypeQuery".into()), &schema);
+    let expected_sig = "# InputObjectTypeQuery\nquery InputObjectTypeQuery{inputTypeQuery(input:{inputString:\"\",inputInt:0,inputBoolean:null,nestedType:{someFloat:0},enumInput:SOME_VALUE_1,nestedTypeList:[],listInput:[]}){enumResponse}}";
+    assert_expected_signature(&generated, expected_sig);
+}
+
+#[test(tokio::test)]
 async fn test_compare() {
     let source = ComparableUsageReporting {
         result: UsageReporting {
