@@ -53,6 +53,25 @@ impl Metrics {
 }
 
 impl InstrumentData {
+    fn get_first_key_from_path(
+        attributes: &mut HashMap<String, opentelemetry::Value>,
+        attr_name: &str,
+        path: &str,
+        value: &Value,
+    ) {
+        if let Some(Value::Object(values)) = JsonPathInst::from_str(path)
+            .expect("json path must be valid")
+            .find_slice(value)
+            .into_iter()
+            .next()
+            .as_deref()
+        {
+            if let Some(key) = values.keys().next() {
+                attributes.insert(attr_name.to_string(), key.clone().into());
+            }
+        };
+    }
+
     fn get_value_from_path(
         attributes: &mut HashMap<String, opentelemetry::Value>,
         attr_name: &str,
@@ -363,28 +382,19 @@ impl InstrumentData {
             "$.mode"
         );
 
-        // We need to update the entry we just made because we set the strategy as an object in the configuration. Using the macro
-        // just maps a selected object to a boolean indicating whether it is present or not, and jsonpath_rust doesn't allow you
-        // to select the name of a key. So, we grab the object at the path for the strategy, then grab the strategy name, which is
-        // assumed to be the first (and only) key.
-        if let Some(Value::Object(values)) =
-            JsonPathInst::from_str("$.experimental_demand_control[?(@.enabled == true)].strategy")
-                .expect("json path must be valid")
-                .find_slice(yaml)
-                .into_iter()
-                .next()
-                .as_deref()
+        // We need to update the entry we just made because the selected strategy is a named object in the config.
+        // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
+        if let Some((_, demand_control_attributes)) = self
+            .data
+            .get_mut(&"apollo.router.config.experimental_demand_control".to_string())
         {
-            if let Some(strategy_name) = values.keys().next() {
-                let (_, demand_control_attributes) = self
-                    .data
-                    .entry("apollo.router.config.experimental_demand_control".to_string())
-                    .or_insert_with(|| (0, HashMap::new()));
-
-                demand_control_attributes
-                    .insert("opt.strategy".to_string(), strategy_name.clone().into());
-            }
-        };
+            Self::get_first_key_from_path(
+                demand_control_attributes,
+                "opt.strategy",
+                "$.experimental_demand_control[?(@.enabled == true)].strategy",
+                yaml,
+            );
+        }
     }
 
     fn populate_env_instrument(&mut self) {
