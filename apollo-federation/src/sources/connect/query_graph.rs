@@ -5,8 +5,6 @@ use indexmap::IndexSet;
 use petgraph::prelude::NodeIndex;
 
 use super::models::Connector;
-use super::selection_parser::NamedSelection;
-use super::selection_parser::PathSelection;
 use super::selection_parser::Property;
 use super::selection_parser::SubSelection;
 use super::ConnectFederatedConcreteFieldQueryGraphEdge;
@@ -44,7 +42,9 @@ impl SourceFederatedQueryGraphBuilderApi for ConnectFederatedQueryGraphBuilder {
             let ObjectOrInterfaceFieldDefinitionPosition::Object(field_def_pos) =
                 id.directive.field
             else {
-                unreachable!()
+                return Err(FederationError::internal(
+                    "connect directives must be on objects",
+                ));
             };
 
             // Make a node for the entrypoint of this field, if not yet created
@@ -109,7 +109,7 @@ fn process_selection(
         // Note: the if condition checked that this is a scalar, so trying to unwrap to anything else
         // is impossible.
         let TypeDefinitionPosition::Scalar(scalar_field_ty) = field_output_type_pos else {
-            unreachable!()
+            return Err(FederationError::internal("scalar wasn't really a scalar"));
         };
 
         return builder.add_scalar_node(
@@ -154,7 +154,9 @@ fn process_selection(
             _ => {
                 // If we don't have either of the above, then we must have a subselection
                 let Some(sub) = path.next_subselection() else {
-                    todo!("handle error");
+                    return Err(FederationError::internal(
+                        "expected subselection for leaf type",
+                    ));
                 };
 
                 process_subselection(
@@ -170,7 +172,9 @@ fn process_selection(
         Selection::Named(sub) => {
             // Make sure that we aren't selecting sub fields from simple types
             if field_ty.is_scalar() || field_ty.is_enum() {
-                todo!("handle error");
+                return Err(FederationError::internal(
+                    "leaf types cannot have subselections",
+                ));
             }
 
             // Grab what we need and return the root node
@@ -194,29 +198,14 @@ fn process_subselection(
     node_cache: &mut IndexMap<Name, NodeIndex<u32>>,
     properties_path: Option<Vec<Property>>,
 ) -> Result<NodeIndex<u32>, FederationError> {
-    // Reference for working with the entry API
-    // let parent_node = match node_cache.entry(&object.type_name) {
-    //     Entry::Occupied(e) => e.into_mut(),
-    //     Entry::Vacant(e) => {
-    //         let node = builder.add_concrete_node(
-    //             object.type_name.clone(),
-    //             SourceFederatedConcreteQueryGraphNode::Connect(
-    //                 ConnectFederatedConcreteQueryGraphNode::ConnectParent {
-    //                     subgraph_type: object.parent().clone(),
-    //                 },
-    //             ),
-    //         )?;
-
-    //         e.insert(node)
-    //     }
-    // };
-
     // Get the type of the field
     let field_ty = field_output_type_pos.get(subgraph_schema.schema())?;
 
     // For milestone 1 we don't need to support anything other than objects...
     let TypeDefinitionPosition::Object(object_pos) = field_output_type_pos else {
-        todo!("handle error");
+        return Err(FederationError::internal(
+            "expected subselection to be of a GraphQL object",
+        ));
     };
     let object_type = object_pos.get(subgraph_schema.schema())?;
     let field_type_pos = object_pos.field(field_ty.name().clone());
@@ -243,7 +232,10 @@ fn process_subselection(
         // Make sure that we have a field on the object type that matches the alias (or the name itself)
         let alias = selection.name();
         let Some(selection_field) = object_type.fields.get(alias) else {
-            todo!("handle error");
+            return Err(FederationError::internal(format!(
+                "expected field `{alias}` to exist on GraphQL type `{}`",
+                object_type.name
+            )));
         };
         let selection_type =
             subgraph_schema.get_type(selection_field.ty.inner_named_type().clone())?;
@@ -258,7 +250,9 @@ fn process_subselection(
             TypeDefinitionPosition::Enum(ref r#enum) => {
                 // An enum cannot have sub selections, so enforce that now
                 if next_subselection.is_some() {
-                    todo!("handle error");
+                    return Err(FederationError::internal(
+                        "an enum cannot have a subselection",
+                    ));
                 }
 
                 // Create the scalar node (or grab it from the cache)
@@ -294,19 +288,17 @@ fn process_subselection(
             }
             TypeDefinitionPosition::Scalar(ref scalar) => {
                 // Custom scalars need to be handled differently
-                if next_subselection.is_some() {
-                    todo!("handle error");
+                if !scalar.get(subgraph_schema.schema())?.is_built_in() {
+                    return Err(FederationError::internal(
+                        "custom scalars are not yet handled",
+                    ));
                 }
 
                 // A scalar cannot have sub selections, so enforce that now
-                if matches!(
-                    selection,
-                    NamedSelection::Field(_, _, Some(_))
-                        | NamedSelection::Quoted(_, _, Some(_))
-                        | NamedSelection::Path(_, PathSelection::Selection(_))
-                        | NamedSelection::Group(_, _)
-                ) {
-                    todo!("handle error");
+                if next_subselection.is_some() {
+                    return Err(FederationError::internal(
+                        "a scalar cannot have a subselection",
+                    ));
                 }
 
                 // Create the scalar node (or grab it from the cache)
@@ -345,7 +337,9 @@ fn process_subselection(
             other => {
                 // Since the type must be composite, there HAS to be a subselection
                 let Some(subselection) = next_subselection else {
-                    todo!("handle error");
+                    return Err(FederationError::internal(
+                        "a composite type must have a subselection",
+                    ));
                 };
 
                 let subselection_node = process_subselection(
@@ -376,7 +370,9 @@ fn process_subselection(
 
     // Handle the optional star selection
     if let Some(_star) = sub.star.as_ref() {
-        //
+        return Err(FederationError::internal(
+            "star selection is not yet supported",
+        ));
     }
 
     Ok(object_node)
