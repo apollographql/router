@@ -66,11 +66,11 @@ use wiremock::ResponseTemplate;
 pub struct IntegrationTest {
     router: Option<Child>,
     test_config_location: PathBuf,
+    test_schema_location: PathBuf,
     router_location: PathBuf,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
-    supergraph: PathBuf,
     _subgraphs: wiremock::MockServer,
     telemetry: Telemetry,
 
@@ -308,10 +308,13 @@ impl IntegrationTest {
             .await;
 
         let mut test_config_location = std::env::temp_dir();
+        let mut test_schema_location = test_config_location.clone();
         let location = format!("apollo-router-test-{}.yaml", Uuid::new_v4());
         test_config_location.push(location);
+        test_schema_location.push(format!("apollo-router-test-{}.graphql", Uuid::new_v4()));
 
         fs::write(&test_config_location, &config_str).expect("could not write config");
+        fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
         let collect_stdio = collect_stdio.map(|sender| {
@@ -323,10 +326,10 @@ impl IntegrationTest {
             router: None,
             router_location: Self::router_location(),
             test_config_location,
+            test_schema_location,
             stdio_tx,
             stdio_rx,
             collect_stdio,
-            supergraph,
             _subgraphs: subgraphs,
             _subgraph_overrides: subgraph_overrides,
             bind_address: Default::default(),
@@ -373,7 +376,7 @@ impl IntegrationTest {
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
-                &self.supergraph.to_string_lossy(),
+                &self.test_schema_location.to_string_lossy(),
                 "--log",
                 "error,apollo_router=info",
             ])
@@ -460,6 +463,11 @@ impl IntegrationTest {
         )
         .await
         .expect("must be able to write config");
+    }
+
+    #[allow(dead_code)]
+    pub async fn update_schema(&self, supergraph_path: &PathBuf) {
+        fs::copy(&supergraph_path, &self.test_schema_location).expect("could not write schema");
     }
 
     #[allow(dead_code)]

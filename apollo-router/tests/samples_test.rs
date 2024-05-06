@@ -106,6 +106,9 @@ impl TestExecution {
                 self.reload_configuration(configuration_path, path, out)
                     .await
             }
+            Action::ReloadSchema { schema_path } => {
+                self.reload_schema(schema_path, path, out).await
+            }
             Action::Request {
                 request,
                 query_path,
@@ -227,6 +230,33 @@ impl TestExecution {
         let config = open_file(&path.join(configuration_path), out)?;
 
         router.update_config(&config).await;
+        router.assert_reloaded().await;
+
+        Ok(())
+    }
+
+    async fn reload_schema(
+        &mut self,
+        schema_path: &str,
+        path: &PathBuf,
+        out: &mut String,
+    ) -> Result<(), Failed> {
+        let router = match self.router.as_mut() {
+            None => {
+                writeln!(
+                    out,
+                    "cannot reload router configuration: router was not started"
+                )
+                .unwrap();
+                return Err(out.into());
+            }
+            Some(router) => router,
+        };
+
+        let schema_path = path.join(schema_path);
+
+        router.update_schema(&schema_path).await;
+        router.assert_reloaded().await;
 
         Ok(())
     }
@@ -356,6 +386,9 @@ enum Action {
     },
     ReloadConfiguration {
         configuration_path: String,
+    },
+    ReloadSchema {
+        schema_path: String,
     },
     Request {
         request: Value,
