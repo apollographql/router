@@ -6,7 +6,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
-use once_cell::sync::OnceCell as OnceLock;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -137,53 +136,70 @@ pub(crate) struct FetchNode {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphOperation {
-    // At least one of these two must be initialized
-    serialized: OnceLock<String>,
-    parsed: OnceLock<Arc<Valid<ExecutableDocument>>>,
+    serialized: String,
+    /// Ideally this would be always present, but we don’t have access to the subgraph schemas
+    /// during `Deserialize`.
+    parsed: Option<Arc<Valid<ExecutableDocument>>>,
 }
 
 impl SubgraphOperation {
     pub(crate) fn from_string(serialized: impl Into<String>) -> Self {
         Self {
-            serialized: OnceLock::from(serialized.into()),
-            parsed: OnceLock::new(),
+            serialized: serialized.into(),
+            parsed: None,
         }
     }
 
     pub(crate) fn from_parsed(parsed: impl Into<Arc<Valid<ExecutableDocument>>>) -> Self {
+        let parsed = parsed.into();
         Self {
-            serialized: OnceLock::new(),
-            parsed: OnceLock::from(parsed.into()),
+            serialized: parsed.to_string(),
+            parsed: Some(parsed),
         }
     }
 
     pub(crate) fn as_serialized(&self) -> &str {
-        self.serialized.get_or_init(|| {
-            self.parsed
-                .get()
-                .expect("SubgraphOperation has neither representation initialized")
-                .to_string()
-        })
+        &self.serialized
+    }
+
+    pub(crate) fn init_parsed(
+        &mut self,
+        subgraph_schema: &Valid<apollo_compiler::Schema>,
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
+        match &mut self.parsed {
+            Some(parsed) => Ok(parsed),
+            option => {
+                let parsed = Arc::new(ExecutableDocument::parse_and_validate(
+                    subgraph_schema,
+                    &self.serialized,
+                    "operation.graphql",
+                )?);
+                Ok(option.insert(parsed))
+            }
+        }
     }
 
     pub(crate) fn as_parsed(
         &self,
-        subgraph_schema: &Valid<apollo_compiler::Schema>,
-    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
-        self.parsed.get_or_try_init(|| {
-            let serialized = self
-                .serialized
-                .get()
-                .expect("SubgraphOperation has neither representation initialized");
-            Ok(Arc::new(
-                ExecutableDocument::parse_and_validate(
-                    subgraph_schema,
-                    serialized,
-                    "operation.graphql",
-                )
-                .map_err(|e| e.errors)?,
-            ))
-        })
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, SubgraphOperationNotInitialized> {
+        self.parsed.as_ref().ok_or(SubgraphOperationNotInitialized)
+    }
+}
+
+/// Failed to call `SubgraphOperation::init_parsed` after creating a query plan
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+pub(crate) struct SubgraphOperationNotInitialized;
+
+impl SubgraphOperationNotInitialized {
+    pub(crate) fn into_graphql_errors(self) -> Vec<Error> {
+        vec![graphql::Error::builder()
+            .extension_code(self.code())
+            .message(self.to_string())
+            .build()]
+    }
+
+    pub(crate) fn code(&self) -> &'static str {
+        "SUBGRAPH_OPERATION_NOT_INITIALIZED"
     }
 }
 
@@ -329,14 +345,6 @@ impl Variables {
 }
 
 impl FetchNode {
-    pub(crate) fn parsed_operation(
-        &self,
-        subgraph_schemas: &SubgraphSchemas,
-    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
-        self.operation
-            .as_parsed(&subgraph_schemas[self.service_name.as_str()])
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fetch_node<'a>(
         &'a self,
@@ -607,13 +615,22 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(
+    pub(crate) fn init_parsed_operation(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+    ) -> Result<(), ValidationErrors> {
+        let schema = &subgraph_schemas[self.service_name.as_str()];
+        self.operation.init_parsed(schema)?;
+        Ok(())
+    }
+
+    pub(crate) fn init_parsed_operation_and_hash_subquery(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
-        let doc = self.parsed_operation(subgraph_schemas)?;
         let schema = &subgraph_schemas[self.service_name.as_str()];
+        let doc = self.operation.init_parsed(schema)?;
 
         if let Ok(hash) = QueryHashVisitor::hash_query(
             schema,
