@@ -499,7 +499,7 @@ async fn test_mutation_inputs() {
     "###);
 }
 
-// TODO: fix when we refactor
+//TODO: fix when we refactor
 #[tokio::test]
 #[ignore]
 async fn test_entity_join() {
@@ -677,7 +677,7 @@ async fn test_response_formatting_aliases() {
     "###);
 }
 
-// TODO: fix when we refactor
+//TODO: fix when we refactor
 #[tokio::test]
 #[ignore]
 async fn test_interface_object() {
@@ -766,7 +766,7 @@ async fn test_interface_object() {
     );
 }
 
-// TODO: fix when we refactor
+//TODO: fix when we refactor
 #[tokio::test]
 #[ignore]
 async fn test_entity_interface() {
@@ -839,7 +839,7 @@ async fn test_entity_interface() {
     "###);
 }
 
-// TODO: fix when we refactor
+//TODO: fix when we refactor
 #[tokio::test]
 #[ignore]
 async fn test_interfaces() {
