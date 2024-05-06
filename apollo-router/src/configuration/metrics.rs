@@ -59,17 +59,14 @@ impl InstrumentData {
         path: &str,
         value: &Value,
     ) {
-        if let Some(Value::Object(values)) = JsonPathInst::from_str(path)
-            .expect("json path must be valid")
-            .find_slice(value)
-            .into_iter()
-            .next()
-            .as_deref()
-        {
-            if let Some(key) = values.keys().next() {
-                attributes.insert(attr_name.to_string(), key.clone().into());
+        if let Ok(json_path) = JsonPathInst::from_str(path) {
+            let value_at_path = json_path.find_slice(value).into_iter().next();
+            if let Some(Value::Object(children)) = value_at_path.as_deref() {
+                if let Some(first_key) = children.keys().next() {
+                    attributes.insert(attr_name.to_string(), first_key.clone().into());
+                }
             }
-        };
+        }
     }
 
     fn get_value_from_path(
