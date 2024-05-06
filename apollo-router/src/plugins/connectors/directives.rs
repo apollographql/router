@@ -372,9 +372,13 @@ impl Source {
             join_graph_enum(&connector_graph_names),
         );
 
-        add_fake_entity(supergraph_schema, &mut inner_supergraph_schema)?;
+        // add_fake_entity(supergraph_schema, &mut inner_supergraph_schema)?;
 
-        // println!("-------------- \n {} \n -----------------", inner_supergraph_schema);
+        println!(
+            "-------------- \n {} \n -----------------",
+            inner_supergraph_schema
+        );
+
         inner_supergraph_schema
             .validate()
             .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)

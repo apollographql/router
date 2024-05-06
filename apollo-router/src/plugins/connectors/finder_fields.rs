@@ -131,13 +131,16 @@ pub(crate) fn finder_field_for_fetch_node(
         .filter_map(|(_, connector)| {
             connector
                 .finder_field_name()
-                .map(|finder| (connector.display_name(), finder))
+                .map(|finder| (connector.display_name(), connector.name.clone(), finder))
         })
         .next()
-        .map(|(connector_service_name, s)| RestProtocolWrapper {
-            connector_service_name,
-            magic_finder_field: Some(s.as_str().to_string()),
-        })
+        .map(
+            |(connector_service_name, connector_graph_key, s)| RestProtocolWrapper {
+                connector_service_name,
+                connector_graph_key: Some(connector_graph_key),
+                magic_finder_field: Some(s.as_str().to_string()),
+            },
+        )
 }
 
 fn flatten_inputs(inputs: &[GraphQLSelection]) -> HashSet<Name> {
@@ -231,9 +234,7 @@ mod tests {
 
     const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
-    // TODO: fix when we refactor
     #[test]
-    #[ignore]
     fn test_finder_field_for_connector() {
         let schema = Schema::parse(SCHEMA, "test_supergraph.graphql").unwrap();
         let source = Source::new(&schema).unwrap().unwrap();
@@ -261,9 +262,7 @@ mod tests {
         "###);
     }
 
-    // TODO: fix when we refactor
     #[test]
-    #[ignore]
     fn test_finder_field_for_fetch_node() {
         let schema = crate::spec::Schema::parse(SCHEMA, &Default::default()).unwrap();
         let source = Source::new(&Schema::parse(SCHEMA, "test_supergraph.graphql").unwrap())

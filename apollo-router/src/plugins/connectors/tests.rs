@@ -350,9 +350,7 @@ mod mock_subgraph {
     }
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_root_field_plus_entity() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -387,9 +385,7 @@ async fn test_root_field_plus_entity() {
     );
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_root_field_plus_entity_field() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -434,9 +430,7 @@ async fn test_root_field_plus_entity_field() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_query_parameters() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -467,9 +461,7 @@ async fn test_query_parameters() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_mutation_inputs() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -562,9 +554,7 @@ async fn test_entity_join() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_aliases_on_connector_fields() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -628,9 +618,7 @@ async fn test_aliases_on_connector_fields() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_response_formatting_aliases() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -925,9 +913,7 @@ async fn test_interfaces() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_unions() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -989,9 +975,7 @@ async fn test_unions() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn basic_errors() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1028,7 +1012,6 @@ async fn basic_errors() {
 
 // TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_requires() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -1129,9 +1112,7 @@ async fn test_internal_dependencies() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_simple_header_propagation() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -1203,9 +1184,7 @@ async fn test_simple_header_propagation() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_directive_header_propagation() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -1290,9 +1269,7 @@ async fn test_directive_header_propagation() {
     "###);
 }
 
-// TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_request_deduping() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

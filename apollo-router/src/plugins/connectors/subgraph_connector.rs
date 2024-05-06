@@ -316,9 +316,8 @@ mod tests {
         let server = Server::from_tcp(listener).unwrap().serve(make_svc);
         server.await.unwrap();
     }
-    // TODO: fix when we refactor
+
     #[tokio::test]
-    #[ignore]
     async fn nullability_formatting() {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let address = listener.local_addr().unwrap();

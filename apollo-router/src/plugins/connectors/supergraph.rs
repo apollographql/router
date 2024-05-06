@@ -969,9 +969,7 @@ mod tests {
 
     const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
-    // TODO: fix when we refactor
     #[tokio::test]
-    #[ignore]
     async fn it_works() {
         let schema = Schema::parse_and_validate(SCHEMA, "outer.graphql").unwrap();
 

@@ -215,5 +215,3 @@ enum join__Graph {
   CONNECTOR_TESTINGINTERFACEOBJECT_D_11 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_11", url: "http://unused")
   CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12 @join__graph(name: "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12", url: "http://unused")
 }
-
-union _Entity @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_F_1) @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__type(graph: CONNECTOR_HELLO_2) @join__type(graph: CONNECTOR_HELLO_RELATED_3) @join__type(graph: CONNECTOR_HELLO_WORLD_2) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12) = EntityAcrossBoth | Query | EIa | EIb | Hello | Related | World | Nested | Mutation | MutationOutput | Ia | Ib | NIa | NIb | UnionA | UnionB | NestedUnionC | NestedUnionD | TestRequires

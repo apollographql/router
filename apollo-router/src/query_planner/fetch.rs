@@ -156,12 +156,14 @@ pub(crate) enum Protocol {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RestProtocolWrapper {
     pub(crate) connector_service_name: String,
+    pub(crate) connector_graph_key: Option<Arc<String>>,
     pub(crate) magic_finder_field: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct RestFetchNode {
     connector_service_name: String,
+    connector_graph_key: Arc<String>,
     parent_service_name: String,
 }
 
@@ -214,20 +216,11 @@ impl SubgraphOperation {
                 .serialized
                 .get()
                 .expect("SubgraphOperation has neither representation initialized");
-
-            println!(
-                "\n -----------------\n {} \n -----------------",
-                subgraph_schema
-            );
-            Arc::new(
-                ExecutableDocument::parse_and_validate(
-                    subgraph_schema,
-                    serialized,
-                    "operation.graphql",
-                )
-                .map_err(|e| e.errors)
-                .expect("Subgraph operation should be valid"),
-            )
+            Arc::new(Valid::assume_valid(
+                ExecutableDocument::parse(subgraph_schema, serialized, "operation.graphql")
+                    .map_err(|e| e.errors)
+                    .expect("Subgraph operation should be valid"),
+            ))
         })
     }
 }
@@ -385,8 +378,12 @@ impl FetchNode {
     pub(crate) fn service_name(&self) -> NodeStr {
         match self.protocol.as_ref() {
             Protocol::GraphQL => self.service_name.clone(),
-            Protocol::RestWrapper(rw) => rw.connector_service_name.clone().into(),
-            Protocol::RestFetch(rf) => rf.connector_service_name.clone().into(),
+            Protocol::RestWrapper(rw) => rw
+                .connector_graph_key
+                .clone()
+                .map(|cgk| cgk.to_string().into())
+                .unwrap_or_else(|| self.service_name.clone()),
+            Protocol::RestFetch(rf) => rf.connector_graph_key.to_string().into(),
         }
     }
 
@@ -430,6 +427,7 @@ impl FetchNode {
             Protocol::RestFetch(RestFetchNode {
                 connector_service_name,
                 parent_service_name,
+                ..
             }) => (parent_service_name, connector_service_name),
             _ => (&service_name_string, &service_name_string),
         };
@@ -848,6 +846,7 @@ impl FetchNode {
                     self.operation.clone(),
                     RestProtocolWrapper {
                         connector_service_name: self.service_name.to_string(),
+                        connector_graph_key: None,
                         magic_finder_field: None,
                     },
                 )
@@ -897,6 +896,7 @@ impl FetchNode {
             std::mem::replace(&mut self.service_name, connector.display_name().into());
         self.protocol = Arc::new(Protocol::RestFetch(RestFetchNode {
             connector_service_name: service_name.to_string(),
+            connector_graph_key: connector._name(),
             parent_service_name,
         }))
     }

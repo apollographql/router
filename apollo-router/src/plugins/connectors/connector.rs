@@ -229,6 +229,10 @@ impl Connector {
             self.origin_subgraph, self.api, tr.method, tr.path_template
         )
     }
+
+    pub(crate) fn _name(&self) -> Arc<String> {
+        self.name.clone()
+    }
 }
 
 #[cfg(test)]
