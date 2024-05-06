@@ -6,9 +6,7 @@ use std::ops::Deref;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::executable::Field;
-use apollo_compiler::executable::Selection;
-use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -1947,7 +1945,7 @@ fn remove_inactive_applications(
 /// set was modified.
 fn remove_non_external_leaf_fields(
     schema: &FederationSchema,
-    selection_set: &mut SelectionSet,
+    selection_set: &mut executable::SelectionSet,
 ) -> Result<bool, FederationError> {
     let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
     let external_directive_definition_name = federation_spec_definition
@@ -1964,13 +1962,13 @@ fn remove_non_external_leaf_fields(
 fn remove_non_external_leaf_fields_internal(
     schema: &FederationSchema,
     external_directive_definition_name: &Name,
-    selection_set: &mut SelectionSet,
+    selection_set: &mut executable::SelectionSet,
 ) -> Result<bool, FederationError> {
     let mut is_modified = false;
     let mut errors = MultipleFederationErrors { errors: Vec::new() };
     selection_set.selections.retain_mut(|selection| {
         let child_selection_set = match selection {
-            Selection::Field(field) => {
+            executable::Selection::Field(field) => {
                 match is_external_or_has_external_implementations(
                     schema,
                     external_directive_definition_name,
@@ -1997,10 +1995,10 @@ fn remove_non_external_leaf_fields_internal(
                 }
                 &mut field.make_mut().selection_set
             }
-            Selection::InlineFragment(inline_fragment) => {
+            executable::Selection::InlineFragment(inline_fragment) => {
                 &mut inline_fragment.make_mut().selection_set
             }
-            Selection::FragmentSpread(_) => {
+            executable::Selection::FragmentSpread(_) => {
                 errors.push(
                     SingleFederationError::Internal {
                         message: "Unexpectedly found named fragment in FieldSet scalar".to_owned(),
@@ -2043,7 +2041,7 @@ fn is_external_or_has_external_implementations(
     schema: &FederationSchema,
     external_directive_definition_name: &Name,
     parent_type_name: &NamedType,
-    selection: &Node<Field>,
+    selection: &Node<executable::Field>,
 ) -> Result<bool, FederationError> {
     let type_pos: CompositeTypeDefinitionPosition =
         schema.get_type(parent_type_name.clone())?.try_into()?;

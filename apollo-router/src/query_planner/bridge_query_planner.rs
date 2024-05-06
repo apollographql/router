@@ -37,6 +37,7 @@ use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
+use crate::error::ValidationErrors;
 use crate::executable::USING_CATCH_UNWIND;
 use crate::graphql;
 use crate::introspection::Introspection;
@@ -559,7 +560,7 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl);
+            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl)?;
         plan_success
             .data
             .query_plan
@@ -991,10 +992,11 @@ impl QueryPlan {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
-    ) {
+    ) -> Result<(), ValidationErrors> {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
         }
+        Ok(())
     }
 
     fn extract_authorization_metadata(

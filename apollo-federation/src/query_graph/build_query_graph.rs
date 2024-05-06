@@ -26,8 +26,8 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::operation::merge_selection_sets;
-use crate::query_plan::operation::NormalizedSelection;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::SelectionSet;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -131,7 +131,7 @@ impl BaseQueryGraphBuilder {
         head: NodeIndex,
         tail: NodeIndex,
         transition: QueryGraphEdgeTransition,
-        conditions: Option<Arc<NormalizedSelectionSet>>,
+        conditions: Option<Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
         self.query_graph.graph.add_edge(
             head,
@@ -1445,7 +1445,7 @@ impl FederatedQueryGraphBuilder {
         base: &mut BaseQueryGraphBuilder,
         source: &NodeStr,
         head: NodeIndex,
-        provided: &NormalizedSelectionSet,
+        provided: &SelectionSet,
         provide_id: u32,
     ) -> Result<(), FederationError> {
         let mut stack = vec![(head, provided)];
@@ -1454,7 +1454,7 @@ impl FederatedQueryGraphBuilder {
             // does.
             for selection in selection_set.selections.values().rev() {
                 match selection {
-                    NormalizedSelection::Field(field_selection) => {
+                    Selection::Field(field_selection) => {
                         let existing_edge_info = base
                             .query_graph
                             .graph
@@ -1560,7 +1560,7 @@ impl FederatedQueryGraphBuilder {
                             }
                         }
                     }
-                    NormalizedSelection::InlineFragment(inline_fragment_selection) => {
+                    Selection::InlineFragment(inline_fragment_selection) => {
                         if let Some(type_condition_pos) = &inline_fragment_selection
                             .inline_fragment
                             .data()
@@ -1618,7 +1618,7 @@ impl FederatedQueryGraphBuilder {
                             stack.push((node, &inline_fragment_selection.selection_set));
                         }
                     }
-                    NormalizedSelection::FragmentSpread(_) => {
+                    Selection::FragmentSpread(_) => {
                         return Err(SingleFederationError::Internal {
                             message: "Unexpectedly found named fragment in FieldSet scalar"
                                 .to_owned(),
@@ -2013,7 +2013,7 @@ struct QueryGraphEdgeData {
     head: NodeIndex,
     tail: NodeIndex,
     transition: QueryGraphEdgeTransition,
-    conditions: Option<Arc<NormalizedSelectionSet>>,
+    conditions: Option<Arc<SelectionSet>>,
 }
 
 impl QueryGraphEdgeData {
