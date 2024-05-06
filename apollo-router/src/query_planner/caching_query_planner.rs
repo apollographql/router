@@ -12,6 +12,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
+use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
@@ -530,6 +531,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
+    pub(crate) query_planner_config: QueryPlannerConfig,
 }
 
 const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
@@ -562,6 +564,7 @@ impl Hash for CachingQueryKey {
         self.operation.hash(state);
         self.metadata.hash(state);
         self.plan_options.hash(state);
+        self.query_planner_config.hash(state);
     }
 }
 
@@ -572,6 +575,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
+    pub(crate) query_planner_config: QueryPlannerConfig,
 }
 
 #[cfg(test)]
