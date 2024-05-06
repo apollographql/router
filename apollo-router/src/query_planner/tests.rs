@@ -1782,3 +1782,39 @@ async fn typename_propagation3() {
     let response = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
 }
+
+#[test]
+fn broken_plan_does_not_panic() {
+    let operation = "{ invalid }";
+    let subgraph_schema = "type Query { field: Int }";
+    let mut plan = QueryPlan {
+        root: PlanNode::Fetch(FetchNode {
+            service_name: "X".into(),
+            requires: vec![],
+            variable_usages: vec![],
+            operation: SubgraphOperation::from_string(operation),
+            operation_name: Some("t".into()),
+            operation_kind: OperationKind::Query,
+            id: Some("fetch1".into()),
+            input_rewrites: None,
+            output_rewrites: None,
+            schema_aware_hash: Default::default(),
+            authorization: Default::default(),
+        }),
+        formatted_query_plan: Default::default(),
+        usage_reporting: UsageReporting {
+            stats_report_key: "this is a test report key".to_string(),
+            referenced_fields_by_type: Default::default(),
+        }
+        .into(),
+        query: Arc::new(Query::empty()),
+    };
+    let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
+    let mut subgraph_schemas = HashMap::new();
+    subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
+    let result = plan.root.hash_subqueries(&subgraph_schemas, "");
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        r#"[1:3] Cannot query field "invalid" on type "Query"."#
+    );
+}
