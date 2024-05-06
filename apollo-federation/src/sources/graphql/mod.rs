@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::schema::position::AbstractFieldDefinitionPosition;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -190,13 +190,13 @@ pub(crate) enum GraphqlFetchDependencyGraphNode {
     OperationRoot {
         merge_at: Vec<FetchDataPathElement>,
         source_entering_edge: EdgeIndex,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
     },
     EntitiesField {
         merge_at: Vec<FetchDataPathElement>,
         source_entering_edge: EdgeIndex,
         key_condition_resolution: Option<ConditionResolutionId>,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
     },
 }
 
