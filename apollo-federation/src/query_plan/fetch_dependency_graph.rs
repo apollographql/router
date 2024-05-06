@@ -1499,13 +1499,13 @@ fn operation_for_entities_fetch(
         .get_type(query_type_name.clone())?
         .try_into()?;
 
-    let mut map = SelectionMap::new();
-    map.insert(entities_call);
+    let mut selections = SelectionMap::new();
+    selections.insert(entities_call);
 
     let selection_set = SelectionSet {
         schema: subgraph_schema.clone(),
         type_position,
-        selections: Arc::new(map),
+        selections,
     };
 
     Ok(Operation {
@@ -1669,7 +1669,7 @@ impl FetchInputs {
         Ok(SelectionSet {
             schema: self.supergraph_schema.clone(),
             type_position: type_position.clone(),
-            selections: Arc::new(selections),
+            selections,
         })
     }
 }

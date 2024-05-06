@@ -241,7 +241,7 @@ impl Operation {
 pub(crate) struct SelectionSet {
     pub(crate) schema: ValidFederationSchema,
     pub(crate) type_position: CompositeTypeDefinitionPosition,
-    pub(crate) selections: Arc<SelectionMap>,
+    pub(crate) selections: SelectionMap,
 }
 
 pub(crate) mod normalized_selection_map {
@@ -1887,12 +1887,12 @@ impl SelectionSet {
         selection: Selection,
     ) -> Self {
         let schema = selection.schema().clone();
-        let mut selection_map = SelectionMap::new();
-        selection_map.insert(selection);
+        let mut selections = SelectionMap::new();
+        selections.insert(selection);
         Self {
             schema,
             type_position,
-            selections: Arc::new(selection_map),
+            selections,
         }
     }
 
@@ -1906,7 +1906,7 @@ impl SelectionSet {
         Self {
             schema,
             type_position,
-            selections: Arc::new(selections.into_iter().collect()),
+            selections: selections.into_iter().collect(),
         }
     }
 
@@ -1975,7 +1975,7 @@ impl SelectionSet {
         let mut merged = SelectionSet {
             schema: schema.clone(),
             type_position,
-            selections: Arc::new(SelectionMap::new()),
+            selections: SelectionMap::new(),
         };
         merged.merge_selections_into(normalized_selections.iter())?;
         Ok(merged)
@@ -2099,10 +2099,9 @@ impl SelectionSet {
         let mut fields = IndexMap::new();
         let mut fragment_spreads = IndexMap::new();
         let mut inline_fragments = IndexMap::new();
-        let target = Arc::make_mut(&mut self.selections);
         for other_selection in others {
             let other_key = other_selection.key();
-            match target.entry(other_key.clone()) {
+            match self.selections.entry(other_key.clone()) {
                 normalized_selection_map::Entry::Occupied(existing) => match existing.get() {
                     Selection::Field(self_field_selection) => {
                         let Selection::Field(other_field_selection) = other_selection else {
@@ -2162,7 +2161,7 @@ impl SelectionSet {
             }
         }
 
-        for (key, self_selection) in target.iter_mut() {
+        for (key, self_selection) in self.selections.iter_mut() {
             match self_selection {
                 SelectionValue::Field(mut self_field_selection) => {
                     if let Some(other_field_selections) = fields.shift_remove(key) {
@@ -2206,7 +2205,7 @@ impl SelectionSet {
         let mut expanded = SelectionSet {
             schema: self.schema.clone(),
             type_position: self.type_position.clone(),
-            selections: Arc::new(SelectionMap::new()),
+            selections: SelectionMap::new(),
         };
         expanded.merge_selections_into(expanded_selections.iter())?;
         Ok(expanded)
@@ -2299,8 +2298,7 @@ impl SelectionSet {
         let mut typename_field_key: Option<SelectionKey> = None;
         let mut sibling_field_key: Option<SelectionKey> = None;
 
-        let mutable_selection_map = Arc::make_mut(&mut self.selections);
-        for (key, entry) in mutable_selection_map.iter_mut() {
+        for (key, entry) in self.selections.iter_mut() {
             match entry {
                 SelectionValue::Field(mut field_selection) => {
                     if field_selection.get().field.data().name() == &TYPENAME_FIELD
@@ -2341,8 +2339,8 @@ impl SelectionSet {
                 Some((_, Selection::Field(typename_field))),
                 Some(SelectionValue::Field(mut sibling_field)),
             ) = (
-                mutable_selection_map.remove(&typename_key),
-                mutable_selection_map.get_mut(&sibling_field_key),
+                self.selections.remove(&typename_key),
+                self.selections.get_mut(&sibling_field_key),
             ) {
                 *sibling_field.get_sibling_typename_mut() =
                     Some(typename_field.field.data().response_name());
@@ -2381,7 +2379,7 @@ impl SelectionSet {
             Cow::Owned(selections) => Ok(Cow::Owned(Self {
                 schema: self.schema.clone(),
                 type_position: self.type_position.clone(),
-                selections: Arc::new(selections),
+                selections,
             })),
         }
     }
@@ -2489,15 +2487,13 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
     ) -> Result<SelectionSet, FederationError> {
-        let mut result = SelectionMap::new();
-        for group in selection_key_groups {
-            let selection = Self::make_selection(schema, parent_type, group)?;
-            result.insert(selection);
-        }
+        let selections = selection_key_groups
+            .map(|group| Self::make_selection(schema, parent_type, group))
+            .collect::<Result<_, _>>()?;
         Ok(SelectionSet {
             schema: schema.clone(),
             type_position: parent_type.clone(),
-            selections: Arc::new(result),
+            selections,
         })
     }
 
@@ -2604,7 +2600,7 @@ impl SelectionSet {
         parent_type_if_abstract: Option<AbstractType>,
         fragments: &Option<&mut RebasedFragments>,
     ) -> Result<SelectionSet, FederationError> {
-        let mut selection_map = SelectionMap::new();
+        let mut selections = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
             if !self.has_top_level_typename_field() {
                 let field_position = parent.introspection_typename_field();
@@ -2612,11 +2608,11 @@ impl SelectionSet {
                     Field::new(FieldData::from_position(&self.schema, field_position)),
                     None,
                 );
-                selection_map.insert(typename_selection);
+                selections.insert(typename_selection);
             }
         }
         for selection in self.selections.values() {
-            selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
+            selections.insert(if let Some(selection_set) = selection.selection_set()? {
                 let type_if_abstract =
                     subselection_type_if_abstract(selection, &self.schema, fragments);
                 let updated_selection_set = selection_set
@@ -2635,7 +2631,7 @@ impl SelectionSet {
         Ok(SelectionSet {
             schema: self.schema.clone(),
             type_position: self.type_position.clone(),
-            selections: Arc::new(selection_map),
+            selections,
         })
     }
 
@@ -2661,19 +2657,17 @@ impl SelectionSet {
         schema: &ValidFederationSchema,
         selection: Selection,
     ) -> Result<(), FederationError> {
-        let selections = Arc::make_mut(&mut self.selections);
-
         let key = selection.key();
-        match selections.remove(&key) {
+        match self.selections.remove(&key) {
             Some((index, existing_selection)) => {
                 let to_merge = [existing_selection, selection];
                 // `existing_selection` and `selection` both have the same selection key,
                 // so the merged selection will also have the same selection key.
                 let selection = SelectionSet::make_selection(schema, parent_type, to_merge.iter())?;
-                selections.insert_at(index, selection);
+                self.selections.insert_at(index, selection);
             }
             None => {
-                selections.insert(selection);
+                self.selections.insert(selection);
             }
         }
 
@@ -2712,19 +2706,17 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
-                let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
-                    .or_insert(|| {
-                        Selection::from_element(
-                            OpPathElement::clone(ele),
-                            // We immediately add a selection afterward to make this selection set
-                            // valid.
-                            Some(SelectionSet::empty(
-                                self.schema.clone(),
-                                self.type_position.clone(),
-                            )),
-                        )
-                    })?;
+                let mut selection = self.selections.entry(ele.key()).or_insert(|| {
+                    Selection::from_element(
+                        OpPathElement::clone(ele),
+                        // We immediately add a selection afterward to make this selection set
+                        // valid.
+                        Some(SelectionSet::empty(
+                            self.schema.clone(),
+                            self.type_position.clone(),
+                        )),
+                    )
+                })?;
                 match &mut selection {
                     SelectionValue::Field(field) => match field.get_selection_set_mut() {
                         Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
@@ -2874,17 +2866,17 @@ impl SelectionSet {
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
     ) -> Result<SelectionSet, FederationError> {
-        let mut normalized_selection_map = SelectionMap::new();
+        let mut normalized_selections = SelectionMap::new();
         for (_, selection) in self.selections.iter() {
             if let Some(selection_or_set) =
                 selection.normalize(parent_type, named_fragments, schema, option)?
             {
                 match selection_or_set {
                     SelectionOrSet::Selection(normalized_selection) => {
-                        normalized_selection_map.insert(normalized_selection);
+                        normalized_selections.insert(normalized_selection);
                     }
                     SelectionOrSet::SelectionSet(normalized_set) => {
-                        normalized_selection_map.extend_ref(&normalized_set.selections);
+                        normalized_selections.extend_ref(&normalized_set.selections);
                     }
                 }
             }
@@ -2893,7 +2885,7 @@ impl SelectionSet {
         Ok(SelectionSet {
             schema: self.schema.clone(),
             type_position: self.type_position.clone(),
-            selections: Arc::new(normalized_selection_map),
+            selections: normalized_selections,
         })
     }
 
@@ -3016,7 +3008,7 @@ impl SelectionSet {
         Ok(SelectionSet {
             schema: self.schema.clone(),
             type_position: self.type_position.clone(),
-            selections: Arc::new(selection_map),
+            selections: selection_map,
         })
     }
 
@@ -3480,7 +3472,7 @@ impl FieldSelection {
                 let mut typename_selection = SelectionMap::new();
                 typename_selection.insert(non_included_typename);
 
-                normalized_selection.selections = Arc::new(typename_selection);
+                normalized_selection.selections = typename_selection;
                 selection.selection_set = Some(normalized_selection);
             } else {
                 selection.selection_set = Some(normalized_selection);
@@ -4052,15 +4044,14 @@ impl InlineFragmentSelection {
             // Otherwise, if there are "liftable" selections, we must return a set comprised of those lifted selection,
             // and the current fragment _without_ those lifted selections.
             if liftable_selections.len() > 0 {
-                let mut mutable_selections = self.selection_set.selections.clone();
-                let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
+                let mut final_fragment_selections = self.selection_set.selections.clone();
                 final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
                 let final_inline_fragment = Selection::from_inline_fragment(
                     self.inline_fragment.clone(),
                     SelectionSet {
                         schema: schema.clone(),
                         type_position: parent_type.clone(),
-                        selections: Arc::new(final_fragment_selections.clone()),
+                        selections: final_fragment_selections,
                     },
                 );
 
@@ -4070,7 +4061,7 @@ impl InlineFragmentSelection {
                 let final_selections = SelectionSet {
                     schema: schema.clone(),
                     type_position: parent_type.clone(),
-                    selections: final_selection_map.into(),
+                    selections: final_selection_map,
                 };
                 return Ok(Some(SelectionOrSet::SelectionSet(final_selections)));
             }

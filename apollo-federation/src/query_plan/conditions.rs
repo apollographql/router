@@ -234,7 +234,7 @@ pub(crate) fn remove_conditions_from_selection_set(
             Ok(SelectionSet {
                 schema: selection_set.schema.clone(),
                 type_position: selection_set.type_position.clone(),
-                selections: Arc::new(selection_map),
+                selections: selection_map,
             })
         }
     }
