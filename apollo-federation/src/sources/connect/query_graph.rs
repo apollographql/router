@@ -421,7 +421,7 @@ mod tests {
 
             style = filled
             color = lightgrey
-            label = "Query.users"
+            label = "connectors.json http: Get /users"
           }
           subgraph cluster_1 {
             node [style = filled,color = white]
@@ -433,7 +433,7 @@ mod tests {
 
             style = filled
             color = lightgrey
-            label = "Query.posts"
+            label = "connectors.json http: Get /posts"
           }
           0.1 -> 0.2 [ label = "id" ]
           0.1 -> 0.3 [ label = "name" ]
@@ -472,7 +472,7 @@ mod tests {
 
             style = filled
             color = lightgrey
-            label = "Query.users"
+            label = "connectors.json http: Get /users"
           }
           subgraph cluster_1 {
             node [style = filled,color = white]
@@ -484,7 +484,7 @@ mod tests {
 
             style = filled
             color = lightgrey
-            label = "Query.posts"
+            label = "connectors.json http: Get /posts"
           }
           0.1 -> 0.2 [ label = "id" ]
           0.1 -> 0.3 [ label = "name: .username" ]
@@ -525,7 +525,7 @@ mod tests {
 
             style = filled
             color = lightgrey
-            label = "Query.me"
+            label = "connectors.json http: Get /users/1"
           }
           subgraph cluster_1 {
             node [style = filled,color = white]
@@ -538,7 +538,7 @@ mod tests {
 
             style = filled
             color = lightgrey
-            label = "Query.user"
+            label = "connectors.json http: Get /users/1"
           }
           0.1 -> 0.2 [ label = "id" ]
           0.1 -> 0.3 [ label = "name" ]
@@ -585,7 +585,7 @@ mod tests {
 
             style = filled
             color = lightgrey
-            label = "Query.user"
+            label = "connectors.json http: Get /users"
           }
           0.1 -> 0.2 [ label = "id" ]
           0.3 -> 0.4 [ label = "name: .\"user full name\"" ]
@@ -738,7 +738,7 @@ mod tests {
                             };
 
                             (
-                                connect_id.directive.field.to_string(),
+                                connect_id,
                                 dot.lines()
                                     .map(|line| format!("{index}.{}", line.trim()))
                                     .join("\n"),
