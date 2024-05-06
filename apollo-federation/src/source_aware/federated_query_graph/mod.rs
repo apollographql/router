@@ -4,7 +4,7 @@ use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::SelectionSet;
 use crate::schema::position::AbstractFieldDefinitionPosition;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -35,7 +35,7 @@ pub struct FederatedQueryGraph {
     supergraph_types_to_root_nodes: IndexMap<ObjectTypeDefinitionPosition, NodeIndex>,
     supergraph_root_kinds_to_types:
         IndexMap<SchemaRootDefinitionKind, ObjectTypeDefinitionPosition>,
-    self_conditions: Vec<NormalizedSelectionSet>,
+    self_conditions: Vec<SelectionSet>,
     non_trivial_followup_edges: IndexMap<EdgeIndex, IndexSet<EdgeIndex>>,
     source_data: SourceFederatedQueryGraphs,
 }
@@ -140,4 +140,4 @@ pub(crate) enum FederatedQueryGraphEdge {
 pub(crate) struct SelfConditionIndex(usize);
 
 #[derive(Debug)]
-pub(crate) struct ConditionNormalizedSelectionSet(NormalizedSelectionSet);
+pub(crate) struct ConditionNormalizedSelectionSet(SelectionSet);
