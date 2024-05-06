@@ -34,14 +34,20 @@
         },
         {
             "type": "ReloadSchema",
-            "schema_path": "./supergraph.graphql"
+            "schema_path": "./supergraph2.graphql"
         },
         {
             "type": "Request",
             "request": {
                 "query": "{ me { nom: name } }"
             },
-            "expected_response": {}
+            "expected_response": {
+                "data":{
+                    "me":{
+                        "name":"test"
+                    }
+                }
+            }
         },
         {
             "type": "Stop"
