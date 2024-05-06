@@ -6653,17 +6653,42 @@ type T {
         use super::super::*;
         use super::*;
 
-        fn contains_field(ss: &SelectionSet, field_name: &Name) -> bool {
+        fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
             ss.selections.contains_key(&SelectionKey::Field {
-                response_name: field_name.clone(),
+                response_name: field_name,
                 directives: Default::default(),
             })
         }
 
-        fn is_named_field(sk: &SelectionKey, name: &Name) -> bool {
+        fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
             matches!(sk,
                 SelectionKey::Field { response_name, directives: _ }
-                    if *response_name == *name)
+                    if *response_name == name)
+        }
+
+        fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Selection> {
+            let Some((first, rest)) = path.split_first() else {
+                // Error: empty path
+                return None;
+            };
+            let result = ss.selections.get(&SelectionKey::Field {
+                response_name: (*first).clone(),
+                directives: Default::default(),
+            });
+            let Some(value) = result else {
+                // Error: No matching field found.
+                return None;
+            };
+            if rest.is_empty() {
+                // Base case => We are done.
+                Some(value)
+            } else {
+                // Recursive case
+                match value.selection_set().unwrap() {
+                    None => None, // Error: Sub-selection expected, but not found.
+                    Some(ss) => get_value_at_path(ss, rest),
+                }
+            }
         }
 
         // recursive filter implementation using `lazy_map`
@@ -6741,21 +6766,17 @@ type T {
             assert!(select_all == selection_set);
 
             // Remove `foo`
-            let remove_foo = filter_rec(&selection_set, &|s| {
-                !is_named_field(&s.key(), &name!("foo"))
-            })
-            .unwrap();
-            assert!(contains_field(&remove_foo, &name!("some_int")));
-            assert!(contains_field(&remove_foo, &name!("foo2")));
-            assert!(!contains_field(&remove_foo, &name!("foo")));
+            let remove_foo =
+                filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("foo"))).unwrap();
+            assert!(contains_field(&remove_foo, name!("some_int")));
+            assert!(contains_field(&remove_foo, name!("foo2")));
+            assert!(!contains_field(&remove_foo, name!("foo")));
 
             // Remove `bar`
-            let remove_bar = filter_rec(&selection_set, &|s| {
-                !is_named_field(&s.key(), &name!("bar"))
-            })
-            .unwrap();
+            let remove_bar =
+                filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("bar"))).unwrap();
             // "foo2" should be removed, since it has no sub-selections left.
-            assert!(!contains_field(&remove_bar, &name!("foo2")));
+            assert!(!contains_field(&remove_bar, name!("foo2")));
         }
 
         fn add_typename_if(
@@ -6803,20 +6824,15 @@ type T {
 
             // Add __typename next to any "id" field.
             let result =
-                add_typename_if(&selection_set, &|s| is_named_field(&s.key(), &name!("id")))
+                add_typename_if(&selection_set, &|s| is_named_field(&s.key(), name!("id")))
                     .unwrap();
 
-            // Check if "foo" has "__typename".
-            let (_, foo) = result
-                .selections
-                .iter()
-                .find(|(k, _v)| is_named_field(k, &name!("foo")))
-                .unwrap();
-            let foo_selection_set = foo.selection_set().unwrap().unwrap();
             // The top level won't have __typename, since it doesn't have "id".
-            assert!(!contains_field(&result, &name!("__typename")));
-            // The "foo" should have __typename, since it has "id".
-            assert!(contains_field(foo_selection_set, &name!("__typename")));
+            assert!(!contains_field(&result, name!("__typename")));
+
+            // Check if "foo" has "__typename".
+            get_value_at_path(&result, &[name!("foo"), name!("__typename")])
+                .expect("foo.__typename should exist");
         }
     }
 }
