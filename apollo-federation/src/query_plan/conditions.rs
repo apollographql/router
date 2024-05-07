@@ -10,8 +10,8 @@ use indexmap::IndexMap;
 use crate::error::FederationError;
 use crate::query_graph::graph_path::selection_of_element;
 use crate::query_graph::graph_path::OpPathElement;
-use crate::query_plan::operation::NormalizedSelectionMap;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::SelectionMap;
+use crate::query_plan::operation::SelectionSet;
 
 /// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
 /// to be queried, based on the `@skip`/`@include` applications on the selections within.
@@ -191,9 +191,9 @@ fn is_constant_condition(condition: &Conditions) -> bool {
 }
 
 pub(crate) fn remove_conditions_from_selection_set(
-    selection_set: &NormalizedSelectionSet,
+    selection_set: &SelectionSet,
     conditions: &Conditions,
-) -> Result<NormalizedSelectionSet, FederationError> {
+) -> Result<SelectionSet, FederationError> {
     match conditions {
         Conditions::Boolean(_) => {
             // If the conditions are the constant false, this means we know the selection will not be included
@@ -204,7 +204,7 @@ pub(crate) fn remove_conditions_from_selection_set(
             Ok(selection_set.clone())
         }
         Conditions::Variables(variable_conditions) => {
-            let mut selection_map = NormalizedSelectionMap::new();
+            let mut selection_map = SelectionMap::new();
 
             for selection in selection_set.selections.values() {
                 let element = selection.element()?;
@@ -231,7 +231,7 @@ pub(crate) fn remove_conditions_from_selection_set(
                 selection_map.insert(new_selection);
             }
 
-            Ok(NormalizedSelectionSet {
+            Ok(SelectionSet {
                 schema: selection_set.schema.clone(),
                 type_position: selection_set.type_position.clone(),
                 selections: Arc::new(selection_map),

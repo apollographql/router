@@ -30,9 +30,9 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToC
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::operation::NormalizedOperation;
-use crate::query_plan::operation::NormalizedSelection;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::Operation;
+use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
@@ -55,7 +55,7 @@ pub(crate) struct QueryPlanningParameters {
     /// The federated query graph used for query planning.
     pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
-    pub(crate) operation: Arc<NormalizedOperation>,
+    pub(crate) operation: Arc<Operation>,
     /// A processor for converting fetch dependency graphs to query plans.
     pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor,
     /// The query graph node at which query planning begins.
@@ -110,7 +110,7 @@ struct OpenBranchAndSelections {
     /// The options for this open branch.
     open_branch: OpenBranch,
     /// A stack of the remaining selections to plan from the node this open branch ends on.
-    selections: Vec<NormalizedSelection>,
+    selections: Vec<Selection>,
 }
 
 pub(crate) struct BestQueryPlanInfo {
@@ -146,7 +146,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         // The ownership of `QueryPlanningParameters` is awkward and should probably be
         // refactored.
         parameters: &'a QueryPlanningParameters,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
         has_defers: bool,
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
@@ -168,7 +168,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     #[allow(clippy::too_many_arguments)]
     fn new_inner(
         parameters: &'a QueryPlanningParameters,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
         starting_id_generation: u64,
         has_defers: bool,
         root_kind: SchemaRootDefinitionKind,
@@ -180,7 +180,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         let is_top_level = parameters.head_must_be_root;
 
         fn map_options_to_selections(
-            selection_set: NormalizedSelectionSet,
+            selection_set: SelectionSet,
             options: Vec<SimultaneousPathsWithLazyIndirectPaths>,
         ) -> Vec<OpenBranchAndSelections> {
             let open_branch = OpenBranch(options);
@@ -269,7 +269,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     /// the stack.
     fn handle_open_branch(
         &mut self,
-        selection: &NormalizedSelection,
+        selection: &Selection,
         options: &mut Vec<SimultaneousPathsWithLazyIndirectPaths>,
     ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
         let operation_element = selection.element()?;
@@ -449,7 +449,7 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     fn selection_set_is_fully_local_from_all_nodes(
         &self,
-        selection: &NormalizedSelectionSet,
+        selection: &SelectionSet,
         nodes: &IndexSet<NodeIndex>,
     ) -> Result<bool, FederationError> {
         // To guarantee that the selection is fully local from the provided vertex/type, we must have:
@@ -464,7 +464,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         // skipped if `nodes` is empty.
         if !nodes.is_empty()
             && selection.selections.values().any(|val| match val {
-                NormalizedSelection::InlineFragment(fragment) => {
+                Selection::InlineFragment(fragment) => {
                     match &fragment.inline_fragment.data().type_condition_position {
                         Some(type_condition) => self
                             .parameters

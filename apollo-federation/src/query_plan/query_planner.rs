@@ -22,8 +22,8 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToC
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::operation::normalize_operation;
 use crate::query_plan::operation::NormalizedDefer;
-use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -501,7 +501,7 @@ fn compute_root_parallel_dependency_graph(
 
 fn compute_root_parallel_best_plan(
     parameters: &QueryPlanningParameters,
-    selection: NormalizedSelectionSet,
+    selection: SelectionSet,
     has_defers: bool,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     let planning_traversal = QueryPlanningTraversal::new(
@@ -529,7 +529,7 @@ fn compute_plan_internal(
         let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
         let mut main = None;
         let mut deferred = vec![];
-        let mut primary_selection = None::<NormalizedSelectionSet>;
+        let mut primary_selection = None::<SelectionSet>;
         for mut dependency_graph in dependency_graphs {
             let (local_main, local_deferred) =
                 dependency_graph.process(&mut parameters.processor, root_kind)?;

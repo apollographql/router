@@ -12,6 +12,7 @@ use super::fetch;
 use super::subscription::SubscriptionNode;
 use crate::configuration::Batching;
 use crate::error::CacheResolverError;
+use crate::error::ValidationErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -323,40 +324,40 @@ impl PlanNode {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
-    ) {
+    ) -> Result<(), ValidationErrors> {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.hash_subquery(subgraph_schemas, supergraph_schema_hash);
+                fetch_node.hash_subquery(subgraph_schemas, supergraph_schema_hash)?;
             }
 
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
                 }
             }
             PlanNode::Flatten(flatten) => flatten
                 .node
-                .hash_subqueries(subgraph_schemas, supergraph_schema_hash),
+                .hash_subqueries(subgraph_schemas, supergraph_schema_hash)?,
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
                 }
                 for deferred_node in deferred {
                     if let Some(node) = deferred_node.node.take() {
                         let mut new_node = (*node).clone();
-                        new_node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+                        new_node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
                         deferred_node.node = Some(Arc::new(new_node));
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
                 }
             }
             PlanNode::Condition {
@@ -365,13 +366,14 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+                    node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
                 }
             }
         }
+        Ok(())
     }
 
     #[cfg(test)]
