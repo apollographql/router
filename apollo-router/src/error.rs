@@ -314,6 +314,10 @@ pub(crate) enum QueryPlannerError {
 
     /// Query planner pool error: {0}
     PoolProcessing(String),
+
+    /// Federation error: {0}
+    // TODO: make `FederationError` serializable and store it as-is?
+    FederationError(String),
 }
 
 impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
@@ -538,18 +542,22 @@ impl std::fmt::Display for PlanErrors {
 }
 
 /// Error in the schema.
-#[derive(Debug, Error, Display)]
+#[derive(Debug, Error, Display, derive_more::From)]
 #[non_exhaustive]
 pub(crate) enum SchemaError {
     /// URL parse error for subgraph {0}: {1}
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
+    #[from(ignore)]
     MissingSubgraphUrl(String),
     /// GraphQL parser error: {0}
     Parse(ParseErrors),
     /// GraphQL validation error: {0}
     Validate(ValidationErrors),
+    /// Federation error: {0}
+    FederationError(apollo_federation::error::FederationError),
     /// Api error(s): {0}
+    #[from(ignore)]
     Api(String),
 }
 
@@ -608,10 +616,9 @@ pub(crate) struct ValidationErrors {
     pub(crate) errors: Vec<apollo_compiler::execution::GraphQLError>,
 }
 
-impl IntoGraphQLErrors for ValidationErrors {
-    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
-        Ok(self
-            .errors
+impl ValidationErrors {
+    pub(crate) fn into_graphql_errors_infallible(self) -> Vec<Error> {
+        self.errors
             .iter()
             .map(|diagnostic| {
                 Error::builder()
@@ -629,7 +636,12 @@ impl IntoGraphQLErrors for ValidationErrors {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
-            .collect())
+            .collect()
+    }
+}
+impl IntoGraphQLErrors for ValidationErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self.into_graphql_errors_infallible())
     }
 }
 

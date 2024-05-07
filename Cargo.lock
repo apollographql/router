@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.45.1"
+version = "1.46.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -337,6 +337,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry-zipkin",
  "opentelemetry_api",
+ "opentelemetry_sdk 0.20.0",
  "p256 0.13.2",
  "parking_lot",
  "paste",
@@ -411,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.45.1"
+version = "1.46.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -427,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.45.1"
+version = "1.46.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -942,7 +943,7 @@ dependencies = [
  "hex",
  "hmac",
  "http 0.2.11",
- "http 1.1.0",
+ "http 1.0.0",
  "once_cell",
  "percent-encoding",
  "sha2",
@@ -1035,7 +1036,7 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "http 0.2.11",
- "http 1.1.0",
+ "http 1.0.0",
  "pin-project-lite",
  "tokio",
  "tracing",
@@ -1908,9 +1909,9 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.1.2"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a677b8922c94e01bdbb12126b0bc852f00447528dee1782229af9c720c3f348"
+checksum = "f711ade317dd348950a9910f81c5947e3d8907ebd2b83f76203ff1807e6a2bc2"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -2606,9 +2607,9 @@ dependencies = [
 
 [[package]]
 name = "fiat-crypto"
-version = "0.2.7"
+version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c007b1ae3abe1cb6f85a16305acd418b7ca6343b953633fee2b76d8f108b830f"
+checksum = "e825f6987101665dea6ec934c09ec6d721de7bc1bf92248e1d5810c8cd636b77"
 
 [[package]]
 name = "filetime"
@@ -3301,9 +3302,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.1.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
+checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
 dependencies = [
  "bytes",
  "fnv",
@@ -3959,6 +3960,7 @@ checksum = "c1cc9717a20b1bb222f333e6a92fd32f7d8a18ddc5a3191a11af45dcbf4dcd16"
 dependencies = [
  "autocfg",
  "scopeguard",
+ "serde",
 ]
 
 [[package]]
@@ -5702,9 +5704,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.18+v2.7.2"
+version = "0.5.21+v2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673a5f56dd761938c87c89d33affb6f53e0129457d14bf12389f0cb4ebe74cfd"
+checksum = "b2142445fe3fe2aae7a3c3c5083d1211a448a0dabb489a14dd90d427cf6c0b13"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -5962,9 +5964,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.16"
+version = "0.8.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a28f4c49489add4ce10783f7911893516f15afe45d015608d41faca6bc4d29"
+checksum = "0afe01b987fac84253ce8acd5c05af9941975e4dee5b4f2d826b6947be8ec2c7"
 dependencies = [
  "dyn-clone",
  "schemars_derive",
@@ -5975,14 +5977,14 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.16"
+version = "0.8.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c767fd6fa65d9ccf9cf026122c1b555f2ef9a4f0cea69da4d7dbc3e258d30967"
+checksum = "d253e72f060451e9e5615a1686f3cb4ff87c4e70504c79bdab8fb3b010cd4e97"
 dependencies = [
  "proc-macro2 1.0.76",
  "quote 1.0.35",
  "serde_derive_internals",
- "syn 1.0.109",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -6116,13 +6118,13 @@ dependencies = [
 
 [[package]]
 name = "serde_derive_internals"
-version = "0.26.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85bf8229e7920a9f636479437026331ce11aa132b4dde37d121944a44d6e5f3c"
+checksum = "330f01ce65a3a5fe59a60c82f3c9a024b573b8a6e875bd233fe5f934e71d54e3"
 dependencies = [
  "proc-macro2 1.0.76",
  "quote 1.0.35",
- "syn 1.0.109",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -8131,7 +8133,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb66477291e7e8d2b0ff1bcb900bf29489a9692816d79874bea351e7a8b6de96"
 dependencies = [
- "curve25519-dalek 4.1.2",
+ "curve25519-dalek 4.0.0",
  "rand_core 0.6.4",
  "serde",
  "zeroize",

@@ -12,8 +12,6 @@ use serde::de::MapAccess;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Deserializer;
-#[cfg(test)]
-use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
@@ -26,7 +24,6 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
 pub(crate) struct Extendable<Att, Ext>
 where
     Att: Default,
@@ -49,12 +46,6 @@ where
 }
 
 impl Extendable<(), ()> {
-    pub(crate) fn empty<A, E>() -> Extendable<A, E>
-    where
-        A: Default,
-    {
-        Default::default()
-    }
     pub(crate) fn empty_arc<A, E>() -> Arc<Extendable<A, E>>
     where
         A: Default,
@@ -63,7 +54,7 @@ impl Extendable<(), ()> {
     }
 }
 
-/// Custom Deserializer for attributes that will deserializse into a custom field if possible, but otherwise into one of the pre-defined attributes.
+/// Custom Deserializer for attributes that will deserialize into a custom field if possible, but otherwise into one of the pre-defined attributes.
 impl<'de, Att, Ext> Deserialize<'de> for Extendable<Att, Ext>
 where
     Att: Default + Deserialize<'de> + Debug + Sized,
@@ -90,7 +81,7 @@ where
             where
                 A: MapAccess<'de>,
             {
-                let mut attributes: Map<String, Value> = Map::new();
+                let mut attributes = Map::new();
                 let mut custom: HashMap<String, Ext> = HashMap::new();
                 while let Some(key) = map.next_key()? {
                     let value: Value = map.next_value()?;
@@ -100,6 +91,15 @@ where
                         }
                         Err(_err) => {
                             // We didn't manage to deserialize as a custom attribute, so stash the value and we'll try again later
+                            // but let's try and deserialize it now so that we get a decent error message rather than 'unknown field'
+                            let mut temp_attributes: Map<String, Value> = Map::new();
+                            temp_attributes.insert(key.clone(), value.clone());
+                            Att::deserialize(Value::Object(temp_attributes)).map_err(|e| {
+                                A::Error::custom(format!(
+                                    "failed to parse attribute '{}': {}",
+                                    key, e
+                                ))
+                            })?;
                             attributes.insert(key, value);
                         }
                     }
@@ -196,32 +196,64 @@ where
 
 #[cfg(test)]
 mod test {
-    use insta::assert_yaml_snapshot;
+    use std::sync::Arc;
 
+    use parking_lot::Mutex;
+
+    use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
+    use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
+    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+    use crate::plugins::telemetry::config_new::conditional::Conditional;
+    use crate::plugins::telemetry::config_new::conditions::Condition;
+    use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::extendable::Extendable;
+    use crate::plugins::telemetry::config_new::selectors::OperationName;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 
     #[test]
     fn test_extendable_serde() {
-        let mut settings = insta::Settings::clone_current();
-        settings.set_sort_maps(true);
-        settings.bind(|| {
-            let o = serde_json::from_value::<Extendable<SupergraphAttributes, SupergraphSelector>>(
-                serde_json::json!({
-                        "graphql.operation.name": true,
-                        "graphql.operation.type": true,
-                        "custom_1": {
-                            "operation_name": "string"
-                        },
-                        "custom_2": {
-                            "operation_name": "string"
-                        }
-                }),
-            )
-            .unwrap();
-            assert_yaml_snapshot!(o);
-        });
+        let extendable_conf = serde_json::from_value::<
+            Extendable<SupergraphAttributes, SupergraphSelector>,
+        >(serde_json::json!({
+                "graphql.operation.name": true,
+                "graphql.operation.type": true,
+                "custom_1": {
+                    "operation_name": "string"
+                },
+                "custom_2": {
+                    "operation_name": "string"
+                }
+        }))
+        .unwrap();
+        assert_eq!(
+            extendable_conf.attributes,
+            SupergraphAttributes {
+                graphql_document: None,
+                graphql_operation_name: Some(true),
+                graphql_operation_type: Some(true),
+                cost: Default::default()
+            }
+        );
+        assert_eq!(
+            extendable_conf.custom.get("custom_1"),
+            Some(&SupergraphSelector::OperationName {
+                operation_name: OperationName::String,
+                redact: None,
+                default: None
+            })
+        );
+        assert_eq!(
+            extendable_conf.custom.get("custom_2"),
+            Some(&SupergraphSelector::OperationName {
+                operation_name: OperationName::String,
+                redact: None,
+                default: None
+            })
+        );
     }
 
     #[test]
@@ -239,5 +271,82 @@ mod test {
             }),
         )
         .expect_err("Should have errored");
+    }
+
+    #[test]
+    fn test_extendable_serde_conditional() {
+        let extendable_conf = serde_json::from_value::<
+            Extendable<RouterAttributes, Conditional<RouterSelector>>,
+        >(serde_json::json!({
+        "http.request.method": true,
+        "http.response.status_code": true,
+        "url.path": true,
+        "http.request.header.x-my-header": {
+          "request_header": "x-my-header",
+          "condition": {
+            "eq": [
+                200,
+                {
+                    "response_status": "code"
+                }
+            ]
+          }
+        },
+        "http.request.header.x-not-present": {
+          "request_header": "x-not-present",
+          "default": "nope"
+        }
+        }))
+        .unwrap();
+        assert_eq!(
+            extendable_conf.attributes,
+            RouterAttributes {
+                datadog_trace_id: None,
+                trace_id: None,
+                baggage: None,
+                common: HttpCommonAttributes {
+                    http_request_method: Some(true),
+                    http_response_status_code: Some(true),
+                    ..Default::default()
+                },
+                server: HttpServerAttributes {
+                    url_path: Some(true),
+                    ..Default::default()
+                }
+            }
+        );
+        assert_eq!(
+            extendable_conf
+                .custom
+                .get("http.request.header.x-my-header"),
+            Some(&Conditional {
+                selector: RouterSelector::RequestHeader {
+                    request_header: String::from("x-my-header"),
+                    redact: None,
+                    default: None
+                },
+                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                    SelectorOrValue::Value(200.into()),
+                    SelectorOrValue::Selector(RouterSelector::ResponseStatus {
+                        response_status: ResponseStatus::Code
+                    })
+                ])))),
+                value: Default::default(),
+            })
+        );
+        assert_eq!(
+            extendable_conf
+                .custom
+                .get("http.request.header.x-not-present"),
+            Some(&Conditional {
+                selector: RouterSelector::RequestHeader {
+                    request_header: String::from("x-not-present"),
+                    redact: None,
+                    default: Some(AttributeValue::String("nope".to_string()))
+                },
+                condition: None,
+                value: Default::default(),
+            })
+        );
     }
 }

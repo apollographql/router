@@ -25,10 +25,10 @@ mod test {
     async fn query_planner() -> Result<(), BoxError> {
         // If this test fails and the cache key format changed you'll need to update the key here.
         // 1. Force this test to run locally by removing the cfg() line at the top of this file.
-        // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
+        // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
         // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
         // 4. Run this test and yank the updated cache key from the redis logs.
-        let known_cache_key = "plan:v2.7.2:121b9859eba2d8fa6dde0a54b6e3781274cf69f7ffb0af912e92c01c6bfff6ca:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:5c7a72fa35639949328548d77b56dba2e77d0dfa90c19b69978da119e996bb92";
+        let known_cache_key = "plan:v2.7.5:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:5c7a72fa35639949328548d77b56dba2e77d0dfa90c19b69978da119e996bb92";
 
         let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
         let client = RedisClient::new(config, None, None, None);
@@ -82,7 +82,7 @@ mod test {
                     let key = key.as_ref().unwrap().results();
                     println!("\t{key:?}");
                 }
-                panic!("key {known_cache_key} not found: {e}");
+                panic!("key {known_cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key.");
             }
         };
         let exp: i64 = client
