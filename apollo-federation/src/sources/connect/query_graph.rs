@@ -11,6 +11,7 @@ use super::ConnectFederatedConcreteFieldQueryGraphEdge;
 use super::ConnectFederatedConcreteQueryGraphNode;
 use super::ConnectFederatedEnumQueryGraphNode;
 use super::ConnectFederatedQueryGraphBuilder;
+use super::ConnectFederatedSourceEnteringQueryGraphEdge;
 use super::Selection;
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -23,6 +24,7 @@ use crate::sources::SourceFederatedConcreteQueryGraphNode;
 use crate::sources::SourceFederatedEnumQueryGraphNode;
 use crate::sources::SourceFederatedQueryGraphBuilderApi;
 use crate::sources::SourceFederatedScalarQueryGraphNode;
+use crate::sources::SourceFederatedSourceEnteringQueryGraphEdge;
 use crate::sources::SourceId;
 use crate::ValidFederationSubgraph;
 
@@ -47,11 +49,22 @@ impl SourceFederatedQueryGraphBuilderApi for ConnectFederatedQueryGraphBuilder {
                 ));
             };
 
-            // Make a node for the entrypoint of this field, if not yet created
+            // Make a node for the entrypoint of this field
             let parent_node = builder.add_concrete_node(
                 field_def_pos.type_name.clone(),
                 SourceFederatedConcreteQueryGraphNode::Connect(
                     ConnectFederatedConcreteQueryGraphNode::ConnectParent {
+                        subgraph_type: field_def_pos.parent().clone(),
+                    },
+                ),
+            )?;
+
+            // Mark this entrypoint as being externally accessible to other resolvers
+            builder.add_source_entering_edge(
+                parent_node,
+                None,
+                SourceFederatedSourceEnteringQueryGraphEdge::Connect(
+                    ConnectFederatedSourceEnteringQueryGraphEdge::ConnectParent {
                         subgraph_type: field_def_pos.parent().clone(),
                     },
                 ),
@@ -414,34 +427,45 @@ mod tests {
           subgraph cluster_0 {
             node [style = filled,color = white]
 
-            0.0 [ label = "Node: Query" ]
-            0.1 [ label = "Node: User" ]
-            0.2 [ label = "Scalar: ID" ]
-            0.3 [ label = "Scalar: String" ]
+            0.0 [ label = ": _" ]
 
             style = filled
             color = lightgrey
-            label = "connectors.json http: Get /users"
+            label = "Source-Aware Entrypoint"
           }
           subgraph cluster_1 {
             node [style = filled,color = white]
 
             1.0 [ label = "Node: Query" ]
-            1.1 [ label = "Node: Post" ]
+            1.1 [ label = "Node: User" ]
             1.2 [ label = "Scalar: ID" ]
             1.3 [ label = "Scalar: String" ]
 
             style = filled
             color = lightgrey
+            label = "connectors.json http: Get /users"
+          }
+          subgraph cluster_2 {
+            node [style = filled,color = white]
+
+            2.0 [ label = "Node: Query" ]
+            2.1 [ label = "Node: Post" ]
+            2.2 [ label = "Scalar: ID" ]
+            2.3 [ label = "Scalar: String" ]
+
+            style = filled
+            color = lightgrey
             label = "connectors.json http: Get /posts"
           }
-          0.1 -> 0.2 [ label = "id" ]
-          0.1 -> 0.3 [ label = "name" ]
-          0.0 -> 0.1 [ label = "users" ]
+          0.0 -> 1.0 [ label = "Query" ]
           1.1 -> 1.2 [ label = "id" ]
-          1.1 -> 1.3 [ label = "title" ]
-          1.1 -> 1.3 [ label = "body" ]
-          1.0 -> 1.1 [ label = "posts" ]
+          1.1 -> 1.3 [ label = "name" ]
+          1.0 -> 1.1 [ label = "users" ]
+          0.0 -> 2.0 [ label = "Query" ]
+          2.1 -> 2.2 [ label = "id" ]
+          2.1 -> 2.3 [ label = "title" ]
+          2.1 -> 2.3 [ label = "body" ]
+          2.0 -> 2.1 [ label = "posts" ]
         }
         "###);
     }
@@ -465,34 +489,45 @@ mod tests {
           subgraph cluster_0 {
             node [style = filled,color = white]
 
-            0.0 [ label = "Node: Query" ]
-            0.1 [ label = "Node: User" ]
-            0.2 [ label = "Scalar: ID" ]
-            0.3 [ label = "Scalar: String" ]
+            0.0 [ label = ": _" ]
 
             style = filled
             color = lightgrey
-            label = "connectors.json http: Get /users"
+            label = "Source-Aware Entrypoint"
           }
           subgraph cluster_1 {
             node [style = filled,color = white]
 
             1.0 [ label = "Node: Query" ]
-            1.1 [ label = "Node: Post" ]
+            1.1 [ label = "Node: User" ]
             1.2 [ label = "Scalar: ID" ]
             1.3 [ label = "Scalar: String" ]
 
             style = filled
             color = lightgrey
+            label = "connectors.json http: Get /users"
+          }
+          subgraph cluster_2 {
+            node [style = filled,color = white]
+
+            2.0 [ label = "Node: Query" ]
+            2.1 [ label = "Node: Post" ]
+            2.2 [ label = "Scalar: ID" ]
+            2.3 [ label = "Scalar: String" ]
+
+            style = filled
+            color = lightgrey
             label = "connectors.json http: Get /posts"
           }
-          0.1 -> 0.2 [ label = "id" ]
-          0.1 -> 0.3 [ label = "name: .username" ]
-          0.0 -> 0.1 [ label = "users" ]
+          0.0 -> 1.0 [ label = "Query" ]
           1.1 -> 1.2 [ label = "id" ]
-          1.1 -> 1.3 [ label = "title: .\"body title\"" ]
-          1.1 -> 1.3 [ label = "body: .summary" ]
-          1.0 -> 1.1 [ label = "posts" ]
+          1.1 -> 1.3 [ label = "name: .username" ]
+          1.0 -> 1.1 [ label = "users" ]
+          0.0 -> 2.0 [ label = "Query" ]
+          2.1 -> 2.2 [ label = "id" ]
+          2.1 -> 2.3 [ label = "title: .\"body title\"" ]
+          2.1 -> 2.3 [ label = "body: .summary" ]
+          2.0 -> 2.1 [ label = "posts" ]
         }
         "###
         );
@@ -517,15 +552,11 @@ mod tests {
           subgraph cluster_0 {
             node [style = filled,color = white]
 
-            0.0 [ label = "Node: Query" ]
-            0.1 [ label = "Node: User" ]
-            0.2 [ label = "Scalar: ID" ]
-            0.3 [ label = "Scalar: String" ]
-            0.4 [ label = "Node: User" ]
+            0.0 [ label = ": _" ]
 
             style = filled
             color = lightgrey
-            label = "connectors.json http: Get /users/1"
+            label = "Source-Aware Entrypoint"
           }
           subgraph cluster_1 {
             node [style = filled,color = white]
@@ -540,16 +571,31 @@ mod tests {
             color = lightgrey
             label = "connectors.json http: Get /users/1"
           }
-          0.1 -> 0.2 [ label = "id" ]
-          0.1 -> 0.3 [ label = "name" ]
-          0.4 -> 0.2 [ label = "id" ]
-          0.1 -> 0.4 [ label = "friends" ]
-          0.0 -> 0.1 [ label = "me" ]
+          subgraph cluster_2 {
+            node [style = filled,color = white]
+
+            2.0 [ label = "Node: Query" ]
+            2.1 [ label = "Node: User" ]
+            2.2 [ label = "Scalar: ID" ]
+            2.3 [ label = "Scalar: String" ]
+            2.4 [ label = "Node: User" ]
+
+            style = filled
+            color = lightgrey
+            label = "connectors.json http: Get /users/1"
+          }
+          0.0 -> 1.0 [ label = "Query" ]
           1.1 -> 1.2 [ label = "id" ]
           1.1 -> 1.3 [ label = "name" ]
           1.4 -> 1.2 [ label = "id" ]
           1.1 -> 1.4 [ label = "friends" ]
-          1.0 -> 1.1 [ label = "user" ]
+          1.0 -> 1.1 [ label = "me" ]
+          0.0 -> 2.0 [ label = "Query" ]
+          2.1 -> 2.2 [ label = "id" ]
+          2.1 -> 2.3 [ label = "name" ]
+          2.4 -> 2.2 [ label = "id" ]
+          2.1 -> 2.4 [ label = "friends" ]
+          2.0 -> 2.1 [ label = "user" ]
         }
         "###
         );
@@ -574,30 +620,40 @@ mod tests {
           subgraph cluster_0 {
             node [style = filled,color = white]
 
-            0.0 [ label = "Node: Query" ]
-            0.1 [ label = "Node: User" ]
-            0.2 [ label = "Scalar: ID" ]
-            0.3 [ label = "Node: UserInfo" ]
-            0.4 [ label = "Scalar: String" ]
-            0.5 [ label = "Node: UserAddress" ]
-            0.6 [ label = "Scalar: Int" ]
-            0.7 [ label = "Node: UserAvatar" ]
+            0.0 [ label = ": _" ]
+
+            style = filled
+            color = lightgrey
+            label = "Source-Aware Entrypoint"
+          }
+          subgraph cluster_1 {
+            node [style = filled,color = white]
+
+            1.0 [ label = "Node: Query" ]
+            1.1 [ label = "Node: User" ]
+            1.2 [ label = "Scalar: ID" ]
+            1.3 [ label = "Node: UserInfo" ]
+            1.4 [ label = "Scalar: String" ]
+            1.5 [ label = "Node: UserAddress" ]
+            1.6 [ label = "Scalar: Int" ]
+            1.7 [ label = "Node: UserAvatar" ]
 
             style = filled
             color = lightgrey
             label = "connectors.json http: Get /users"
           }
-          0.1 -> 0.2 [ label = "id" ]
-          0.3 -> 0.4 [ label = "name: .\"user full name\"" ]
-          0.5 -> 0.4 [ label = "street: .street_line" ]
-          0.5 -> 0.4 [ label = "state" ]
-          0.5 -> 0.6 [ label = "zip" ]
-          0.3 -> 0.5 [ label = "address: .addresses.main.address" ]
-          0.7 -> 0.4 [ label = "large" ]
-          0.7 -> 0.4 [ label = "thumbnail" ]
-          0.3 -> 0.7 [ label = "avatar" ]
-          0.1 -> 0.3 [ label = "info: .user_info" ]
-          0.0 -> 0.1 [ label = "user" ]
+          0.0 -> 1.0 [ label = "Query" ]
+          1.1 -> 1.2 [ label = "id" ]
+          1.3 -> 1.4 [ label = "name: .\"user full name\"" ]
+          1.5 -> 1.4 [ label = "street: .street_line" ]
+          1.5 -> 1.4 [ label = "state" ]
+          1.5 -> 1.6 [ label = "zip" ]
+          1.3 -> 1.5 [ label = "address: .addresses.main.address" ]
+          1.7 -> 1.4 [ label = "large" ]
+          1.7 -> 1.4 [ label = "thumbnail" ]
+          1.3 -> 1.7 [ label = "avatar" ]
+          1.1 -> 1.3 [ label = "info: .user_info" ]
+          1.0 -> 1.1 [ label = "user" ]
         }
         "###
         );
@@ -617,10 +673,15 @@ mod tests {
         use petgraph::Graph;
 
         use crate::error::FederationError;
+        use crate::schema::position::ObjectFieldDefinitionPosition;
+        use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+        use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
         use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
         use crate::source_aware::federated_query_graph::SelfConditionIndex;
         use crate::sources::connect::selection_parser::Property;
         use crate::sources::connect::ConnectFederatedConcreteFieldQueryGraphEdge;
+        use crate::sources::connect::ConnectFederatedSourceEnteringQueryGraphEdge;
+        use crate::sources::connect::ConnectId;
         use crate::sources::SourceFederatedAbstractFieldQueryGraphEdge;
         use crate::sources::SourceFederatedConcreteFieldQueryGraphEdge;
         use crate::sources::SourceFederatedConcreteQueryGraphNode;
@@ -688,12 +749,36 @@ mod tests {
         pub struct MockSourceQueryGraphBuilder {
             graph: Graph<MockNode, MockEdge>,
             current_source: Option<SourceId>,
+            entering_node: NodeIndex<u32>,
         }
         impl MockSourceQueryGraphBuilder {
             pub fn new() -> Self {
+                let empty_name = Name::new("_").unwrap();
+
+                let mut graph = Graph::new();
+                let entering_node = graph.add_node(MockNode {
+                    prefix: "".to_string(),
+                    type_name: empty_name.clone(),
+                    source_id: SourceId::Connect(ConnectId {
+                        label: "Source-Aware Entrypoint".to_string(),
+                        subgraph_name: "".to_string().into(),
+                        directive: ObjectOrInterfaceFieldDirectivePosition {
+                            field: ObjectOrInterfaceFieldDefinitionPosition::Object(
+                                ObjectFieldDefinitionPosition {
+                                    type_name: empty_name.clone(),
+                                    field_name: empty_name.clone(),
+                                },
+                            ),
+                            directive_name: empty_name.clone(),
+                            directive_index: 0,
+                        },
+                    }),
+                });
+
                 Self {
-                    graph: Graph::new(),
+                    graph,
                     current_source: None,
+                    entering_node,
                 }
             }
 
@@ -784,13 +869,11 @@ mod tests {
                     });
 
                 // Helper to get the offset and index from a node ID's index
-                // Note: Reversing the counts here makes it easier to search
-                counts.reverse();
                 let offset_and_index = move |index: usize| -> (usize, usize) {
-                    let last_max_pos = counts.iter().position(|&count| count <= index);
+                    let last_max_pos = counts.iter().rposition(|&count| count <= index);
 
                     if let Some(last_max) = last_max_pos {
-                        (last_max, index - counts[last_max])
+                        (last_max + 1, index - counts[last_max])
                     } else {
                         (0, index)
                     }
@@ -885,6 +968,29 @@ mod tests {
                 }))
             }
 
+            fn add_source_entering_edge(
+                &mut self,
+                tail: NodeIndex,
+                _self_conditions: Option<SelfConditionIndex>,
+                source_data: SourceFederatedSourceEnteringQueryGraphEdge,
+            ) -> Result<EdgeIndex, FederationError> {
+                let SourceFederatedSourceEnteringQueryGraphEdge::Connect(
+                    ConnectFederatedSourceEnteringQueryGraphEdge::ConnectParent { subgraph_type },
+                ) = source_data
+                else {
+                    unreachable!()
+                };
+
+                Ok(self.graph.add_edge(
+                    self.entering_node,
+                    tail,
+                    MockEdge {
+                        field_name: subgraph_type.type_name,
+                        path: Vec::new(),
+                    },
+                ))
+            }
+
             // ---------------------------------
             // -- Everything below is todo!() --
             // ---------------------------------
@@ -944,15 +1050,6 @@ mod tests {
             }
 
             fn is_for_query_planning(&self) -> bool {
-                todo!()
-            }
-
-            fn add_source_entering_edge(
-                &mut self,
-                _tail: NodeIndex,
-                _self_conditions: Option<SelfConditionIndex>,
-                _source_data: SourceFederatedSourceEnteringQueryGraphEdge,
-            ) -> Result<EdgeIndex, FederationError> {
                 todo!()
             }
         }
