@@ -242,7 +242,7 @@ pub(crate) struct ConnectPath {
 pub(crate) struct ConnectPathField {
     response_name: Name,
     arguments: IndexMap<Name, Node<Value>>,
-    selections: Option<ConnectPathSelections>,
+    selections: ConnectPathSelections,
 }
 
 #[derive(Debug)]
