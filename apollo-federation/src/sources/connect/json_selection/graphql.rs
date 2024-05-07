@@ -1,25 +1,24 @@
-// The Selection syntax is intended to be more generic than GraphQL,
-// capable of transforming any aribitrary JSON in arbitrary ways,
-// without assuming the universal availability of __typename or other
-// convenient GraphQL-isms. However, since we are using the Selection
-// syntax to generate GraphQL-shaped output JSON, it's helpful to have
-// some GraphQL-specific utilities.
+// The JSONSelection syntax is intended to be more generic than GraphQL, capable
+// of transforming any aribitrary JSON in arbitrary ways, without assuming the
+// universal availability of __typename or other convenient GraphQL-isms.
+// However, since we are using the JSONSelection syntax to generate
+// GraphQL-shaped output JSON, it's helpful to have some GraphQL-specific
+// utilities.
 //
-// This file contains several trait implementations that allow
-// converting from the Selection type to a corresponding GraphQL
-// selection set, where (for example) PathSelection syntax is expanded
-// to ordinary nested selection sets. The resulting JSON will retain the
-// nested structure of the GraphQL selection sets, and thus be more
-// verbose than the output of the Selection syntax, but may be easier to
-// use for validating the selection against a GraphQL schema, using
-// existing code for validating GraphQL operations.
+// This file contains several trait implementations that allow converting from
+// the JSONSelection type to a corresponding GraphQL selection set, where (for
+// example) PathSelection syntax is expanded to ordinary nested selection sets.
+// The resulting JSON will retain the nested structure of the GraphQL selection
+// sets, and thus be more verbose than the output of the JSONSelection syntax,
+// but may be easier to use for validating the selection against a GraphQL
+// schema, using existing code for validating GraphQL operations.
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection as GraphQLSelection;
 
+use super::parser::JSONSelection;
 use super::parser::NamedSelection;
 use super::parser::PathSelection;
-use super::parser::Selection;
 use super::parser::StarSelection;
 use super::parser::SubSelection;
 
@@ -38,13 +37,13 @@ impl From<Vec<GraphQLSelection>> for GraphQLSelections {
     }
 }
 
-impl From<Selection> for Vec<GraphQLSelection> {
-    fn from(val: Selection) -> Vec<GraphQLSelection> {
+impl From<JSONSelection> for Vec<GraphQLSelection> {
+    fn from(val: JSONSelection) -> Vec<GraphQLSelection> {
         match val {
-            Selection::Named(named_selections) => {
+            JSONSelection::Named(named_selections) => {
                 GraphQLSelections::from(named_selections).valid_selections()
             }
-            Selection::Path(path_selection) => path_selection.into(),
+            JSONSelection::Path(path_selection) => path_selection.into(),
         }
     }
 }

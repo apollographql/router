@@ -10,7 +10,7 @@ use serde_json_bytes::Value as JSON;
 macro_rules! selection {
     ($input:expr) => {
         if let Ok((remainder, parsed)) =
-            $crate::sources::connect::json_selection::Selection::parse($input)
+            $crate::sources::connect::json_selection::JSONSelection::parse($input)
         {
             assert_eq!(remainder, "");
             parsed
