@@ -200,7 +200,7 @@ pub(crate) enum GraphqlFetchDependencyGraphNode {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct GraphqlPath {
     merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
