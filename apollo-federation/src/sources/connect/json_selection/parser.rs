@@ -17,7 +17,8 @@ use serde::Serialize;
 
 use super::helpers::spaces_or_comments;
 
-// JSONSelection ::= NamedSelection* StarSelection? | PathSelection
+// JSONSelection     ::= NakedSubSelection | PathSelection
+// NakedSubSelection ::= NamedSelection* StarSelection?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum JSONSelection {
@@ -48,11 +49,11 @@ impl JSONSelection {
     }
 }
 
-// NamedSelection ::=
-//     | Alias? Identifier SubSelection?
-//     | Alias StringLiteral SubSelection?
-//     | Alias PathSelection
-//     | Alias SubSelection
+// NamedSelection       ::= NamedFieldSelection | NamedQuotedSelection | NamedPathSelection | NamedGroupSelection
+// NamedFieldSelection  ::= Alias? Identifier SubSelection?
+// NamedQuotedSelection ::= Alias StringLiteral SubSelection?
+// NamedPathSelection   ::= Alias PathSelection
+// NamedGroupSelection  ::= Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum NamedSelection {
@@ -142,7 +143,10 @@ impl NamedSelection {
     }
 }
 
-// PathSelection ::= ("." Property)+ SubSelection?
+// PathSelection ::= (VarPath | KeyPath) SubSelection?
+// VarPath       ::= "$" (NO_SPACE Identifier)? PathStep*
+// KeyPath       ::= Key PathStep+
+// PathStep      ::= "." Key | "->" Identifier MethodArgs?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum PathSelection {
@@ -201,7 +205,7 @@ impl PathSelection {
     }
 }
 
-// SubSelection ::= "{" NamedSelection* StarSelection? "}"
+// SubSelection ::= "{" NakedSubSelection "}"
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct SubSelection {

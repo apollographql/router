@@ -47,11 +47,11 @@
          rx="10"/>
    <text class="terminal" x="149" y="21">*</text>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#Subselection"
-      xlink:title="Subselection">
+      xlink:href="#SubSelection"
+      xlink:title="SubSelection">
       <rect x="209" y="35" width="100" height="32"/>
       <rect x="207" y="33" width="100" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="217" y="53">Subselection</text>
+      <text class="nonterminal" x="217" y="53">SubSelection</text>
    </a>
    <path class="line"
          d="m17 17 h2 m20 0 h10 m0 0 h60 m-90 0 h20 m70 0 h20 m-110 0 q10 0 10 10 m90 0 q0 -10 10 -10 m-100 10 v12 m90 0 v-12 m-90 12 q0 10 10 10 m70 0 q10 0 10 -10 m-80 10 h10 m50 0 h10 m20 -32 h10 m28 0 h10 m20 0 h10 m0 0 h110 m-140 0 h20 m120 0 h20 m-160 0 q10 0 10 10 m140 0 q0 -10 10 -10 m-150 10 v12 m140 0 v-12 m-140 12 q0 10 10 10 m120 0 q10 0 10 -10 m-130 10 h10 m100 0 h10 m23 -32 h-3"/>

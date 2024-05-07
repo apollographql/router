@@ -32,11 +32,11 @@
    <polygon points="9 17 1 13 1 21"/>
    <polygon points="17 17 9 13 9 21"/>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#NakedSubselection"
-      xlink:title="NakedSubselection">
+      xlink:href="#NakedSubSelection"
+      xlink:title="NakedSubSelection">
       <rect x="51" y="3" width="140" height="32"/>
       <rect x="49" y="1" width="140" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="59" y="21">NakedSubselection</text>
+      <text class="nonterminal" x="59" y="21">NakedSubSelection</text>
    </a>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
       xlink:href="#PathSelection"
