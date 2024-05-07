@@ -2261,12 +2261,14 @@ impl SelectionSet {
         Ok(conditions)
     }
 
+    /// Build a selection by merging all items in the given selections (slice).
+    /// - Assumes all items in the slice have the same selection key.
     fn make_selection(
         schema: &ValidFederationSchema,
         parent_type: &CompositeTypeDefinitionPosition,
-        updates: &[Selection],
+        selections: &[Selection],
     ) -> Result<Option<Selection>, FederationError> {
-        let Some((first, rest)) = updates.split_first() else {
+        let Some((first, rest)) = selections.split_first() else {
             // PORT_NOTE: The TypeScript version asserts here.
             return Err(FederationError::internal(
                 "Should not be called without any updates",
@@ -2305,8 +2307,8 @@ impl SelectionSet {
 
         // This case has a sub-selection. Merge all sub-selection updates.
         let mut sub_selection_updates: MultiMap<SelectionKey, Selection> = MultiMap::new();
-        for update in updates {
-            if let Some(sub_selection_set) = update.selection_set()? {
+        for selection in selections {
+            if let Some(sub_selection_set) = selection.selection_set()? {
                 sub_selection_updates.extend(
                     sub_selection_set
                         .selections
@@ -2315,29 +2317,38 @@ impl SelectionSet {
                 );
             }
         }
+        // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
+        // against the multimap repo.
+        let update_slices = sub_selection_updates
+            .keys()
+            .flat_map(|k| sub_selection_updates.get_vec(k).map(Vec::as_slice));
         let updated_sub_selection = Some(Self::make_selection_set(
             schema,
             sub_selection_parent_type,
-            sub_selection_updates,
+            update_slices,
         )?);
         Selection::from_element(element, updated_sub_selection).map(Some)
     }
 
-    fn make_selection_set(
+    /// Build a selection set by aggregating all items from the `selection_key_groups` iterator.
+    /// - Assumes each item (slice) from the iterator has the same selection key within the slice.
+    /// - Note that if the same selection key repeats in a later group, the previous group will be
+    ///   ignored and replaced by the new group.
+    fn make_selection_set<'a>(
         schema: &ValidFederationSchema,
         parent_type: &CompositeTypeDefinitionPosition,
-        updated_selections: MultiMap<SelectionKey, Selection>,
+        selection_key_groups: impl Iterator<Item = &'a [Selection]>,
     ) -> Result<SelectionSet, FederationError> {
-        let mut selections = SelectionMap::new();
-        for (_key, updates) in updated_selections.into_iter() {
-            if let Some(selection) = Self::make_selection(schema, parent_type, &updates)? {
-                selections.insert(selection);
+        let mut result = SelectionMap::new();
+        for group in selection_key_groups.into_iter() {
+            if let Some(selection) = Self::make_selection(schema, parent_type, group)? {
+                result.insert(selection);
             }
         }
         Ok(SelectionSet {
             schema: schema.clone(),
             type_position: parent_type.clone(),
-            selections: Arc::new(selections),
+            selections: Arc::new(result),
         })
     }
 
@@ -2394,7 +2405,12 @@ impl SelectionSet {
         if !changed {
             Ok(self.clone())
         } else {
-            Self::make_selection_set(&self.schema, &self.type_position, updated_selections)
+            // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
+            // against the multimap repo.
+            let update_slices = updated_selections
+                .keys()
+                .flat_map(|k| updated_selections.get_vec(k).map(Vec::as_slice));
+            Self::make_selection_set(&self.schema, &self.type_position, update_slices)
         }
     }
 
