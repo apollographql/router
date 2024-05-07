@@ -132,7 +132,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
     fn add_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
+        _merge_at: Arc<Vec<FetchDataPathElement>>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
         _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
@@ -149,7 +149,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
     fn new_path(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
+        _merge_at: Arc<Vec<FetchDataPathElement>>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError> {
@@ -202,7 +202,7 @@ pub(crate) enum GraphqlFetchDependencyGraphNode {
 
 #[derive(Debug)]
 pub(crate) struct GraphqlPath {
-    merge_at: Vec<FetchDataPathElement>,
+    merge_at: Arc<Vec<FetchDataPathElement>>,
     source_entering_edge: EdgeIndex,
     source_id: SourceId,
     operation_path: Vec<OperationPathElement>,

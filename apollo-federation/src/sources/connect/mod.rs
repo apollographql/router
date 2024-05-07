@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use apollo_compiler::executable::Name;
 use apollo_compiler::executable::Value;
+use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
@@ -167,7 +168,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
     fn add_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
+        _merge_at: Arc<Vec<FetchDataPathElement>>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
         _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
@@ -184,7 +185,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
     fn new_path(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
+        _merge_at: Arc<Vec<FetchDataPathElement>>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError> {
@@ -231,7 +232,7 @@ pub(crate) struct ConnectFetchDependencyGraphNode {
 
 #[derive(Debug)]
 pub(crate) struct ConnectPath {
-    merge_at: Vec<FetchDataPathElement>,
+    merge_at: Arc<Vec<FetchDataPathElement>>,
     source_entering_edge: EdgeIndex,
     source_id: SourceId,
     field: Option<ConnectPathField>,
@@ -240,8 +241,8 @@ pub(crate) struct ConnectPath {
 #[derive(Debug)]
 pub(crate) struct ConnectPathField {
     response_name: Name,
-    arguments: IndexMap<Name, Value>,
-    selections: ConnectPathSelections,
+    arguments: IndexMap<Name, Node<Value>>,
+    selections: Option<ConnectPathSelections>,
 }
 
 #[derive(Debug)]
@@ -290,6 +291,6 @@ impl SourcePathApi for ConnectPath {
 pub struct ConnectFetchNode {
     source_id: ConnectId,
     field_response_name: Name,
-    field_arguments: IndexMap<Name, Value>,
+    field_arguments: IndexMap<Name, Node<Value>>,
     selection: Selection,
 }
