@@ -341,6 +341,7 @@ impl QueryPlanner {
                     requires: Default::default(),
                     input_rewrites: Default::default(),
                     output_rewrites: Default::default(),
+                    context_rewrites: Default::default(),
                 };
 
                 return Ok(QueryPlan::new(node, statistics));

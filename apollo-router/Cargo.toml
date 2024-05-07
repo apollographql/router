@@ -65,7 +65,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.80"
 apollo-compiler.workspace = true
-apollo-federation = { git = "https://github.com/apollographql/federation-next", rev = "7d25ce0d4721e3c00b2300b9377777826e159474" }
+apollo-federation = { path = "../apollo-federation", version = "=0.0.11" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [

@@ -1801,6 +1801,7 @@ fn broken_plan_does_not_panic() {
             id: Some("fetch1".into()),
             input_rewrites: None,
             output_rewrites: None,
+            context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
         }),
