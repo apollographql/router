@@ -3,6 +3,7 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 
+use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use serde_json_bytes::json;
@@ -19,10 +20,18 @@ pub trait ApplyTo {
     // explicitly support), which are distinct from null values (which it does
     // support).
     fn apply_to(&self, data: &JSON) -> (Option<JSON>, Vec<ApplyToError>) {
+        self.apply_with_vars(data, &IndexMap::new())
+    }
+
+    fn apply_with_vars(
+        &self,
+        data: &JSON,
+        vars: &IndexMap<String, JSON>,
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         let mut input_path = vec![];
         // Using IndexSet over HashSet to preserve the order of the errors.
         let mut errors = IndexSet::new();
-        let value = self.apply_to_path(data, &mut input_path, &mut errors);
+        let value = self.apply_to_path(data, vars, &mut input_path, &mut errors);
         (value, errors.into_iter().collect())
     }
 
@@ -31,6 +40,7 @@ pub trait ApplyTo {
     fn apply_to_path(
         &self,
         data: &JSON,
+        vars: &IndexMap<String, JSON>,
         input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON>;
@@ -40,6 +50,7 @@ pub trait ApplyTo {
     fn apply_to_array(
         &self,
         data_array: &[JSON],
+        vars: &IndexMap<String, JSON>,
         input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
@@ -47,7 +58,7 @@ pub trait ApplyTo {
 
         for (i, element) in data_array.iter().enumerate() {
             input_path.push(Key::Index(i));
-            let value = self.apply_to_path(element, input_path, errors);
+            let value = self.apply_to_path(element, vars, input_path, errors);
             input_path.pop();
             // When building an Object, we can simply omit missing properties
             // and report an error, but when building an Array, we need to
@@ -129,11 +140,12 @@ impl ApplyTo for JSONSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
+        vars: &IndexMap<String, JSON>,
         input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let data = match data {
-            JSON::Array(array) => return self.apply_to_array(array, input_path, errors),
+            JSON::Array(array) => return self.apply_to_array(array, vars, input_path, errors),
             JSON::Object(_) => data,
             _ => {
                 errors.insert(ApplyToError::new("not an object", input_path));
@@ -149,9 +161,11 @@ impl ApplyTo for JSONSelection {
             // need to create a temporary SubSelection to wrap the selections
             // Vec.
             Self::Named(named_selections) => {
-                named_selections.apply_to_path(data, input_path, errors)
+                named_selections.apply_to_path(data, vars, input_path, errors)
             }
-            Self::Path(path_selection) => path_selection.apply_to_path(data, input_path, errors),
+            Self::Path(path_selection) => {
+                path_selection.apply_to_path(data, vars, input_path, errors)
+            }
         }
     }
 }
@@ -160,11 +174,12 @@ impl ApplyTo for NamedSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
+        vars: &IndexMap<String, JSON>,
         input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let data = match data {
-            JSON::Array(array) => return self.apply_to_array(array, input_path, errors),
+            JSON::Array(array) => return self.apply_to_array(array, vars, input_path, errors),
             JSON::Object(_) => data,
             _ => {
                 errors.insert(ApplyToError::new("not an object", input_path));
@@ -184,7 +199,7 @@ impl ApplyTo for NamedSelection {
             if let Some(child) = data.get(name) {
                 let output_name = alias.map_or(name, |alias| &alias.name);
                 if let Some(selection) = selection {
-                    let value = selection.apply_to_path(child, input_path, errors);
+                    let value = selection.apply_to_path(child, vars, input_path, errors);
                     if let Some(value) = value {
                         output.insert(output_name.clone(), value);
                     }
@@ -211,13 +226,13 @@ impl ApplyTo for NamedSelection {
                 input_path.pop();
             }
             Self::Path(alias, path_selection) => {
-                let value = path_selection.apply_to_path(data, input_path, errors);
+                let value = path_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name.clone(), value);
                 }
             }
             Self::Group(alias, sub_selection) => {
-                let value = sub_selection.apply_to_path(data, input_path, errors);
+                let value = sub_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name.clone(), value);
                 }
@@ -232,14 +247,31 @@ impl ApplyTo for PathSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
+        vars: &IndexMap<String, JSON>,
         input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         if let JSON::Array(array) = data {
-            return self.apply_to_array(array, input_path, errors);
+            return self.apply_to_array(array, vars, input_path, errors);
         }
 
         match self {
+            Self::Var(var_name, tail) => {
+                if var_name == "$" {
+                    // Because $ refers to the current value, we keep using
+                    // input_path instead of creating a new var_path here.
+                    tail.apply_to_path(data, vars, input_path, errors)
+                } else if let Some(var_data) = vars.get(var_name) {
+                    let mut var_path = vec![Key::Field(var_name.clone())];
+                    tail.apply_to_path(var_data, vars, &mut var_path, errors)
+                } else {
+                    errors.insert(ApplyToError::new(
+                        format!("Variable {} not found", var_name).as_str(),
+                        &[Key::Field(var_name.clone())],
+                    ));
+                    None
+                }
+            }
             Self::Key(key, tail) => {
                 match data {
                     JSON::Object(_) => {}
@@ -262,7 +294,7 @@ impl ApplyTo for PathSelection {
                     Key::Quoted(name) => data.get(name),
                     Key::Index(index) => data.get(index),
                 } {
-                    let result = tail.apply_to_path(child, input_path, errors);
+                    let result = tail.apply_to_path(child, vars, input_path, errors);
                     input_path.pop();
                     result
                 } else {
@@ -279,7 +311,7 @@ impl ApplyTo for PathSelection {
             Self::Selection(selection) => {
                 // If data is not an object here, this recursive apply_to_path
                 // call will handle the error.
-                selection.apply_to_path(data, input_path, errors)
+                selection.apply_to_path(data, vars, input_path, errors)
             }
             Self::Empty => {
                 // If data is not an object here, we want to preserve its value
@@ -294,11 +326,12 @@ impl ApplyTo for SubSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
+        vars: &IndexMap<String, JSON>,
         input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let data_map = match data {
-            JSON::Array(array) => return self.apply_to_array(array, input_path, errors),
+            JSON::Array(array) => return self.apply_to_array(array, vars, input_path, errors),
             JSON::Object(data_map) => data_map,
             _ => {
                 errors.insert(ApplyToError::new(
@@ -317,7 +350,7 @@ impl ApplyTo for SubSelection {
         let mut input_names = IndexSet::new();
 
         for named_selection in &self.selections {
-            let value = named_selection.apply_to_path(data, input_path, errors);
+            let value = named_selection.apply_to_path(data, vars, input_path, errors);
 
             // If value is an object, extend output with its keys and their values.
             if let Some(JSON::Object(key_and_value)) = value {
@@ -378,7 +411,9 @@ impl ApplyTo for SubSelection {
                 let mut star_output = Map::new();
                 for (key, value) in data_map {
                     if !input_names.contains(key.as_str()) {
-                        if let Some(selected) = selection.apply_to_path(value, input_path, errors) {
+                        if let Some(selected) =
+                            selection.apply_to_path(value, vars, input_path, errors)
+                        {
                             star_output.insert(key.clone(), selected);
                         }
                     }
@@ -389,7 +424,9 @@ impl ApplyTo for SubSelection {
             Some(StarSelection(None, Some(selection))) => {
                 for (key, value) in data_map {
                     if !input_names.contains(key.as_str()) {
-                        if let Some(selected) = selection.apply_to_path(value, input_path, errors) {
+                        if let Some(selected) =
+                            selection.apply_to_path(value, vars, input_path, errors)
+                        {
                             output.insert(key.clone(), selected);
                         }
                     }
@@ -1037,6 +1074,73 @@ mod tests {
                     //     "path": ["arrayOfArrays", 4, 3],
                     // })),
                 ],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_apply_to_variable_expressions() {
+        let id_object = selection!("id: $").apply_to(&json!(123));
+        assert_eq!(id_object, (Some(json!({"id": 123})), vec![]));
+
+        let data = json!({
+            "id": 123,
+            "name": "Ben",
+            "friend_ids": [234, 345, 456]
+        });
+
+        assert_eq!(
+            selection!("id name friends: friend_ids { id: $ }").apply_to(&data),
+            (
+                Some(json!({
+                    "id": 123,
+                    "name": "Ben",
+                    "friends": [
+                        { "id": 234 },
+                        { "id": 345 },
+                        { "id": 456 },
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        let mut vars = IndexMap::new();
+        vars.insert("$args".to_string(), json!({ "id": "id from args" }));
+        assert_eq!(
+            selection!("id: $args.id name").apply_with_vars(&data, &vars),
+            (
+                Some(json!({
+                    "id": "id from args",
+                    "name": "Ben"
+                })),
+                vec![],
+            ),
+        );
+        assert_eq!(
+            selection!("id: $args.id name").apply_to(&data),
+            (
+                Some(json!({
+                    "name": "Ben"
+                })),
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Variable $args not found",
+                    "path": ["$args"],
+                }))],
+            ),
+        );
+        let mut vars_without_args_id = IndexMap::new();
+        vars_without_args_id.insert("$args".to_string(), json!({ "unused": "ignored" }));
+        assert_eq!(
+            selection!("id: $args.id name").apply_with_vars(&data, &vars_without_args_id),
+            (
+                Some(json!({
+                    "name": "Ben"
+                })),
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Property .id not found in object",
+                    "path": ["$args", "id"],
+                }))],
             ),
         );
     }

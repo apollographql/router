@@ -93,6 +93,10 @@ impl From<NamedSelection> for Vec<GraphQLSelection> {
 impl From<PathSelection> for Vec<GraphQLSelection> {
     fn from(val: PathSelection) -> Vec<GraphQLSelection> {
         match val {
+            PathSelection::Var(_, _) => {
+                // Variable references do not correspond to GraphQL fields.
+                vec![]
+            }
             PathSelection::Key(_, tail) => {
                 let tail = *tail;
                 tail.into()
