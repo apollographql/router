@@ -92,6 +92,7 @@ pub(crate) fn compose(test_name: &str, subgraph_names_and_schemas: &[(&str, &str
         .collect();
 
     let mut hasher = sha1::Sha1::new();
+    hasher.update(ROVER_FEDERATION_VERSION);
     for (name, schema) in &subgraph_names_and_schemas {
         hasher.update(b"\xFF");
         hasher.update(name);
