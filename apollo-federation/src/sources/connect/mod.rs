@@ -223,7 +223,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
 
 #[derive(Debug)]
 pub(crate) struct ConnectFetchDependencyGraphNode {
-    merge_at: Vec<FetchDataPathElement>,
+    merge_at: Arc<Vec<FetchDataPathElement>>,
     source_entering_edge: EdgeIndex,
     field_response_name: Name,
     field_arguments: IndexMap<Name, Value>,

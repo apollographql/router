@@ -188,12 +188,12 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
 #[derive(Debug)]
 pub(crate) enum GraphqlFetchDependencyGraphNode {
     OperationRoot {
-        merge_at: Vec<FetchDataPathElement>,
+        merge_at: Arc<Vec<FetchDataPathElement>>,
         source_entering_edge: EdgeIndex,
         selection_set: SelectionSet,
     },
     EntitiesField {
-        merge_at: Vec<FetchDataPathElement>,
+        merge_at: Arc<Vec<FetchDataPathElement>>,
         source_entering_edge: EdgeIndex,
         key_condition_resolution: Option<ConditionResolutionId>,
         selection_set: SelectionSet,
