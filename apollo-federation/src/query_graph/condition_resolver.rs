@@ -54,19 +54,6 @@ impl ConditionResolution {
 //            But in Rust, `QueryPlanningTraversal` implements `ConditionResolver` trait itself,
 //            using `ConditionResolverCache` struct below.
 //            However, `CachingConditionResolver` may still be used in the composition in the future.
-pub(crate) struct CachingConditionResolver;
-
-impl ConditionResolver for CachingConditionResolver {
-    fn resolve(
-        &mut self,
-        _edge: EdgeIndex,
-        _context: &OpGraphPathContext,
-        _excluded_destinations: &ExcludedDestinations,
-        _excluded_conditions: &ExcludedConditions,
-    ) -> Result<ConditionResolution, FederationError> {
-        todo!()
-    }
-}
 
 #[derive(Debug)]
 pub(crate) enum ConditionResolutionCacheResult {
