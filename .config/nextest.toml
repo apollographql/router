@@ -9,3 +9,9 @@ fail-fast = false
 # Write to output for persistence to CircleCI
 [profile.ci.junit]
 path = "junit.xml"
+
+# Integration tests require more than one thread. The default setting of 1 will cause too many integration tests to run
+# at the same time and causes tests to fail.
+[[profile.default.overrides]]
+filter = 'package(apollo-router) & kind(test)'
+threads-required = 2
