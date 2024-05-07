@@ -402,7 +402,6 @@ mod test {
     use futures::StreamExt;
     use schemars::JsonSchema;
     use serde::Deserialize;
-    use test_log;
 
     use crate::graphql;
     use crate::graphql::Response;
@@ -453,16 +452,26 @@ mod test {
         insta::assert_yaml_snapshot!(body);
     }
 
-    #[test_log::test(tokio::test)]
-    async fn test_metrics_on_execution_response() {
+    #[tokio::test]
+    async fn test_metrics_on_execution() {
         async {
+            test_on_execution(include_str!(
+                "fixtures/measure_on_execution_request.router.yaml"
+            ))
+            .await;
+            assert_counter!(
+                "apollo.router.demand_control",
+                1,
+                "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+
             test_on_execution(include_str!(
                 "fixtures/enforce_on_execution_response.router.yaml"
             ))
             .await;
             assert_counter!(
                 "apollo.router.demand_control",
-                1,
+                2,
                 "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
             );
         }
