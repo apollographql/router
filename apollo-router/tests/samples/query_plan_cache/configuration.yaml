@@ -2,3 +2,14 @@ override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:
   all: true
+
+supergraph:
+  introspection: true
+  query_planning:
+    warmed_up_queries: 5
+    # experimental_paths_limit: 3000
+    experimental_plans_limit: 10
+    cache:
+      redis:
+        urls: ["redis://localhost:6379",]
+    #     ttl: 100s
