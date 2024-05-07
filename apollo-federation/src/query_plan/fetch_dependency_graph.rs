@@ -1604,7 +1604,7 @@ impl FetchSelectionSet {
         path_in_node: &OpPath,
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set);
+        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;
@@ -1710,10 +1710,10 @@ impl DeferTracking {
         defer_args: &DeferDirectiveArguments,
         path: FetchDependencyGraphNodePath,
         parent_type: CompositeTypeDefinitionPosition,
-    ) {
+    ) -> Result<(), FederationError> {
         // Having the primary selection undefined means that @defer handling is actually disabled, so there's no need to track anything.
         let Some(primary_selection) = self.primary_selection.as_mut() else {
-            return;
+            return Ok(());
         };
 
         let label = defer_args
@@ -1736,10 +1736,10 @@ impl DeferTracking {
             parent_info.deferred.insert(label.clone());
             parent_info
                 .sub_selection
-                .add_at_path(&defer_context.path_to_defer_parent, None);
+                .add_at_path(&defer_context.path_to_defer_parent, None)
         } else {
             self.top_level_deferred.insert(label.clone());
-            primary_selection.add_at_path(&defer_context.path_to_defer_parent, None);
+            primary_selection.add_at_path(&defer_context.path_to_defer_parent, None)
         }
     }
 
@@ -1747,12 +1747,12 @@ impl DeferTracking {
         &mut self,
         defer_context: &DeferContext,
         selection_set: Option<&Arc<SelectionSet>>,
-    ) {
+    ) -> Result<(), FederationError> {
         if !defer_context.is_part_of_query {
-            return;
+            return Ok(());
         }
         let Some(primary_selection) = &mut self.primary_selection else {
-            return;
+            return Ok(());
         };
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             self.deferred[parent_ref]
@@ -1847,14 +1847,14 @@ pub(crate) fn compute_nodes_for_tree(
                 .add_at_path(&stack_item.node_path.path_in_node, Some(selection_set))?;
             dependency_graph
                 .defer_tracking
-                .update_subselection(&stack_item.defer_context, Some(selection_set));
+                .update_subselection(&stack_item.defer_context, Some(selection_set))?;
         }
         if stack_item.tree.is_leaf() {
             node.selection_set_mut()
                 .add_at_path(&stack_item.node_path.path_in_node, None)?;
             dependency_graph
                 .defer_tracking
-                .update_subselection(&stack_item.defer_context, None);
+                .update_subselection(&stack_item.defer_context, None)?;
             continue;
         }
         // We want to preserve the order of the elements in the child,
@@ -2252,7 +2252,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 ..stack_item.defer_context.clone()
             },
             None,
-        )
+        )?
     }
     let Ok((Some(updated_operation), updated_defer_context)) = extract_defer_from_operation(
         dependency_graph,
@@ -2529,7 +2529,7 @@ fn extract_defer_from_operation(
         &defer_args,
         node_path.clone(),
         operation.parent_type_position(),
-    );
+    )?;
 
     let updated_context = DeferContext {
         current_defer_ref: Some(updated_defer_ref.into()),

@@ -38,10 +38,12 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::operation::Field;
 use crate::query_plan::operation::FieldData;
+use crate::query_plan::operation::HasSelectionKey;
 use crate::query_plan::operation::InlineFragment;
 use crate::query_plan::operation::InlineFragmentData;
 use crate::query_plan::operation::RebaseErrorHandlingOption;
 use crate::query_plan::operation::SelectionId;
+use crate::query_plan::operation::SelectionKey;
 use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
@@ -279,11 +281,27 @@ pub(crate) enum OpPathElement {
     InlineFragment(InlineFragment),
 }
 
+impl HasSelectionKey for OpPathElement {
+    fn key(&self) -> SelectionKey {
+        match self {
+            OpPathElement::Field(field) => field.key(),
+            OpPathElement::InlineFragment(fragment) => fragment.key(),
+        }
+    }
+}
+
 impl OpPathElement {
     pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
         match self {
             OpPathElement::Field(field) => &field.data().directives,
             OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.data().directives,
+        }
+    }
+
+    pub(crate) fn schema(&self) -> &ValidFederationSchema {
+        match self {
+            OpPathElement::Field(field) => field.schema(),
+            OpPathElement::InlineFragment(fragment) => fragment.schema(),
         }
     }
 
