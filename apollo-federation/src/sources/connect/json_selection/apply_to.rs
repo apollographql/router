@@ -31,7 +31,7 @@ pub trait ApplyTo {
     fn apply_to_path(
         &self,
         data: &JSON,
-        input_path: &mut Vec<Property>,
+        input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON>;
 
@@ -40,13 +40,13 @@ pub trait ApplyTo {
     fn apply_to_array(
         &self,
         data_array: &[JSON],
-        input_path: &mut Vec<Property>,
+        input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let mut output = Vec::with_capacity(data_array.len());
 
         for (i, element) in data_array.iter().enumerate() {
-            input_path.push(Property::Index(i));
+            input_path.push(Key::Index(i));
             let value = self.apply_to_path(element, input_path, errors);
             input_path.pop();
             // When building an Object, we can simply omit missing properties
@@ -74,13 +74,13 @@ impl Hash for ApplyToError {
 }
 
 impl ApplyToError {
-    fn new(message: &str, path: &[Property]) -> Self {
+    fn new(message: &str, path: &[Key]) -> Self {
         Self(json!({
             "message": message,
             "path": path.iter().map(|property| match property {
-                Property::Field(name) => json!(name),
-                Property::Quoted(name) => json!(name),
-                Property::Index(index) => json!(index),
+                Key::Field(name) => json!(name),
+                Key::Quoted(name) => json!(name),
+                Key::Index(index) => json!(index),
             }).collect::<Vec<JSON>>(),
         }))
     }
@@ -129,7 +129,7 @@ impl ApplyTo for JSONSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        input_path: &mut Vec<Property>,
+        input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let data = match data {
@@ -160,7 +160,7 @@ impl ApplyTo for NamedSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        input_path: &mut Vec<Property>,
+        input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let data = match data {
@@ -179,7 +179,7 @@ impl ApplyTo for NamedSelection {
             alias: Option<&Alias>,
             name: &String,
             selection: &Option<SubSelection>,
-            input_path: &mut Vec<Property>,
+            input_path: &mut Vec<Key>,
         | {
             if let Some(child) = data.get(name) {
                 let output_name = alias.map_or(name, |alias| &alias.name);
@@ -201,12 +201,12 @@ impl ApplyTo for NamedSelection {
 
         match self {
             Self::Field(alias, name, selection) => {
-                input_path.push(Property::Field(name.clone()));
+                input_path.push(Key::Field(name.clone()));
                 field_quoted_helper(alias.as_ref(), name, selection, input_path);
                 input_path.pop();
             }
             Self::Quoted(alias, name, selection) => {
-                input_path.push(Property::Quoted(name.clone()));
+                input_path.push(Key::Quoted(name.clone()));
                 field_quoted_helper(Some(alias), name, selection, input_path);
                 input_path.pop();
             }
@@ -232,7 +232,7 @@ impl ApplyTo for PathSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        input_path: &mut Vec<Property>,
+        input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         if let JSON::Array(array) = data {
@@ -240,7 +240,7 @@ impl ApplyTo for PathSelection {
         }
 
         match self {
-            Self::Path(head, tail) => {
+            Self::Key(key, tail) => {
                 match data {
                     JSON::Object(_) => {}
                     _ => {
@@ -256,20 +256,20 @@ impl ApplyTo for PathSelection {
                     }
                 };
 
-                input_path.push(head.clone());
-                if let Some(child) = match head {
-                    Property::Field(name) => data.get(name),
-                    Property::Quoted(name) => data.get(name),
-                    Property::Index(index) => data.get(index),
+                input_path.push(key.clone());
+                if let Some(child) = match key {
+                    Key::Field(name) => data.get(name),
+                    Key::Quoted(name) => data.get(name),
+                    Key::Index(index) => data.get(index),
                 } {
                     let result = tail.apply_to_path(child, input_path, errors);
                     input_path.pop();
                     result
                 } else {
-                    let message = match head {
-                        Property::Field(name) => format!("Response field {} not found", name),
-                        Property::Quoted(name) => format!("Response field {} not found", name),
-                        Property::Index(index) => format!("Response field {} not found", index),
+                    let message = match key {
+                        Key::Field(name) => format!("Response field {} not found", name),
+                        Key::Quoted(name) => format!("Response field {} not found", name),
+                        Key::Index(index) => format!("Response field {} not found", index),
                     };
                     errors.insert(ApplyToError::new(message.as_str(), input_path));
                     input_path.pop();
@@ -294,7 +294,7 @@ impl ApplyTo for SubSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        input_path: &mut Vec<Property>,
+        input_path: &mut Vec<Key>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let data_map = match data {
@@ -336,9 +336,9 @@ impl ApplyTo for SubSelection {
                         input_names.insert(name.as_str());
                     }
                     NamedSelection::Path(_, path_selection) => {
-                        if let PathSelection::Path(head, _) = path_selection {
-                            match head {
-                                Property::Field(name) | Property::Quoted(name) => {
+                        if let PathSelection::Key(key, _) = path_selection {
+                            match key {
+                                Key::Field(name) | Key::Quoted(name) => {
                                     input_names.insert(name.as_str());
                                 }
                                 // While Property::Index may be used to
@@ -351,7 +351,7 @@ impl ApplyTo for SubSelection {
                                 // means the numeric Property::Index case cannot
                                 // affect the keys selected by * selections, so
                                 // input_names does not need updating here.
-                                Property::Index(_) => {}
+                                Key::Index(_) => {}
                             };
                         }
                     }

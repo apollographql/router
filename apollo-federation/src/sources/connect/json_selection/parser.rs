@@ -116,13 +116,13 @@ impl NamedSelection {
     /// Extracts the property path for a given named selection
     ///
     // TODO: Expand on what this means once I have a better understanding
-    pub(crate) fn property_path(&self) -> Vec<Property> {
+    pub(crate) fn property_path(&self) -> Vec<Key> {
         match self {
-            NamedSelection::Field(_, name, _) => vec![Property::Field(name.to_string())],
+            NamedSelection::Field(_, name, _) => vec![Key::Field(name.to_string())],
             NamedSelection::Quoted(_, _, Some(_)) => todo!(),
-            NamedSelection::Quoted(_, name, None) => vec![Property::Quoted(name.to_string())],
+            NamedSelection::Quoted(_, name, None) => vec![Key::Quoted(name.to_string())],
             NamedSelection::Path(_, path) => path.collect_paths(),
-            NamedSelection::Group(alias, _) => vec![Property::Field(alias.name.to_string())],
+            NamedSelection::Group(alias, _) => vec![Key::Field(alias.name.to_string())],
         }
     }
 
@@ -150,9 +150,9 @@ impl NamedSelection {
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum PathSelection {
-    // We use a recursive structure here instead of a Vec<Property> to make
-    // applying the selection to a JSON value easier.
-    Path(Property, Box<PathSelection>),
+    // We use a recursive structure here instead of a Vec<Key> to make applying
+    // the selection to a JSON value easier.
+    Key(Key, Box<PathSelection>),
     Selection(SubSelection),
     Empty,
 }
@@ -161,18 +161,18 @@ impl PathSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             spaces_or_comments,
-            many1(preceded(char('.'), Property::parse)),
+            many1(preceded(char('.'), Key::parse)),
             opt(SubSelection::parse),
             spaces_or_comments,
         ))(input)
         .map(|(input, (_, path, selection, _))| (input, Self::from_slice(&path, selection)))
     }
 
-    fn from_slice(properties: &[Property], selection: Option<SubSelection>) -> Self {
+    fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
             [head, tail @ ..] => {
-                Self::Path(head.clone(), Box::new(Self::from_slice(tail, selection)))
+                Self::Key(head.clone(), Box::new(Self::from_slice(tail, selection)))
             }
         }
     }
@@ -181,13 +181,13 @@ impl PathSelection {
     ///
     /// This method attempts to collect as many paths as possible, shorting out once
     /// a non path selection is encountered.
-    pub(crate) fn collect_paths(&self) -> Vec<Property> {
+    pub(crate) fn collect_paths(&self) -> Vec<Key> {
         let mut results = Vec::new();
 
         // Collect as many as possible
         let mut current = self;
-        while let Self::Path(prop, rest) = current {
-            results.push(prop.clone());
+        while let Self::Key(key, rest) = current {
+            results.push(key.clone());
 
             current = rest;
         }
@@ -198,7 +198,7 @@ impl PathSelection {
     /// Find the next subselection, traversing nested chains if needed
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         match self {
-            PathSelection::Path(_, path) => path.next_subselection(),
+            PathSelection::Key(_, path) => path.next_subselection(),
             PathSelection::Selection(sub) => Some(sub),
             PathSelection::Empty => None,
         }
@@ -269,16 +269,16 @@ impl Alias {
     }
 }
 
-// Property ::= Identifier | StringLiteral
+// Key ::= Identifier | StringLiteral
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
-pub enum Property {
+pub enum Key {
     Field(String),
     Quoted(String),
     Index(usize),
 }
 
-impl Property {
+impl Key {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             map(parse_identifier, Self::Field),
@@ -287,17 +287,17 @@ impl Property {
     }
 }
 
-impl Display for Property {
+impl Display for Key {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Property::Field(field) => write!(f, ".{field}"),
-            Property::Quoted(quote) => write!(f, r#"."{quote}""#),
-            Property::Index(index) => write!(f, "[{index}]"),
+            Key::Field(field) => write!(f, ".{field}"),
+            Key::Quoted(quote) => write!(f, r#"."{quote}""#),
+            Key::Index(index) => write!(f, "[{index}]"),
         }
     }
 }
 
-// Identifier ::= [a-zA-Z_][0-9a-zA-Z_]*
+// Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
 fn parse_identifier(input: &str) -> IResult<&str, String> {
     tuple((
@@ -410,15 +410,15 @@ mod tests {
         );
     }
     #[test]
-    fn test_property() {
+    fn test_key() {
         assert_eq!(
-            Property::parse("hello"),
-            Ok(("", Property::Field("hello".to_string()))),
+            Key::parse("hello"),
+            Ok(("", Key::Field("hello".to_string()))),
         );
 
         assert_eq!(
-            Property::parse("'hello'"),
-            Ok(("", Property::Quoted("hello".to_string()))),
+            Key::parse("'hello'"),
+            Ok(("", Key::Quoted("hello".to_string()))),
         );
     }
 
@@ -623,7 +623,7 @@ mod tests {
         assert_eq!(
             selection!(".hello"),
             JSONSelection::Path(PathSelection::from_slice(
-                &[Property::Field("hello".to_string()),],
+                &[Key::Field("hello".to_string()),],
                 None
             )),
         );
@@ -637,8 +637,8 @@ mod tests {
                     },
                     PathSelection::from_slice(
                         &[
-                            Property::Field("hello".to_string()),
-                            Property::Field("world".to_string()),
+                            Key::Field("hello".to_string()),
+                            Key::Field("world".to_string()),
                         ],
                         None
                     ),
@@ -658,8 +658,8 @@ mod tests {
                         },
                         PathSelection::from_slice(
                             &[
-                                Property::Field("hello".to_string()),
-                                Property::Field("world".to_string()),
+                                Key::Field("hello".to_string()),
+                                Key::Field("world".to_string()),
                             ],
                             None
                         ),
@@ -679,8 +679,8 @@ mod tests {
                     },
                     PathSelection::from_slice(
                         &[
-                            Property::Field("hello".to_string()),
-                            Property::Field("world".to_string()),
+                            Key::Field("hello".to_string()),
+                            Key::Field("world".to_string()),
                         ],
                         Some(SubSelection {
                             selections: vec![
@@ -748,9 +748,9 @@ mod tests {
                                 },
                                 PathSelection::from_slice(
                                     &[
-                                        Property::Field("some".to_string()),
-                                        Property::Field("nested".to_string()),
-                                        Property::Field("path".to_string()),
+                                        Key::Field("some".to_string()),
+                                        Key::Field("nested".to_string()),
+                                        Key::Field("path".to_string()),
                                     ],
                                     Some(SubSelection {
                                         selections: vec![
@@ -802,15 +802,15 @@ mod tests {
 
         check_path_selection(
             ".hello",
-            PathSelection::from_slice(&[Property::Field("hello".to_string())], None),
+            PathSelection::from_slice(&[Key::Field("hello".to_string())], None),
         );
 
         check_path_selection(
             ".hello.world",
             PathSelection::from_slice(
                 &[
-                    Property::Field("hello".to_string()),
-                    Property::Field("world".to_string()),
+                    Key::Field("hello".to_string()),
+                    Key::Field("world".to_string()),
                 ],
                 None,
             ),
@@ -820,8 +820,8 @@ mod tests {
             ".hello.world { hello }",
             PathSelection::from_slice(
                 &[
-                    Property::Field("hello".to_string()),
-                    Property::Field("world".to_string()),
+                    Key::Field("hello".to_string()),
+                    Key::Field("world".to_string()),
                 ],
                 Some(SubSelection {
                     selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
@@ -834,10 +834,10 @@ mod tests {
             ".nested.'string literal'.\"property\".name",
             PathSelection::from_slice(
                 &[
-                    Property::Field("nested".to_string()),
-                    Property::Quoted("string literal".to_string()),
-                    Property::Quoted("property".to_string()),
-                    Property::Field("name".to_string()),
+                    Key::Field("nested".to_string()),
+                    Key::Quoted("string literal".to_string()),
+                    Key::Quoted("property".to_string()),
+                    Key::Field("name".to_string()),
                 ],
                 None,
             ),
@@ -847,8 +847,8 @@ mod tests {
             ".nested.'string literal' { leggo: 'my ego' }",
             PathSelection::from_slice(
                 &[
-                    Property::Field("nested".to_string()),
-                    Property::Quoted("string literal".to_string()),
+                    Key::Field("nested".to_string()),
+                    Key::Quoted("string literal".to_string()),
                 ],
                 Some(SubSelection {
                     selections: vec![NamedSelection::Quoted(
