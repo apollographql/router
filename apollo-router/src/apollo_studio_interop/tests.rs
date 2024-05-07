@@ -1709,6 +1709,36 @@ async fn test_enhanced_inline_input_object() {
 }
 
 #[test(tokio::test)]
+async fn test_enhanced_should_preserve_aliases() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+
+    let query_str = r#"
+      query AliasQuery {
+        xxAlias: enumInputQuery(enumInput: SOME_VALUE_1) {
+          aliased: enumResponse
+        }
+        aaAlias: enumInputQuery(enumInput: SOME_VALUE_2) {
+          aliasedAgain: enumResponse
+        }
+        ZZAlias: enumInputQuery(enumInput: SOME_VALUE_3) {
+          enumResponse
+        }
+        enumInputQuery(enumInput: SOME_VALUE_1) {
+          enumResponse
+          aliasedId: id
+          nullableId
+        }
+      }"#;
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_enhanced(&doc, &Some("AliasQuery".into()), &schema);
+    let expected_sig = "# AliasQuery\nquery AliasQuery{enumInputQuery(enumInput:SOME_VALUE_1){enumResponse nullableId aliasedId:id}ZZAlias:enumInputQuery(enumInput:SOME_VALUE_3){enumResponse}aaAlias:enumInputQuery(enumInput:SOME_VALUE_2){aliasedAgain:enumResponse}xxAlias:enumInputQuery(enumInput:SOME_VALUE_1){aliased:enumResponse}}";
+    assert_expected_signature(&generated, expected_sig);
+}
+
+#[test(tokio::test)]
 async fn test_compare() {
     let source = ComparableUsageReporting {
         result: UsageReporting {

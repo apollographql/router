@@ -1,4 +1,5 @@
 //! Generation of usage reporting fields
+use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -403,9 +404,26 @@ fn format_selection_set(
     }
 
     if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
-        fields.sort_by(|&a, &b| a.name.cmp(&b.name));
+        if is_enhanced(normalization_algorithm) {
+            // in enhanced mode we display aliases so we show non-aliased field sorted by name first, then aliased fields sorted by alias
+            fields.sort_by(|&a, &b| {
+                match (a.alias.as_ref(), b.alias.as_ref()) {
+                    (None, None) => a.name.cmp(&b.name), // when both are non-aliased, sort by field name
+                    (Some(alias_a), Some(alias_b)) => alias_a.cmp(alias_b), // when both are aliased, sort by alias
+                    // when one is aliased and on isn't, the non-aliased field comes first
+                    (Some(_), None) => Ordering::Greater,
+                    (None, Some(_)) => Ordering::Less,
+                }
+            });
+        } else {
+            // otherwise we just sort by field name (and remove aliases in the field)
+            fields.sort_by(|&a, &b| a.name.cmp(&b.name));
+        }
+
+        // named fragments are always sorted
         named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
-        // Inline fragments are not sorted in the JS implementation
+
+        // in enhanced mode we sort inline fragments
         if is_enhanced(normalization_algorithm) {
             inline_fragments.sort_by(|&a, &b| {
                 let a_name = a.type_condition.as_ref().map(|t| t.as_str()).unwrap_or("");
@@ -477,6 +495,12 @@ fn format_field(
     normalization_algorithm: &SignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
+    if is_enhanced(normalization_algorithm) {
+        if let Some(alias) = &field.alias {
+            write!(f, "{}:", alias)?;
+        }
+    }
+
     f.write_str(&field.name)?;
 
     let mut sorted_args = field.arguments.clone();
