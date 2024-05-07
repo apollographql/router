@@ -15,12 +15,9 @@ use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
-use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
-use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -159,27 +156,7 @@ impl PlannerMode {
         configuration: &Configuration,
         old_planner: Option<Arc<Planner<QueryPlanResult>>>,
     ) -> Result<Arc<Planner<QueryPlanResult>>, ServiceBuildError> {
-        let query_planner_configuration = QueryPlannerConfig {
-            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-            generate_query_fragments: Some(configuration.supergraph.generate_query_fragments),
-            incremental_delivery: Some(IncrementalDeliverySupport {
-                enable_defer: Some(configuration.supergraph.defer_support),
-            }),
-            graphql_validation: false,
-            debug: Some(QueryPlannerDebugConfig {
-                bypass_planner_for_single_subgraph: None,
-                max_evaluated_plans: configuration
-                    .supergraph
-                    .query_planning
-                    .experimental_plans_limit
-                    .or(Some(10000)),
-                paths_limit: configuration
-                    .supergraph
-                    .query_planning
-                    .experimental_paths_limit,
-            }),
-            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
-        };
+        let query_planner_configuration = configuration.js_query_planner_config();
         let planner = match old_planner {
             None => Planner::new(sdl.to_owned(), query_planner_configuration).await?,
             Some(old_planner) => {

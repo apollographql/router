@@ -14,6 +14,7 @@ use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
+use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -51,6 +52,14 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
+pub(crate) enum ConfigMode {
+    //FIXME: add the Rust planner structure once it is hashable and serializable
+    Rust,
+    Both(Arc<QueryPlannerConfig>),
+    Js(Arc<QueryPlannerConfig>),
+}
+
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
@@ -63,6 +72,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
+    config_mode: ConfigMode,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -91,12 +101,23 @@ where
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
+
+        let config_mode = match configuration.experimental_query_planner_mode {
+            crate::configuration::QueryPlannerMode::New => ConfigMode::Rust,
+            crate::configuration::QueryPlannerMode::Legacy => {
+                ConfigMode::Js(Arc::new(configuration.js_query_planner_config()))
+            }
+            crate::configuration::QueryPlannerMode::Both => {
+                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+            }
+        };
         Ok(Self {
             cache,
             delegate,
             schema,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
+            config_mode,
         })
     }
 
@@ -142,7 +163,8 @@ where
                             hash,
                             metadata,
                             plan_options,
-                            ..
+                            config_mode: _,
+                            sdl: _,
                         },
                         _,
                     )| WarmUpCachingQueryKey {
@@ -151,6 +173,7 @@ where
                         hash: Some(hash.clone()),
                         metadata: metadata.clone(),
                         plan_options: plan_options.clone(),
+                        config_mode: self.config_mode.clone(),
                     },
                 )
                 .take(count)
@@ -182,6 +205,7 @@ where
                     hash: None,
                     metadata: CacheKeyMetadata::default(),
                     plan_options: PlanOptions::default(),
+                    config_mode: self.config_mode.clone(),
                 });
             }
         }
@@ -196,6 +220,7 @@ where
             hash,
             metadata,
             plan_options,
+            config_mode: _,
         } in all_cache_keys
         {
             let context = Context::new();
@@ -211,6 +236,7 @@ where
                 sdl: Arc::clone(&self.schema.raw_sdl),
                 metadata,
                 plan_options,
+                config_mode: self.config_mode.clone(),
             };
 
             if experimental_reuse_query_plans {
@@ -392,6 +418,7 @@ where
             sdl: Arc::clone(&self.schema.raw_sdl),
             metadata,
             plan_options,
+            config_mode: self.config_mode.clone(),
         };
 
         let context = request.context.clone();
@@ -531,7 +558,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) query_planner_config: QueryPlannerConfig,
+    pub(crate) config_mode: ConfigMode,
 }
 
 const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
@@ -547,6 +574,8 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
+        hasher
+            .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
         hasher.update(&serde_json::to_vec(&self.sdl).expect("serialization should not fail"));
         let metadata = hex::encode(hasher.finalize());
 
@@ -560,11 +589,12 @@ impl std::fmt::Display for CachingQueryKey {
 
 impl Hash for CachingQueryKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.sdl.hash(state);
         self.hash.0.hash(state);
         self.operation.hash(state);
         self.metadata.hash(state);
         self.plan_options.hash(state);
-        self.query_planner_config.hash(state);
+        self.config_mode.hash(state);
     }
 }
 
@@ -575,7 +605,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) query_planner_config: QueryPlannerConfig,
+    pub(crate) config_mode: ConfigMode,
 }
 
 #[cfg(test)]
