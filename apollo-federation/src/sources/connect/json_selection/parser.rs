@@ -9,6 +9,7 @@ use nom::combinator::opt;
 use nom::combinator::recognize;
 use nom::multi::many0;
 use nom::multi::many1;
+use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
@@ -76,15 +77,19 @@ impl NamedSelection {
     fn parse_field(input: &str) -> IResult<&str, Self> {
         tuple((
             opt(Alias::parse),
-            parse_identifier,
+            delimited(spaces_or_comments, parse_identifier, spaces_or_comments),
             opt(SubSelection::parse),
         ))(input)
         .map(|(input, (alias, name, selection))| (input, Self::Field(alias, name, selection)))
     }
 
     fn parse_quoted(input: &str) -> IResult<&str, Self> {
-        tuple((Alias::parse, parse_string_literal, opt(SubSelection::parse)))(input)
-            .map(|(input, (alias, name, selection))| (input, Self::Quoted(alias, name, selection)))
+        tuple((
+            Alias::parse,
+            delimited(spaces_or_comments, parse_string_literal, spaces_or_comments),
+            opt(SubSelection::parse),
+        ))(input)
+        .map(|(input, (alias, name, selection))| (input, Self::Quoted(alias, name, selection)))
     }
 
     fn parse_path(input: &str) -> IResult<&str, Self> {
@@ -264,8 +269,14 @@ pub struct Alias {
 
 impl Alias {
     fn parse(input: &str) -> IResult<&str, Self> {
-        tuple((parse_identifier, char(':'), spaces_or_comments))(input)
-            .map(|(input, (name, _, _))| (input, Self { name }))
+        tuple((
+            spaces_or_comments,
+            parse_identifier,
+            spaces_or_comments,
+            char(':'),
+            spaces_or_comments,
+        ))(input)
+        .map(|(input, (_, name, _, _, _))| (input, Self { name }))
     }
 }
 
@@ -300,7 +311,7 @@ impl Display for Key {
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
 fn parse_identifier(input: &str) -> IResult<&str, String> {
-    tuple((
+    delimited(
         spaces_or_comments,
         recognize(pair(
             one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
@@ -309,13 +320,13 @@ fn parse_identifier(input: &str) -> IResult<&str, String> {
             )),
         )),
         spaces_or_comments,
-    ))(input)
-    .map(|(input, (_, name, _))| (input, name.to_string()))
+    )(input)
+    .map(|(input, name)| (input, name.to_string()))
 }
 
 // StringLiteral ::=
-//     | "'" ("\'" | [^'])* "'"
-//     | '"' ('\"' | [^"])* '"'
+//   | "'" ("\\'" | [^'])* "'"
+//   | '"' ('\\"' | [^"])* '"'
 
 fn parse_string_literal(input: &str) -> IResult<&str, String> {
     let input = spaces_or_comments(input).map(|(input, _)| input)?;
