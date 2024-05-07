@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
+use apollo_federation::sources::SourceFetchNode;
 use indexmap::IndexSet;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -141,6 +142,8 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
     #[serde(default)]
     pub(crate) protocol: Arc<Protocol>,
+    #[serde(default, skip)]
+    pub(crate) source_node: Option<Arc<SourceFetchNode>>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
@@ -162,9 +165,9 @@ pub(crate) struct RestProtocolWrapper {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct RestFetchNode {
-    connector_service_name: String,
-    connector_graph_key: Arc<String>,
-    parent_service_name: String,
+    pub(crate) connector_service_name: String,
+    pub(crate) connector_graph_key: Arc<String>,
+    pub(crate) parent_service_name: String,
 }
 
 #[derive(Clone)]
@@ -286,7 +289,7 @@ pub(crate) struct Variables {
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub(crate) fn new(
         requires: &[Selection],
         variable_usages: &[NodeStr],
         data: &Value,
@@ -390,6 +393,11 @@ impl FetchNode {
         data: &'a Value,
         current_dir: &'a Path,
     ) -> (Value, Vec<Error>) {
+        if self.source_node.is_some() {
+            return self
+                .process_source_node(parameters, data, current_dir)
+                .await;
+        }
         let FetchNode {
             operation,
             operation_kind,
@@ -527,7 +535,7 @@ impl FetchNode {
     }
 
     #[instrument(skip_all, level = "debug", name = "response_insert")]
-    fn response_at_path<'a>(
+    pub(crate) fn response_at_path<'a>(
         &'a self,
         schema: &Schema,
         current_dir: &'a Path,
@@ -875,25 +883,5 @@ impl FetchNode {
             }
         }
         Ok(None)
-    }
-
-    // TODO: let's go all in on nodestr
-    pub(crate) fn update_connector_plan(
-        &mut self,
-        parent_service_name: &String,
-        connectors: &Arc<HashMap<Arc<String>, Connector>>,
-    ) {
-        let parent_service_name = parent_service_name.to_string();
-        let connector = connectors.get(&self.service_name.to_string()).unwrap(); // TODO
-                                                                                 // .map(|c| c.name().into())
-                                                                                 // TODO
-                                                                                 // .unwrap_or_else(|| String::new().into());
-        let service_name =
-            std::mem::replace(&mut self.service_name, connector.display_name().into());
-        self.protocol = Arc::new(Protocol::RestFetch(RestFetchNode {
-            connector_service_name: service_name.to_string(),
-            connector_graph_key: connector._name(),
-            parent_service_name,
-        }))
     }
 }

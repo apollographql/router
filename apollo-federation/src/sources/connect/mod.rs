@@ -16,6 +16,7 @@ use petgraph::graph::EdgeIndex;
 pub use selection_parser::ApplyTo;
 pub use selection_parser::ApplyToError;
 pub use selection_parser::Selection;
+pub use selection_parser::SubSelection;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 
@@ -34,7 +35,6 @@ use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
 use crate::sources::connect::selection_parser::PathSelection;
 use crate::sources::connect::selection_parser::Property;
-use crate::sources::connect::selection_parser::SubSelection;
 use crate::sources::SourceFetchDependencyGraphApi;
 use crate::sources::SourceFetchDependencyGraphNode;
 use crate::sources::SourceFetchNode;
@@ -44,10 +44,10 @@ use crate::sources::SourcePathApi;
 use crate::ValidFederationSubgraph;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct ConnectId {
-    label: String,
-    subgraph_name: NodeStr,
-    directive: ObjectOrInterfaceFieldDirectivePosition,
+pub struct ConnectId {
+    pub label: String,
+    pub subgraph_name: NodeStr,
+    pub directive: ObjectOrInterfaceFieldDirectivePosition,
 }
 
 impl Display for ConnectId {
@@ -286,10 +286,10 @@ impl SourcePathApi for ConnectPath {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConnectFetchNode {
-    source_id: ConnectId,
-    field_response_name: Name,
-    field_arguments: IndexMap<Name, Value>,
-    selection: Selection,
+    pub source_id: ConnectId,
+    pub field_response_name: Name,
+    pub field_arguments: IndexMap<Name, Value>,
+    pub selection: Selection,
 }

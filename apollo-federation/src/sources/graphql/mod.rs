@@ -39,7 +39,7 @@ use crate::sources::SourcePathApi;
 use crate::ValidFederationSubgraph;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct GraphqlId {
+pub struct GraphqlId {
     subgraph_name: NodeStr,
 }
 
@@ -224,10 +224,10 @@ impl SourcePathApi for GraphqlPath {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GraphqlFetchNode {
-    source_id: GraphqlId,
-    operation_document: Valid<ExecutableDocument>,
-    operation_name: Option<NodeStr>,
-    operation_kind: OperationType,
+    pub source_id: GraphqlId,
+    pub operation_document: Valid<ExecutableDocument>,
+    pub operation_name: Option<NodeStr>,
+    pub operation_kind: OperationType,
 }
