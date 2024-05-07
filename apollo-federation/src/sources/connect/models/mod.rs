@@ -15,6 +15,8 @@ use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
 use crate::sources::connect::ConnectSpecDefinition;
 
+pub use validation::{validate, ValidationError};
+
 // --- Connector ---------------------------------------------------------------
 
 #[cfg_attr(test, derive(Debug))]

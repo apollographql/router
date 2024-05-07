@@ -43,6 +43,8 @@ use crate::sources::SourcePath;
 use crate::sources::SourcePathApi;
 use crate::ValidFederationSubgraph;
 
+pub use models::{validate, ValidationError};
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct ConnectId {
     label: String,
