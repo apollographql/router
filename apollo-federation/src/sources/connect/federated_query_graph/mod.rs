@@ -6,10 +6,10 @@ use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::ObjectFieldDefinitionPosition;
+use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::PathSelection;
 use crate::sources::connect::json_selection::Property;
-use crate::sources::connect::Selection;
-use crate::sources::connect::SubSelection;
+use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::source;
 use crate::sources::source::federated_query_graph::FederatedQueryGraphApi;
 use crate::sources::source::SourceId;
@@ -68,7 +68,7 @@ pub(crate) enum ScalarNode {
     },
     CustomScalarSelectionRoot {
         subgraph_type: ScalarTypeDefinitionPosition,
-        selection: Selection,
+        selection: JSONSelection,
     },
     SelectionChild {
         subgraph_type: ScalarTypeDefinitionPosition,

@@ -28,7 +28,7 @@ use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::FederationSchema;
-use crate::sources::connect::json_selection::Selection;
+use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 
@@ -268,7 +268,7 @@ impl ConnectDirectiveArguments {
                     .as_node_str()
                     .expect("`selection` field in `@connect` directive is not a string");
                 let (remainder, selection_value) =
-                    Selection::parse(selection_value.as_str()).expect("invalid JSON selection");
+                    JSONSelection::parse(selection_value.as_str()).expect("invalid JSON selection");
                 if !remainder.is_empty() {
                     panic!("`selection` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}");
                 }
@@ -315,7 +315,7 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                     .as_node_str()
                     .expect("`body` field in `@connect` directive's `http` field is not a string");
                 let (remainder, body_value) =
-                    Selection::parse(body_value.as_str()).expect("invalid JSON selection");
+                    JSONSelection::parse(body_value.as_str()).expect("invalid JSON selection");
                 if !remainder.is_empty() {
                     panic!("`body` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}");
                 }

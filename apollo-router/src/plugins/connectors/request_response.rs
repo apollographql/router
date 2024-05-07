@@ -756,7 +756,7 @@ mod tests {
     use apollo_compiler::name;
     use apollo_compiler::validation::Valid;
     use apollo_compiler::Schema;
-    use apollo_federation::sources::connect::Selection as JSONSelection;
+    use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::URLPathTemplate;
     use insta::assert_debug_snapshot;
 

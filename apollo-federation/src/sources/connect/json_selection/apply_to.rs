@@ -1,4 +1,4 @@
-/// ApplyTo is a trait for applying a Selection to a JSON value, collecting
+/// ApplyTo is a trait for applying a JSONSelection to a JSON value, collecting
 /// any/all errors encountered in the process.
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -27,7 +27,7 @@ pub trait ApplyTo {
     }
 
     // This is the trait method that should be implemented and called
-    // recursively by the various Selection types.
+    // recursively by the various JSONSelection types.
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -125,7 +125,7 @@ impl ApplyToError {
     }
 }
 
-impl ApplyTo for Selection {
+impl ApplyTo for JSONSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -142,11 +142,12 @@ impl ApplyTo for Selection {
         };
 
         match self {
-            // Because we represent a Selection::Named as a SubSelection, we can
-            // fully delegate apply_to_path to SubSelection::apply_to_path. Even
-            // if we represented Self::Named as a Vec<NamedSelection>, we could
-            // still delegate to SubSelection::apply_to_path, but we would need
-            // to create a temporary SubSelection to wrap the selections Vec.
+            // Because we represent a JSONSelection::Named as a SubSelection, we
+            // can fully delegate apply_to_path to SubSelection::apply_to_path.
+            // Even if we represented Self::Named as a Vec<NamedSelection>, we
+            // could still delegate to SubSelection::apply_to_path, but we would
+            // need to create a temporary SubSelection to wrap the selections
+            // Vec.
             Self::Named(named_selections) => {
                 named_selections.apply_to_path(data, input_path, errors)
             }
@@ -430,7 +431,7 @@ mod tests {
             ],
         });
 
-        let check_ok = |selection: Selection, expected_json: JSON| {
+        let check_ok = |selection: JSONSelection, expected_json: JSON| {
             let (actual_json, errors) = selection.apply_to(&data);
             assert_eq!(actual_json, Some(expected_json));
             assert_eq!(errors, vec![]);
@@ -573,7 +574,7 @@ mod tests {
             }
         });
 
-        let check_ok = |selection: Selection, expected_json: JSON| {
+        let check_ok = |selection: JSONSelection, expected_json: JSON| {
             let (actual_json, errors) = selection.apply_to(&data);
             assert_eq!(actual_json, Some(expected_json));
             assert_eq!(errors, vec![]);

@@ -17,18 +17,18 @@ use serde::Serialize;
 
 use super::helpers::spaces_or_comments;
 
-// Selection ::= NamedSelection* StarSelection? | PathSelection
+// JSONSelection ::= NamedSelection* StarSelection? | PathSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub enum Selection {
-    // Although we reuse the SubSelection type for the Selection::Named case, we
-    // parse it as a sequence of NamedSelection items without the {...} curly
-    // braces that SubSelection::parse expects.
+pub enum JSONSelection {
+    // Although we reuse the SubSelection type for the JSONSelection::Named
+    // case, we parse it as a sequence of NamedSelection items without the
+    // {...} curly braces that SubSelection::parse expects.
     Named(SubSelection),
     Path(PathSelection),
 }
 
-impl Selection {
+impl JSONSelection {
     pub fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             all_consuming(map(
@@ -479,7 +479,7 @@ mod tests {
             assert_eq!(actual.unwrap().1.name(), name);
             assert_eq!(
                 selection!(input),
-                Selection::Named(SubSelection {
+                JSONSelection::Named(SubSelection {
                     selections: vec![expected],
                     star: None,
                 }),
@@ -594,7 +594,7 @@ mod tests {
     fn test_selection() {
         assert_eq!(
             selection!(""),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![],
                 star: None,
             }),
@@ -602,7 +602,7 @@ mod tests {
 
         assert_eq!(
             selection!("   "),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![],
                 star: None,
             }),
@@ -610,7 +610,7 @@ mod tests {
 
         assert_eq!(
             selection!("hello"),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
                 star: None,
             }),
@@ -618,7 +618,7 @@ mod tests {
 
         assert_eq!(
             selection!(".hello"),
-            Selection::Path(PathSelection::from_slice(
+            JSONSelection::Path(PathSelection::from_slice(
                 &[Property::Field("hello".to_string()),],
                 None
             )),
@@ -626,7 +626,7 @@ mod tests {
 
         assert_eq!(
             selection!("hi: .hello.world"),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Path(
                     Alias {
                         name: "hi".to_string(),
@@ -645,7 +645,7 @@ mod tests {
 
         assert_eq!(
             selection!("before hi: .hello.world after"),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, "before".to_string(), None),
                     NamedSelection::Path(
@@ -666,7 +666,7 @@ mod tests {
             }),
         );
 
-        let before_path_nested_after_result = Selection::Named(SubSelection {
+        let before_path_nested_after_result = JSONSelection::Named(SubSelection {
             selections: vec![
                 NamedSelection::Field(None, "before".to_string(), None),
                 NamedSelection::Path(
@@ -723,7 +723,7 @@ mod tests {
                 siblingGroup: { brother sister }
             }"
             ),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     Some(Alias {
                         name: "topLevelAlias".to_string(),
@@ -793,7 +793,7 @@ mod tests {
     fn test_path_selection() {
         fn check_path_selection(input: &str, expected: PathSelection) {
             assert_eq!(PathSelection::parse(input), Ok(("", expected.clone())));
-            assert_eq!(selection!(input), Selection::Path(expected.clone()));
+            assert_eq!(selection!(input), JSONSelection::Path(expected.clone()));
         }
 
         check_path_selection(
@@ -1025,7 +1025,7 @@ mod tests {
 
         assert_eq!(
             selection!(" before alias: * { * { a b c } } "),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(None, "before".to_string(), None),],
                 star: Some(StarSelection(
                     Some(Alias {
@@ -1051,7 +1051,7 @@ mod tests {
 
         assert_eq!(
             selection!(" before group: { * { a b c } } after "),
-            Selection::Named(SubSelection {
+            JSONSelection::Named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, "before".to_string(), None),
                     NamedSelection::Group(

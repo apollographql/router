@@ -14,10 +14,10 @@ use crate::sources::connect::federated_query_graph::ConcreteNode;
 use crate::sources::connect::federated_query_graph::EnumNode;
 use crate::sources::connect::federated_query_graph::ScalarNode;
 use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
-use crate::sources::connect::models::Connector;
+use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::Property;
 use crate::sources::connect::json_selection::SubSelection;
-use crate::sources::connect::Selection;
+use crate::sources::connect::models::Connector;
 use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilderApi;
 use crate::sources::source::SourceId;
 use crate::ValidFederationSubgraph;
@@ -106,7 +106,7 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
 /// This method creates nodes from selection parameters of a field decorated by
 /// a connect directive, making sure to reuse nodes if possible.
 fn process_selection(
-    selection: Selection,
+    selection: JSONSelection,
     field_output_type_pos: TypeDefinitionPosition,
     subgraph_schema: &ValidFederationSchema,
     builder: &mut impl IntraSourceQueryGraphBuilderApi,
@@ -137,7 +137,7 @@ fn process_selection(
 
     // If we aren't a custom scalar, then look at the selection to see what to attempt
     match selection {
-        Selection::Path(path) => match field_output_type_pos {
+        JSONSelection::Path(path) => match field_output_type_pos {
             TypeDefinitionPosition::Enum(enum_type) => {
                 // Create the node for this enum
                 builder.add_enum_node(
@@ -179,7 +179,7 @@ fn process_selection(
                 )
             }
         },
-        Selection::Named(sub) => {
+        JSONSelection::Named(sub) => {
             // Make sure that we aren't selecting sub fields from simple types
             if field_ty.is_scalar() || field_ty.is_enum() {
                 return Err(FederationError::internal(

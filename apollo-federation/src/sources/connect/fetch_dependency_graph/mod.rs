@@ -16,10 +16,10 @@ use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
+use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::PathSelection;
 use crate::sources::connect::json_selection::Property;
-use crate::sources::connect::Selection;
-use crate::sources::connect::SubSelection;
+use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::source;
 use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
 use crate::sources::source::fetch_dependency_graph::PathApi;
@@ -124,7 +124,7 @@ pub(crate) struct Node {
     source_entering_edge: EdgeIndex,
     field_response_name: Name,
     field_arguments: IndexMap<Name, Value>,
-    selection: Selection,
+    selection: JSONSelection,
 }
 
 #[derive(Debug)]
@@ -150,7 +150,7 @@ pub(crate) enum PathSelections {
         tail_selection: Option<(Name, PathTailSelection)>,
     },
     CustomScalarRoot {
-        selection: Selection,
+        selection: JSONSelection,
     },
 }
 
