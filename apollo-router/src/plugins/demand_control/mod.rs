@@ -33,6 +33,7 @@ use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
 use crate::services::subgraph;
+use crate::Context;
 
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
@@ -209,6 +210,20 @@ pub(crate) struct DemandControl {
     strategy_factory: StrategyFactory,
 }
 
+impl DemandControl {
+    fn report_operation_metric(context: Context) {
+        let guard = context.extensions().lock();
+        let cost_context = guard.get::<CostContext>();
+        let result = cost_context.map_or("NO_CONTEXT", |c| c.result);
+        u64_counter!(
+            "apollo.router.demand_control",
+            "Total operations with demand control enabled",
+            1,
+            "demand_control.result" = result
+        );
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for DemandControl {
     type Config = DemandControlConfig;
@@ -260,7 +275,15 @@ impl Plugin for DemandControl {
                         .expect("must have strategy")
                         .clone();
                     let context = resp.context.clone();
-                    let metrics_context = resp.context.clone();
+
+                    // We want to sequence this code to run after all the subgraph responses have been scored.
+                    // To do so without collecting all the results, we chain this "empty" stream onto the end.
+                    let report_operation_metric =
+                        futures::stream::unfold(resp.context.clone(), |ctx| async move {
+                            Self::report_operation_metric(ctx);
+                            None
+                        });
+
                     resp.response = resp.response.map(move |resp| {
                         // Here we are going to abort the stream if the cost is too high
                         // First we map based on cost, then we use take while to abort the stream if an error is emitted.
@@ -288,21 +311,8 @@ impl Plugin for DemandControl {
                         // Terminate the stream on error
                         .take_while(|resp| future::ready(resp.is_ok()))
                         // Unwrap the result. This is safe because we are terminating the stream on error.
-                        .map(move |i| {
-                            let resp = i.expect("error used to terminate stream");
-
-                            let guard = metrics_context.extensions().lock();
-                            let cost_context = guard.get::<CostContext>();
-                            let result = cost_context.map_or("NO_CONTEXT", |c| c.result);
-                            u64_counter!(
-                                "apollo.router.demand_control",
-                                "Total operations with demand control enabled",
-                                1,
-                                "demand_control.result" = result
-                            );
-
-                            resp
-                        })
+                        .map(|i| i.expect("error used to terminate stream"))
+                        .chain(report_operation_metric)
                         .boxed()
                     });
                     resp
