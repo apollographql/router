@@ -6,6 +6,7 @@ use std::sync::Arc;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentOrigin;
 // use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
@@ -336,31 +337,6 @@ impl Source {
             change.apply_to(supergraph_schema, &mut inner_supergraph_schema)?;
         }
 
-        let entity_union_members = entity_union_members(&inner_supergraph_schema);
-
-        for (eum, ty) in entity_union_members {
-            let graph_name = ty
-                .directives()
-                .iter()
-                .find(|d| d.name == name!("join__Graph"))
-                .and_then(|d| {
-                    d.arguments
-                        .iter()
-                        .find(|a| a.name == name!("name"))
-                        .map(|a| Arc::new(a.value.to_string()))
-                });
-            Change::UnionMember {
-                union_name: name!("_Entity"),
-                member_name: eum,
-                graph_name: graph_name.clone().unwrap(),
-            }
-            .apply_to(supergraph_schema, &mut inner_supergraph_schema)?;
-            Change::FakeEntities {
-                graph_name: graph_name.unwrap(),
-            }
-            .apply_to(supergraph_schema, &mut inner_supergraph_schema)?;
-        }
-
         let connector_graph_names = connectors
             .values()
             // sorted for stable SDL generation
@@ -372,12 +348,8 @@ impl Source {
             join_graph_enum(&connector_graph_names),
         );
 
-        // add_fake_entity(supergraph_schema, &mut inner_supergraph_schema)?;
-
-        println!(
-            "-------------- \n {} \n -----------------",
-            inner_supergraph_schema
-        );
+        add_fake_entity(&mut inner_supergraph_schema)?;
+        update_any_scalar(&mut inner_supergraph_schema)?;
 
         inner_supergraph_schema
             .validate()
@@ -385,15 +357,82 @@ impl Source {
     }
 }
 
-fn add_fake_entity(
-    supergraph_schema: &Schema,
-    inner_supergraph_schema: &mut Schema,
-) -> Result<(), ConnectorSupergraphError> {
-    let graph_name = Arc::new(inner_supergraph_schema.to_string());
+fn update_any_scalar(inner_supergraph_schema: &mut Schema) -> Result<(), ConnectorSupergraphError> {
+    let all_graphs = inner_supergraph_schema
+        .types
+        .get(&name!("join__Graph"))
+        .map(|join_graph| {
+            if let ExtendedType::Enum(jge) = join_graph {
+                jge.values
+                    .iter()
+                    .map(|(k, _)| k.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                Default::default()
+            }
+        })
+        .unwrap_or_default();
+
+    if let Some(ExtendedType::Scalar(s)) = inner_supergraph_schema.types.get_mut(&name!("_Any")) {
+        let scalar = s.make_mut();
+        let mut new_directives = scalar
+            .directives
+            .clone()
+            .into_iter()
+            .filter(|d| d.name != name!("join__type"))
+            .collect::<Vec<_>>();
+        new_directives.extend(all_graphs.into_iter().map(|graph| {
+            Component {
+                origin: ComponentOrigin::Definition, // ?
+                node: Directive {
+                    name: name!("join__type"),
+                    arguments: vec![Node::new(apollo_compiler::ast::Argument {
+                        name: name!("graph"),
+                        value: Value::Enum(graph.clone()).into(),
+                    })],
+                }
+                .into(),
+            }
+        }));
+
+        scalar.directives = DirectiveList(new_directives);
+    }
+    Ok(())
+}
+
+fn add_fake_entity(inner_supergraph_schema: &mut Schema) -> Result<(), ConnectorSupergraphError> {
     inner_supergraph_schema
         .types
         .insert(name!("_Entity"), entity_union(inner_supergraph_schema));
-    Change::FakeEntities { graph_name }.apply_to(supergraph_schema, inner_supergraph_schema)
+
+    let query_type = inner_supergraph_schema.types.get_mut("Query").unwrap();
+
+    if let ExtendedType::Object(q) = query_type {
+        q.make_mut().fields.insert(
+            name!("_entities"),
+            FieldDefinition {
+                name: name!("_entities"),
+                arguments: vec![apollo_compiler::schema::InputValueDefinition {
+                    description: Default::default(),
+                    directives: Default::default(),
+                    default_value: Default::default(),
+                    name: name!("representations"),
+                    ty: apollo_compiler::ty!([_Any!]!).into(),
+                }
+                .into()],
+                directives: apollo_compiler::ast::DirectiveList(vec![]),
+                description: None,
+                ty: apollo_compiler::schema::Type::Named(name!("_Entity"))
+                    .non_null()
+                    .list()
+                    .non_null(),
+            }
+            .into(),
+        );
+    }
+
+    Ok(())
+    // Change::FakeEntities { graph_name }.apply_to(supergraph_schema, inner_supergraph_schema)
 }
 
 fn entity_union_members(schema: &Schema) -> Vec<(Name, ExtendedType)> {
@@ -403,17 +442,31 @@ fn entity_union_members(schema: &Schema) -> Vec<(Name, ExtendedType)> {
         .filter(|(_, ty)| {
             ty.is_object()
                 && !ty.is_built_in()
-                && ty.directives().iter().any(|arg| arg.name == name!("key"))
+                && ty
+                    .directives()
+                    .iter()
+                    .any(|arg| arg.name.to_string().starts_with("join__"))
         })
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
 }
 
 fn entity_union(schema: &Schema) -> ExtendedType {
+    let join_union_member = name!("join__unionMember");
+    let graph = name!("graph");
+    let join_type = name!("join__type");
+    let member = name!("member");
     let (names, join_directives): (Vec<_>, Vec<_>) = schema
         .types
         .iter()
-        .filter(|(_, ty)| ty.is_object() && !ty.is_built_in())
+        .filter(|(_, ty)| {
+            ty.is_object()
+                && !ty.is_built_in()
+                && ty
+                    .directives()
+                    .iter()
+                    .any(|arg| arg.name.to_string().starts_with("join__"))
+        })
         .map(|(key, value)| {
             (
                 key.into(),
@@ -423,26 +476,57 @@ fn entity_union(schema: &Schema) -> ExtendedType {
                     .into_iter()
                     // Only add resolvable types to the entity union
                     .filter(|d| {
-                        d.name == name!("join__type")
-                            && d.arguments.iter().any(|arg| arg.name == name!("key"))
+                        d.name == join_type
+                        // && d.arguments.iter().any(|arg| arg.name == name!("key"))
                     })
-                    .map(|d| {
+                    .flat_map(|d| {
+                        dbg!(&key, &d.name, &d.node);
                         let Component { origin, mut node } = d;
                         let directive = node.make_mut();
-                        let Directive { name, arguments } = directive.clone();
-                        Component {
-                            origin,
-                            node: Directive {
-                                name,
-                                arguments: arguments
-                                    .into_iter()
-                                    .filter(|a| a.name == name!("graph"))
-                                    .collect(),
-                            }
-                            .into(),
+                        let Directive { arguments, .. } = directive.clone();
+
+                        let graph_argument = arguments.into_iter().find(|a| a.name == graph);
+
+                        if let Some(g) = graph_argument {
+                            vec![
+                                Component {
+                                    origin: origin.clone(),
+                                    node: Directive {
+                                        name: join_type.clone(),
+                                        arguments: vec![Node::new(
+                                            apollo_compiler::ast::Argument {
+                                                name: graph.clone(),
+                                                value: g.value.clone(),
+                                            },
+                                        )],
+                                    }
+                                    .into(),
+                                },
+                                Component {
+                                    origin,
+                                    node: Directive {
+                                        name: join_union_member.clone(),
+                                        arguments: vec![
+                                            Node::new(apollo_compiler::ast::Argument {
+                                                name: graph.clone(),
+                                                value: g.value.clone(),
+                                            }),
+                                            Node::new(apollo_compiler::ast::Argument {
+                                                name: member.clone(),
+                                                value: Node::new(Value::String(
+                                                    key.to_string().into(),
+                                                )),
+                                            }),
+                                        ],
+                                    }
+                                    .into(),
+                                },
+                            ]
+                        } else {
+                            vec![]
                         }
                     })
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<Component<Directive>>>(),
             )
         })
         .unzip();

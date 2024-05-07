@@ -499,9 +499,7 @@ async fn test_mutation_inputs() {
     "###);
 }
 
-//TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_entity_join() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -677,9 +675,7 @@ async fn test_response_formatting_aliases() {
     "###);
 }
 
-//TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_interface_object() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -766,9 +762,7 @@ async fn test_interface_object() {
     );
 }
 
-//TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_entity_interface() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -839,9 +833,7 @@ async fn test_entity_interface() {
     "###);
 }
 
-//TODO: fix when we refactor
 #[tokio::test]
-#[ignore]
 async fn test_interfaces() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;

@@ -4,13 +4,17 @@ use std::sync::Arc;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
 // use apollo_compiler::name;
+// use apollo_compiler::schema::ComponentName;
+// use apollo_compiler::name;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Name;
+// use apollo_compiler::schema::UnionType;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+// use indexmap::IndexSet;
 use itertools::Itertools;
 
 use super::connector::Connector;
@@ -254,8 +258,6 @@ pub(super) enum Change {
         member_name: Name,
         graph_name: Arc<String>,
     },
-    /// _entities for validation only
-    FakeEntities { graph_name: Arc<String> },
 }
 
 impl Change {
@@ -318,10 +320,28 @@ impl Change {
 
                 add_entities_field(ty, graph_name, field_name, type_name);
             }
-            Change::FakeEntities { graph_name } => {
-                let ty = upsert_type(original_schema, schema, "Query")?;
-                add_entities_field(ty, graph_name, "_entities", "_Entity");
-            }
+            // Change::FakeEntities {
+            //     graph_name,
+            //     member_names,
+            // } => {
+            //     add_type(
+            //         schema,
+            //         "_Entity",
+            //         ExtendedType::Union(Node::new(UnionType {
+            //             description: None,
+            //             name: name!("_Entity"),
+            //             directives: Default::default(),
+            //             members: member_names.clone(),
+            //         })),
+            //     )
+            //     .unwrap();
+
+            //     let arg_ty = add_type(schema, "_Any", make_any_scalar())?;
+            //     add_join_type_directive(arg_ty, graph_name, None, None);
+
+            //     let ty = upsert_type(original_schema, schema, "Query")?;
+            //     add_entities_field(ty, graph_name, "_entities", "_Entity");
+            // }
             Change::EnumValue {
                 enum_name,
                 value_name,

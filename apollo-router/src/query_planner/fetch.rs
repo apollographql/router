@@ -378,11 +378,7 @@ impl FetchNode {
     pub(crate) fn service_name(&self) -> NodeStr {
         match self.protocol.as_ref() {
             Protocol::GraphQL => self.service_name.clone(),
-            Protocol::RestWrapper(rw) => rw
-                .connector_graph_key
-                .clone()
-                .map(|cgk| cgk.to_string().into())
-                .unwrap_or_else(|| self.service_name.clone()),
+            Protocol::RestWrapper(_rw) => self.service_name.clone(),
             Protocol::RestFetch(rf) => rf.connector_graph_key.to_string().into(),
         }
     }
