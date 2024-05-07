@@ -446,43 +446,50 @@ impl Variables {
             let mut named_args: Vec<HashMap<String, Value>> = Vec::new();
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
+                let mut found_rewrites: HashSet<String> = HashSet::new();
                 let hash_map: HashMap<String, Value> = context_rewrites
                     .iter()
                     .flatten()
                     .filter_map(|rewrite| {
+                        // note that it's possible that we could have multiple rewrites for the same variable. If that's the case, don't lookup if a value has already been found
                         match rewrite {
                             DataRewrite::KeyRenamer(item) => {
-                                let data_path = merge_context_path(&path, &item.path);
-                                let val = data_at_path(data, &data_path);
-                                if let Some(v) = val {
-                                    // TODO: not great
-                                    let mut new_value = v.clone();
-                                    if let Some(values) = new_value.as_array_mut() {
-                                        for mut v in values {
+                                if !found_rewrites.contains(item.rename_key_to.as_str()) {
+                                    let data_path = merge_context_path(&path, &item.path);
+                                    let val = data_at_path(data, &data_path);
+                                    if let Some(v) = val {
+                                        // add to found
+                                        found_rewrites.insert(item.rename_key_to.clone().to_string());
+                                        
+                                        // TODO: not great
+                                        let mut new_value = v.clone();
+                                        if let Some(values) = new_value.as_array_mut() {
+                                            for mut v in values {
+                                                rewrites::apply_single_rewrite(
+                                                    schema,
+                                                    &mut v,
+                                                    &DataRewrite::KeyRenamer({
+                                                        DataKeyRenamer {
+                                                            path: data_path.clone(),
+                                                            rename_key_to: item.rename_key_to.clone(),
+                                                        }
+                                                    }),
+                                                );
+                                            }
+                                        } else {
                                             rewrites::apply_single_rewrite(
                                                 schema,
-                                                &mut v,
+                                                &mut new_value,
                                                 &DataRewrite::KeyRenamer({
                                                     DataKeyRenamer {
-                                                        path: data_path.clone(),
+                                                        path: data_path,
                                                         rename_key_to: item.rename_key_to.clone(),
                                                     }
                                                 }),
                                             );
                                         }
-                                    } else {
-                                        rewrites::apply_single_rewrite(
-                                            schema,
-                                            &mut new_value,
-                                            &DataRewrite::KeyRenamer({
-                                                DataKeyRenamer {
-                                                    path: data_path,
-                                                    rename_key_to: item.rename_key_to.clone(),
-                                                }
-                                            }),
-                                        );
+                                        return Some((item.rename_key_to.to_string(), new_value));
                                     }
-                                    return Some((item.rename_key_to.to_string(), new_value));
                                 }
                                 return None;
                             }
