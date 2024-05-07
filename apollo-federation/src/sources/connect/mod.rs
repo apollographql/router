@@ -1,5 +1,5 @@
 mod models;
-mod query_graph;
+pub(crate) mod query_graph;
 mod selection_parser;
 pub(crate) mod spec;
 mod url_path_template;
@@ -140,15 +140,6 @@ pub(crate) enum ConnectFederatedSourceEnteringQueryGraphEdge {
         subgraph_type: ObjectTypeDefinitionPosition,
     },
 }
-
-/// Connect-aware query graph builder
-///
-/// This builder is in charge of setting up nodes / edges in the query graph
-/// that correspond to REST mappings defined through the @source and @connect
-/// directives.
-///
-/// Refer to [SourceSpecDefinition] and [ConnectSpecDefinition] for more info.
-pub(crate) struct ConnectFederatedQueryGraphBuilder;
 
 #[derive(Debug)]
 pub(crate) struct ConnectFetchDependencyGraph;

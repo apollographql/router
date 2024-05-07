@@ -20,7 +20,6 @@ use crate::sources::connect::ConnectFederatedConcreteFieldQueryGraphEdge;
 use crate::sources::connect::ConnectFederatedConcreteQueryGraphNode;
 use crate::sources::connect::ConnectFederatedEnumQueryGraphNode;
 use crate::sources::connect::ConnectFederatedQueryGraph;
-use crate::sources::connect::ConnectFederatedQueryGraphBuilder;
 use crate::sources::connect::ConnectFederatedScalarQueryGraphNode;
 use crate::sources::connect::ConnectFederatedSourceEnteringQueryGraphEdge;
 use crate::sources::connect::ConnectFederatedTypeConditionQueryGraphEdge;
@@ -45,6 +44,8 @@ use crate::sources::graphql::GraphqlFetchNode;
 use crate::sources::graphql::GraphqlId;
 use crate::sources::graphql::GraphqlPath;
 use crate::ValidFederationSubgraph;
+
+use self::connect::query_graph::builder::ConnectFederatedQueryGraphBuilder;
 
 pub mod connect;
 pub mod graphql;

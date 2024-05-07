@@ -4,21 +4,20 @@ use indexmap::IndexMap;
 use indexmap::IndexSet;
 use petgraph::prelude::NodeIndex;
 
-use super::models::Connector;
-use super::selection_parser::Property;
-use super::selection_parser::SubSelection;
-use super::ConnectFederatedConcreteFieldQueryGraphEdge;
-use super::ConnectFederatedConcreteQueryGraphNode;
-use super::ConnectFederatedEnumQueryGraphNode;
-use super::ConnectFederatedQueryGraphBuilder;
-use super::ConnectFederatedSourceEnteringQueryGraphEdge;
-use super::Selection;
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+use crate::sources::connect::models::Connector;
+use crate::sources::connect::selection_parser::Property;
+use crate::sources::connect::selection_parser::SubSelection;
+use crate::sources::connect::ConnectFederatedConcreteFieldQueryGraphEdge;
+use crate::sources::connect::ConnectFederatedConcreteQueryGraphNode;
+use crate::sources::connect::ConnectFederatedEnumQueryGraphNode;
 use crate::sources::connect::ConnectFederatedScalarQueryGraphNode;
+use crate::sources::connect::ConnectFederatedSourceEnteringQueryGraphEdge;
+use crate::sources::connect::Selection;
 use crate::sources::SourceFederatedConcreteFieldQueryGraphEdge;
 use crate::sources::SourceFederatedConcreteQueryGraphNode;
 use crate::sources::SourceFederatedEnumQueryGraphNode;
@@ -27,6 +26,15 @@ use crate::sources::SourceFederatedScalarQueryGraphNode;
 use crate::sources::SourceFederatedSourceEnteringQueryGraphEdge;
 use crate::sources::SourceId;
 use crate::ValidFederationSubgraph;
+
+/// Connect-aware query graph builder
+///
+/// This builder is in charge of setting up nodes / edges in the query graph
+/// that correspond to REST mappings defined through the @source and @connect
+/// directives.
+///
+/// Refer to [SourceSpecDefinition] and [ConnectSpecDefinition] for more info.
+pub(crate) struct ConnectFederatedQueryGraphBuilder;
 
 impl SourceFederatedQueryGraphBuilderApi for ConnectFederatedQueryGraphBuilder {
     fn process_subgraph_schema(
@@ -412,7 +420,7 @@ mod tests {
     fn it_handles_a_simple_schema() {
         let federated_builder = ConnectFederatedQueryGraphBuilder;
         let mut mock_builder = mock::MockSourceQueryGraphBuilder::new();
-        let subgraphs = get_subgraphs(include_str!("./tests/schemas/simple.graphql"));
+        let subgraphs = get_subgraphs(include_str!("../tests/schemas/simple.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
         // Make sure that the tail data is correct
@@ -474,7 +482,7 @@ mod tests {
     fn it_handles_an_aliased_schema() {
         let federated_builder = ConnectFederatedQueryGraphBuilder;
         let mut mock_builder = mock::MockSourceQueryGraphBuilder::new();
-        let subgraphs = get_subgraphs(include_str!("./tests/schemas/aliasing.graphql"));
+        let subgraphs = get_subgraphs(include_str!("../tests/schemas/aliasing.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
         // Make sure that the tail data is correct
@@ -537,7 +545,7 @@ mod tests {
     fn it_handles_a_cyclical_schema() {
         let federated_builder = ConnectFederatedQueryGraphBuilder;
         let mut mock_builder = mock::MockSourceQueryGraphBuilder::new();
-        let subgraphs = get_subgraphs(include_str!("./tests/schemas/cyclical.graphql"));
+        let subgraphs = get_subgraphs(include_str!("../tests/schemas/cyclical.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
         // Make sure that the tail data is correct
@@ -605,7 +613,7 @@ mod tests {
     fn it_handles_a_nested_schema() {
         let federated_builder = ConnectFederatedQueryGraphBuilder;
         let mut mock_builder = mock::MockSourceQueryGraphBuilder::new();
-        let subgraphs = get_subgraphs(include_str!("./tests/schemas/nested.graphql"));
+        let subgraphs = get_subgraphs(include_str!("../tests/schemas/nested.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
         // Make sure that the tail data is correct
