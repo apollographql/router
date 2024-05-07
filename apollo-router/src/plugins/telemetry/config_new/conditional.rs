@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use schemars::gen::SchemaGenerator;
+use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
 use serde::de::Error;
 use serde::de::MapAccess;
@@ -77,26 +80,58 @@ where
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
         // Add condition to each variant in the schema.
         //Maybe we can rearrange this for a smaller schema
-        let mut selector = gen.subschema_for::<T>();
+        let selector = gen.subschema_for::<T>();
 
-        if let Schema::Object(schema) = &mut selector {
-            if let Some(object) = &mut schema.subschemas {
-                if let Some(any_of) = &mut object.any_of {
-                    for mut variant in any_of {
-                        if let Schema::Object(variant) = &mut variant {
-                            if let Some(object) = &mut variant.object {
-                                object.properties.insert(
-                                    "condition".to_string(),
-                                    gen.subschema_for::<Condition<T>>(),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        selector
+        Schema::Object(SchemaObject {
+            metadata: None,
+            instance_type: None,
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: Some(Box::new(SubschemaValidation {
+                any_of: Some(vec![
+                    selector,
+                    Schema::Object(SchemaObject {
+                        metadata: None,
+                        instance_type: None,
+                        format: None,
+                        enum_values: None,
+                        const_value: None,
+                        subschemas: None,
+                        number: None,
+                        string: None,
+                        array: None,
+                        object: Some(Box::new(ObjectValidation {
+                            max_properties: None,
+                            min_properties: None,
+                            required: Default::default(),
+                            properties: [(
+                                "condition".to_string(),
+                                gen.subschema_for::<Condition<T>>(),
+                            )]
+                            .into(),
+                            pattern_properties: Default::default(),
+                            additional_properties: None,
+                            property_names: None,
+                        })),
+                        reference: None,
+                        extensions: Default::default(),
+                    }),
+                ]),
+                all_of: None,
+                one_of: None,
+                not: None,
+                if_schema: None,
+                then_schema: None,
+                else_schema: None,
+            })),
+            number: None,
+            string: None,
+            array: None,
+            object: None,
+            reference: None,
+            extensions: Default::default(),
+        })
     }
 }
 
