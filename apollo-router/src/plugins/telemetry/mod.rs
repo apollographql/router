@@ -1844,7 +1844,7 @@ impl CustomTraceIdPropagator {
 
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
         let trace_id = extractor.get(&self.header_name)?;
-        let trace_id = trace_id.replace("-", "");
+        let trace_id = trace_id.replace('-', "");
 
         // extract trace id
         let trace_id = match opentelemetry::trace::TraceId::from_hex(&trace_id) {
