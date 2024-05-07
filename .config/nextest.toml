@@ -15,3 +15,8 @@ path = "junit.xml"
 [[profile.default.overrides]]
 filter = 'package(apollo-router) & kind(test)'
 threads-required = 2
+
+# Scaffold test takes all the test threads as it runs rustc.
+[[profile.default.overrides]]
+filter = 'package(apollo-router-scaffold)'
+threads-required = 'num-test-threads'
