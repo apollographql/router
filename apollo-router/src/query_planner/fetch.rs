@@ -10,8 +10,8 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
-use once_cell::sync::OnceCell as OnceLock;
 use json_ext::PathElement;
+use once_cell::sync::OnceCell as OnceLock;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -295,10 +295,8 @@ fn query_batching_for_contextual_args2(
                                 new_variables.push(Node::new(new_variable.clone()));
 
                                 s = rename_variables(s, v.name.clone(), new_variable.name.clone());
-                            } else {
-                                if !new_variables.iter().any(|var| var.name == v.name) {
-                                    new_variables.push(v.clone());
-                                }
+                            } else if !new_variables.iter().any(|var| var.name == v.name) {
+                                new_variables.push(v.clone());
                             }
                         }
 
@@ -459,8 +457,8 @@ impl Variables {
                                     let val = data_at_path(data, &data_path);
                                     if let Some(v) = val {
                                         // add to found
-                                        found_rewrites.insert(item.rename_key_to.clone().to_string());
-                                        
+                                        found_rewrites
+                                            .insert(item.rename_key_to.clone().to_string());
                                         // TODO: not great
                                         let mut new_value = v.clone();
                                         if let Some(values) = new_value.as_array_mut() {
@@ -471,7 +469,9 @@ impl Variables {
                                                     &DataRewrite::KeyRenamer({
                                                         DataKeyRenamer {
                                                             path: data_path.clone(),
-                                                            rename_key_to: item.rename_key_to.clone(),
+                                                            rename_key_to: item
+                                                                .rename_key_to
+                                                                .clone(),
                                                         }
                                                     }),
                                                 );
@@ -491,11 +491,11 @@ impl Variables {
                                         return Some((item.rename_key_to.to_string(), new_value));
                                     }
                                 }
-                                return None;
+                                None
                             }
                             DataRewrite::ValueSetter(_) => {
                                 // TODO: Log error? panic? not sure
-                                return None;
+                                None
                             }
                         }
                     })
@@ -528,7 +528,7 @@ impl Variables {
             // Here we create a new map with all the key value pairs to push into variables.
             // Note that if all variables are the same, we just use the named parameter as a variable, but if they are different then each
             // entity will have it's own set of parameters all appended by _<index>
-            let (extended_vars, contextual_args) = if let Some(first_map) = named_args.get(0) {
+            let (extended_vars, contextual_args) = if let Some(first_map) = named_args.first() {
                 if named_args.iter().all(|map| map == first_map) {
                     (
                         first_map

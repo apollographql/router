@@ -37,7 +37,7 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "9baf30a619593a77ddaf5f68d8bd58af2527c30f0d9f1161001338c0e798edf4",
+              "schemaAwareHash": "904cce765299d4ec167658b15259c8bc8c3093af5bb33db4d2979827472646cd",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -89,7 +89,7 @@ expression: response
                     "renameKeyTo": "Subgraph1_U_field_a"
                   }
                 ],
-                "schemaAwareHash": "82ac499d9905065a835b1ad324b824367a513c6eb3e3b9c0364dd6bd31edb384",
+                "schemaAwareHash": "2539792d01c83160bdcfaee2e8d371f56aca9083b54befb4c1aa44d011adc662",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

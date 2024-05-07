@@ -155,7 +155,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
-            context_rewrites,
+            context_rewrites: _,
         } = value;
         Self {
             service_name: subgraph_name.clone(),
