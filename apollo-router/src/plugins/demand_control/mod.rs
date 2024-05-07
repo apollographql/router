@@ -260,6 +260,7 @@ impl Plugin for DemandControl {
                         .expect("must have strategy")
                         .clone();
                     let context = resp.context.clone();
+                    let metrics_context = resp.context.clone();
                     resp.response = resp.response.map(move |resp| {
                         // Here we are going to abort the stream if the cost is too high
                         // First we map based on cost, then we use take while to abort the stream if an error is emitted.
@@ -267,24 +268,41 @@ impl Plugin for DemandControl {
                         resp.flat_map(move |resp| {
                             match strategy.on_execution_response(&context, req.as_ref(), &resp) {
                                 Ok(_) => Either::Left(stream::once(future::ready(Ok(resp)))),
-                                Err(err) => Either::Right(stream::iter(vec![
-                                    // This is the error we are returning to the user
-                                    Ok(graphql::Response::builder()
-                                        .errors(
-                                            err.into_graphql_errors()
-                                                .expect("must be able to convert to graphql error"),
-                                        )
-                                        .extensions(crate::json_ext::Object::new())
-                                        .build()),
-                                    // This will terminate the stream
-                                    Err(()),
-                                ])),
+                                Err(err) => {
+                                    Either::Right(stream::iter(vec![
+                                        // This is the error we are returning to the user
+                                        Ok(graphql::Response::builder()
+                                            .errors(
+                                                err.into_graphql_errors().expect(
+                                                    "must be able to convert to graphql error",
+                                                ),
+                                            )
+                                            .extensions(crate::json_ext::Object::new())
+                                            .build()),
+                                        // This will terminate the stream
+                                        Err(()),
+                                    ]))
+                                }
                             }
                         })
                         // Terminate the stream on error
                         .take_while(|resp| future::ready(resp.is_ok()))
                         // Unwrap the result. This is safe because we are terminating the stream on error.
-                        .map(|i| i.expect("error used to terminate stream"))
+                        .map(move |i| {
+                            let resp = i.expect("error used to terminate stream");
+
+                            let guard = metrics_context.extensions().lock();
+                            let cost_context = guard.get::<CostContext>();
+                            let result = cost_context.map_or("NO_CONTEXT", |c| c.result);
+                            u64_counter!(
+                                "apollo.router.demand_control",
+                                "Total operations with demand control enabled",
+                                1,
+                                "demand_control.result" = result
+                            );
+
+                            resp
+                        })
                         .boxed()
                     });
                     resp
@@ -374,9 +392,11 @@ mod test {
     use futures::StreamExt;
     use schemars::JsonSchema;
     use serde::Deserialize;
+    use test_log;
 
     use crate::graphql;
     use crate::graphql::Response;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::demand_control::DemandControl;
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
@@ -421,6 +441,23 @@ mod test {
         ))
         .await;
         insta::assert_yaml_snapshot!(body);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_metrics_on_execution_response() {
+        async {
+            test_on_execution(include_str!(
+                "fixtures/enforce_on_execution_response.router.yaml"
+            ))
+            .await;
+            assert_counter!(
+                "apollo.router.demand_control",
+                1,
+                "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+        }
+        .with_metrics()
+        .await
     }
 
     #[tokio::test]
