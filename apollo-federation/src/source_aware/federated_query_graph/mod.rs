@@ -4,6 +4,8 @@ use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::query_plan::operation::SelectionSet;
 use crate::schema::position::AbstractFieldDefinitionPosition;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -139,5 +141,68 @@ pub(crate) enum FederatedQueryGraphEdge {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) struct SelfConditionIndex(usize);
 
-#[derive(Debug)]
-pub(crate) struct ConditionNormalizedSelectionSet(SelectionSet);
+impl FederatedQueryGraph {
+    pub(crate) fn graph(&self) -> &DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge> {
+        &self.graph
+    }
+
+    pub(crate) fn node_weight(
+        &self,
+        node: NodeIndex,
+    ) -> Result<&FederatedQueryGraphNode, FederationError> {
+        self.graph.node_weight(node).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Node unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    fn node_weight_mut(
+        &mut self,
+        node: NodeIndex,
+    ) -> Result<&mut FederatedQueryGraphNode, FederationError> {
+        self.graph.node_weight_mut(node).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Node unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    pub(crate) fn edge_weight(
+        &self,
+        edge: EdgeIndex,
+    ) -> Result<&FederatedQueryGraphEdge, FederationError> {
+        self.graph.edge_weight(edge).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Edge unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    fn edge_weight_mut(
+        &mut self,
+        edge: EdgeIndex,
+    ) -> Result<&mut FederatedQueryGraphEdge, FederationError> {
+        self.graph.edge_weight_mut(edge).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Edge unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    pub(crate) fn edge_endpoints(
+        &self,
+        edge: EdgeIndex,
+    ) -> Result<(NodeIndex, NodeIndex), FederationError> {
+        self.graph.edge_endpoints(edge).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Edge unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+}
