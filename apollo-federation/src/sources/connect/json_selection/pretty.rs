@@ -5,7 +5,9 @@
 //! pretty printing trait which is then implemented on the various sub types
 //! of the JSONSelection tree.
 
+use super::js_literal::JSLiteral;
 use crate::sources::connect::json_selection::JSONSelection;
+use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::PathSelection;
@@ -129,12 +131,115 @@ impl PrettyPrintable for PathList {
                 result.push_str(key.dotted().as_str());
                 result.push_str(rest.as_str());
             }
+            Self::Method(method, args, tail) => {
+                result.push_str("->");
+                result.push_str(method.as_str());
+                if let Some(args) = args {
+                    result.push_str(
+                        args.pretty_print_with_indentation(true, indentation)
+                            .as_str(),
+                    );
+                }
+                result.push_str(
+                    tail.pretty_print_with_indentation(true, indentation)
+                        .as_str(),
+                );
+            }
             Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(true, indentation);
                 result.push(' ');
                 result.push_str(sub.as_str());
             }
             Self::Empty => {}
+        }
+
+        result
+    }
+}
+
+impl PrettyPrintable for MethodArgs {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        let mut result = String::new();
+
+        if !inline {
+            result.push_str(indent_chars(indentation).as_str());
+        }
+
+        result.push('(');
+
+        // TODO Break long argument lists across multiple lines, with indentation?
+        for (i, arg) in self.0.iter().enumerate() {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            result.push_str(
+                arg.pretty_print_with_indentation(true, indentation)
+                    .as_str(),
+            );
+        }
+
+        result.push(')');
+
+        result
+    }
+}
+
+impl PrettyPrintable for JSLiteral {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        let mut result = String::new();
+        if !inline {
+            result.push_str(indent_chars(indentation).as_str());
+        }
+
+        match self {
+            JSLiteral::String(s) => {
+                let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
+                result.push_str(safely_quoted.as_str());
+            }
+            JSLiteral::Number(n) => result.push_str(n.as_str()),
+            JSLiteral::Bool(b) => result.push_str(b.to_string().as_str()),
+            JSLiteral::Null => result.push_str("null"),
+            JSLiteral::Object(map) => {
+                result.push('{');
+                let mut is_first = true;
+                for (key, value) in map {
+                    if is_first {
+                        is_first = false;
+                    } else {
+                        result.push_str(", ");
+                    }
+                    let key = serde_json_bytes::Value::String(key.clone().into()).to_string();
+                    result.push_str(key.as_str());
+                    result.push_str(": ");
+                    result.push_str(
+                        value
+                            .pretty_print_with_indentation(true, indentation)
+                            .as_str(),
+                    );
+                }
+                result.push('}');
+            }
+            JSLiteral::Array(vec) => {
+                result.push('[');
+                let mut is_first = true;
+                for value in vec {
+                    if is_first {
+                        is_first = false;
+                    } else {
+                        result.push_str(", ");
+                    }
+                    result.push_str(
+                        value
+                            .pretty_print_with_indentation(true, indentation)
+                            .as_str(),
+                    );
+                }
+                result.push(']');
+            }
+            JSLiteral::Path(path) => {
+                let path = path.pretty_print_with_indentation(inline, indentation);
+                result.push_str(path.as_str());
+            }
         }
 
         result

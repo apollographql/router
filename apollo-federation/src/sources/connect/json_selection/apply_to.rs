@@ -7,11 +7,13 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use itertools::Itertools;
 use serde_json_bytes::json;
-use serde_json_bytes::Map;
+use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
+use super::js_literal::JSLiteral;
+use super::methods::ARROW_METHODS;
 use super::parser::*;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<String, (&'a JSON, InputPath<JSON>)>;
@@ -105,7 +107,7 @@ impl ApplyToError {
     }
 
     #[cfg(test)]
-    fn from_json(json: &JSON) -> Self {
+    pub(crate) fn from_json(json: &JSON) -> Self {
         if let JSON::Object(error) = json {
             if let Some(JSON::String(message)) = error.get("message") {
                 if let Some(JSON::Array(path)) = error.get("path") {
@@ -181,7 +183,7 @@ impl ApplyTo for NamedSelection {
             return self.apply_to_array(array, vars, input_path, errors);
         }
 
-        let mut output = Map::new();
+        let mut output = JSONMap::new();
 
         #[rustfmt::skip] // cargo fmt butchers this closure's formatting
         let mut field_quoted_helper = |
@@ -270,6 +272,8 @@ impl ApplyTo for PathList {
                     // For the special variable $, the path represents the
                     // sequence of keys from the root input data to the $ data.
                     tail.apply_to_path(var_data, vars, var_path, errors)
+                } else if var_name == "@" {
+                    tail.apply_to_path(data, vars, input_path, errors)
                 } else if var_name == TYPENAMES {
                     if let PathList::Key(Key::Field(ref name), _) = **tail {
                         let var_data = json!({ name: name });
@@ -328,12 +332,79 @@ impl ApplyTo for PathList {
                     None
                 }
             }
+            Self::Method(method_name, method_args, tail) => {
+                if let Some(method) = ARROW_METHODS.get(method_name) {
+                    method(
+                        method_name.as_str(),
+                        method_args,
+                        data,
+                        vars,
+                        input_path,
+                        tail.as_ref(),
+                        errors,
+                    )
+                } else {
+                    errors.insert(ApplyToError::new(
+                        format!("Method ->{} not found", method_name).as_str(),
+                        input_path.to_vec(),
+                    ));
+                    None
+                }
+            }
             Self::Selection(selection) => selection.apply_to_path(data, vars, input_path, errors),
             Self::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
                 Some(data.clone())
             }
+        }
+    }
+}
+
+impl ApplyTo for JSLiteral {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        vars: &VarsWithPathsMap,
+        input_path: &InputPath<JSON>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
+        match self {
+            Self::String(s) => Some(JSON::String(s.clone().into())),
+            Self::Number(n) => {
+                if let Ok(JSON::Number(n)) = serde_json_bytes::serde_json::from_str(n) {
+                    Some(JSON::Number(n))
+                } else {
+                    errors.insert(ApplyToError::new(
+                        format!("Invalid number {}", n).as_str(),
+                        input_path.to_vec(),
+                    ));
+                    None
+                }
+            }
+            Self::Bool(b) => Some(JSON::Bool(*b)),
+            Self::Null => Some(JSON::Null),
+            Self::Object(map) => {
+                let mut output = JSONMap::new();
+                for (key, value) in map {
+                    if let Some(value_json) = value.apply_to_path(data, vars, input_path, errors) {
+                        output.insert(key.clone(), value_json);
+                    }
+                }
+                Some(JSON::Object(output))
+            }
+            Self::Array(vec) => {
+                let mut output = vec![];
+                for value in vec {
+                    output.push(
+                        value
+                            .apply_to_path(data, vars, input_path, errors)
+                            .unwrap_or(JSON::Null),
+                    );
+                }
+                Some(JSON::Array(output))
+            }
+            Self::Path(path) => path.apply_to_path(data, vars, input_path, errors),
         }
     }
 }
@@ -358,10 +429,10 @@ impl ApplyTo for SubSelection {
 
         let (data_map, data_really_primitive) = match data {
             JSON::Object(data_map) => (data_map.clone(), false),
-            _primitive => (Map::new(), true),
+            _primitive => (JSONMap::new(), true),
         };
 
-        let mut output = Map::new();
+        let mut output = JSONMap::new();
         let mut input_names = IndexSet::default();
 
         for named_selection in &self.selections {
@@ -402,7 +473,7 @@ impl ApplyTo for SubSelection {
         match &self.star {
             // Aliased but not subselected, e.g. "a b c rest: *"
             Some(StarSelection(Some(alias), None)) => {
-                let mut star_output = Map::new();
+                let mut star_output = JSONMap::new();
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         star_output.insert(key.clone(), value.clone());
@@ -412,7 +483,7 @@ impl ApplyTo for SubSelection {
             }
             // Aliased and subselected, e.g. "alias: * { hello }"
             Some(StarSelection(Some(alias), Some(selection))) => {
-                let mut star_output = Map::new();
+                let mut star_output = JSONMap::new();
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         if let Some(selected) =
@@ -1229,6 +1300,12 @@ mod tests {
                     "path": ["$args", "id"],
                 }))],
             ),
+        );
+
+        // A single variable path should not be mapped over an input array.
+        assert_eq!(
+            selection!("$args.id").apply_with_vars(&json!([1, 2, 3]), &vars),
+            (Some(json!("id from args")), vec![]),
         );
     }
 

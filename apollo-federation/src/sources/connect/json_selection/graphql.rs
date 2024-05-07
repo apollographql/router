@@ -103,6 +103,10 @@ impl From<PathList> for Vec<GraphQLSelection> {
             // Variable references do not correspond to GraphQL fields.
             PathList::Var(_, _) => vec![],
             PathList::Key(_, tail) => (*tail).into(),
+            // TODO If we decide to allow MethodArgs to accept PathSelection
+            // values that refer to fields (rather than $variables), then we
+            // will need to convert those field selection paths to GraphQL.
+            PathList::Method(_, _, tail) => (*tail).into(),
             PathList::Selection(selection) => GraphQLSelections::from(selection).valid_selections(),
             PathList::Empty => vec![],
         }

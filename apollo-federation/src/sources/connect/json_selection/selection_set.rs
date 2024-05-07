@@ -18,11 +18,11 @@
 
 use std::collections::HashSet;
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
 use multimap::MultiMap;
 
 use super::parser::PathList;
@@ -48,7 +48,7 @@ impl SubSelection {
     /// Apply a selection set to create a new [`SubSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         let mut new_selections = Vec::new();
-        let mut dropped_fields = IndexMap::new();
+        let mut dropped_fields = IndexMap::default();
         let mut referenced_fields = HashSet::new();
         let field_map = map_fields_by_name(selection_set);
 
@@ -202,6 +202,11 @@ impl PathList {
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
+                Box::new(path.apply_selection_set(selection_set)),
+            ),
+            Self::Method(method_name, args, path) => Self::Method(
+                method_name.clone(),
+                args.clone(),
                 Box::new(path.apply_selection_set(selection_set)),
             ),
             Self::Selection(sub) => Self::Selection(sub.apply_selection_set(selection_set)),

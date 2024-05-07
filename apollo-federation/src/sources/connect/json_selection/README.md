@@ -97,9 +97,10 @@ NamedFieldSelection  ::= Alias? Identifier SubSelection?
 NamedQuotedSelection ::= Alias StringLiteral SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Identifier ":"
-PathSelection        ::= (VarPath | KeyPath) SubSelection?
+PathSelection        ::= (VarPath | KeyPath | AtPath) SubSelection?
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
+AtPath               ::= "@" PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | StringLiteral
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
@@ -488,8 +489,8 @@ type User @key(fields: "id") {
 ```
 
 In addition to variables like `$this` and `$args`, a special `$` variable is
-always bound to the current value being processed, which allows you to transform
-input data that looks like this
+always bound to the value received by the closest enclosing `{...}` selection
+set, which allows you to transform input data that looks like this
 
 ```json
 {
@@ -576,6 +577,52 @@ character (so `.data { id name }`, or even `.data.id` or `.data.name`) to mean
 the same thing as `$.`, but this is no longer recommended, since `.data` is easy
 to mistype and misread, compared to `$.data`.
 
+### `AtPath ::=`
+
+![AtPath](./grammar/AtPath.svg)
+
+Similar to the special `$` variable, the `@` character always represents the
+current value being processed, which is often equal to `$`, but may differ from
+the `$` variable when `@` is used within the arguments of `->` methods.
+
+For example, when you want to compute the logical conjunction of several
+properties of the current object, you can keep using `$` with different property
+selections:
+
+```graphql
+all: $.first->and($.second)->and($.third)
+```
+
+If the `$` variable were rebound to the input value received by the `->and`
+method, this style of method chaining would not work, because the `$.second`
+expression would attempt to select a `second` property from the value of
+`$.first`. Instead, the `$` remains bound to the same value received by the
+closest enclosing `{...}` selection set, or the root value when used at the top
+level of a `JSONSelection`.
+
+The `@` character becomes useful when you need to refer to the input value
+received by a `->` method, as when using the `->echo` method to wrap a given
+input value:
+
+```graphql
+wrapped: field->echo({ fieldValue: @ })
+children: parent->echo([@.child1, @.child2, @.child3])
+```
+
+The `->map` method has the special ability to apply its argument to each element
+of its input array, so `@` will take on the value of each of those elements,
+rather than referring to the array itself:
+
+```graphql
+doubled: numbers->map({ value: @->mul(2) })
+types: values->map(@->typeof)
+```
+
+This special behavior of `@` within `->map` is available to any method
+implementation, since method arguments are not evaluated before calling the
+method, but are passed in as expressions that the method may choose to evaluate
+(or even repeatedly reevaluate) however it chooses.
+
 ### `PathStep ::=`
 
 ![PathStep](./grammar/PathStep.svg)
@@ -590,25 +637,70 @@ registered in the `JSONSelection` parser in order to be recognized.
 For the time being, only a fixed set of known methods are supported, though this
 list may grow and/or become user-configurable in the future:
 
-> Full disclosure: even this list is still aspirational, but suggestive of the
-> kinds of methods that are likely to be supported in the next version of the
-> `JSONSelection` parser.
-
 ```graphql
-list->first { id name }
-list->last.name
-list->slice($args.start, $args.end)
-list->reverse
-some.value->times(2)
-some.value->plus($addend)
-some.value->minus(100)
-some.value->div($divisor)
-isDog: kind->eq("dog")
-isNotCat: kind->neq("cat")
-__typename: kind->match({ "dog": "Dog", "cat": "Cat" })
-decoded: utf8Bytes->decode("utf-8")
-utf8Bytes: string->encode("utf-8")
-encoded: bytes->encode("base64")
+# The ->echo method returns its first input argument as-is, ignoring
+# the input data. Useful for embedding literal values, as in
+# $->echo("give me this string"), or wrapping the input value.
+__typename: $->echo("Book")
+wrapped: field->echo({ fieldValue: @ })
+
+# Returns the type of the data as a string, e.g. "object", "array",
+# "string", "number", "boolean", or "null". Note that `typeof null` is
+# "object" in JavaScript but "null" for our purposes.
+typeOfValue: value->typeof
+
+# When invoked against an array, ->map evaluates its first argument
+# against each element of the array, binding the element values to `@`,
+# and returns an array of the results. When invoked against a non-array,
+# ->map evaluates its first argument against that value and returns the
+# result without wrapping it in an array.
+doubled: numbers->map(@->mul(2))
+types: values->map(@->typeof)
+
+# Returns true if the data is deeply equal to the first argument, false
+# otherwise. Equality is solely value-based (all JSON), no references.
+isObject: value->typeof->eq("object")
+
+# Takes any number of pairs [candidate, value], and returns value for
+# the first candidate that equals the input data. If none of the
+# pairs match, a runtime error is reported, but a single-element
+# [<default>] array as the final argument guarantees a default value.
+__typename: kind->match(
+    ["dog", "Canine"],
+    ["cat", "Feline"],
+    ["Exotic"]
+)
+
+# Like ->match, but expects the first element of each pair to evaluate
+# to a boolean, returning the second element of the first pair whose
+# first element is true. This makes providing a final catch-all case
+# easy, since the last pair can be [true, <default>].
+__typename: kind->matchIf(
+    [@->eq("dog"), "Canine"],
+    [@->eq("cat"), "Feline"],
+    [true, "Exotic"]
+)
+
+# Arithmetic methods, supporting both integers and floating point values,
+# similar to JavaScript.
+sum: $.a->add($.b)->add($.c)
+difference: $.a->sub($.b)->sub($.c)
+product: $.a->mul($.b, $.c)
+quotient: $.a->div($.b)
+remainder: $.a->mod($.b)
+
+# Array methods
+first: list->first
+last: list->last
+slice: list->slice(0, 5)
+
+# Logical methods
+negation: $.condition->not
+bangBang: $.condition->not->not
+disjunction: $.a->or($.b)->or($.c)
+conjunction: $.a->and($.b, $.c)
+aImpliesB: $.a->not->or($.b)
+excludedMiddle: $.toBe->or($.toBe->not)->eq(true)
 ```
 
 ### `MethodArgs ::=`
@@ -617,7 +709,7 @@ encoded: bytes->encode("base64")
 
 When a `PathStep` invokes an `->operator` method, the method invocation may
 optionally take a sequence of comma-separated `JSLiteral` arguments in
-parentheses, as in `list->slice(0, 5)` or `kilometers: miles->times(1.60934)`.
+parentheses, as in `list->slice(0, 5)` or `kilometers: miles->mul(1.60934)`.
 
 Methods do not have to take arguments, as in `list->first` or `list->last`,
 which is why `MethodArgs` is optional in `PathStep`.
