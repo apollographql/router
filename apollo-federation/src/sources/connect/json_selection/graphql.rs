@@ -93,7 +93,7 @@ impl From<NamedSelection> for Vec<GraphQLSelection> {
 impl From<PathSelection> for Vec<GraphQLSelection> {
     fn from(val: PathSelection) -> Vec<GraphQLSelection> {
         match val {
-            PathSelection::Path(_head, tail) => {
+            PathSelection::Key(_, tail) => {
                 let tail = *tail;
                 tail.into()
             }

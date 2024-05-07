@@ -15,7 +15,7 @@ use crate::sources::connect::federated_query_graph::EnumNode;
 use crate::sources::connect::federated_query_graph::ScalarNode;
 use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
 use crate::sources::connect::json_selection::JSONSelection;
-use crate::sources::connect::json_selection::Property;
+use crate::sources::connect::json_selection::Key;
 use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::connect::models::Connector;
 use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilderApi;
@@ -206,7 +206,7 @@ fn process_subselection(
     subgraph_schema: &ValidFederationSchema,
     builder: &mut impl IntraSourceQueryGraphBuilderApi,
     node_cache: &mut IndexMap<Name, NodeIndex<u32>>,
-    properties_path: Option<Vec<Property>>,
+    properties_path: Option<Vec<Key>>,
 ) -> Result<NodeIndex<u32>, FederationError> {
     // Get the type of the field
     let field_ty = field_output_type_pos.get(subgraph_schema.schema())?;
@@ -669,7 +669,7 @@ mod tests {
         use crate::source_aware::federated_query_graph::SelfConditionIndex;
         use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
         use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
-        use crate::sources::connect::json_selection::Property;
+        use crate::sources::connect::json_selection::Key;
         use crate::sources::connect::ConnectId;
         use crate::sources::source;
         use crate::sources::source::SourceId;
@@ -690,7 +690,7 @@ mod tests {
         /// A mock query edge
         struct MockEdge {
             field_name: Name,
-            path: Vec<Property>,
+            path: Vec<Key>,
         }
         impl Display for MockEdge {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -702,13 +702,13 @@ mod tests {
                 }
 
                 // Helper for checking name equality of a property
-                fn is_name_eq(prop: &Property, other: &str) -> bool {
+                fn is_name_eq(prop: &Key, other: &str) -> bool {
                     match prop {
-                        Property::Field(f) => f == other,
-                        Property::Quoted(q) => q == other,
+                        Key::Field(f) => f == other,
+                        Key::Quoted(q) => q == other,
 
                         // No string name will be equal to a number
-                        Property::Index(_) => false,
+                        Key::Index(_) => false,
                     }
                 }
 

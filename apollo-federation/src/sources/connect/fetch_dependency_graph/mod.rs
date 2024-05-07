@@ -17,8 +17,8 @@ use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
 use crate::sources::connect::json_selection::JSONSelection;
+use crate::sources::connect::json_selection::Key;
 use crate::sources::connect::json_selection::PathSelection;
-use crate::sources::connect::json_selection::Property;
 use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::source;
 use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
@@ -145,8 +145,8 @@ pub(crate) struct PathField {
 #[derive(Debug)]
 pub(crate) enum PathSelections {
     Selections {
-        head_property_path: Vec<Property>,
-        named_selections: Vec<(Name, Vec<Property>)>,
+        head_property_path: Vec<Key>,
+        named_selections: Vec<(Name, Vec<Key>)>,
         tail_selection: Option<(Name, PathTailSelection)>,
     },
     CustomScalarRoot {
@@ -157,14 +157,14 @@ pub(crate) enum PathSelections {
 #[derive(Debug)]
 pub(crate) enum PathTailSelection {
     Selection {
-        property_path: Vec<Property>,
+        property_path: Vec<Key>,
     },
     CustomScalarPathSelection {
         path_selection: PathSelection,
     },
     CustomScalarStarSelection {
         star_subselection: Option<SubSelection>,
-        excluded_properties: IndexSet<Property>,
+        excluded_properties: IndexSet<Key>,
     },
 }
 
@@ -205,7 +205,7 @@ mod tests {
     use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
     use crate::sources::connect::federated_query_graph::ConcreteNode;
     use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
-    use crate::sources::connect::json_selection::Property;
+    use crate::sources::connect::json_selection::Key;
     use crate::sources::connect::ConnectId;
     use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
     use crate::sources::source::SourceId;
@@ -272,7 +272,7 @@ mod tests {
                 source_id: source_id.clone(),
                 source_data: ConcreteNode::SelectionRoot {
                     subgraph_type: node_type.clone(),
-                    property_path: vec![Property::Field(type_name.to_lowercase().to_string())],
+                    property_path: vec![Key::Field(type_name.to_lowercase().to_string())],
                 }
                 .into(),
             });
