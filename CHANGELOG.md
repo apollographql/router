@@ -4,6 +4,188 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.46.0] - 2024-05-07
+
+## 🚀 Features
+
+### Entity cache preview: support queries with private scope ([PR #4855](https://github.com/apollographql/router/pull/4855))
+
+**This feature is part of the work on [subgraph entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching/), currently in preview.**
+
+The router now supports caching responses marked with `private` scope. This caching currently works only on subgraph responses without any schema-level information.
+
+For details about the caching behavior, see [PR #4855](https://github.com/apollographql/router/pull/4855) 
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4855
+
+### Add support of custom events defined by YAML for telemetry ([Issue #4320](https://github.com/apollographql/router/issues/4320))
+
+Users can now [configure telemetry events via YAML](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events/)
+to log that something has happened (e.g. a request had errors of a particular type) without reaching for Rhai or a custom plugin.
+
+Events may be triggered on conditions and can include information in the request/response pipeline as attributes.
+
+Here is an example of configuration:
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      router:
+        # Standard events
+        request: info
+        response: info
+        error: info
+
+        # Custom events
+        my.event:
+          message: "my event message"
+          level: info
+          on: request
+          attributes:
+            http.response.body.size: false
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+          
+      supergraph:
+          # Custom event configuration for supergraph service ...
+      subgraph:
+          # Custom event configuration for subgraph service .
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4956
+
+### Ability to ignore auth prefixes in the JWT plugin
+
+The router now supports a configuration to ignore header prefixes with the JWT plugin. Given that many application headers use the format of `Authorization: <scheme> <token>`, this option enables the router to process requests for specific schemes within the `Authorization` header while ignoring others.
+
+For example, you can configure the router to process requests with `Authorization: Bearer <token>` defined while ignoring others such as `Authorization: Basic <token>`: 
+
+```yaml title="router.yaml"
+authentication:
+  router:
+    jwt:
+      header_name: authorization
+      header_value_prefix: "Bearer"
+      ignore_mismatched_prefix: true
+```
+
+If the header prefix is an empty string, this option is ignored.
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4718
+
+### Support conditions on custom attributes for spans and a new selector for GraphQL errors ([Issue #4336](https://github.com/apollographql/router/issues/4336))
+
+The router now supports conditionally adding attributes on a span and the new `on_graphql_error` selector that is set to true if the response body contains GraphQL errors.
+
+An example configuration using `condition` in `attributes` and `on_graphql_error`:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans: 
+      router: 
+        attributes:    
+          otel.status_description: 
+            static: "there was an error"
+            condition:
+              any:
+              - not:
+                  eq:
+                  - response_status: code
+                  - 200
+              - eq:
+                - on_graphql_error
+                - true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4987
+
+## 🐛 Fixes
+
+### Federation v2.7.5 ([PR #5064](https://github.com/apollographql/router/pull/5064))
+
+This brings in a query planner fix released in v2.7.5 of Apollo Federation.  Notably, from [its changelog](https://github.com/apollographql/federation/releases/tag/%40apollo%2Fquery-planner%402.7.5):
+
+-   Fix issue with missing fragment definitions due to `generateQueryFragments`. ([#2993](https://github.com/apollographql/federation/pull/2993))
+
+    An incorrect implementation detail in `generateQueryFragments` caused certain queries to be missing fragment definitions, causing the operation to be invalid and fail early in the request life-cycle (before execution). Specifically, subsequent fragment "candidates" with the same type condition and the same length of selections as a previous fragment weren't correctly added to the list of fragments. An example of an affected query is:
+
+    ```graphql
+    query {
+      t {
+        ... on A {
+          x
+          y
+        }
+      }
+      t2 {
+        ... on A {
+          y
+          z
+        }
+      }
+    }
+    ```
+
+    In this case, the second selection set would be converted to an inline fragment spread to subgraph fetches, but the fragment definition would be missing
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5064
+
+### Use supergraph schema to extract authorization info ([PR #5047](https://github.com/apollographql/router/pull/5047))
+
+The router now uses the supergraph schema to extract authorization info, as authorization information may not be available on the query planner's subgraph schemas. This reverts the authorization changes made in [PR #4975](https://github.com/apollographql/router/pull/4975).
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5047
+
+### Filter fetches added to batch during batch creation ([PR #5034](https://github.com/apollographql/router/pull/5034))
+
+Previously, the router didn't filter query hashes when creating batches. This could result in failed queries because the additional hashes could incorrectly make a query appear to be committed when it wasn't actually registered in a batch. 
+
+This release fixes this issue by filtering query hashes during batch creation.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5034
+
+### Use `subgraph.name` attribute instead of `apollo.subgraph.name` ([PR #5012](https://github.com/apollographql/router/pull/5012))
+
+In the router v1.45.0, subgraph name mapping didn't work correctly in the Datadog exporter.
+
+The Datadog exporter does some explicit mapping of attributes and was using a value `apollo.subgraph.name` that the latest versions of the router don't use. The correct choice is `subgraph.name`.
+
+This release updates the mapping to reflect the change and fixes subgraph name mapping for Datadog.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5012
+
+## 📚 Documentation
+
+### Document traffic shaping default configuration ([PR #4953](https://github.com/apollographql/router/pull/4953))
+
+The documentation for [configuring traffic shaping](https://www.apollographql.com/docs/router/configuration/traffic-shaping#configuration) has been updated to clarify that it's enabled by default with preset values. This setting has been the default since PR [#3330](https://github.com/apollographql/router/pull/3330), which landed in [v1.23.0](https://github.com/apollographql/router/releases/tag/v1.23.0). 
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4953
+
+## 🧪 Experimental
+
+### Experimental type conditioned fetching ([PR #4748](https://github.com/apollographql/router/pull/4748))
+
+This release introduces an experimental configuration to enable type-conditioned fetching.
+
+Previously, when querying a field that was in a path of two or more unions, the query planner wasn't able to handle different selections and would aggressively collapse selections in fetches. This resulted in incorrect plans.
+
+Enabling the `experimental_type_conditioned_fetching` option can fix this issue by configuring the query planner to fetch with type conditions.
+
+
+```yaml
+experimental_type_conditioned_fetching: true # false by default
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/4748
+
+
+
 # [1.45.1] - 2024-04-26
 
 ## 🐛 Fixes
