@@ -37,7 +37,6 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::query_graph::graph_path::selection_of_element;
 use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
@@ -679,6 +678,8 @@ impl Selection {
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
     ) -> Result<Self, FederationError> {
+        // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
+        // TODO: validate that the subSelection is ok for the element
         match element {
             OpPathElement::Field(field) => Ok(Self::from_normalized_field(field, sub_selections)),
             OpPathElement::InlineFragment(inline_fragment) => {
@@ -920,7 +921,7 @@ impl Selection {
     ///         to appropriately handle invalid return values.
     pub(crate) fn map_selection_set(
         &self,
-        mapper: &mut dyn FnMut(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
+        mapper: impl FnOnce(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
     ) -> Result<Self, FederationError> {
         if let Some(selection_set) = self.selection_set()? {
             self.with_updated_selection_set(mapper(selection_set)?)
@@ -941,22 +942,10 @@ impl HasSelectionKey for Selection {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
 pub(crate) enum SelectionOrSet {
     Selection(Selection),
     SelectionSet(SelectionSet),
-}
-
-impl From<Selection> for SelectionOrSet {
-    fn from(selection: Selection) -> Self {
-        Self::Selection(selection)
-    }
-}
-
-impl From<SelectionSet> for SelectionOrSet {
-    fn from(selections: SelectionSet) -> Self {
-        Self::SelectionSet(selections)
-    }
 }
 
 /// An analogue of the apollo-compiler type `Fragment` with these changes:
@@ -1180,14 +1169,14 @@ mod normalized_field_selection {
             self.alias.clone().unwrap_or_else(|| self.name().clone())
         }
 
-        pub(crate) fn base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
+        pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
             let definition = self.field_position.get(self.schema.schema())?;
             self.schema
                 .get_type(definition.ty.inner_named_type().clone())
         }
 
         pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
-            let base_type_position = self.base_type()?;
+            let base_type_position = self.output_base_type()?;
             Ok(matches!(
                 base_type_position,
                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
@@ -1740,22 +1729,11 @@ impl Operation {
 }
 
 /// the return type of `lazy_map` function's `mapper` closure argument
+#[derive(derive_more::From)]
 pub(crate) enum SelectionMapperReturn {
     None,
     Selection(Selection),
     SelectionList(Vec<Selection>),
-}
-
-impl From<Selection> for SelectionMapperReturn {
-    fn from(selection: Selection) -> Self {
-        Self::Selection(selection)
-    }
-}
-
-impl From<Vec<Selection>> for SelectionMapperReturn {
-    fn from(selection: Vec<Selection>) -> Self {
-        Self::SelectionList(selection)
-    }
 }
 
 impl FromIterator<Selection> for SelectionMapperReturn {
@@ -2286,7 +2264,7 @@ impl SelectionSet {
     fn make_selection(
         schema: &ValidFederationSchema,
         parent_type: &CompositeTypeDefinitionPosition,
-        updates: Vec<Selection>,
+        updates: &[Selection],
     ) -> Result<Option<Selection>, FederationError> {
         let Some((first, rest)) = updates.split_first() else {
             // PORT_NOTE: The TypeScript version asserts here.
@@ -2316,15 +2294,13 @@ impl SelectionSet {
             ));
         };
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> = match element {
-            OpPathElement::Field(ref field) => field.data().base_type()?.try_into().ok(),
+            OpPathElement::Field(ref field) => field.data().output_base_type()?.try_into().ok(),
             OpPathElement::InlineFragment(ref inline) => Some(inline.data().casted_type()),
         };
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
-            return Ok(Some(selection_of_element(
-                element, /*sub_selection*/ None,
-            )?));
+            return Selection::from_element(element, /*sub_selection*/ None).map(Some);
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
@@ -2344,7 +2320,7 @@ impl SelectionSet {
             sub_selection_parent_type,
             sub_selection_updates,
         )?);
-        Ok(Some(selection_of_element(element, updated_sub_selection)?))
+        Selection::from_element(element, updated_sub_selection).map(Some)
     }
 
     fn make_selection_set(
@@ -2354,7 +2330,7 @@ impl SelectionSet {
     ) -> Result<SelectionSet, FederationError> {
         let mut selections = SelectionMap::new();
         for (_key, updates) in updated_selections.into_iter() {
-            if let Some(selection) = Self::make_selection(schema, parent_type, updates)? {
+            if let Some(selection) = Self::make_selection(schema, parent_type, &updates)? {
                 selections.insert(selection);
             }
         }
@@ -2378,7 +2354,7 @@ impl SelectionSet {
     // `Arc::make_mut` on the `Arc` fields of `self` didn't seem better than cloning Arc instances.
     pub(crate) fn lazy_map(
         &self,
-        mapper: &mut dyn FnMut(&Selection) -> Result<SelectionMapperReturn, FederationError>,
+        mut mapper: impl FnMut(&Selection) -> Result<SelectionMapperReturn, FederationError>,
     ) -> Result<SelectionSet, FederationError> {
         // Note: If `changed` is false, then `updated_selections` must be empty.
         // However, `changed` can be true and `updated_selections` is empty when
@@ -2423,39 +2399,37 @@ impl SelectionSet {
     }
 
     pub(crate) fn add_back_typename_in_attachments(&self) -> Result<SelectionSet, FederationError> {
-        self.lazy_map(
-            &mut |selection| -> Result<SelectionMapperReturn, FederationError> {
-                let selection_element = selection.element()?;
-                let updated = selection
-                    .map_selection_set(&mut |ss| ss.add_back_typename_in_attachments().map(Some))?;
-                let Some(sibling_typename) = selection_element.sibling_typename() else {
-                    // No sibling typename to add back
-                    return Ok(updated.into());
-                };
-                // We need to add the query __typename for the current type in the current group.
-                // Note that the value of the sibling_typename is the alias or "" if there is no alias
-                let alias = if sibling_typename == "" {
-                    None
-                } else {
-                    Some(sibling_typename.clone())
-                };
-                let field_position = selection
-                    .element()?
-                    .parent_type_position()
-                    .introspection_typename_field();
-                let field_element = Field::new(FieldData {
-                    schema: self.schema.clone(),
-                    field_position,
-                    alias,
-                    arguments: Default::default(),
-                    directives: Default::default(),
-                    sibling_typename: None,
-                });
-                let typename_selection =
-                    selection_of_element(field_element.into(), /*subselection*/ None)?;
-                Ok([updated, typename_selection].into_iter().collect())
-            },
-        )
+        self.lazy_map(|selection| {
+            let selection_element = selection.element()?;
+            let updated = selection
+                .map_selection_set(|ss| ss.add_back_typename_in_attachments().map(Some))?;
+            let Some(sibling_typename) = selection_element.sibling_typename() else {
+                // No sibling typename to add back
+                return Ok(updated.into());
+            };
+            // We need to add the query __typename for the current type in the current group.
+            // Note that the value of the sibling_typename is the alias or "" if there is no alias
+            let alias = if sibling_typename.is_empty() {
+                None
+            } else {
+                Some(sibling_typename.clone())
+            };
+            let field_position = selection
+                .element()?
+                .parent_type_position()
+                .introspection_typename_field();
+            let field_element = Field::new(FieldData {
+                schema: self.schema.clone(),
+                field_position,
+                alias,
+                arguments: Default::default(),
+                directives: Default::default(),
+                sibling_typename: None,
+            });
+            let typename_selection =
+                Selection::from_element(field_element.into(), /*subselection*/ None)?;
+            Ok([updated, typename_selection].into_iter().collect())
+        })
     }
 
     pub(crate) fn add_typename_field_for_abstract_types(
@@ -6696,7 +6670,7 @@ type T {
             ss: &SelectionSet,
             pred: &impl Fn(&Selection) -> bool,
         ) -> Result<SelectionSet, FederationError> {
-            ss.lazy_map(&mut |s| {
+            ss.lazy_map(|s| {
                 if !pred(s) {
                     return Ok(SelectionMapperReturn::None);
                 }
@@ -6783,9 +6757,9 @@ type T {
             ss: &SelectionSet,
             pred: &impl Fn(&Selection) -> bool,
         ) -> Result<SelectionSet, FederationError> {
-            ss.lazy_map(&mut |s| {
+            ss.lazy_map(|s| {
                 let to_add_typename = pred(s);
-                let updated = s.map_selection_set(&mut |ss| add_typename_if(ss, pred).map(Some))?;
+                let updated = s.map_selection_set(|ss| add_typename_if(ss, pred).map(Some))?;
                 if !to_add_typename {
                     return Ok(updated.into());
                 }
@@ -6802,7 +6776,7 @@ type T {
                     sibling_typename: None,
                 });
                 let typename_selection =
-                    selection_of_element(field_element.into(), /*subselection*/ None)?;
+                    Selection::from_element(field_element.into(), /*subselection*/ None)?;
                 // return `updated` and `typename_selection`
                 Ok([updated, typename_selection].into_iter().collect())
             })
