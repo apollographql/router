@@ -20,6 +20,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
+use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
@@ -135,6 +136,8 @@ pub(crate) enum DemandControlError {
     },
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
+    /// Invalid subgraph query: {0}
+    InvalidSubgraphQuery(ValidationErrors),
     /// The response body could not be properly matched with its query's structure: {0}
     ResponseTypingFailure(String),
 }
@@ -176,6 +179,9 @@ impl IntoGraphQLErrors for DemandControlError {
                 .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
+            DemandControlError::InvalidSubgraphQuery(errors) => {
+                Ok(errors.into_graphql_errors_infallible())
+            }
         }
     }
 }
@@ -187,6 +193,7 @@ impl DemandControlError {
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
             DemandControlError::ResponseTypingFailure(_) => "COST_RESPONSE_TYPING_FAILURE",
+            DemandControlError::InvalidSubgraphQuery(_) => "GRAPHQL_VALIDATION_FAILED",
         }
     }
 }

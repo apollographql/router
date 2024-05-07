@@ -17,9 +17,9 @@ use petgraph::Direction;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::query_plan::operation::NormalizedField;
-use crate::query_plan::operation::NormalizedInlineFragment;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::Field;
+use crate::query_plan::operation::InlineFragment;
+use crate::query_plan::operation::SelectionSet;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -121,7 +121,7 @@ pub(crate) struct QueryGraphEdge {
     /// represent the fact that you need the key to be able to use an @key edge.
     ///
     /// Outside of keys, @requires edges also rely on conditions.
-    pub(crate) conditions: Option<Arc<NormalizedSelectionSet>>,
+    pub(crate) conditions: Option<Arc<SelectionSet>>,
 }
 
 impl Display for QueryGraphEdge {
@@ -537,11 +537,7 @@ impl QueryGraph {
         Ok(false)
     }
 
-    pub(crate) fn edge_for_field(
-        &self,
-        node: NodeIndex,
-        field: &NormalizedField,
-    ) -> Option<EdgeIndex> {
+    pub(crate) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
         let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::FieldCollection {
@@ -576,7 +572,7 @@ impl QueryGraph {
     pub(crate) fn edge_for_inline_fragment(
         &self,
         node: NodeIndex,
-        inline_fragment: &NormalizedInlineFragment,
+        inline_fragment: &InlineFragment,
     ) -> Option<EdgeIndex> {
         let Some(type_condition_pos) = &inline_fragment.data().type_condition_position else {
             // No type condition means the type hasn't changed, meaning there is no edge to take.
@@ -728,7 +724,7 @@ impl QueryGraph {
     pub(crate) fn get_locally_satisfiable_key(
         &self,
         node_index: NodeIndex,
-    ) -> Result<Option<NormalizedSelectionSet>, FederationError> {
+    ) -> Result<Option<SelectionSet>, FederationError> {
         let node = self.node_weight(node_index)?;
         let type_name = match &node.type_ {
             QueryGraphNodeType::SchemaType(ty) => {

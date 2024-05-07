@@ -37,6 +37,7 @@ use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
+use crate::error::ValidationErrors;
 use crate::executable::USING_CATCH_UNWIND;
 use crate::graphql;
 use crate::introspection::Introspection;
@@ -308,8 +309,16 @@ impl PlannerMode {
 
                     (Ok(js_plan), Ok(rust_plan)) => {
                         is_matched = js_plan.data.query_plan == rust_plan.into();
-                        if !is_matched {
-                            // TODO: tracing::debug!(diff)
+                        if is_matched {
+                            tracing::debug!("JS and Rust query plans match! 🎉");
+                        } else {
+                            tracing::warn!("JS v.s. Rust query plan mismatch");
+                            if let Some(formatted) = &js_plan.data.formatted_query_plan {
+                                tracing::debug!(
+                                    "Diff:\n{}",
+                                    render_diff(&diff::lines(formatted, &rust_plan.to_string()))
+                                );
+                            }
                         }
                     }
                 }
@@ -559,7 +568,7 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl);
+            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl)?;
         plan_success
             .data
             .query_plan
@@ -991,10 +1000,11 @@ impl QueryPlan {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
-    ) {
+    ) -> Result<(), ValidationErrors> {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
         }
+        Ok(())
     }
 
     fn extract_authorization_metadata(
