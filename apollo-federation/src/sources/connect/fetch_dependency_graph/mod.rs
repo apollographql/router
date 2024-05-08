@@ -257,7 +257,7 @@ mod tests {
         } = setup();
 
         // Make sure that the first edge is what we expect
-        let last_edge_index = source_entry_edges.last().unwrap().clone();
+        let last_edge_index = *source_entry_edges.last().unwrap();
         let (query_root_index, post_index) = query_graph.edge_endpoints(last_edge_index).unwrap();
         assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
         Concrete {
@@ -351,7 +351,7 @@ mod tests {
         } = setup();
 
         // Make sure that the first edge is what we expect
-        let last_edge_index = non_source_entry_edges.last().unwrap().clone();
+        let last_edge_index = *non_source_entry_edges.last().unwrap().clone();
         let (query_root_index, view_index) = query_graph.edge_endpoints(last_edge_index).unwrap();
         assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
         Concrete {
