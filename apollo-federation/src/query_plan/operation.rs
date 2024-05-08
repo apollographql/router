@@ -303,6 +303,7 @@ pub(crate) mod normalized_selection_map {
             self.0.shift_insert(index, value.key(), value)
         }
 
+        /// Remove a selection from the map. Returns the selection and its numeric index.
         pub(crate) fn remove(&mut self, key: &SelectionKey) -> Option<(usize, Selection)> {
             // We specifically use shift_remove() instead of swap_remove() to maintain order.
             self.0
