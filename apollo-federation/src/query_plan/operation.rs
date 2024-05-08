@@ -2367,51 +2367,57 @@ impl SelectionSet {
         &self,
         mut mapper: impl FnMut(&Selection) -> Result<SelectionMapperReturn, FederationError>,
     ) -> Result<SelectionSet, FederationError> {
-        // Note: If `changed` is false, then `updated_selections` must be empty.
-        // However, `changed` can be true and `updated_selections` is empty when
-        // all of the selections up to that point are removed.
-        let mut changed = false;
-        let mut updated_selections: MultiMap<SelectionKey, Selection> = MultiMap::new();
+        let mut iter = self.selections.values();
 
-        for (index, selection) in self.selections.values().enumerate() {
-            let updated = mapper(selection)?;
-            if let SelectionMapperReturn::Selection(ref updated) = updated {
-                if !changed && *updated == *selection {
-                    continue; // No change so far => skip
-                }
+        // Find the first object that is not identical after mapping
+        let Some((index, (_, first_changed))) = iter
+            .by_ref()
+            .map(|sel| (sel, mapper(sel)))
+            .enumerate()
+            .find(|(_, (sel, updated))|
+                !matches!(&updated, Ok(SelectionMapperReturn::Selection(updated)) if updated == *sel))
+        else {
+            // All selections are identical after mapping, so just clone `self`.
+            return Ok(self.clone());
+        };
+
+        // The mapped selection could be an error, so we need to not forget about it.
+        let first_changed = first_changed?;
+        // Copy the first half of the selections until the `index`-th item, since they are not
+        // changed.
+        let mut updated_selections = MultiMap::new();
+        updated_selections.extend(
+            self.selections
+                .iter()
+                .take(index)
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+
+        let mut update_new_selection = |selection| match selection {
+            SelectionMapperReturn::None => {} // Removed; Skip it.
+            SelectionMapperReturn::Selection(new_selection) => {
+                updated_selections.insert(new_selection.key(), new_selection)
             }
-            // Otherwise, journal the change
-            if !changed {
-                // If this is the first change, we copy all the previously identical selections.
-                changed = true;
-                updated_selections.extend(
-                    self.selections
-                        .iter()
-                        .take(index)
-                        .map(|(k, v)| (k.clone(), v.clone())),
-                );
+            SelectionMapperReturn::SelectionList(new_selections) => {
+                updated_selections.extend(new_selections.into_iter().map(|s| (s.key(), s)))
             }
-            match updated {
-                SelectionMapperReturn::None => {} // Removed; Skip it.
-                SelectionMapperReturn::Selection(new_selection) => {
-                    updated_selections.insert(new_selection.key(), new_selection);
-                }
-                SelectionMapperReturn::SelectionList(new_selections) => {
-                    updated_selections.extend(new_selections.into_iter().map(|s| (s.key(), s)));
-                }
-            };
+        };
+
+        // Now update the rest of the selections using the `mapper` function.
+        update_new_selection(first_changed);
+        for selection in iter {
+            update_new_selection(mapper(selection)?)
         }
 
-        if !changed {
-            Ok(self.clone())
-        } else {
-            // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
-            // against the multimap repo.
-            let update_slices = updated_selections
+        // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
+        // against the multimap repo.
+        Self::make_selection_set(
+            &self.schema,
+            &self.type_position,
+            updated_selections
                 .keys()
-                .flat_map(|k| updated_selections.get_vec(k).map(Vec::as_slice));
-            Self::make_selection_set(&self.schema, &self.type_position, update_slices)
-        }
+                .flat_map(|k| updated_selections.get_vec(k).map(Vec::as_slice)),
+        )
     }
 
     pub(crate) fn add_back_typename_in_attachments(&self) -> Result<SelectionSet, FederationError> {
