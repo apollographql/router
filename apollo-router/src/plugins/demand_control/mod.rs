@@ -216,7 +216,7 @@ impl DemandControl {
         let cost_context = guard.get::<CostContext>();
         let result = cost_context.map_or("NO_CONTEXT", |c| c.result);
         u64_counter!(
-            "apollo.router.demand_control",
+            "apollo.router.operations.demand_control",
             "Total operations with demand control enabled",
             1,
             "demand_control.result" = result
@@ -460,7 +460,7 @@ mod test {
             ))
             .await;
             assert_counter!(
-                "apollo.router.demand_control",
+                "apollo.router.operations.demand_control",
                 1,
                 "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
             );
@@ -470,7 +470,7 @@ mod test {
             ))
             .await;
             assert_counter!(
-                "apollo.router.demand_control",
+                "apollo.router.operations.demand_control",
                 2,
                 "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
             );
