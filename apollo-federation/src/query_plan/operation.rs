@@ -37,7 +37,6 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -2984,10 +2983,7 @@ impl SelectionSet {
         _variable_definitions: &[Node<executable::VariableDefinition>],
     ) -> Result<(), FederationError> {
         if self.selections.is_empty() {
-            Err(SingleFederationError::Internal {
-                message: "Invalid empty selection set".to_string(),
-            }
-            .into())
+            Err(FederationError::internal("Invalid empty selection set"))
         } else {
             for selection in self.selections.values() {
                 if let Some(s) = selection.selection_set()? {
@@ -4818,8 +4814,14 @@ impl From<&FragmentSpreadSelection> for executable::FragmentSpread {
 impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     type Error = FederationError;
 
-    fn try_from(_value: Operation) -> Result<Self, Self::Error> {
-        todo!()
+    fn try_from(value: Operation) -> Result<Self, Self::Error> {
+        // TODO(@goto-bus-stop): Obviously reparsing is not the way to go here
+        // Just doing it because it's easy for now
+        Ok(executable::ExecutableDocument::parse_and_validate(
+            value.schema.schema(),
+            value.to_string(),
+            "node.graphql",
+        )?)
     }
 }
 

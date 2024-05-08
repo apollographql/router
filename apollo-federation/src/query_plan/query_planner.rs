@@ -721,7 +721,6 @@ type User
     "#;
 
     #[test]
-    #[allow(unused)] // remove when build_query_plan() can run without panicking
     fn it_does_not_crash() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
@@ -740,7 +739,19 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        // let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+                    userById(id: 1) {
+                name
+                email
+              }
+            }
+          }
+        }
+        "###);
     }
 
     #[test]
