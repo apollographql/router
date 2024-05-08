@@ -4171,21 +4171,21 @@ impl NamedFragments {
     /// - Finally, re-fragments the nested fragments.
     fn map_to_expanded_selection_sets(
         &self,
-        mapper: &mut impl FnMut(&SelectionSet) -> Result<SelectionSet, FederationError>,
+        mut mapper: impl FnMut(&SelectionSet) -> Result<SelectionSet, FederationError>,
     ) -> Result<NamedFragments, FederationError> {
         let mut result = NamedFragments::default();
         // Note: `self.fragments` has insertion order topologically sorted.
         for fragment in self.fragments.values() {
-            let expanded_ss = fragment.selection_set.expand_all_fragments()?.normalize(
+            let expanded_selection_set = fragment.selection_set.expand_all_fragments()?.normalize(
                 &fragment.type_condition_position,
                 &Default::default(),
                 &fragment.schema,
                 NormalizeSelectionOption::NormalizeRecursively,
             )?;
-            let mapped_ss = mapper(&expanded_ss)?;
-            let optimized_ss = mapped_ss; // TODO: call SelectionSet::optimize (FED-191)
+            let mapped_selection_set = mapper(&expanded_selection_set)?;
+            let optimized_selection_set = mapped_selection_set; // TODO: call SelectionSet::optimize (FED-191)
             let updated = Fragment {
-                selection_set: optimized_ss,
+                selection_set: optimized_selection_set,
                 schema: fragment.schema.clone(),
                 name: fragment.name.clone(),
                 type_condition_position: fragment.type_condition_position.clone(),
@@ -4256,12 +4256,11 @@ impl NamedFragments {
         // which is what `mapToExpandedSelectionSets` gives us.
 
         if self.is_empty() {
-            // PORT_NOTE: This is an assertion in JS version.
-            return Err(FederationError::internal(
-                "Empty fragments are not expected",
-            ));
+            // PORT_NOTE: This was an assertion failure in JS version. But, it's actually ok to
+            // return unchanged if empty.
+            return Ok(self.clone());
         }
-        let updated = self.map_to_expanded_selection_sets(&mut |ss| {
+        let updated = self.map_to_expanded_selection_sets(|ss| {
             ss.add_typename_field_for_abstract_types(
                 /*parent_type_if_abstract*/ None, /*fragments*/ &None,
             )

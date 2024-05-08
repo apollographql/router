@@ -350,7 +350,7 @@ impl QueryPlanner {
 
         let reuse_query_fragments = self.config.reuse_query_fragments;
         let mut named_fragments = NamedFragments::new(&document.fragments, &self.api_schema);
-        if reuse_query_fragments && !named_fragments.is_empty() {
+        if reuse_query_fragments {
             // For all subgraph fetches we query `__typename` on every abstract types (see
             // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
             // fragments, we should make sure those fragments also query `__typename` for every
