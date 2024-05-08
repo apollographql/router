@@ -298,9 +298,16 @@ pub(crate) mod normalized_selection_map {
             self.0.insert(value.key(), value)
         }
 
-        pub(crate) fn remove(&mut self, key: &SelectionKey) -> Option<Selection> {
+        /// Insert a selection at a specific index.
+        pub(crate) fn insert_at(&mut self, index: usize, value: Selection) -> Option<Selection> {
+            self.0.shift_insert(index, value.key(), value)
+        }
+
+        pub(crate) fn remove(&mut self, key: &SelectionKey) -> Option<(usize, Selection)> {
             // We specifically use shift_remove() instead of swap_remove() to maintain order.
-            self.0.shift_remove(key)
+            self.0
+                .shift_remove_full(key)
+                .map(|(index, _key, selection)| (index, selection))
         }
 
         pub(crate) fn retain(
@@ -2218,7 +2225,7 @@ impl SelectionSet {
             (typename_field_key, sibling_field_key)
         {
             if let (
-                Some(Selection::Field(typename_field)),
+                Some((_, Selection::Field(typename_field))),
                 Some(SelectionValue::Field(mut sibling_field)),
             ) = (
                 mutable_selection_map.remove(&typename_key),
@@ -2555,19 +2562,22 @@ impl SelectionSet {
         let selections = Arc::make_mut(&mut self.selections);
 
         let key = selection.key();
-        let selection = match selections.remove(&key) {
-            None => selection,
-            Some(entry) => {
-                let to_merge = [entry, selection];
-                SelectionSet::make_selection(schema, parent_type, to_merge.iter())?.ok_or_else(
-                    || FederationError::internal("Failed to merge selections together."),
-                )?
+        match selections.remove(&key) {
+            Some((index, existing_selection)) => {
+                let to_merge = [existing_selection, selection];
+                // `existing_selection` and `selection` both have the same selection key,
+                // so the merged selection will also have the same selection key.
+                let selection = SelectionSet::make_selection(schema, parent_type, to_merge.iter())?
+                    .ok_or_else(|| {
+                        FederationError::internal("Failed to merge selections together.")
+                    })?;
+                selections.insert_at(index, selection);
             }
-        };
-        /* TODO(@TylerBloom): Is this needed?
-        if key != selection.key() { todo!(); }
-        */
-        selections.insert(selection);
+            None => {
+                selections.insert(selection);
+            }
+        }
+
         Ok(())
     }
 
