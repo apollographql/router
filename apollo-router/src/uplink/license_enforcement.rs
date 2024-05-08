@@ -390,6 +390,11 @@ impl LicenseEnforcementReport {
                 .path("$.experimental_demand_control")
                 .name("Demand control plugin")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.experimental_apollo_metrics_reference_mode")
+                .value("enhanced")
+                .name("Apollo metrics enhanced references")
+                .build(),
         ]
     }
 

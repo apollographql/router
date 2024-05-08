@@ -159,6 +159,25 @@ expression: "&schema"
         }
       ]
     },
+    "ApolloMetricsReferenceMode": {
+      "description": "Apollo usage report reference generation modes.",
+      "oneOf": [
+        {
+          "description": "Use the Enhanced mode that reports input object fields and enum value references as well as object fields.",
+          "enum": [
+            "enhanced"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the standard mode that only reports referenced object fields.",
+          "enum": [
+            "standard"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "Apq": {
       "additionalProperties": false,
       "description": "Automatic Persisted Queries (APQ) configuration",
@@ -6980,6 +6999,10 @@ expression: "&schema"
     "experimental_apollo_metrics_generation_mode": {
       "$ref": "#/definitions/ApolloMetricsGenerationMode",
       "description": "#/definitions/ApolloMetricsGenerationMode"
+    },
+    "experimental_apollo_metrics_reference_mode": {
+      "$ref": "#/definitions/ApolloMetricsReferenceMode",
+      "description": "#/definitions/ApolloMetricsReferenceMode"
     },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",

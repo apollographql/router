@@ -166,6 +166,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
 
+    /// Set the Apollo usage report reference reporting mode to use.
+    #[serde(default)]
+    pub(crate) experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
+
     /// Set the query planner implementation to use.
     #[serde(default)]
     pub(crate) experimental_query_planner_mode: QueryPlannerMode,
@@ -231,6 +235,18 @@ pub(crate) enum ApolloMetricsGenerationMode {
     Both,
 }
 
+/// Apollo usage report reference generation modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ApolloMetricsReferenceMode {
+    /// Use the Enhanced mode that reports input object fields and enum value references as well as object fields.
+    Enhanced,
+    /// Use the standard mode that only reports referenced object fields.
+    #[default]
+    Standard,
+}
+
 /// Query planner modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
@@ -272,6 +288,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
+            experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
             experimental_api_schema_generation_mode: ApiSchemaMode,
             experimental_query_planner_mode: QueryPlannerMode,
         }
@@ -295,6 +312,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_api_schema_generation_mode: ad_hoc.experimental_api_schema_generation_mode,
             experimental_apollo_metrics_generation_mode: ad_hoc
                 .experimental_apollo_metrics_generation_mode,
+            experimental_apollo_metrics_reference_mode: ad_hoc
+                .experimental_apollo_metrics_reference_mode,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
             plugins: ad_hoc.plugins,
@@ -344,6 +363,7 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        experimental_apollo_metrics_reference_mode: Option<ApolloMetricsReferenceMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
@@ -363,6 +383,8 @@ impl Configuration {
                 .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:
                 experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            experimental_apollo_metrics_reference_mode: experimental_apollo_metrics_reference_mode
+                .unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -446,6 +468,7 @@ impl Configuration {
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        experimental_apollo_metrics_reference_mode: Option<ApolloMetricsReferenceMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -461,6 +484,8 @@ impl Configuration {
                 .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:
                 experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            experimental_apollo_metrics_reference_mode: experimental_apollo_metrics_reference_mode
+                .unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -568,6 +593,15 @@ impl Configuration {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
                 error: "either change to some other query planner mode, or change to new metrics generation".into()
+            });
+        }
+
+        if self.experimental_apollo_metrics_reference_mode == ApolloMetricsReferenceMode::Enhanced
+            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "`experimental_apollo_metrics_reference_mode: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
+                error: "either change to the standard reference generation mode, or change to new metrics generation".into()
             });
         }
 
