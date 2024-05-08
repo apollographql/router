@@ -38,11 +38,8 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::operation::Field;
 use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::FieldSelection;
 use crate::query_plan::operation::InlineFragment;
 use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::InlineFragmentSelection;
-use crate::query_plan::operation::Selection;
 use crate::query_plan::operation::SelectionId;
 use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::FetchDataPathElement;
@@ -407,27 +404,6 @@ impl OpPathElement {
             }
         }
     }
-}
-
-pub(crate) fn selection_of_element(
-    element: OpPathElement,
-    sub_selection: Option<SelectionSet>,
-) -> Result<Selection, FederationError> {
-    // TODO: validate that the subSelection is ok for the element
-    Ok(match element {
-        OpPathElement::Field(field) => Selection::Field(Arc::new(FieldSelection {
-            field,
-            selection_set: sub_selection,
-        })),
-        OpPathElement::InlineFragment(inline_fragment) => {
-            Selection::InlineFragment(Arc::new(InlineFragmentSelection {
-                inline_fragment,
-                selection_set: sub_selection.ok_or_else(|| {
-                    FederationError::internal("Expected a selection set for an inline fragment")
-                })?,
-            }))
-        }
-    })
 }
 
 impl Display for OpPathElement {
