@@ -20,8 +20,10 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
+use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
+use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -34,6 +36,34 @@ use crate::services::subgraph;
 
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
+
+/// The cost calculation information stored in context for use in telemetry and other plugins that need to know what cost was calculated.
+pub(crate) struct CostContext {
+    pub(crate) estimated: f64,
+    pub(crate) actual: f64,
+    pub(crate) result: &'static str,
+}
+
+impl Default for CostContext {
+    fn default() -> Self {
+        Self {
+            estimated: 0.0,
+            actual: 0.0,
+            result: "COST_OK",
+        }
+    }
+}
+
+impl CostContext {
+    pub(crate) fn delta(&self) -> f64 {
+        self.estimated - self.actual
+    }
+
+    pub(crate) fn result(&mut self, error: DemandControlError) -> DemandControlError {
+        self.result = error.code();
+        error
+    }
+}
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -89,13 +119,25 @@ pub(crate) struct DemandControlConfig {
 
 #[derive(Debug, Display, Error)]
 pub(crate) enum DemandControlError {
-    /// Query estimated cost exceeded configured maximum
-    EstimatedCostTooExpensive,
-    /// Query actual cost exceeded configured maximum
+    /// query estimated cost {estimated_cost} exceeded configured maximum {max_cost}
+    EstimatedCostTooExpensive {
+        /// The estimated cost of the query
+        estimated_cost: f64,
+        /// The maximum cost of the query
+        max_cost: f64,
+    },
+    /// auery actual cost {actual_cost} exceeded configured maximum {max_cost}
     #[allow(dead_code)]
-    ActualCostTooExpensive,
+    ActualCostTooExpensive {
+        /// The actual cost of the query
+        actual_cost: f64,
+        /// The maximum cost of the query
+        max_cost: f64,
+    },
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
+    /// Invalid subgraph query: {0}
+    InvalidSubgraphQuery(ValidationErrors),
     /// The response body could not be properly matched with its query's structure: {0}
     ResponseTypingFailure(String),
 }
@@ -103,22 +145,55 @@ pub(crate) enum DemandControlError {
 impl IntoGraphQLErrors for DemandControlError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            DemandControlError::EstimatedCostTooExpensive => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_ESTIMATED_TOO_EXPENSIVE")
-                .message(self.to_string())
-                .build()]),
-            DemandControlError::ActualCostTooExpensive => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_ACTUAL_TOO_EXPENSIVE")
-                .message(self.to_string())
-                .build()]),
+            DemandControlError::EstimatedCostTooExpensive {
+                estimated_cost,
+                max_cost,
+            } => {
+                let mut extensions = Object::new();
+                extensions.insert("cost.estimated", estimated_cost.into());
+                extensions.insert("cost.max", max_cost.into());
+                Ok(vec![graphql::Error::builder()
+                    .extension_code(self.code())
+                    .extensions(extensions)
+                    .message(self.to_string())
+                    .build()])
+            }
+            DemandControlError::ActualCostTooExpensive {
+                actual_cost,
+                max_cost,
+            } => {
+                let mut extensions = Object::new();
+                extensions.insert("cost.actual", actual_cost.into());
+                extensions.insert("cost.max", max_cost.into());
+                Ok(vec![graphql::Error::builder()
+                    .extension_code(self.code())
+                    .extensions(extensions)
+                    .message(self.to_string())
+                    .build()])
+            }
             DemandControlError::QueryParseFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_QUERY_PARSE_FAILURE")
+                .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
             DemandControlError::ResponseTypingFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code("COST_RESPONSE_TYPING_FAILURE")
+                .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
+            DemandControlError::InvalidSubgraphQuery(errors) => {
+                Ok(errors.into_graphql_errors_infallible())
+            }
+        }
+    }
+}
+
+impl DemandControlError {
+    fn code(&self) -> &'static str {
+        match self {
+            DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
+            DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
+            DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
+            DemandControlError::ResponseTypingFailure(_) => "COST_RESPONSE_TYPING_FAILURE",
+            DemandControlError::InvalidSubgraphQuery(_) => "GRAPHQL_VALIDATION_FAILED",
         }
     }
 }
@@ -184,12 +259,13 @@ impl Plugin for DemandControl {
                         .get::<Strategy>()
                         .expect("must have strategy")
                         .clone();
+                    let context = resp.context.clone();
                     resp.response = resp.response.map(move |resp| {
                         // Here we are going to abort the stream if the cost is too high
                         // First we map based on cost, then we use take while to abort the stream if an error is emitted.
                         // When we terminate the stream we still want to emit a graphql error, so the error response is emitted first before a termination error.
                         resp.flat_map(move |resp| {
-                            match strategy.on_execution_response(req.as_ref(), &resp) {
+                            match strategy.on_execution_response(&context, req.as_ref(), &resp) {
                                 Ok(_) => Either::Left(stream::once(future::ready(Ok(resp)))),
                                 Err(err) => Either::Right(stream::iter(vec![
                                     // This is the error we are returning to the user
@@ -253,7 +329,10 @@ impl Plugin for DemandControl {
                 })
                 .map_future_with_request_data(
                     |req: &subgraph::Request| {
-                        req.executable_document.clone().expect("must have document")
+                        //TODO convert this to expect
+                        req.executable_document.clone().unwrap_or_else(|| {
+                            Arc::new(Valid::assume_valid(ExecutableDocument::new()))
+                        })
                     },
                     |req: Arc<Valid<ExecutableDocument>>, fut| async move {
                         let resp: subgraph::Response = fut.await?;
@@ -272,7 +351,7 @@ impl Plugin for DemandControl {
                                         .expect("must be able to convert to graphql error"),
                                 )
                                 .context(resp.context.clone())
-                                .extensions(crate::json_ext::Object::new())
+                                .extensions(Object::new())
                                 .build(),
                         })
                     },
@@ -466,10 +545,16 @@ mod test {
         fn from(value: &TestError) -> Self {
             match value {
                 TestError::EstimatedCostTooExpensive => {
-                    DemandControlError::EstimatedCostTooExpensive
+                    DemandControlError::EstimatedCostTooExpensive {
+                        max_cost: 1.0,
+                        estimated_cost: 2.0,
+                    }
                 }
 
-                TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive,
+                TestError::ActualCostTooExpensive => DemandControlError::ActualCostTooExpensive {
+                    actual_cost: 1.0,
+                    max_cost: 2.0,
+                },
             }
         }
     }

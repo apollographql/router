@@ -85,6 +85,18 @@ impl Extensions {
             .and_then(|boxed| (&mut **boxed as &mut (dyn Any + 'static)).downcast_mut())
     }
 
+    /// Get a mutable reference to a type or insert and return the value if it does not exist
+    pub fn get_or_default_mut<T: Default + Send + Sync + 'static>(&mut self) -> &mut T {
+        let map = self.map.get_or_insert_with(Box::default);
+        let value = map
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::<T>::default());
+        // It should be impossible for the entry to be the wrong type as we don't allow direct access to the map.
+        value
+            .downcast_mut()
+            .expect("default value should be inserted and we should be able to downcast it")
+    }
+
     /// Returns `true` type has been stored in `Extensions`.
     pub fn contains_key<T: Send + Sync + 'static>(&self) -> bool {
         self.map

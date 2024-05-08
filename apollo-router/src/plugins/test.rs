@@ -88,7 +88,7 @@ impl<T: Plugin> PluginTestHarness<T> {
             .unwrap_or(Value::Object(Default::default()));
 
         let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
-            let planner = BridgeQueryPlanner::new(schema.to_string(), Arc::new(config))
+            let planner = BridgeQueryPlanner::new(schema.to_string(), Arc::new(config), None)
                 .await
                 .unwrap();
             (
