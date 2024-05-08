@@ -208,6 +208,8 @@ When adding new static metrics and attributes make sure to:
 #### Operation counts
 Each new feature MUST have an operation count metric that counts the number of requests that the feature has processed.
 
+When defining new operation metrics use the following conventions:
+
 **Name:** `apollo.router.operations.<feature>` - (counter)
 > Note that even if a feature is experimental this should not be reflected in the metric name.
 
@@ -219,6 +221,8 @@ Each new feature MUST have an operation count metric that counts the number of r
 #### Config metrics
 Each new feature MUST have a config metric that gives us information if a feature has been enabled. 
 
+When defining new config metrics use the following conventions:
+
 **Name:** `apollo.router.config.<feature>` - (gauge)
 > Note that even if a feature is experimental this should not be reflected in the metric name.
 
@@ -226,21 +230,31 @@ Each new feature MUST have a config metric that gives us information if a featur
 * `opt.<feature-specific-attribute>` - (usually a boolean or number, but can be a string if the set of possible values is fixed)
 
 ### Dynamic metrics
-Users may create custom metrics to monitor the health and performance of their system. They are highly configurable and the user has the ability to add custom attributes as they see fit. 
+Users may create custom instrument to monitor the health and performance of their system. They are highly configurable and the user has the ability to add custom attributes as they see fit. 
 These metrics will NOT be transmitted to Apollo and are only available to the user via their APM. 
 
-> :warning: **Failure to add dynamic metrics for a feature will render it undebuggable and unmonitorable by the user.**
+> :warning: **Failure to add dynamic metrics for a feature will render it un-debuggable and un-monitorable by the user.**
 
-Adding a new dynamic metric means:
-* Adding a new selector in the telemetry plugin.
+Adding a new dynamic instrument means:
+* Adding new selector(s) in the telemetry plugin.
 * Adding tests that assert that the selector can correctly obtain the value from the relevant request or response type.
 * (Optional) Adding new default instruments in the telemetry plugin.
+* Adding documentation for new instruments and selectors.
 
 An example of a new dynamic instrument is the [cost metrics and selectors](https://github.com/apollographql/router/blob/dev/apollo-router/src/plugins/telemetry/config_new/cost/mod.rs)
 
 When adding new dynamic metrics and attributes make sure to:
 * Include them in your design document.
-* Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/)
+* Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) for guidance on naming.
+
+When defining new dynamic instruments use the following conventions:
+
+Name:
+`<feature>.<metric-name>` - (counter, gauge, histogram)
+> Note that even if a feature is experimental this should not be reflected in the metric name.
+
+Attributes:
+* `<feature>.<feature-specific-attribute>` - (selector)
 
 
 
