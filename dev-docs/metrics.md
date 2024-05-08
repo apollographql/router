@@ -179,3 +179,71 @@ Strong references to instruments will be discarded when changes to the aggregate
 On the fast path the mutex is locked for the period that it takes to upgrade the weak reference. This is a fast operation, and should not block the thread for any meaningful period of time.
 
 If there is shown to be contention in future profiling we can revisit.
+
+## Adding new metrics
+There are different types of metrics.
+
+* Static - Used by us to monitor feature usage.
+* Dynamic - Defined by the user to monitor the health and performance of their system.
+
+> New features should add BOTH static and dynamic metrics.
+
+> Why are static metrics no longer recommended for users to use directly?
+> 
+> They can, but usually it'll be only a starting point for them. We can't predict the things that users will want to monitor, and if we tried we would blow up the cardinality of our metrics resulting in high costs for our users via their APMs.
+> 
+> This *is* a departure from the previous way of doing things, but as dynamic metrics are not available we need to move away from statically defined metrics.
+
+### Static metrics
+When adding a new feature to the Router you must also add new static metrics to monitor the usage of that feature and users cannot turn them off.
+These metrics must be low cardinality and not leak any sensitive information. Users cannot change these metrics and they are primarily for us to see how our features are used so that we can inform future development.
+These metrics are transmitted to Apollo unless explicitly disabled.
+
+When adding new static metrics and attributes make sure to:
+* Include them in your design document.
+* Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) 
+* Notify `#proj-router-analytics` channel in Slack.
+* Add the metrics to the spreadsheet linked in the `#proj-router-analytics` channel in Slack.
+
+#### Operation counts
+Each new feature MUST have an operation count metric that counts the number of requests that the feature has processed.
+
+**Name:** `apollo.router.operations.<feature>` - (counter)
+> Note that even if a feature is experimental this should not be reflected in the metric name.
+
+**Attributes:**
+* `<feature>.<feature-specific-attribute>` - (usually a boolean or number, but can be a string if the set of possible values is fixed)
+
+> :warning: **Remember that attributes are not to be used to store high cardinality or user specific information. Operation name is not permitted!**
+
+#### Config metrics
+Each new feature MUST have a config metric that gives us information if a feature has been enabled. 
+
+**Name:** `apollo.router.config.<feature>` - (gauge)
+> Note that even if a feature is experimental this should not be reflected in the metric name.
+
+**Attributes:**
+* `opt.<feature-specific-attribute>` - (usually a boolean or number, but can be a string if the set of possible values is fixed)
+
+### Dynamic metrics
+Users may create custom metrics to monitor the health and performance of their system. They are highly configurable and the user has the ability to add custom attributes as they see fit. 
+These metrics will NOT be transmitted to Apollo and are only available to the user via their APM. 
+
+> :warning: **Failure to add dynamic metrics for a feature will render it undebuggable and unmonitorable by the user.**
+
+Adding a new dynamic metric means:
+* Adding a new selector in the telemetry plugin.
+* Adding tests that assert that the selector can correctly obtain the value from the relevant request or response type.
+* (Optional) Adding new default instruments in the telemetry plugin.
+
+An example of a new dynamic instrument is the [cost metrics and selectors](https://github.com/apollographql/router/blob/dev/apollo-router/src/plugins/telemetry/config_new/cost/mod.rs)
+
+When adding new dynamic metrics and attributes make sure to:
+* Include them in your design document.
+* Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/)
+
+
+
+
+
+
