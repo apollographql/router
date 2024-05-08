@@ -2554,6 +2554,9 @@ impl SelectionSet {
         self.selections.contains_key(key)
     }
 
+    /// Inserts a `Selection` into the inner map. Should a selection with the same key already
+    /// exist in the map, the existing selection and the given selection are merged, replacing the
+    /// existing selection while keeping the same insertion index.
     fn add_selection(
         &mut self,
         parent_type: &CompositeTypeDefinitionPosition,
