@@ -204,17 +204,29 @@ impl Operation {
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
     pub(crate) fn with_normalized_defer(self) -> NormalizedDefer {
-        todo!()
+        if self.has_defer() {
+            todo!("@defer not implemented");
+        } else {
+            NormalizedDefer {
+                operation: self,
+                has_defers: false,
+                assigned_defer_labels: HashSet::new(),
+                defer_conditions: IndexMap::new(),
+            }
+        }
     }
 
-    pub(crate) fn without_defer(self) -> Self {
-        if self.selection_set.has_defer()
+    fn has_defer(&self) -> bool {
+        self.selection_set.has_defer()
             || self
                 .named_fragments
                 .fragments
                 .values()
                 .any(|f| f.has_defer())
-        {
+    }
+
+    pub(crate) fn without_defer(self) -> Self {
+        if self.has_defer() {
             todo!("@defer not implemented");
         }
 
