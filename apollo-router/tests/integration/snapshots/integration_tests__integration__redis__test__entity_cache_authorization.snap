@@ -3,6 +3,30 @@ source: apollo-router/tests/integration/redis.rs
 expression: response
 ---
 {
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "me"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    },
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "topProducts",
+        "@",
+        "reviews",
+        "@",
+        "author"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ],
   "data": {
     "me": null,
     "topProducts": [
@@ -29,29 +53,5 @@ expression: response
         ]
       }
     ]
-  },
-  "errors": [
-    {
-      "message": "Unauthorized field or type",
-      "path": [
-        "me"
-      ],
-      "extensions": {
-        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
-      }
-    },
-    {
-      "message": "Unauthorized field or type",
-      "path": [
-        "topProducts",
-        "@",
-        "reviews",
-        "@",
-        "author"
-      ],
-      "extensions": {
-        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
-      }
-    }
-  ]
+  }
 }
