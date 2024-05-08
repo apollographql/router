@@ -28,21 +28,18 @@ executors:
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
-      RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -505,10 +502,10 @@ commands:
           condition:
             equal: [ "dev", "<< pipeline.git.branch >>" ]
           steps:
-          - save_cache:
-              key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-              paths:
-                - target
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+                paths:
+                  - target
       - store_test_results:
           # The results from nextest that power the CircleCI Insights.
           path: ./target/nextest/ci/junit.xml
@@ -540,7 +537,7 @@ jobs:
     steps:
       - when:
           condition:
-            equal: [*amd_linux_helm_executor, << parameters.platform >>]
+            equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
           steps:
             - checkout
             - xtask_check_helm
@@ -838,7 +835,7 @@ jobs:
             not:
               equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
           steps:
-             - run:
+            - run:
                 command: >
                   echo "Not publishing any github release."
       - when:

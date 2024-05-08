@@ -9,3 +9,15 @@ fail-fast = false
 # Write to output for persistence to CircleCI
 [profile.ci.junit]
 path = "junit.xml"
+
+# Integration tests require more than one thread. The default setting of 1 will cause too many integration tests to run
+# at the same time and causes tests to fail where timing is involved.
+# This filter applies only to to the integration tests in the apollo-router package.
+[[profile.default.overrides]]
+filter = 'package(apollo-router) & kind(test)'
+threads-required = 2
+
+# Scaffold test takes all the test threads as it runs rustc.
+[[profile.default.overrides]]
+filter = 'package(apollo-router-scaffold)'
+threads-required = 'num-test-threads'
