@@ -424,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn it_fails_with_malformed_graph() {
+    fn it_fails_with_invalid_edge() {
         let SetupInfo {
             fetch_graph,
             query_graph,
