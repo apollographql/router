@@ -78,6 +78,13 @@ pub(crate) struct SourceFederatedQueryGraphs {
     graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>,
 }
 
+#[cfg(test)]
+impl SourceFederatedQueryGraphs {
+    pub(crate) fn with_graphs(graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>) -> Self {
+        Self { graphs }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum SourceFederatedAbstractQueryGraphNode {
     Graphql(GraphqlFederatedAbstractQueryGraphNode),

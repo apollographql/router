@@ -49,11 +49,11 @@ impl FederatedQueryGraph {
     ) -> Self {
         Self {
             graph,
-            supergraph_types_to_root_nodes: todo!(),
-            supergraph_root_kinds_to_types: todo!(),
-            self_conditions: todo!(),
-            non_trivial_followup_edges: todo!(),
-            source_data: todo!(),
+            supergraph_types_to_root_nodes: IndexMap::new(),
+            supergraph_root_kinds_to_types: IndexMap::new(),
+            self_conditions: Vec::new(),
+            non_trivial_followup_edges: IndexMap::new(),
+            source_data: SourceFederatedQueryGraphs::with_graphs(IndexMap::new()),
         }
     }
 }

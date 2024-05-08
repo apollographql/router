@@ -114,6 +114,7 @@ mod tests {
     use apollo_compiler::ast::Name;
     use apollo_compiler::name;
     use indexmap::IndexMap;
+    use insta::assert_debug_snapshot;
     use petgraph::graph::DiGraph;
     use petgraph::prelude::EdgeIndex;
 
@@ -127,11 +128,9 @@ mod tests {
     use crate::sources::connect::selection_parser::Property;
     use crate::sources::connect::ConnectFederatedConcreteQueryGraphNode;
     use crate::sources::connect::ConnectId;
-    use crate::sources::connect::ConnectPath;
     use crate::sources::SourceFederatedConcreteQueryGraphNode;
     use crate::sources::SourceFetchDependencyGraphApi;
     use crate::sources::SourceId;
-    use crate::sources::SourcePath;
 
     use super::ConnectFetchDependencyGraph;
 
@@ -176,9 +175,9 @@ mod tests {
             source_data: SourceFederatedConcreteQueryGraphNode::Connect(
                 ConnectFederatedConcreteQueryGraphNode::SelectionRoot {
                     subgraph_type: ObjectTypeDefinitionPosition {
-                        type_name: name!("Post"),
+                        type_name: name!("Query"),
                     },
-                    property_path: vec![Property::Field("posts".to_string())],
+                    property_path: Vec::new(),
                 },
             ),
         });
@@ -188,7 +187,7 @@ mod tests {
         let entrypoints = 2;
         for (index, type_name) in ["Post", "User", "View"].into_iter().enumerate() {
             let node_type = ObjectTypeDefinitionPosition {
-                type_name: name!(type_name),
+                type_name: Name::new(type_name).unwrap(),
             };
 
             let node = graph.add_node(FederatedQueryGraphNode::Concrete {
@@ -209,8 +208,8 @@ mod tests {
                 node,
                 FederatedQueryGraphEdge::ConcreteField {
                     supergraph_field: ObjectFieldDefinitionPosition {
-                        type_name: name!(type_name),
-                        field_name: Name::new(type_name.to_lowercase()).unwrap(), // can't use macro since not &'static str
+                        type_name: Name::new(type_name).unwrap(),
+                        field_name: Name::new(type_name.to_lowercase()).unwrap(),
                     },
                     self_conditions: None,
                     source_id: source_id.clone(),
@@ -254,33 +253,201 @@ mod tests {
             fetch_graph,
             query_graph,
             source_entry_edges,
-            source_id,
             ..
         } = setup();
 
+        // Make sure that the first edge is what we expect
+        let last_edge_index = source_entry_edges.last().unwrap().clone();
+        let (query_root_index, post_index) = query_graph.edge_endpoints(last_edge_index).unwrap();
+        assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
+        Concrete {
+            supergraph_type: Object(Query),
+            field_edges: {},
+            source_exiting_edge: None,
+            source_id: Connect(
+                ConnectId {
+                    label: "test connect",
+                    subgraph_name: "CONNECT",
+                    directive: ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(TestObject.testField),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                },
+            ),
+            source_data: Connect(
+                SelectionRoot {
+                    subgraph_type: Object(Query),
+                    property_path: [],
+                },
+            ),
+        }
+        "###);
+        assert_debug_snapshot!(query_graph.node_weight(post_index).unwrap(), @r###"
+        Concrete {
+            supergraph_type: Object(User),
+            field_edges: {},
+            source_exiting_edge: None,
+            source_id: Connect(
+                ConnectId {
+                    label: "test connect",
+                    subgraph_name: "CONNECT",
+                    directive: ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(TestObject.testField),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                },
+            ),
+            source_data: Connect(
+                SelectionRoot {
+                    subgraph_type: Object(User),
+                    property_path: [
+                        Field(
+                            "user",
+                        ),
+                    ],
+                },
+            ),
+        }
+        "###);
+
         let path = fetch_graph
-            .new_path(
-                query_graph,
-                Arc::new(Vec::new()),
-                source_entry_edges[0],
-                None,
-            )
+            .new_path(query_graph, Arc::new(Vec::new()), last_edge_index, None)
             .unwrap();
 
-        assert_eq!(
+        assert_debug_snapshot!(
             path,
-            SourcePath::Connect(ConnectPath {
-                merge_at: Arc::new(Vec::new()),
-                source_entering_edge: source_entry_edges[0],
-                source_id,
-                field: None
-            })
+            @r###"
+        Connect(
+            ConnectPath {
+                merge_at: [],
+                source_entering_edge: EdgeIndex(3),
+                source_id: Connect(
+                    ConnectId {
+                        label: "test connect",
+                        subgraph_name: "CONNECT",
+                        directive: ObjectOrInterfaceFieldDirectivePosition {
+                            field: Object(TestObject.testField),
+                            directive_name: "connect",
+                            directive_index: 0,
+                        },
+                    },
+                ),
+                field: None,
+            },
+        )
+        "###
         );
     }
 
     #[test]
-    fn it_fails_with_invalid_entrypoint() {}
+    fn it_fails_with_invalid_entrypoint() {
+        let SetupInfo {
+            fetch_graph,
+            query_graph,
+            non_source_entry_edges,
+            ..
+        } = setup();
+
+        // Make sure that the first edge is what we expect
+        let last_edge_index = non_source_entry_edges.last().unwrap().clone();
+        let (query_root_index, view_index) = query_graph.edge_endpoints(last_edge_index).unwrap();
+        assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
+        Concrete {
+            supergraph_type: Object(Query),
+            field_edges: {},
+            source_exiting_edge: None,
+            source_id: Connect(
+                ConnectId {
+                    label: "test connect",
+                    subgraph_name: "CONNECT",
+                    directive: ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(TestObject.testField),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                },
+            ),
+            source_data: Connect(
+                SelectionRoot {
+                    subgraph_type: Object(Query),
+                    property_path: [],
+                },
+            ),
+        }
+        "###);
+        assert_debug_snapshot!(query_graph.node_weight(view_index).unwrap(), @r###"
+        Concrete {
+            supergraph_type: Object(View),
+            field_edges: {},
+            source_exiting_edge: None,
+            source_id: Connect(
+                ConnectId {
+                    label: "test connect",
+                    subgraph_name: "CONNECT",
+                    directive: ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(TestObject.testField),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                },
+            ),
+            source_data: Connect(
+                SelectionRoot {
+                    subgraph_type: Object(View),
+                    property_path: [
+                        Field(
+                            "view",
+                        ),
+                    ],
+                },
+            ),
+        }
+        "###);
+
+        // Make sure that we fail since we do not have an entering edge
+        let path = fetch_graph.new_path(query_graph, Arc::new(Vec::new()), last_edge_index, None);
+
+        assert_debug_snapshot!(
+            path,
+            @r###"
+        Err(
+            SingleFederationError(
+                Internal {
+                    message: "a path should start from an entering edge",
+                },
+            ),
+        )
+        "###
+        );
+    }
 
     #[test]
-    fn it_fails_with_malformed_graph() {}
+    fn it_fails_with_malformed_graph() {
+        let SetupInfo {
+            fetch_graph,
+            query_graph,
+            ..
+        } = setup();
+
+        // Make sure that the first edge is what we expect
+        let invalid_index = EdgeIndex::end();
+
+        // Make sure that we fail since we pass in an invalid edge
+        let path = fetch_graph.new_path(query_graph, Arc::new(Vec::new()), invalid_index, None);
+
+        assert_debug_snapshot!(
+            path,
+            @r###"
+        Err(
+            SingleFederationError(
+                Internal {
+                    message: "Edge unexpectedly missing",
+                },
+            ),
+        )
+        "###
+        );
+    }
 }
