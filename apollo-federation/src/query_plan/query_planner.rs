@@ -21,9 +21,10 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphPro
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::operation::normalize_operation;
+use crate::query_plan::operation::NamedFragments;
 use crate::query_plan::operation::NormalizedDefer;
-use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -348,19 +349,19 @@ impl QueryPlanner {
         }
 
         let reuse_query_fragments = self.config.reuse_query_fragments;
-        if reuse_query_fragments && !document.fragments.is_empty() {
-            // For all subgraph fetches we query `__typename` on every abstract types (see `FetchDependencyGraphNode::to_plan_node`)
-            // so if we want to have a chance to reuse fragments, we should make sure those fragments also query `__typename` for
-            // every abstract type.
-            //
-            // TODO: FED-165
-            //
-            // JS: fragments = addTypenameFieldForAbstractTypesInNamedFragments(fragments);
+        let mut named_fragments = NamedFragments::new(&document.fragments, &self.api_schema);
+        if reuse_query_fragments {
+            // For all subgraph fetches we query `__typename` on every abstract types (see
+            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
+            // fragments, we should make sure those fragments also query `__typename` for every
+            // abstract type.
+            named_fragments =
+                named_fragments.add_typename_field_for_abstract_types_in_named_fragments()?;
         }
 
         let normalized_operation = normalize_operation(
             operation,
-            &document.fragments,
+            named_fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
         )?;
@@ -501,7 +502,7 @@ fn compute_root_parallel_dependency_graph(
 
 fn compute_root_parallel_best_plan(
     parameters: &QueryPlanningParameters,
-    selection: NormalizedSelectionSet,
+    selection: SelectionSet,
     has_defers: bool,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     let planning_traversal = QueryPlanningTraversal::new(
@@ -529,7 +530,7 @@ fn compute_plan_internal(
         let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
         let mut main = None;
         let mut deferred = vec![];
-        let mut primary_selection = None::<NormalizedSelectionSet>;
+        let mut primary_selection = None::<SelectionSet>;
         for mut dependency_graph in dependency_graphs {
             let (local_main, local_deferred) =
                 dependency_graph.process(&mut parameters.processor, root_kind)?;
